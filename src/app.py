@@ -489,6 +489,8 @@ class MainWindow(QMainWindow):
                 args=(username, "password", character_name, title, delay),
                 daemon=True,
             ).start()
+        else:
+            log.warning("Auto-login unavailable (pyautogui not found) — skipping for %s", username)
 
     def _launch_all(self) -> None:
         """Launch every visible, non-banned, non-running account (staggered).
