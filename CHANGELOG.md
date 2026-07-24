@@ -2,7 +2,19 @@
 
 ## Changelog
 
-## v1.0.20 — 2026-07-24
+## v1.0.23 — 2026-07-24
+
+### Added
+- **Linux cross-platform support** — platform abstraction layer auto-detects OS at import time. Proton auto-detection, wmctrl/xdotool window focus, os.symlink profiles, bash nohup+disown updater, Wine settings paths through Proton prefix, xdg-open/$EDITOR for text editor. Single codebase — no more Windows-only assumptions.
+- **Linux PyInstaller build** — `build_linux.spec` and `scripts/build_linux.sh`.
+
+### Fixed
+- **ResFiles resolved from configured client, not TQ junction** — previously resolved through `.resolve()` on the profile junction, which landed on the real TQ client's `SharedCache\ResFiles`. Now derives ResFiles from the **configured `client_path`** directly (`client_path/../ResFiles`), matching official Play.bat behavior. Launcher now works without official EVE TQ installed. Thanks to **Space Police Backup [ELYS]** for catching this! 🫡
+
+### Changed
+- 8 files refactored to use platform API instead of Windows-only code.
+
+## v1.0.22 — 2026-07-24
 
 ### Added
 - **Version number in status bar** — app version now displayed bottom-right in the footer for quick reference.
