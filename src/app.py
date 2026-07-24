@@ -359,16 +359,11 @@ class MainWindow(QMainWindow):
         """Find the process listening on a port and force-kill it."""
         try:
             result = subprocess.run(
-                f'netstat -ano | findstr ":{port}" | findstr "LISTENING"',
-                capture_output=True, text=True, shell=True, timeout=5,
+                ["powershell", "-NoProfile", "-Command",
+                 f"$c = Get-NetTCPConnection -LocalPort {port} -ErrorAction SilentlyContinue; "
+                 f"if ($c) {{ Stop-Process -Id $c.OwningProcess -Force -ErrorAction SilentlyContinue }}"],
+                capture_output=True, timeout=10,
             )
-            for line in result.stdout.strip().splitlines():
-                parts = line.split()
-                if parts and parts[-1].isdigit():
-                    subprocess.run(
-                        ["taskkill", "/F", "/PID", parts[-1]],
-                        capture_output=True, timeout=5,
-                    )
         except Exception:
             pass
 
