@@ -43,7 +43,7 @@ from .core.autologin import auto_login, is_available as autologin_available
 from .core.db import Account, load_accounts
 from .core.launcher import launch_client
 from .core.process_tracker import ProcessTracker
-from .core.profiles import PROFILES_ROOT, create_profile, profile_exists
+from .core.profiles import PROFILES_ROOT, create_profile, prefill_username, profile_exists
 from .core.server_launcher import (
     detect_server_scripts,
     get_server_console_log,
@@ -456,6 +456,9 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", "Profile junction not found.")
             return
 
+        # Pre-fill username so auto-login only needs password + Enter
+        prefill_username(username)
+
         try:
             proc = launch_client(
                 evejs_root=evejs_root,
@@ -533,6 +536,8 @@ class MainWindow(QMainWindow):
                 title = self._cfg.get("autologin_window_title", "EVE")
                 # Run synchronously so only one EVE window is active at a time
                 auto_login(account.username, "password", char.name, title, delay)
+            else:
+                log.warning("Auto-login unavailable (pyautogui not found) — skipping for %s", account.username)
 
             self._refresh_characters()
             self._update_status_bar()

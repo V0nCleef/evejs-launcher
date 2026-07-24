@@ -4,6 +4,7 @@ Each account gets a junction pointing to the real EVE client install.
 This gives each account a unique path → unique settings folder on first launch.
 """
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -94,6 +95,37 @@ def get_profile_settings_path(username: str) -> Path:
         raise FileNotFoundError(f"Profile junction does not exist: {username}")
     key = get_settings_key(str(junction))
     return Path(os.environ.get("LOCALAPPDATA", "")) / "CCP" / "EVE" / key / "settings"
+
+
+def prefill_username(username: str) -> None:
+    """Write the username to the EVE client settings so it's pre-filled on
+    the login screen, even for accounts that have never been launched before."""
+    try:
+        settings_dir = get_profile_settings_path(username)
+    except FileNotFoundError:
+        return  # profile not created yet
+
+    settings_dir.mkdir(parents=True, exist_ok=True)
+    yaml_path = settings_dir / "core_public__.yaml"
+
+    # Read existing YAML or start fresh
+    if yaml_path.exists():
+        text = yaml_path.read_text(encoding="utf-8", errors="replace")
+    else:
+        text = "generic: {}\n"
+
+    # The EVE client stores the last username like:
+    #   username: [timestamp, Voncleef]
+    #   usernames: [timestamp, [Voncleef]]
+    import time
+    ts = int(time.time() * 10_000_000)  # EVE uses 100-nanosecond intervals
+
+    if "username:" in text:
+        text = re.sub(r"username: \[.*?\]", f"username: [{ts}, {username}]", text)
+    else:
+        text += f"\nusername: [{ts}, {username}]"
+
+    yaml_path.write_text(text, encoding="utf-8")
 
 
 def list_profiles() -> list[str]:
