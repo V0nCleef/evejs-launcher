@@ -488,7 +488,11 @@ class MainWindow(QMainWindow):
             ).start()
 
     def _launch_all(self) -> None:
-        """Launch every visible, non-banned, non-running account (staggered)."""
+        """Launch every visible, non-banned, non-running account (staggered).
+
+        Auto-login runs synchronously for each client to avoid focus-stealing
+        between multiple simultaneously-launched EVE windows.
+        """
         evejs_root = self._cfg.get("evejs_root", "")
         client_path = self._cfg.get("client_path", "")
         if not evejs_root or not client_path:
@@ -517,25 +521,27 @@ class MainWindow(QMainWindow):
                 proc = launch_client(evejs_root, profile_path)
                 self._tracker.add(account.username, char.name, proc)
                 launched += 1
+                log.info("Launched client %d/%d: %s as %s",
+                         launched, len(self._accounts), account.username, char.name)
             except Exception:
                 log.exception("Launch failed for %s", account.username)
                 continue
-            if stagger and launched:
+
+            # ── Serial auto-login: finish this client before next launch ─
+            if autologin_available():
+                delay = self._cfg.get("autologin_delay_sec", 2)
+                title = self._cfg.get("autologin_window_title", "EVE")
+                # Run synchronously so only one EVE window is active at a time
+                auto_login(account.username, "password", char.name, title, delay)
+
+            self._refresh_characters()
+            self._update_status_bar()
+
+            if stagger and launched < len(self._accounts):
                 time.sleep(stagger)
 
         self._refresh_characters()
         self._update_status_bar()
-
-        if autologin_available():
-            delay = self._cfg.get("autologin_delay_sec", 2)
-            title = self._cfg.get("autologin_window_title", "EVE")
-            for client in self._tracker.running:
-                threading.Thread(
-                    target=auto_login,
-                    args=(client.username, "password", client.character_name, title, delay),
-                    daemon=True,
-                ).start()
-
         QMessageBox.information(self, "Launch Complete", f"Launched {launched} client(s).")
 
     def _kill_all_clients(self) -> None:
