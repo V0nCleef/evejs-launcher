@@ -83,7 +83,7 @@ def _bootstrap_settings(username: str) -> None:
     if not template_dir.exists():
         return
 
-    for name in ("prefs.ini", "core_public__.yaml"):
+    for name in ("prefs.ini", "core_public__.yaml", "core_user__.dat", "core_char__.dat"):
         src = template_dir / name
         dst = settings_dir / name
         if src.exists() and not dst.exists():
