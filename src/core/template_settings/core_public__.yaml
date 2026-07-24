@@ -1,49 +1,53 @@
 audio:
-  eveampGain: [134293787954452243, 0.5]
-  evevoiceGain: [134293787954452243, 0.9]
-  masterVolume: [134293787954452243, 0.7]
-  suppressTurret: [134293787954452243, 0]
-  uiGain: [134293787954452243, 0.5]
-  useCombatMusic: [134293787954452243, 1]
-  useOldJukeboxOverride: [134293787958398865, 0]
-  worldVolume: [134293787954452243, 0.7]
+  eveampGain: [134293791979798242, 0.0]
+  evevoiceGain: [134293791979798242, 0.9]
+  masterVolume: [134293791979798242, 0.7]
+  suppressTurret: [134293791979798242, 0]
+  uiGain: [134293791979798242, 0.5]
+  useCombatMusic: [134293791979798242, 1]
+  useOldJukeboxOverride: [134293791983455966, 0]
+  worldVolume: [134293791979798242, 0.7]
 device:
-  DeviceSettings: [134293787950810236, null]
-  FixedWindow: [134293787950810236, 0]
-  FixedWindowSettings:
-  - 134293787961309210
-  - {adapter: 0, height: 1440, presentInterval: 1, width: 2560}
-  FullScreenResolution: [134293787950810236, null]
+  DeviceSettings: [134293791964073483, null]
+  FixedWindow: [134293791964073483, 0]
+  FixedWindowSettings: [134293791984256423, null]
+  FullScreenResolution: [134293791964073483, null]
   FullScreenSettings:
-  - 134293787961309210
+  - 134293791984256423
   - {adapter: 0, height: 1440, presentInterval: 1, width: 2560}
-  UIScaleFullscreen: [134293787950810236, 1.0]
-  UIScaleFullscreenSetAutomatically: [134293787950810236, true]
-  UIScaleWindowed: [134293788149337691, 1.0]
-  UIScaleWindowedSetAutomatically: [134293788149337691, false]
-  WindowMode: [134293787961309210, 2]
-  WindowedResolution: [134293787950810236, null]
-  WindowedSettings: [134293787961309210, null]
-  antiAliasing: [134293788149337691, 3]
-  aoQuality: [134293788149337691, 3]
-  brightness: [134293787950810236, 1.0]
-  charClothSimulation: [134293787950810236, 1]
-  charTextureQuality: [134293787950810236, 1]
-  dofEnabled: [134293787972265881, true]
-  fastCharacterCreation: [134293787950810236, 0]
-  frameGeneration: [134293788149337691, false]
-  lodQuality: [134293788149337691, 3]
-  postProcessingQuality: [134293788149337691, 2]
-  reflectionQuality: [134293788149337691, 3]
-  shaderQuality: [134293788149337691, 3]
-  shadowQuality: [134293788149337691, 2]
-  textureQuality: [134293788149337691, 0]
-  upscalingSetting: [134293788146092029, 1]
-  upscalingTechnique: [134293788149337691, 0]
-  volumetricQuality: [134293788149337691, 2]
+  UIScaleFullscreen: [134293791964073483, 1.0]
+  UIScaleFullscreenSetAutomatically: [134293791964073483, true]
+  UIScaleWindowed: [134293791987458023, 1.0]
+  UIScaleWindowedSetAutomatically: [134293791987458023, false]
+  WindowMode: [134293791984256423, 1]
+  WindowedResolution: [134293791964073483, null]
+  WindowedSettings:
+  - 134293791984256423
+  - {adapter: 0, height: 1369, left: -8, presentInterval: 0, showState: 1, top: -8,
+    width: 2560}
+  antiAliasing: [134293791993879214, 0]
+  aoQuality: [134293791993879214, 2]
+  brightness: [134293791964073483, 1.0]
+  charClothSimulation: [134293791964073483, 1]
+  charTextureQuality: [134293791964073483, 1]
+  dofEnabled: [134293791993879214, true]
+  fastCharacterCreation: [134293791964073483, 0]
+  frameGeneration: [134293791984256423, false]
+  lodQuality: [134293791984256423, 2]
+  postProcessingQuality: [134293791993879214, 1]
+  reflectionQuality: [134293791993879214, 2]
+  shaderQuality: [134293791993879214, 2]
+  shadowQuality: [134293791993879214, 1]
+  textureQuality: [134293791984256423, 1]
+  upscalingSetting: [134293791984256423, 1]
+  upscalingTechnique: [134293791984256423, 0]
+  volumetricQuality: [134293791993879214, 1]
 generic: {}
 ui:
-    __migrate_existing_font_size_settings_down_one_size__: [134293788149337691, true]
-  clientFontSize: [134293788146092029, 2]
-  username: [__TIMESTAMP__, __USERNAME__]
-  usernames: null
+  Insider: [134293724654839320, false]
+  __migrate_existing_font_size_settings_down_one_size__: [134293791984779180, true]
+  clientFontSize: [134293791990894740, 2]
+  username: [134293791990894740, Voncleef3]
+  usernames:
+  - 134293791990894740
+  - [Voncleef, Voncleef1, Voncleef2, Voncleef3]
