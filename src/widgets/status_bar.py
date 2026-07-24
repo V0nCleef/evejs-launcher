@@ -7,7 +7,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QPainter, QColor, QFont
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QWidget, QGraphicsOpacityEffect
 
-from src.constants import COLORS
+from src.constants import COLORS, APP_VERSION
 
 
 class ServiceState(Enum):
@@ -149,6 +149,13 @@ class StatusBar(QFrame):
         layout.addWidget(self.clients_section)
 
         layout.addStretch()
+
+        # Version label — bottom right
+        version_label = QLabel(f"v{APP_VERSION}")
+        version_label.setStyleSheet(
+            f"color: {COLORS['grey']}; font-size: 10px; padding-right: 8px;"
+        )
+        layout.addWidget(version_label)
 
     # ── Event filter: forward child-label clicks to the parent section ──
     def eventFilter(self, obj: QObject, event) -> bool:  # noqa: N802
