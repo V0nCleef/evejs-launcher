@@ -1,4 +1,6 @@
-# EveJS Multibox Launcher — Changelog
+# EveJS Launcher V1
+
+## Changelog
 
 ## v1.0.20 — 2026-07-24
 

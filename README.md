@@ -1,4 +1,4 @@
-# 🚀 EveJS Multibox Launcher V2
+# 🚀 EveJS Launcher V1
 
 <p align="center">
   <img src="assets/logo.ico" alt="EveJS Launcher" width="96" />
@@ -19,7 +19,7 @@
 
 ## What is this?
 
-The **EveJS Multibox Launcher V2** is a native Windows desktop app (PyQt6) that replaces the command-line workflow of [EveJS](https://github.com/V0nCleef/evejs-launcher) with a polished graphical interface. It handles everything you'd normally do across multiple terminal windows:
+The **EveJS Launcher V1** is a native Windows desktop app (PyQt6) that replaces the command-line workflow of [EveJS](https://github.com/V0nCleef/evejs-launcher) with a polished graphical interface. It handles everything you'd normally do across multiple terminal windows:
 
 - **Start & stop** the Game Server, Market Server, and Proxy (ports 26000/26001/26002)
 - **Manage multiple EVE accounts** with character portraits, stats (ISK, SP, ship, sec status), and zero-copy Junction profiles

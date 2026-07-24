@@ -35,7 +35,7 @@ def _read_version() -> str:
 
 def _build_user_agent() -> str:
     """Compose a custom User-Agent header."""
-    return f"EveJS-Launcher-V2/{_read_version()}"
+    return f"EveJS-Launcher/{_read_version()}"
 
 
 def get_latest_release(repo: str | None = None) -> dict[str, Any] | None:

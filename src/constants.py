@@ -26,8 +26,8 @@ COLORS["card"] = COLORS["carbon"]
 COLORS["hover"] = COLORS["steel"]
 
 # ── Application metadata ─────────────────────────────────────────────────────
-APP_NAME: str = "EveJS-Launcher-V2"
-APP_TITLE: str = "EVEJS MULTIBOX LAUNCHER V2"
+APP_NAME: str = "EveJS-Launcher"
+APP_TITLE: str = "EVEJS LAUNCHER V1"
 
 # ── Version ───────────────────────────────────────────────────────────────────
 VERSION_PATH = Path(__file__).resolve().parent.parent / "VERSION"

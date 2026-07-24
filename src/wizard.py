@@ -92,7 +92,7 @@ class SetupWizard(QDialog):
 
         # Page 0: Welcome
         p0 = _WizardPage(
-            "Welcome to EveJS Multi-Box Launcher",
+            "Welcome to EveJS Launcher",
             "This tool manages and launches multiple EVE clients for your local EveJS server.\n\n"
             "Let's locate your EveJS installation to get started."
         )
