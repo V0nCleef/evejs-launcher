@@ -5,6 +5,18 @@ from typing import Optional
 import subprocess
 
 
+def _eve_window_exists() -> bool:
+    """Return True if an EVE client window is currently visible on screen."""
+    try:
+        import pygetwindow as gw
+        for win in gw.getAllWindows():
+            if win.title == "EVE" and win.width > 200 and win.height > 200:
+                return True
+    except ImportError:
+        pass
+    return False
+
+
 @dataclass
 class LaunchedClient:
     """Represents a running EVE client."""
@@ -102,6 +114,26 @@ class ProcessTracker:
         for c in self.running:
             if c.username == username:
                 return True
+        return False
+
+    def is_account_launching(self, username: str, window_delay_sec: int = 20) -> bool:
+        """Check if any client from this account was recently launched.
+
+        Returns True while the client is alive but the EVE window hasn't had
+        enough time to materialize (default 20 seconds after subprocess spawn).
+
+        Also returns False if the EVE window is no longer present (user closed
+        the client), even if the OS process hasn't fully terminated yet.
+        """
+        for c in self.running:
+            if c.username == username:
+                elapsed = (datetime.now() - c.started_at).total_seconds()
+                if elapsed < window_delay_sec:
+                    # Window-gone check: the process may still be alive but the
+                    # user already closed the EVE client, so stop showing LAUNCHING.
+                    if not _eve_window_exists():
+                        return False
+                    return True
         return False
 
     def get_running_character(self, username: str) -> str | None:

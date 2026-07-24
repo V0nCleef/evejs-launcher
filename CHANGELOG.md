@@ -1,5 +1,19 @@
 # EveJS Multibox Launcher — Changelog
 
+## v1.0.1 — 2026-07-24
+
+### Fixed
+- **EVE client window never appeared** — `stdout=subprocess.DEVNULL` redirected the GUI process's output handles, preventing the DirectX window from being created. Removed both redirects.
+- **"Running" status shown instantly but window takes 15s** — added gold **"LAUNCHING..."** status for the first 20 seconds after subprocess spawn, transitioning to green "RUNNING" once the window is expected to be visible.
+- **EVE window minimized/hidden after launch** — `_restore_eve_window` daemon thread now finds the EVE window, un-minimizes it, and brings it to front.
+- **Auto-login typed into wrong window** — `wait_for_window` matched File Explorer, browsers, and the launcher itself ("EVE" substring too broad). Now excludes known false-positives and requires window ≥300×200.
+- **Auto-login stopped after login screen** — now waits 5s for character-select screen and presses Enter to auto-select the first character.
+- **"LAUNCHING" stuck after closing EVE** — `_eve_window_exists()` check detects when the user closes the client so status drops to READY immediately.
+- **Market showed online when only server running** — `_is_market_running` was checking port 26001 (game server's market proxy). Now checks `_market_proc` + port 40111 (actual market RPC).
+- **Server/Market consoles empty** — both processes now pipe stdout to temp log files (`server_console.log`, `market_console.log`). Console panels tail these files for a 1:1 mirror of terminal output.
+- **Market server shut down immediately** — batch wrapper used `start /b /wait` which shared the console; replaced with direct `cargo run` / pre-built binary launch via `subprocess.Popen` with stdout capture.
+- **Market console showed stale server log** — added `clear_content()` and `set_title()` to ConsolePanel for market-specific display.
+
 ## v1.3.0 — 2026-07-24
 
 ### Fixed

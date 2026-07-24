@@ -46,6 +46,8 @@ from .core.process_tracker import ProcessTracker
 from .core.profiles import PROFILES_ROOT, create_profile, profile_exists
 from .core.server_launcher import (
     detect_server_scripts,
+    get_server_console_log,
+    get_market_console_log,
     get_server_log_path,
     is_server_running,
     start_game_server,
@@ -65,6 +67,33 @@ from .updater.dialog import UpdateDialog
 from .updater.installer import download_and_install
 
 log = setup_logger(__name__)
+
+
+def _restore_eve_window(window_title: str = "EVE", timeout: int = 30) -> None:
+    """Wait for the EVE client window to appear, then restore and focus it.
+
+    Runs in a daemon thread.  The EVE client takes 10-15 seconds to
+    materialise its DirectX window on first launch; without this the
+    window may appear minimised or behind the launcher.
+    """
+    try:
+        import pygetwindow as gw
+    except ImportError:
+        return
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for win in gw.getAllWindows():
+            if window_title.lower() in win.title.lower() and win.width > 200 and "launcher" not in win.title.lower():
+                try:
+                    if win.isMinimized:
+                        win.restore()
+                    win.activate()
+                except Exception:
+                    pass
+                return  # window found and focused
+        time.sleep(2)
+    log.debug("EVE window '%s' not detected within %ss", window_title, timeout)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -283,7 +312,13 @@ class MainWindow(QMainWindow):
         self._update_status_bar()
 
     def _is_market_running(self) -> bool:
-        return self._market_proc is not None and self._market_proc.poll() is None
+        # The actual market server listens on 40110/40111, NOT 26001.
+        # Port 26001 is the game server's own market proxy endpoint.
+        if self._market_proc is not None and self._market_proc.poll() is None:
+            return True
+        # Fallback: check the real market RPC port in case market was
+        # started outside the launcher.
+        return is_server_running(port=40111)
 
     def _start_all_servers(self) -> None:
         """Start Market then Game server (both auto-discover each other)."""
@@ -433,12 +468,19 @@ class MainWindow(QMainWindow):
         self._refresh_characters()
         self._update_status_bar()
 
+        # ── Eve client window takes 10-15s to appear; restore it once visible ─
+        threading.Thread(
+            target=_restore_eve_window,
+            args=(self._cfg.get("autologin_window_title", "EVE"),),
+            daemon=True,
+        ).start()
+
         if autologin_available():
             delay = self._cfg.get("autologin_delay_sec", 2)
             title = self._cfg.get("autologin_window_title", "EVE")
             threading.Thread(
                 target=auto_login,
-                args=(username, "password", title, delay),
+                args=(username, "password", character_name, title, delay),
                 daemon=True,
             ).start()
 
@@ -487,7 +529,7 @@ class MainWindow(QMainWindow):
             for client in self._tracker.running:
                 threading.Thread(
                     target=auto_login,
-                    args=(client.username, "password", title, delay),
+                    args=(client.username, "password", client.character_name, title, delay),
                     daemon=True,
                 ).start()
 
@@ -602,16 +644,21 @@ class MainWindow(QMainWindow):
             return
 
         if name == "server":
-            log_path = get_server_log_path(evejs_root)
+            log_path = get_server_console_log()
             if log_path.exists():
                 self._console_panel.tail(str(log_path))
             else:
                 self._console_panel.show()
                 self._console_panel.raise_()
         elif name == "market":
-            # Market server has no plain-text log file to tail — show empty panel.
-            self._console_panel.show()
-            self._console_panel.raise_()
+            log_path = get_market_console_log()
+            if log_path.exists():
+                self._console_panel.tail(str(log_path))
+            else:
+                self._console_panel.clear_content()
+                self._console_panel.set_title("Market Server — not started yet")
+                self._console_panel.show()
+                self._console_panel.raise_()
 
     # ── Event filter: resize cursors + click-outside-console ──────────
 

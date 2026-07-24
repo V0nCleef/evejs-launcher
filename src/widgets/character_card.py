@@ -34,6 +34,13 @@ _STATUS_CONFIG = {
         "btn_color": C["teal"],
         "btn_hover": C["teal_dim"],
     },
+    Status.LAUNCHING: {
+        "bar_color": C["gold"],
+        "btn_text": "LAUNCHING...",
+        "btn_enabled": False,
+        "btn_color": C["gold"],
+        "btn_hover": C["gold"],
+    },
     Status.RUNNING: {
         "bar_color": C["green"],
         "btn_text": "RUNNING",

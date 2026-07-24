@@ -300,6 +300,14 @@ class ConsolePanel(QFrame):
         self.hide()
         self.closed.emit()
 
+    def clear_content(self) -> None:
+        """Clear the log text area without affecting tailing state."""
+        self._log.clear()
+
+    def set_title(self, title: str) -> None:
+        """Set the header title label."""
+        self._title_label.setText(title)
+
     def _poll_log(self) -> None:
         if not self._log_path or not self._log_path.exists():
             return

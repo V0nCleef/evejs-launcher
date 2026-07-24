@@ -47,6 +47,7 @@ class Ports(IntEnum):
 # ── Runtime status for accounts / clients ────────────────────────────────────
 class Status(Enum):
     READY = "ready"
+    LAUNCHING = "launching"
     RUNNING = "running"
     BANNED = "banned"
     NO_PROFILE = "no_profile"

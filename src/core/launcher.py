@@ -88,8 +88,6 @@ def launch_client(
         [str(exe)],
         env=env,
         cwd=str(exe.parent),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
         | subprocess.DETACHED_PROCESS,
     )

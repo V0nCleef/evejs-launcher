@@ -1,25 +1,62 @@
 """Server launcher — starts EveJS game server and market server.
 
-Game server: Launches Node.js directly (no batch file wrapper) so that
-Ctrl+C shutdown reaches Node.js without the cmd.exe prompt.
-
-Processes run with CREATE_NO_WINDOW — no visible CMD window since the
-launcher's built-in console panel tails server.log for live output.
+Both processes redirect their stdout/stderr to temp log files so the
+launcher's built-in console panel can tail them for a 1:1 mirror of
+what would normally appear in a CMD window.
 """
+import os
 import socket
 import subprocess
+import threading
 import time
-import tempfile
-import os
-import ctypes
 from pathlib import Path
 
-# ── Keep the CMD window hidden unless user explicitly wants it ────────
+from ..config import CONFIG_DIR
+
+# ── Keep the CMD window hidden ────────────────────────────────────────
 _HIDDEN = subprocess.CREATE_NO_WINDOW
 
+# ── Console log paths (temp files) ────────────────────────────────────
+_LOGS_DIR = CONFIG_DIR / "logs"
+_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
-# ── Mod discovery ────────────────────────────────────────────────────────
+SERVER_CONSOLE_LOG = _LOGS_DIR / "server_console.log"
+MARKET_CONSOLE_LOG = _LOGS_DIR / "market_console.log"
 
+
+def get_server_log_path(evejs_root: str) -> Path:
+    """Return path to the server's own log file (written by EveJS internally)."""
+    return Path(evejs_root) / "server" / "logs" / "server.log"
+
+
+def get_server_console_log() -> Path:
+    """Return the path to the live server console log (1:1 stdout mirror)."""
+    return SERVER_CONSOLE_LOG
+
+
+def get_market_console_log() -> Path:
+    """Return the path to the live market console log (1:1 stdout mirror)."""
+    return MARKET_CONSOLE_LOG
+
+
+# ── Pipe reader thread ────────────────────────────────────────────────
+
+def _pipe_to_file(pipe, path: Path) -> None:
+    """Read lines from *pipe* and append them to *path* in a daemon thread."""
+    try:
+        with open(path, "w", encoding="utf-8", errors="replace") as f:
+            for line in iter(pipe.readline, b""):
+                try:
+                    text = line.decode("utf-8", errors="replace")
+                except Exception:
+                    text = line.decode("latin-1", errors="replace")
+                f.write(text)
+                f.flush()
+    except (OSError, ValueError):
+        pass  # pipe closed
+
+
+# ── Mod discovery ──────────────────────────────────────────────────────
 
 def _find_mod_preloads(evejs_root: str) -> list[str]:
     """Scan mods/*/loader.js and return --require flags for active mods."""
@@ -32,24 +69,13 @@ def _find_mod_preloads(evejs_root: str) -> list[str]:
     return args
 
 
-# ── Server log path ──────────────────────────────────────────────────────
-
-
-def get_server_log_path(evejs_root: str) -> Path:
-    """Return path to the live server log file that EveJS writes."""
-    return Path(evejs_root) / "server" / "logs" / "server.log"
-
-
-# ── Game server (direct Node.js launch) ─────────────────────────────────
-
+# ── Game server (direct Node.js launch with stdout capture) ────────────
 
 def start_game_server(evejs_root: str, mode: str = "modded") -> subprocess.Popen:
-    """Start the game server by launching Node.js DIRECTLY.
+    """Start the game server by launching Node.js directly.
 
-    Bypassing cmd.exe means:
-      - No batch prompt on Ctrl+C
-      - Ctrl+C reaches Node.js → graceful shutdown
-      - EveJS logs to server/logs/server.log — launcher tails that file
+    Stdout and stderr are piped to a temp log file so the launcher's
+    console panel shows a 1:1 mirror of the server's terminal output.
     """
     server_dir = Path(evejs_root) / "server"
     index_js = server_dir / "index.js"
@@ -70,49 +96,80 @@ def start_game_server(evejs_root: str, mode: str = "modded") -> subprocess.Popen
     env = os.environ.copy()
     env["EVEJS_PROXY_LOCAL_INTERCEPT"] = "1"
 
+    # Truncate the console log for a fresh start
+    SERVER_CONSOLE_LOG.write_text("", encoding="utf-8")
+
     proc = subprocess.Popen(
         cmd,
         cwd=str(server_dir),
         env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         creationflags=_HIDDEN,
     )
+
+    # Start a daemon thread that writes stdout to the console log file
+    threading.Thread(
+        target=_pipe_to_file,
+        args=(proc.stdout, SERVER_CONSOLE_LOG),
+        daemon=True,
+    ).start()
+
     return proc
 
 
-# ── Market server ────────────────────────────────────────────────────────
-
-
-def _make_market_wrapper(bat: Path) -> str:
-    """Wrapper that uses start /b to avoid batch-job prompt on Ctrl+C."""
-    wrapper = (
-        f'@echo off\r\n'
-        f'break=off\r\n'
-        f'cd /d "{bat.parent}"\r\n'
-        f'echo 1| start /b /wait "" cmd /c ""{bat.name}""\r\n'
-    )
-    wrapper_path = os.path.join(tempfile.gettempdir(), "evejs_market.bat")
-    with open(wrapper_path, "w") as f:
-        f.write(wrapper)
-    return wrapper_path
-
+# ── Market server (direct cargo launch with stdout capture) ────────────
 
 def start_market_server(evejs_root: str) -> subprocess.Popen:
-    """Start market server in a VISIBLE CMD window."""
-    bat = Path(evejs_root) / "StartMarketServer.bat"
-    if not bat.exists():
-        raise FileNotFoundError(f"Market server script not found: {bat}")
+    """Start the market server directly via cargo (no batch wrapper).
 
-    wrapper = _make_market_wrapper(bat)
+    Stdout and stderr are piped to a temp log file so the launcher's
+    console panel shows a 1:1 mirror of the market server's output.
+    """
+    market_dir = Path(evejs_root) / "externalservices" / "market-server"
+    cargo_toml = market_dir / "Cargo.toml"
+    if not cargo_toml.exists():
+        raise FileNotFoundError(f"Market server project not found: {cargo_toml}")
+
+    # Use the pre-built binary if available, otherwise cargo run
+    binary = market_dir / "target" / "release" / "market-server.exe"
+    if binary.exists():
+        cmd = [
+            str(binary),
+            "--config", "config/market-server.local.toml",
+            "serve",
+        ]
+    else:
+        cmd = [
+            "cargo", "run", "--release", "--",
+            "--config", "config/market-server.local.toml",
+            "serve",
+        ]
+
+    env = os.environ.copy()
+
+    # Truncate the console log for a fresh start
+    MARKET_CONSOLE_LOG.write_text("", encoding="utf-8")
+
     proc = subprocess.Popen(
-        ["cmd", "/c", wrapper],
-        cwd=str(bat.parent),
+        cmd,
+        cwd=str(market_dir),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         creationflags=_HIDDEN,
     )
+
+    threading.Thread(
+        target=_pipe_to_file,
+        args=(proc.stdout, MARKET_CONSOLE_LOG),
+        daemon=True,
+    ).start()
+
     return proc
 
 
-# ── Shared utilities ─────────────────────────────────────────────────────
-
+# ── Shared utilities ───────────────────────────────────────────────────
 
 def detect_server_scripts(evejs_root: str) -> dict[str, Path]:
     """Detect which server start scripts exist."""

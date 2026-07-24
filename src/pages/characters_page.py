@@ -255,6 +255,9 @@ class CharactersPage(QWidget):
             return Status.READY
         running_char = self._tracker.get_running_character(username)
         if running_char == char.name:
+            # Still in the launch window (EVE takes 10-15s to show its window)
+            if self._tracker.is_account_launching(username):
+                return Status.LAUNCHING
             return Status.RUNNING
         if running_char is not None:
             return Status.SAME_ACCOUNT_ONLINE
