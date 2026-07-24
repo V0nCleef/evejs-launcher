@@ -309,9 +309,15 @@ class MainWindow(QMainWindow):
         if self._market_proc:
             self._graceful_kill(self._market_proc)
             self._market_proc = None
-        else:
-            # Market may have been started outside this launcher instance
-            _kill_process_on_port(40111)
+        elif is_server_running(port=40111):
+            # Market was started outside this launcher — can't kill safely
+            QMessageBox.information(
+                self, "Market Server",
+                "The market server was started outside this launcher.\n\n"
+                "Close it manually via Task Manager, or stop the game server\n"
+                "and restart both through the launcher."
+            )
+            return
         self._update_status_bar()
 
     def _is_market_running(self) -> bool:
@@ -356,14 +362,22 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _kill_process_on_port(port: int) -> None:
-        """Find the process listening on a port and force-kill it."""
+        """Find the process listening on a port and force-kill it using taskkill."""
         try:
+            # Use netstat to find PID, then taskkill (avoids PowerShell dependency)
             result = subprocess.run(
-                ["powershell", "-NoProfile", "-Command",
-                 f"$c = Get-NetTCPConnection -LocalPort {port} -ErrorAction SilentlyContinue; "
-                 f"if ($c) {{ Stop-Process -Id $c.OwningProcess -Force -ErrorAction SilentlyContinue }}"],
-                capture_output=True, timeout=10,
+                ["cmd", "/c", f"netstat -ano | findstr :{port}"],
+                capture_output=True, text=True, timeout=5,
             )
+            for line in result.stdout.strip().splitlines():
+                if "LISTENING" in line:
+                    parts = line.split()
+                    if parts and parts[-1].isdigit():
+                        subprocess.run(
+                            ["taskkill", "/F", "/PID", parts[-1]],
+                            capture_output=True, timeout=5,
+                        )
+                        return
         except Exception:
             pass
 
