@@ -1,5 +1,14 @@
 # EveJS Multibox Launcher — Changelog
 
+## v1.0.20 — 2026-07-24
+
+### Added
+- **Version number in status bar** — app version now displayed bottom-right in the footer for quick reference.
+- **Auto-hide test/GM accounts** — new `hide_test_accounts` config option (default: true). Accounts with "test" prefix or "gm" in username are hidden from the character grid. Users can unhide individually or disable in config.
+
+### Changed
+- **Template YAML scrubbed** — placeholder usernames replace personal data in shipped template.
+
 ## v1.0.13 — 2026-07-24
 
 ### Fixed
