@@ -108,11 +108,15 @@ def auto_login(
         logger.warning(f"Could not activate window: {e}")
 
     try:
-        pyautogui.typewrite(username, interval=0.05)
-        pyautogui.press("tab")
-        time.sleep(0.2)
-        pyautogui.typewrite(password, interval=0.05)
-        pyautogui.press("enter")
+        if HAS_AUTOGUI:
+            pyautogui.typewrite(username, interval=0.05)
+            pyautogui.press("tab")
+            time.sleep(0.2)
+            pyautogui.typewrite(password, interval=0.05)
+            pyautogui.press("enter")
+        else:
+            # PowerShell SendKeys fallback (works without pyautogui)
+            _sendkeys_via_powershell(username + "{TAB}" + password + "{ENTER}")
         logger.info(f"Credentials submitted for '{username}'")
     except Exception as e:
         logger.error(f"Auto-login typing failed: {e}")
@@ -120,14 +124,14 @@ def auto_login(
 
     # ── Character selection (if requested) ──────────────────────────
     if character_name:
-        # The character-select screen takes a few seconds to load after login.
-        # EveJS auto-selects the first character; pressing Enter is enough for
-        # single-character accounts.
         time.sleep(5)
         try:
-            win.activate()
-            time.sleep(0.3)
-            pyautogui.press("enter")
+            if HAS_AUTOGUI:
+                win.activate()
+                time.sleep(0.3)
+                pyautogui.press("enter")
+            else:
+                _sendkeys_via_powershell("{ENTER}")
             logger.info(f"Character select confirmed for '{character_name}'")
         except Exception as e:
             logger.warning(f"Character select step failed: {e}")
@@ -138,4 +142,23 @@ def auto_login(
 
 def is_available() -> bool:
     """Check if auto-login dependencies are available."""
-    return HAS_AUTOGUI
+    if HAS_AUTOGUI:
+        return True
+    # Fallback: PowerShell SendKeys via WScript.Shell (always available on Windows)
+    return True  # always try; auto_login will use PowerShell fallback
+
+
+def _sendkeys_via_powershell(keys: str) -> None:
+    """Send keystrokes via PowerShell's WScript.Shell SendKeys (no pyautogui needed)."""
+    import subprocess
+    # Use AppActivate to focus EVE first, then send keys
+    script = (
+        f'$ws = New-Object -ComObject WScript.Shell; '
+        f'$ws.AppActivate(\"EVE\") | Out-Null; '
+        f'Start-Sleep -Milliseconds 500; '
+        f'$ws.SendKeys(\"{keys}\")'
+    )
+    subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        capture_output=True, timeout=15,
+    )
