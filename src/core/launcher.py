@@ -1,7 +1,10 @@
-"""Client launcher — spawns exefile.exe with correct environment."""
+"""Client launcher — spawns the EVE client with correct environment."""
+from __future__ import annotations
+
 import os
-import subprocess
 from pathlib import Path
+
+from .platform import get_client_exe_path, launch_eve_client
 
 
 def build_env(evejs_root: str, proxy_url: str = "http://127.0.0.1:26002") -> dict[str, str]:
@@ -60,34 +63,39 @@ def launch_client(
     evejs_root: str,
     profile_tq_path: Path,
     proxy_url: str = "http://127.0.0.1:26002",
+    client_path: str = "",
 ) -> subprocess.Popen:
-    """Launch exefile.exe from a profile junction.
+    """Launch the EVE client executable from a profile junction.
 
     Args:
         evejs_root: Path to EveJS installation root.
         profile_tq_path: Path to the profile's tq junction.
         proxy_url: Proxy URL for EveJS.
+        client_path: The user-configured EVE client tq folder.  Used to
+            derive the ResFiles cache (mirrors Play.bat behaviour).
 
     Returns:
         subprocess.Popen for the launched process.
     """
-    exe = profile_tq_path / "bin64" / "exefile.exe"
+    exe = get_client_exe_path(profile_tq_path)
     if not exe.exists():
         raise FileNotFoundError(f"Client executable not found: {exe}")
 
     env = build_env(evejs_root, proxy_url)
 
-    # Resolve the real client path for ResFiles
-    real_tq = profile_tq_path.resolve()
-    cache_root = real_tq.parent
+    # ── ResFiles: derive from the configured client path, NOT the junction ──
+    # Play.bat resolves EVEJS_CLIENT_PATH\\..\\ResFiles — the ResFiles that
+    # lives beside the user's configured client copy.  Resolving through the
+    # junction could land on the real TQ client's cache, poisoning the client
+    # with official resource files instead of the EveJS-managed ones.
+    if client_path:
+        cache_root = Path(client_path).parent
+    else:
+        # Fallback for callers that don't pass client_path (backward compat).
+        cache_root = profile_tq_path.resolve().parent
+
     resfiles = cache_root / "ResFiles"
     if resfiles.exists():
         env["EO_REMOTEFILECACHEFOLDER"] = str(resfiles)
 
-    return subprocess.Popen(
-        [str(exe)],
-        env=env,
-        cwd=str(exe.parent),
-        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
-        | subprocess.DETACHED_PROCESS,
-    )
+    return launch_eve_client(exe, env, exe.parent)

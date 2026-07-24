@@ -1,8 +1,6 @@
 """Overlay console panel for tailing log files inside EveJS Launcher V2."""
 from __future__ import annotations
 
-import os
-import subprocess
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPoint, QSize
@@ -348,7 +346,8 @@ class ConsolePanel(QFrame):
 
     def _open_in_notepad(self) -> None:
         if self._log_path and self._log_path.exists():
-            subprocess.Popen(["notepad.exe", str(self._log_path)])
+            from src.core.platform import open_text_editor
+            open_text_editor(self._log_path)
 
     # ── Size hints ───────────────────────────────────────────────────────────
     def sizeHint(self) -> QSize:  # noqa: N802

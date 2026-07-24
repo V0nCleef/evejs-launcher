@@ -3,12 +3,11 @@
 Each account gets a junction pointing to the real EVE client install.
 This gives each account a unique path → unique settings folder on first launch.
 """
-import os
 import re
-import subprocess
 from pathlib import Path
 
 from ..config import CONFIG_DIR
+from .platform import create_directory_link, get_eve_settings_path, remove_directory_link
 
 PROFILES_ROOT = CONFIG_DIR / "Profiles"
 
@@ -48,16 +47,7 @@ def create_profile(username: str, real_client_path: str) -> Path:
 
     junction = profile_dir / "tq"
     if not junction.exists():
-        # mklink /J creates a directory junction (no admin required on Win10+)
-        result = subprocess.run(
-            ["cmd", "/c", "mklink", "/J", str(junction), str(Path(real_client_path))],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"Failed to create junction for {username}: {result.stderr.strip()}"
-            )
+        create_directory_link(Path(real_client_path), junction)
 
     # ── Bootstrap EVE settings from real client (or template fallback) ──
     try:
@@ -86,11 +76,7 @@ def _bootstrap_settings(username: str, real_client_path: str = "") -> None:
 
     # ── Try to copy from the real client's settings first ────────────
     if real_client_path:
-        real_key = get_settings_key(real_client_path)
-        real_settings = (
-            Path(os.environ.get("LOCALAPPDATA", ""))
-            / "CCP" / "EVE" / real_key / "settings"
-        )
+        real_settings = get_eve_settings_path(real_client_path)
         if real_settings.exists():
             for src in real_settings.iterdir():
                 dst = dst_dir / src.name
@@ -118,8 +104,7 @@ def delete_profile(username: str) -> None:
     junction = profile_dir / "tq"
 
     if junction.exists():
-        # rmdir on a junction removes the junction link, NOT the target
-        subprocess.run(["cmd", "/c", "rmdir", str(junction)], check=True)
+        remove_directory_link(junction)
 
     # Remove empty profile dir (only if empty after junction removal)
     if profile_dir.exists():
@@ -146,8 +131,7 @@ def get_profile_settings_path(username: str) -> Path:
     junction = PROFILES_ROOT / username / "tq"
     if not junction.exists():
         raise FileNotFoundError(f"Profile junction does not exist: {username}")
-    key = get_settings_key(str(junction))
-    return Path(os.environ.get("LOCALAPPDATA", "")) / "CCP" / "EVE" / key / "settings"
+    return get_eve_settings_path(str(junction))
 
 
 def prefill_username(username: str) -> None:

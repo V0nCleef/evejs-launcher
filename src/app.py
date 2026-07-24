@@ -10,7 +10,6 @@ Wires together nav, server, character launching, and process tracking.
 """
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import threading
@@ -41,6 +40,7 @@ from . import config
 from .constants import APP_TITLE, Page, Ports
 from .core.db import Account, load_accounts
 from .core.launcher import launch_client
+from .core.platform import hard_exit
 from .core.process_tracker import ProcessTracker
 from .core.profiles import PROFILES_ROOT, create_profile, prefill_username, profile_exists
 from .core.server_launcher import (
@@ -75,22 +75,12 @@ def _restore_eve_window(window_title: str = "EVE", timeout: int = 30) -> None:
     materialise its DirectX window on first launch; without this the
     window may appear minimised or behind the launcher.
     """
-    try:
-        import pygetwindow as gw
-    except ImportError:
-        return
+    from .core.platform import find_and_focus_eve_window
 
     deadline = time.time() + timeout
     while time.time() < deadline:
-        for win in gw.getAllWindows():
-            if window_title.lower() in win.title.lower() and win.width > 200 and "launcher" not in win.title.lower():
-                try:
-                    if win.isMinimized:
-                        win.restore()
-                    win.activate()
-                except Exception:
-                    pass
-                return  # window found and focused
+        if find_and_focus_eve_window(window_title):
+            return
         time.sleep(2)
     log.debug("EVE window '%s' not detected within %ss", window_title, timeout)
 
@@ -479,6 +469,7 @@ class MainWindow(QMainWindow):
                 evejs_root=evejs_root,
                 profile_tq_path=profile_path,
                 proxy_url=self._cfg.get("proxy_url", "http://127.0.0.1:26002"),
+                client_path=client_path,
             )
             self._tracker.add(username, character_name, proc)
             log.info("Launched client for %s as %s (pid=%s)", username, character_name, proc.pid)
@@ -546,7 +537,11 @@ class MainWindow(QMainWindow):
             prefill_username(account.username)
 
             try:
-                proc = launch_client(evejs_root, profile_path)
+                proc = launch_client(
+                    evejs_root,
+                    profile_path,
+                    client_path=client_path,
+                )
                 self._tracker.add(account.username, char.name, proc)
                 launched += 1
                 log.info("Launched client %d/%d: %s as %s",
@@ -854,12 +849,13 @@ class MainWindow(QMainWindow):
             current_exe = sys.executable
             success = download_and_install(self._latest_download_url, current_exe)
             if success:
-                # Use os._exit() for an immediate hard exit — no Qt cleanup,
+                # Use hard_exit() for an immediate hard exit — no Qt cleanup,
                 # no Python atexit handlers, no DLL unloading.  This prevents
                 # transient "Failed to load Python DLL" dialogs that can appear
                 # during graceful shutdown when PyInstaller's bootloader
                 # unloads the Python runtime.
-                os._exit(0)
+                from .core.platform import hard_exit
+                hard_exit()
 
         elif dlg.skip_requested:
             # User clicked Skip This Version

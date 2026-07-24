@@ -12,9 +12,7 @@ import time
 from pathlib import Path
 
 from ..config import CONFIG_DIR
-
-# ── Keep the CMD window hidden ────────────────────────────────────────
-_HIDDEN = subprocess.CREATE_NO_WINDOW
+from .platform import get_hidden_process_flags, get_market_binary_name
 
 # ── Console log paths (temp files) ────────────────────────────────────
 _LOGS_DIR = CONFIG_DIR / "logs"
@@ -105,7 +103,7 @@ def start_game_server(evejs_root: str, mode: str = "modded") -> subprocess.Popen
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        creationflags=_HIDDEN,
+        **get_hidden_process_flags(),
     )
 
     # Start a daemon thread that writes stdout to the console log file
@@ -132,7 +130,7 @@ def start_market_server(evejs_root: str) -> subprocess.Popen:
         raise FileNotFoundError(f"Market server project not found: {cargo_toml}")
 
     # Use the pre-built binary if available, otherwise cargo run
-    binary = market_dir / "target" / "release" / "market-server.exe"
+    binary = market_dir / "target" / "release" / get_market_binary_name()
     if binary.exists():
         cmd = [
             str(binary),
@@ -157,7 +155,7 @@ def start_market_server(evejs_root: str) -> subprocess.Popen:
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        creationflags=_HIDDEN,
+        **get_hidden_process_flags(),
     )
 
     threading.Thread(

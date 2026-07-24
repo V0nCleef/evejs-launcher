@@ -4,17 +4,12 @@ from datetime import datetime
 from typing import Optional
 import subprocess
 
+from .platform import find_eve_window
+
 
 def _eve_window_exists() -> bool:
     """Return True if an EVE client window is currently visible on screen."""
-    try:
-        import pygetwindow as gw
-        for win in gw.getAllWindows():
-            if win.title == "EVE" and win.width > 200 and win.height > 200:
-                return True
-    except ImportError:
-        pass
-    return False
+    return find_eve_window()
 
 
 @dataclass

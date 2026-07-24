@@ -268,8 +268,9 @@ class SettingsPage(QWidget):
             target.setText(path)
 
     def _browse_file(self, target: QLineEdit) -> None:
+        from src.core.platform import get_exe_file_filter
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select File", target.text(), "Executables (*.exe);;All Files (*)"
+            self, "Select File", target.text(), get_exe_file_filter()
         )
         if path:
             target.setText(path)
