@@ -1,5 +1,12 @@
 # EveJS Multibox Launcher — Changelog
 
+## v1.0.11 — 2026-07-24
+
+### Fixed
+- **New accounts never showed login window** — `newbie=1` in `prefs.ini` caused EVE client to open setup wizard instead of login screen. The wizard renders nothing under EveJS proxy → process alive but no DirectX window. `prefill_username()` now auto-sets `newbie=0` for all accounts so they show the normal login screen on first launch.
+- **Auto-login crashed with `'bool' object has no attribute 'activate'`** — gateway condition used `and` instead of `or`, so when pyautogui was available but pygetwindow wasn't, the code fell through to the pygetwindow path which returned a bool from PowerShell detection. Changed `and` → `or`.
+- **Auto-login typed credentials into wrong window (PowerShell path)** — `_find_window_via_powershell()` had no false-positive filter, matching the launcher itself and File Explorer windows. Added `-notmatch` exclusion for same substrings used in pygetwindow path.
+
 ## v1.0.1 — 2026-07-24
 
 ### Fixed

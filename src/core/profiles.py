@@ -99,13 +99,33 @@ def get_profile_settings_path(username: str) -> Path:
 
 def prefill_username(username: str) -> None:
     """Write the username to the EVE client settings so it's pre-filled on
-    the login screen, even for accounts that have never been launched before."""
+    the login screen, even for accounts that have never been launched before.
+
+    Also ensures ``newbie=0`` in ``prefs.ini`` so the EVE client shows the
+    normal login screen instead of the first-run setup wizard (EULA, graphics
+    config) which can fail silently under the EveJS proxy.
+    """
     try:
         settings_dir = get_profile_settings_path(username)
     except FileNotFoundError:
         return  # profile not created yet
 
     settings_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── prefs.ini: ensure newbie=0 so the client skips the setup wizard ──
+    prefs_path = settings_dir / "prefs.ini"
+    if prefs_path.exists():
+        prefs_text = prefs_path.read_text(encoding="utf-8", errors="replace")
+    else:
+        prefs_text = ""
+    if "newbie=1" in prefs_text:
+        prefs_text = prefs_text.replace("newbie=1", "newbie=0")
+        prefs_path.write_text(prefs_text, encoding="utf-8")
+    elif "newbie=" not in prefs_text:
+        prefs_text += "\nnewbie=0\n"
+        prefs_path.write_text(prefs_text, encoding="utf-8")
+
+    # ── core_public__.yaml: pre-fill username ──────────────────────────
     yaml_path = settings_dir / "core_public__.yaml"
 
     # Read existing YAML or start fresh

@@ -96,8 +96,11 @@ def auto_login(
     Returns:
         True if login was attempted, False if window was never found.
     """
-    if not HAS_AUTOGUI and gw is None:
-        # Neither pyautogui nor pygetwindow available — use pure PowerShell
+    if not HAS_AUTOGUI or gw is None:
+        # Either pyautogui or pygetwindow is missing — use pure PowerShell fallback.
+        # (Previously used `and` which meant if pyautogui was available but
+        # pygetwindow wasn't, wait_for_window() would return a bool and
+        # win.activate() would crash with "'bool' object has no attribute 'activate'".)
         return _auto_login_powershell(username, password, character_name, window_title, delay, timeout)
 
     _ensure_log()
@@ -174,13 +177,33 @@ def _sendkeys_via_powershell(keys: str) -> None:
 
 
 def _find_window_via_powershell(title_substring: str, timeout: int = 30) -> bool:
-    """Wait for a window whose title contains *title_substring* using PowerShell."""
+    """Wait for a window whose title contains *title_substring* using PowerShell.
+
+    Filters out known false positives (launcher, explorer, browsers, etc.)
+    the same way the pygetwindow path does.
+    """
     import subprocess, time
+
+    # Same false-positive list as the pygetwindow path in wait_for_window().
+    _FALSE_POSITIVES_PS = (
+        "launcher", "explorer", "file", "folder", "paint", "notepad",
+        "settings", "control", "panel", "powershell", "cmd", "brave",
+        "chrome", "firefox", "edge", "hermes", "visual studio",
+    )
+    # Build a PowerShell filter that excludes windows whose title contains
+    # any of these substrings (case-insensitive via -notmatch).
+    exclude_pattern = "|".join(_FALSE_POSITIVES_PS)
+    ps_filter = (
+        f"Get-Process | Where-Object {{ "
+        f"$_.MainWindowTitle -like '*{title_substring}*' -and "
+        f"$_.MainWindowTitle -notmatch '({exclude_pattern})' "
+        f"}} | Measure-Object | Select-Object -ExpandProperty Count"
+    )
+
     deadline = time.time() + timeout
     while time.time() < deadline:
         result = subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             f"@(Get-Process | Where-Object {{ $_.MainWindowTitle -like '*{title_substring}*' }}).Count"],
+            ["powershell", "-NoProfile", "-Command", ps_filter],
             capture_output=True, text=True, timeout=5,
         )
         try:
