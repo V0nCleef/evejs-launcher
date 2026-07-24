@@ -31,9 +31,10 @@ def get_settings_key(client_path: str) -> str:
 def create_profile(username: str, real_client_path: str) -> Path:
     """Create a junction profile for the given account.
 
-    Also bootstraps the EVE settings directory with a template ``prefs.ini``
-    (containing ``newbie=0``, server port, etc.) so the EVE client renders
-    its login window on first launch instead of the broken setup wizard.
+    Copies ALL EVE settings from the real client on first creation so the
+    EVE client can render its window immediately (proven essential — template
+    files alone cause silent crashes for some accounts when other clients
+    are already running).
 
     Args:
         username: Account username (used as profile folder name).
@@ -58,34 +59,55 @@ def create_profile(username: str, real_client_path: str) -> Path:
                 f"Failed to create junction for {username}: {result.stderr.strip()}"
             )
 
-    # ── Bootstrap EVE settings with template files ──────────────────
+    # ── Bootstrap EVE settings from real client (or template fallback) ──
     try:
-        _bootstrap_settings(username)
+        _bootstrap_settings(username, real_client_path)
     except Exception:
         pass  # non-fatal — username pre-fill will still run
 
     return profile_dir
 
 
-def _bootstrap_settings(username: str) -> None:
-    """Copy template EVE settings files so the login window renders on first launch."""
+def _bootstrap_settings(username: str, real_client_path: str = "") -> None:
+    """Copy EVE settings from the real client to the new profile.
+
+    Copies ALL files (not just template) because the EVE client needs the
+    full set of .dat files to initialize when other clients are running.
+    Falls back to shipped template files if real client settings don't exist.
+    """
     import shutil
 
     try:
-        settings_dir = get_profile_settings_path(username)
+        dst_dir = get_profile_settings_path(username)
     except FileNotFoundError:
         return
 
-    settings_dir.mkdir(parents=True, exist_ok=True)
+    dst_dir.mkdir(parents=True, exist_ok=True)
 
-    # Template files shipped with the launcher
+    # ── Try to copy from the real client's settings first ────────────
+    if real_client_path:
+        real_key = get_settings_key(real_client_path)
+        real_settings = (
+            Path(os.environ.get("LOCALAPPDATA", ""))
+            / "CCP" / "EVE" / real_key / "settings"
+        )
+        if real_settings.exists():
+            for src in real_settings.iterdir():
+                dst = dst_dir / src.name
+                if src.is_file() and not dst.exists():
+                    shutil.copy2(src, dst)
+                elif src.is_dir() and src.name == "Browser" and not dst.exists():
+                    shutil.copytree(src, dst)
+            return  # real client copy succeeded — done
+
+    # ── Fallback: template files shipped with the launcher ───────────
     template_dir = Path(__file__).resolve().parent / "template_settings"
     if not template_dir.exists():
         return
 
     for name in ("prefs.ini", "core_public__.yaml"):
         src = template_dir / name
-        dst = settings_dir / name
+        dst = dst_dir / name
         if src.exists() and not dst.exists():
             shutil.copy2(src, dst)
 
