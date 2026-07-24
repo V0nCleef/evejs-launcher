@@ -31,10 +31,9 @@ def get_settings_key(client_path: str) -> str:
 def create_profile(username: str, real_client_path: str) -> Path:
     """Create a junction profile for the given account.
 
-    Also bootstraps the EVE settings directory with template files
-    (``core_user__.dat``, ``core_char__.dat``, ``prefs.ini``) so the
-    EVE client can render its login window on first launch.  Without
-    these bootstrap files the DirectX window never materialises.
+    Also bootstraps the EVE settings directory with a template ``prefs.ini``
+    (containing ``newbie=0``, server port, etc.) so the EVE client renders
+    its login window on first launch instead of the broken setup wizard.
 
     Args:
         username: Account username (used as profile folder name).
@@ -84,7 +83,7 @@ def _bootstrap_settings(username: str) -> None:
     if not template_dir.exists():
         return
 
-    for name in ("core_user__.dat", "core_char__.dat", "prefs.ini"):
+    for name in ("prefs.ini",):
         src = template_dir / name
         dst = settings_dir / name
         if src.exists() and not dst.exists():
