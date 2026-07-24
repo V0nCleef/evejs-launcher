@@ -621,15 +621,18 @@ class MainWindow(QMainWindow):
         server_starting = server_proc_alive and not sr
 
         # ── StatusBar dots ─────────────────────────────────────────────
+        server_pid = self._server_proc.pid if server_proc_alive else None
         if sr:
-            self._status_bar.set_server_state(ServiceState.ONLINE)
+            self._status_bar.set_server_state(ServiceState.ONLINE, pid=server_pid)
         elif server_starting:
             self._status_bar.set_server_state(ServiceState.STARTING)
         else:
             self._status_bar.set_server_state(ServiceState.OFFLINE)
 
+        market_pid = self._market_proc.pid if (self._market_proc and self._market_proc.poll() is None) else None
         self._status_bar.set_market_state(
-            ServiceState.ONLINE if mr else ServiceState.OFFLINE
+            ServiceState.ONLINE if mr else ServiceState.OFFLINE,
+            pid=market_pid,
         )
         self._status_bar.set_client_count(cr)
 

@@ -65,14 +65,16 @@ class StatusSection(QFrame):
             }}
         """)
 
-    def set_state(self, state: ServiceState) -> None:
-        """Update the displayed state."""
+    def set_state(self, state: ServiceState, pid: int | None = None) -> None:
         self._state = state
         if state == ServiceState.ONLINE:
             self._pulse.stop()
             self._opacity_effect.setOpacity(1.0)
             self.dot.setStyleSheet(f"background-color: {COLORS['green']}; border-radius: 5px;")
-            self.label.setText(f"{self.section_name}: Online")
+            txt = f"{self.section_name}: Online"
+            if pid:
+                txt += f" (PID {pid})"
+            self.label.setText(txt)
         elif state == ServiceState.STARTING:
             self.dot.setStyleSheet(f"background-color: {COLORS['gold']}; border-radius: 5px;")
             self.label.setText(f"{self.section_name}: Starting...")
@@ -158,11 +160,11 @@ class StatusBar(QFrame):
                         return True
         return super().eventFilter(obj, event)
 
-    def set_server_state(self, state: ServiceState) -> None:
-        self.server_section.set_state(state)
+    def set_server_state(self, state: ServiceState, pid: int | None = None) -> None:
+        self.server_section.set_state(state, pid=pid)
 
-    def set_market_state(self, state: ServiceState) -> None:
-        self.market_section.set_state(state)
+    def set_market_state(self, state: ServiceState, pid: int | None = None) -> None:
+        self.market_section.set_state(state, pid=pid)
 
     def set_client_count(self, count: int) -> None:
         self.clients_section.set_count(count)
