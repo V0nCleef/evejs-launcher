@@ -5,10 +5,14 @@ from pathlib import Path
 
 try:
     import pyautogui
-    import pygetwindow as gw
     HAS_AUTOGUI = True
 except ImportError:
     HAS_AUTOGUI = False
+
+try:
+    import pygetwindow as gw
+except ImportError:
+    gw = None  # type: ignore
 
 from ..config import CONFIG_DIR
 
@@ -37,6 +41,11 @@ def wait_for_window(title_substring: str, timeout: int = 30) -> object | None:
         return None
 
     _ensure_log()
+
+    if gw is None:
+        # pygetwindow not available — use PowerShell fallback window detection
+        return _find_window_via_powershell(title_substring, timeout)
+
     # Common window titles that happen to contain "EVE" but are not the game client.
     _FALSE_POSITIVES = {"launcher", "explorer", "file", "folder", "paint", "notepad",
                          "settings", "control", "panel", "powershell", "cmd", "brave",
@@ -87,9 +96,9 @@ def auto_login(
     Returns:
         True if login was attempted, False if window was never found.
     """
-    if not HAS_AUTOGUI:
-        logger.error("Cannot auto-login: pyautogui not available")
-        return False
+    if not HAS_AUTOGUI and gw is None:
+        # Neither pyautogui nor pygetwindow available — use pure PowerShell
+        return _auto_login_powershell(username, password, character_name, window_title, delay, timeout)
 
     _ensure_log()
     logger.info(f"Auto-login started for '{username}'")
@@ -162,3 +171,59 @@ def _sendkeys_via_powershell(keys: str) -> None:
         ["powershell", "-NoProfile", "-Command", script],
         capture_output=True, timeout=15,
     )
+
+
+def _find_window_via_powershell(title_substring: str, timeout: int = 30) -> bool:
+    """Wait for a window whose title contains *title_substring* using PowerShell."""
+    import subprocess, time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             f"@(Get-Process | Where-Object {{ $_.MainWindowTitle -like '*{title_substring}*' }}).Count"],
+            capture_output=True, text=True, timeout=5,
+        )
+        try:
+            count = int(result.stdout.strip())
+        except ValueError:
+            count = 0
+        if count > 0:
+            logger.info(f"Found {count} window(s) matching '{title_substring}' via PowerShell")
+            return True
+        time.sleep(1)
+    return False
+
+
+def _auto_login_powershell(
+    username: str,
+    password: str = "password",
+    character_name: str = "",
+    window_title: str = "EVE",
+    delay: float = 2.0,
+    timeout: int = 45,
+) -> bool:
+    """Pure PowerShell auto-login — no pyautogui or pygetwindow needed."""
+    import subprocess, time
+
+    _ensure_log()
+    logger.info(f"Auto-login (PowerShell) started for '{username}'")
+
+    # Wait for EVE window via PowerShell
+    if not _find_window_via_powershell(window_title, timeout):
+        logger.error(f"Login window not found for '{username}'")
+        return False
+
+    time.sleep(delay)
+
+    # Type credentials
+    _sendkeys_via_powershell(username + "{TAB}" + password + "{ENTER}")
+    logger.info(f"Credentials submitted for '{username}'")
+
+    # Character selection
+    if character_name:
+        time.sleep(5)
+        _sendkeys_via_powershell("{ENTER}")
+        logger.info(f"Character select confirmed for '{character_name}'")
+
+    logger.info(f"Auto-login complete for '{username}'")
+    return True
