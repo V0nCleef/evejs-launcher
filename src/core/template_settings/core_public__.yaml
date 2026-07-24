@@ -47,7 +47,7 @@ ui:
   Insider: [134293724654839320, false]
   __migrate_existing_font_size_settings_down_one_size__: [134293791984779180, true]
   clientFontSize: [134293791990894740, 2]
-  username: [134293791990894740, Voncleef3]
+  username: [__TS__, __USERNAME__]
   usernames:
-  - 134293791990894740
-  - [Voncleef, Voncleef1, Voncleef2, Voncleef3]
+  - __TS__
+  - [__USERNAME__]
