@@ -1,5 +1,10 @@
 # EveJS Multibox Launcher — Changelog
 
+## v1.0.12 — 2026-07-24
+
+### Fixed
+- **CMD windows flashed on every auto-login action** — `subprocess.run(["powershell", ...])` spawned visible console windows. The polling loop in `_find_window_via_powershell` flashed a CMD every 1 second while waiting for EVE (10-30 windows per launch). These popups stole focus, minimized fullscreen games, and could crash the EVE client. Added `creationflags=CREATE_NO_WINDOW` to all PowerShell subprocess calls.
+
 ## v1.0.11 — 2026-07-24
 
 ### Fixed

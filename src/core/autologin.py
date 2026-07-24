@@ -1,7 +1,13 @@
 """Auto-login — keyboard macro that types credentials into the EVE login window."""
+import subprocess
 import time
 import logging
 from pathlib import Path
+
+# CREATE_NO_WINDOW prevents PowerShell console windows from flashing on screen.
+# 0x08000000 is the Windows API value; subprocess.CREATE_NO_WINDOW is available
+# in Python 3.7+ but we use getattr for safety.
+_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 
 try:
     import pyautogui
@@ -162,17 +168,17 @@ def is_available() -> bool:
 
 def _sendkeys_via_powershell(keys: str) -> None:
     """Send keystrokes via PowerShell's WScript.Shell SendKeys (no pyautogui needed)."""
-    import subprocess
     # Use AppActivate to focus EVE first, then send keys
     script = (
         f'$ws = New-Object -ComObject WScript.Shell; '
-        f'$ws.AppActivate(\"EVE\") | Out-Null; '
+        f'$ws.AppActivate(\\"EVE\\") | Out-Null; '
         f'Start-Sleep -Milliseconds 500; '
-        f'$ws.SendKeys(\"{keys}\")'
+        f'$ws.SendKeys(\\"{keys}\\")'
     )
     subprocess.run(
         ["powershell", "-NoProfile", "-Command", script],
         capture_output=True, timeout=15,
+        creationflags=_CREATE_NO_WINDOW,
     )
 
 
@@ -182,7 +188,6 @@ def _find_window_via_powershell(title_substring: str, timeout: int = 30) -> bool
     Filters out known false positives (launcher, explorer, browsers, etc.)
     the same way the pygetwindow path does.
     """
-    import subprocess, time
 
     # Same false-positive list as the pygetwindow path in wait_for_window().
     _FALSE_POSITIVES_PS = (
@@ -205,6 +210,7 @@ def _find_window_via_powershell(title_substring: str, timeout: int = 30) -> bool
         result = subprocess.run(
             ["powershell", "-NoProfile", "-Command", ps_filter],
             capture_output=True, text=True, timeout=5,
+            creationflags=_CREATE_NO_WINDOW,
         )
         try:
             count = int(result.stdout.strip())
@@ -226,7 +232,6 @@ def _auto_login_powershell(
     timeout: int = 45,
 ) -> bool:
     """Pure PowerShell auto-login — no pyautogui or pygetwindow needed."""
-    import subprocess, time
 
     _ensure_log()
     logger.info(f"Auto-login (PowerShell) started for '{username}'")
