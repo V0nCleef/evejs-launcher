@@ -117,8 +117,8 @@ def main() -> int:
         return 1
 
     # ── Wait for the old launcher to exit ─────────────────────────────────
-    log.info("Waiting 2 seconds for the old launcher to exit…")
-    time.sleep(2)
+    log.info("Waiting 5 seconds for the old launcher to exit…")
+    time.sleep(5)
 
     # ── Retry loop (up to 10 attempts, 500 ms apart) ─────────────────────
     max_attempts = 10
@@ -146,12 +146,23 @@ def main() -> int:
 
     # ── Restart the new launcher ──────────────────────────────────────────
     if args.restart:
-        log.info("Launching %s", old_exe)
+        # Brief pause to let Windows flush any pending file operations
+        # after the os.replace() above.
+        time.sleep(2)
+
+        log.info("Launching %s via cmd /c start", old_exe)
         try:
+            # Use cmd.exe's "start" command to launch the exe completely
+            # detached from this Python process.  No inherited handles,
+            # no shared console, no environment leakage.  This prevents
+            # transient PyInstaller bootloader errors that can occur when
+            # a child process inherits a stale state from the parent.
             subprocess.Popen(
-                [str(old_exe)],
+                ["cmd", "/c", "start", "", str(old_exe)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                close_fds=True,
             )
         except OSError as exc:
             log.error("Failed to launch new .exe: %s", exc)

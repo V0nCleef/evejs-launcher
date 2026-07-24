@@ -16,9 +16,74 @@ from typing import Callable
 
 from src.updater.github import download_asset
 
-# The helper script is shipped at the repo root; we read it at runtime
+# Minimum size for a valid PyInstaller .exe (4 KiB — anything smaller is
+# definitely corrupt / a GitHub error page).
+_MIN_EXE_SIZE: int = 4096
+
+# The Python DLL that MUST be bundled inside the CArchive.  We verify its
+# presence with a static scan — no process spawning.
+_REQUIRED_DLL: bytes = b"python311.dll"
+
+
+def _verify_exe_integrity(exe_path: Path) -> None:
+    """Raise :class:`ValueError` if *exe_path* looks invalid or corrupt.
+
+    Performs **static** checks only (no process spawning):
+    1. File exists and is above minimum size.
+    2. Starts with the Windows PE magic ``MZ``.
+    3. Contains at least two references to ``python311.dll`` — one in the
+       bootloader import table and one in the CArchive metadata.  A single
+       missing reference means the exe cannot load Python.
+    """
+    if not exe_path.is_file():
+        raise ValueError(f"Downloaded file missing: {exe_path}")
+
+    file_size = exe_path.stat().st_size
+    if file_size < _MIN_EXE_SIZE:
+        raise ValueError(
+            f"Downloaded file too small ({file_size} bytes) — likely not an executable."
+        )
+
+    try:
+        with open(exe_path, "rb") as fh:
+            header = fh.read(2)
+        if header[:2] != b"MZ":
+            raise ValueError(
+                "Downloaded file is not a valid Windows executable (missing MZ header)."
+            )
+    except OSError as exc:
+        raise ValueError(f"Could not read downloaded file: {exc}") from exc
+
+    # Scan for python311.dll.  A healthy PyInstaller exe has 3+ references:
+    #   • bootloader import table (LoadLibrary target)
+    #   • CArchive TOC entry (bundled file metadata)
+    #   • CArchive string table
+    # We require at least 2 to guard against false positives from a single
+    # stray string match.
+    count = 0
+    with open(exe_path, "rb") as fh:
+        chunk_size = 1 << 20  # 1 MiB
+        while True:
+            chunk = fh.read(chunk_size)
+            if not chunk:
+                break
+            count += chunk.count(_REQUIRED_DLL)
+            if count >= 2:
+                return  # early exit — we have enough evidence
+
+    raise ValueError(
+        f"Downloaded .exe contains only {count} reference(s) to "
+        f"{_REQUIRED_DLL.decode()} (expected ≥2).  "
+        "The bootloader may be corrupted.  Aborting update."
+    )
+
+# The helper VBScript is shipped at the repo root; we read it at runtime
 # and write a copy to %TEMP% so it can outlive the launcher process.
-_HELPER_SOURCE = Path(__file__).resolve().parent.parent.parent / "update_helper.py"
+# When frozen by PyInstaller, bundled data is extracted to sys._MEIPASS.
+if getattr(sys, "frozen", False):
+    _HELPER_SOURCE = Path(sys._MEIPASS) / "update_helper.vbs"
+else:
+    _HELPER_SOURCE = Path(__file__).resolve().parent.parent.parent / "update_helper.vbs"
 
 
 def download_and_install(
@@ -62,14 +127,25 @@ def download_and_install(
     if not ok:
         return False
 
-    # 2. Write (or overwrite) the helper script into %TEMP%.
-    helper_dest = temp_dir / "evejs_launcher_update_helper.py"
+    # Pre-flight: verify the downloaded .exe references the correct Python DLL.
+    # A corrupted bootloader (e.g. UPX-garbled DLL name) would brick the
+    # launcher after replacement with no recovery path.
+    try:
+        _verify_exe_integrity(new_exe_path)
+    except ValueError as exc:
+        # Clean up the bad download so it doesn't pollute %TEMP%.
+        try:
+            new_exe_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False
+
+    # 2. Write (or overwrite) the helper VBScript into %TEMP%.
+    helper_dest = temp_dir / "evejs_launcher_update_helper.vbs"
     try:
         helper_source = _HELPER_SOURCE.read_text(encoding="utf-8")
     except (FileNotFoundError, OSError):
-        # If the helper isn't found at the expected path (e.g. during
-        # development), look relative to the current working directory.
-        fallback = Path.cwd() / "update_helper.py"
+        fallback = Path.cwd() / "update_helper.vbs"
         if fallback.exists():
             helper_source = fallback.read_text(encoding="utf-8")
         else:
@@ -77,26 +153,23 @@ def download_and_install(
 
     helper_dest.write_text(helper_source, encoding="utf-8")
 
-    # 3. Spawn the helper detached.
+    # 3. Spawn the helper VBScript via wscript.exe — completely silent,
+    # no console window, no output.  The script handles the wait, replace,
+    # and optional restart entirely in the background.
     flags = 0
     if sys.platform == "win32":
-        flags = (
-            subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
-            | subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
-        )
+        flags = subprocess.DETACHED_PROCESS
 
     try:
         subprocess.Popen(
             [
-                sys.executable,
+                "wscript.exe",
                 str(helper_dest),
-                "--old-exe",
                 str(current_exe_path),
-                "--new-exe",
                 str(new_exe_path),
                 "--restart",
             ],
-            creationflags=flags,  # type: ignore[arg-type]
+            creationflags=flags,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,

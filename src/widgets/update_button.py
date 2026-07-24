@@ -46,15 +46,19 @@ class UpdateButton(QPushButton):
         """Switch to gold-pill state showing *version* and start pulsing."""
         self._cancel_pulse()
 
-        self.setText(f"\u2b07 Update v{version}")  # ⬇
-        self.setToolTip(f"Update available: v{version}")
+        # Clean, readable text — no unicode glyphs that might not render
+        clean_version = version.lstrip("vV")
+        self.setText(f"Update v{clean_version}")
+        self.setToolTip(f"A new version is available: v{clean_version}")
 
-        font = QFont()
-        font.setPixelSize(11)
+        font = QFont("Segoe UI")
+        font.setPixelSize(13)
         font.setBold(True)
+        font.setStyleHint(QFont.StyleHint.SansSerif)
         self.setFont(font)
 
-        self.setFixedHeight(24)
+        self.setFixedHeight(28)
+        self.setMinimumWidth(120)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setVisible(True)
 
@@ -64,9 +68,10 @@ class UpdateButton(QPushButton):
                 background-color: {COLORS["gold"]};
                 color:            {COLORS["void_black"]};
                 border:           none;
-                border-radius:    12px;
-                padding-left:     10px;
-                padding-right:    10px;
+                border-radius:    14px;
+                padding-left:     14px;
+                padding-right:    14px;
+                font-weight:      bold;
             }}
             QPushButton:hover {{
                 background-color: #FFCC33;
@@ -83,14 +88,16 @@ class UpdateButton(QPushButton):
         """Show a muted spinner label while checking for updates."""
         self._cancel_pulse()
 
-        self.setText("\u27f3 Checking...")  # ⟳
+        self.setText("Checking...")
         self.setToolTip("Checking for updates...")
 
-        font = QFont()
+        font = QFont("Segoe UI")
         font.setPixelSize(12)
+        font.setStyleHint(QFont.StyleHint.SansSerif)
         self.setFont(font)
 
-        self.setFixedHeight(24)
+        self.setFixedHeight(28)
+        self.setMinimumWidth(0)
         self.setCursor(Qt.CursorShape.ArrowCursor)
         self.setVisible(True)
 
@@ -105,6 +112,7 @@ class UpdateButton(QPushButton):
                 border:      none;
                 padding-left:  10px;
                 padding-right: 10px;
+                font-size:   12px;
             }}
             """
         )

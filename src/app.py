@@ -10,6 +10,7 @@ Wires together nav, server, character launching, and process tracking.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import threading
@@ -137,6 +138,8 @@ class MainWindow(QMainWindow):
         self._update_checker.check_failed.connect(
             lambda msg: log.warning("Update check failed: %s", msg)
         )
+
+        self._settings_page.settings_update_check.connect(self._on_manual_update_check)
 
         if self._cfg.get("update_auto_check", True):
             QTimer.singleShot(2000, self._update_checker.check)
@@ -737,7 +740,12 @@ class MainWindow(QMainWindow):
             current_exe = sys.executable
             success = download_and_install(self._latest_download_url, current_exe)
             if success:
-                QApplication.quit()
+                # Use os._exit() for an immediate hard exit — no Qt cleanup,
+                # no Python atexit handlers, no DLL unloading.  This prevents
+                # transient "Failed to load Python DLL" dialogs that can appear
+                # during graceful shutdown when PyInstaller's bootloader
+                # unloads the Python runtime.
+                os._exit(0)
 
         elif dlg.skip_requested:
             # User clicked Skip This Version
@@ -749,6 +757,27 @@ class MainWindow(QMainWindow):
         self._title_bar.set_update_up_to_date()
         self._cfg["update_last_checked"] = datetime.now(timezone.utc).isoformat()
         config.save(self._cfg)
+        self._settings_page.set_update_check_done(True)
+
+    def _on_manual_update_check(self) -> None:
+        """Triggered by the Settings page's 'Check for Updates' button."""
+        # Visual feedback — title bar spinner + settings button shows checking
+        self._title_bar.set_update_checking()
+        self._settings_page.set_update_checking()
+
+        # Create a fresh checker (QThread can only start once)
+        checker = UpdateChecker(self)
+        checker.update_available.connect(self._on_update_available)
+        checker.up_to_date.connect(self._on_update_up_to_date)
+        checker.up_to_date.connect(lambda v="": self._settings_page.set_update_check_done(True))
+        checker.check_failed.connect(lambda msg: self._on_check_failed_from_settings(msg))
+        checker.check()
+
+    def _on_check_failed_from_settings(self, error: str) -> None:
+        """Handle a failed check triggered from Settings."""
+        log.warning("Manual update check failed: %s", error)
+        self._title_bar.set_update_up_to_date()
+        self._settings_page.set_update_check_done(False)
 
     # ── Resize / close lifecycle ──────────────────────────────────────
 

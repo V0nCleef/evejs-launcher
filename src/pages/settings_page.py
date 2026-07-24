@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -136,11 +137,11 @@ class SettingsPage(QWidget):
         self.version_label.setCursor(Qt.CursorShape.ArrowCursor)
         updates_form.addRow("Current Version:", self.version_label)
 
-        check_btn = QPushButton("Check for Updates")
-        check_btn.setProperty("class", "primary")
-        check_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        check_btn.clicked.connect(self.settings_update_check.emit)
-        updates_form.addRow("", check_btn)
+        self.check_btn = QPushButton("Check for Updates")
+        self.check_btn.setProperty("class", "primary")
+        self.check_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.check_btn.clicked.connect(self._on_check_clicked)
+        updates_form.addRow("", self.check_btn)
 
         self.update_auto_check_toggle = ToggleSwitch()
         updates_form.addRow("Auto-Check for Updates:", self.update_auto_check_toggle)
@@ -318,6 +319,28 @@ class SettingsPage(QWidget):
         self.settings_saved.emit(cfg)
 
     # ── Update helpers ───────────────────────────────────────────────────────
+    def _on_check_clicked(self) -> None:
+        """User clicked Check for Updates — disable button and emit signal."""
+        self.check_btn.setEnabled(False)
+        self.check_btn.setText("Checking...")
+        self.settings_update_check.emit()
+
+    def set_update_checking(self) -> None:
+        """Called externally — show checking state on the button."""
+        self.check_btn.setEnabled(False)
+        self.check_btn.setText("Checking...")
+
+    def set_update_check_done(self, success: bool) -> None:
+        """Called externally after check completes — reset button + update label."""
+        self.check_btn.setEnabled(True)
+        self.check_btn.setText("Check for Updates")
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        if success:
+            self.last_checked_label.setText(now)
+        else:
+            self.last_checked_label.setText(f"Failed — {now}")
+            self.last_checked_label.setStyleSheet(f"color: {COLORS['red']}; font-size: 11px;")
+
     def _open_changelog(self) -> None:
         """Open CHANGELOG.md in the default text editor."""
         changelog_path = Path(__file__).resolve().parent.parent.parent / "CHANGELOG.md"
