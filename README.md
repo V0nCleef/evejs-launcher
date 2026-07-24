@@ -180,7 +180,6 @@ evejs-launcher/
     │   ├── process_tracker.py  # Live process monitoring
     │   ├── profiles.py      # Junction-based profile creation
     │   ├── mod_manager.py   # Mod discovery + loader.js toggle
-    │   ├── autologin.py     # Auto-login to character select
     │   ├── discovery.py     # Account scanning
     │   ├── db.py            # SQLite character database
     │   └── groups.py        # Character grouping

@@ -168,6 +168,7 @@ class MainWindow(QMainWindow):
         )
 
         self._settings_page.settings_update_check.connect(self._on_manual_update_check)
+        self._settings_page.settings_saved.connect(self._on_settings_saved)
 
         if self._cfg.get("update_auto_check", True):
             QTimer.singleShot(2000, self._update_checker.check)
@@ -253,6 +254,12 @@ class MainWindow(QMainWindow):
         btn = self._nav.nav_group.button(index)
         if btn is not None and not btn.isChecked():
             btn.setChecked(True)
+
+        # Refresh settings from config when the user visits the Settings tab,
+        # so auto-hidden accounts (persisted by _refresh_characters after
+        # startup) show up in the Hidden Accounts list.
+        if index == int(Page.SETTINGS):
+            self._settings_page.load_settings()
 
     # ── Server control ─────────────────────────────────────────────────
 
@@ -464,7 +471,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", "Profile junction not found.")
             return
 
-        # Pre-fill username so auto-login only needs password + Enter
+        # Pre-fill username so the EVE client shows it on the login screen.
         prefill_username(username)
 
         try:
@@ -485,19 +492,15 @@ class MainWindow(QMainWindow):
         # ── Eve client window takes 10-15s to appear; restore it once visible ─
         threading.Thread(
             target=_restore_eve_window,
-            args=(self._cfg.get("autologin_window_title", "EVE"),),
+            args=("EVE",),
             daemon=True,
         ).start()
 
-        # Auto-login disabled — user types password manually.
-        # Username is pre-filled by prefill_username() above.
+        # ── Serial launch: start next client after a stagger delay ──
+        # (Auto-login feature has been removed — user types password manually.)
 
     def _launch_all(self) -> None:
-        """Launch every visible, non-banned, non-running account (staggered).
-
-        Auto-login runs synchronously for each client to avoid focus-stealing
-        between multiple simultaneously-launched EVE windows.
-        """
+        """Launch every visible, non-banned, non-running account (staggered)."""
         evejs_root = self._cfg.get("evejs_root", "")
         client_path = self._cfg.get("client_path", "")
         if not evejs_root or not client_path:
@@ -508,20 +511,40 @@ class MainWindow(QMainWindow):
 
         stagger = max(0, int(self._cfg.get("stagger_delay_sec", 3)))
         launched = 0
-        hidden = set(self._cfg.get("hidden_accounts", []))
+
+        # Build the full hidden set — INCLUDES auto-hidden test/GM characters
+        # (matching the logic in _refresh_characters so the UI and Launch All
+        #  filter identically).
+        hidden: set[str] = set(self._cfg.get("hidden_characters", []))
+        if self._cfg.get("hide_test_characters", True):
+            for account in self._accounts:
+                ul = account.username.lower()
+                if ul.startswith("test") or "gm" in ul:
+                    for char in account.characters:
+                        hidden.add(char.name)
 
         for account in self._accounts:
-            if account.banned or account.username in hidden:
+            if account.banned:
                 continue
             if self._tracker.is_account_running(account.username) or not account.characters:
                 continue
-            char = account.characters[0]
+
+            # Find the first non-hidden character for this account.
+            char = next((c for c in account.characters if c.name not in hidden), None)
+            if char is None:
+                continue  # all characters hidden
             if not profile_exists(account.username):
                 try:
                     create_profile(account.username, client_path)
                 except RuntimeError:
                     continue
             profile_path = Path(PROFILES_ROOT) / account.username / "tq"
+
+            # Pre-fill the correct username for this account BEFORE launching —
+            # otherwise the EVE client uses stale cached values from the real
+            # client's settings, causing multiple clients to show the same name.
+            prefill_username(account.username)
+
             try:
                 proc = launch_client(evejs_root, profile_path)
                 self._tracker.add(account.username, char.name, proc)
@@ -550,14 +573,25 @@ class MainWindow(QMainWindow):
         if count > 0:
             QMessageBox.information(self, "Killed", f"Terminated {count} client(s).")
 
-    def _on_hide_character(self, username: str) -> None:
-        """Add a username to hidden_accounts and refresh the character grid."""
-        hidden: list[str] = list(self._cfg.get("hidden_accounts", []))
-        if username not in hidden:
-            hidden.append(username)
-            self._cfg["hidden_accounts"] = hidden
+    def _on_hide_character(self, character_name: str) -> None:
+        """Add a character name to hidden_characters and refresh the grid.
+
+        Also removes it from ``never_hide_characters`` (if present) — the
+        user actively wants this character hidden, so the auto-hide exemption
+        no longer applies.
+        """
+        hidden: list[str] = list(self._cfg.get("hidden_characters", []))
+        if character_name not in hidden:
+            hidden.append(character_name)
+            self._cfg["hidden_characters"] = hidden
             config.save(self._cfg)
-            log.info("Hid account '%s'", username)
+            log.info("Hid character '%s'", character_name)
+        # Remove from never-hide list so auto-hide can re-claim it on restart
+        never: list[str] = list(self._cfg.get("never_hide_characters", []))
+        if character_name in never:
+            never.remove(character_name)
+            self._cfg["never_hide_characters"] = never
+            config.save(self._cfg)
         self._refresh_characters()
 
     # ── Refresh + status ──────────────────────────────────────────────
@@ -573,15 +607,28 @@ class MainWindow(QMainWindow):
                 log.exception("Failed to load accounts")
                 self._accounts = []
 
-        hidden = list(self._cfg.get("hidden_accounts", []))
+        hidden = list(self._cfg.get("hidden_characters", []))
 
-        # ── Auto-hide test/GM accounts (configurable) ──────────────────
-        if self._cfg.get("hide_test_accounts", True):
+        # ── Auto-hide characters belonging to test/GM accounts ───────────
+        if self._cfg.get("hide_test_characters", True):
+            never_hide: set[str] = set(self._cfg.get("never_hide_characters", []))
+            cfg_changed = False
             for account in self._accounts:
                 username_lower = account.username.lower()
                 is_test = username_lower.startswith("test") or "gm" in username_lower
-                if is_test and account.username not in hidden:
-                    hidden.append(account.username)
+                if is_test:
+                    for char in account.characters:
+                        # Skip characters the user explicitly un-hid
+                        if char.name in never_hide:
+                            continue
+                        if char.name not in hidden:
+                            hidden.append(char.name)
+                            # Persist to config so it shows up in Settings → Hidden Characters
+                            if char.name not in self._cfg.get("hidden_characters", []):
+                                self._cfg.setdefault("hidden_characters", []).append(char.name)
+                                cfg_changed = True
+            if cfg_changed:
+                config.save(self._cfg)
 
         try:
             self._characters_page.refresh(self._accounts, hidden, self._tracker, evejs_root)
@@ -825,6 +872,11 @@ class MainWindow(QMainWindow):
         self._cfg["update_last_checked"] = datetime.now(timezone.utc).isoformat()
         config.save(self._cfg)
         self._settings_page.set_update_check_done(True)
+
+    def _on_settings_saved(self, cfg: dict) -> None:
+        """Refresh in-memory config and character grid after settings save."""
+        self._cfg.update(cfg)
+        self._refresh_characters()
 
     def _on_manual_update_check(self) -> None:
         """Triggered by the Settings page's 'Check for Updates' button."""

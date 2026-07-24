@@ -37,11 +37,11 @@ class StatusSection(QFrame):
         self.dot = QLabel()
         self.dot.setFixedSize(10, 10)
         self.dot.setStyleSheet(f"background-color: {COLORS['grey']}; border-radius: 5px;")
-        layout.addWidget(self.dot)
+        layout.addWidget(self.dot, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self.label = QLabel(f"{self.section_name}: Offline")
         self.label.setStyleSheet(f"color: {COLORS['white']}; font-size: 12px;")
-        layout.addWidget(self.label)
+        layout.addWidget(self.label, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -112,7 +112,7 @@ class StatusBar(QFrame):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setFixedHeight(28)
+        self.setFixedHeight(32)
         self.setStyleSheet(f"""
             StatusBar {{
                 background-color: {COLORS['carbon']};
@@ -153,9 +153,9 @@ class StatusBar(QFrame):
         # Version label — bottom right
         version_label = QLabel(f"v{APP_VERSION}")
         version_label.setStyleSheet(
-            f"color: {COLORS['grey']}; font-size: 10px; padding-right: 8px;"
+            f"color: {COLORS['grey']}; font-size: 12px; padding-right: 10px;"
         )
-        layout.addWidget(version_label)
+        layout.addWidget(version_label, alignment=Qt.AlignmentFlag.AlignVCenter)
 
     # ── Event filter: forward child-label clicks to the parent section ──
     def eventFilter(self, obj: QObject, event) -> bool:  # noqa: N802

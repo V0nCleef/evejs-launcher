@@ -207,7 +207,7 @@ class CharacterCard(QFrame):
 
     launched = pyqtSignal(str, str)  # username, char_name
     selected = pyqtSignal(str, str, int)  # username, char_name, char_id
-    hide_requested = pyqtSignal(str)  # username
+    hide_requested = pyqtSignal(str)  # character_name
 
     def __init__(
         self,
@@ -450,7 +450,7 @@ class CharacterCard(QFrame):
             """
         )
         menu.addAction("View Details", self._on_view_details)
-        menu.addAction("Hide Character", lambda: self.hide_requested.emit(self.username))
+        menu.addAction("Hide Character", lambda: self.hide_requested.emit(self.char_name))
         menu.addAction("View Log", lambda: None)
         menu.exec(self._overflow_btn.mapToGlobal(self._overflow_btn.rect().bottomLeft()))
 

@@ -16,11 +16,10 @@ DEFAULT_CONFIG = {
     "auto_start_market": False,
     "server_mode": "modded",  # "vanilla" or "modded"
     "stagger_delay_sec": 3,
-    "autologin_delay_sec": 2,
-    "autologin_window_title": "EVE",
     "theme": "dark",
-    "hidden_accounts": [],  # list of usernames hidden from UI
-    "hide_test_accounts": True,  # auto-hide EveJS default test/GM accounts
+    "hidden_characters": [],  # list of character names hidden from UI
+    "hide_test_characters": True,  # auto-hide characters belonging to test/GM accounts
+    "never_hide_characters": [],  # characters the user explicitly un-hid — auto-hide skips these
     "animations_enabled": True,  # cross-fade banner, page transitions, card effects
     "hero_rotation_interval_sec": 6,  # seconds between hero banner cross-fades
     # ── Auto-update ──────────────────────────────────────────────────────

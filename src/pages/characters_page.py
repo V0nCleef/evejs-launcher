@@ -12,7 +12,7 @@ Layout
 
 Behaviour
 ---------
-* ``refresh(accounts, hidden_accounts, tracker)`` rebuilds the card grid
+* ``refresh(accounts, hidden_characters, tracker)`` rebuilds the card grid
   diff-smart: cards that already exist are updated in place, new cards are
   added, removed characters are deleted.
 * While accounts are loading, placeholder ``SkeletonCard`` widgets are shown.
@@ -59,7 +59,7 @@ class CharactersPage(QWidget):
 
     launch_character = pyqtSignal(str, str)  # username, char_name
     character_selected = pyqtSignal(str, str, int)  # username, char_name, char_id
-    hide_character = pyqtSignal(str)  # username
+    hide_character = pyqtSignal(str)  # character_name
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -160,7 +160,7 @@ class CharactersPage(QWidget):
     def refresh(
         self,
         accounts: list[Account],
-        hidden_accounts: list[str],
+        hidden_characters: list[str],
         tracker: ProcessTracker,
         evejs_root: str = "",
     ) -> None:
@@ -175,15 +175,16 @@ class CharactersPage(QWidget):
         self._cancel_transition()
         self._tracker = tracker
         self._evejs_root = evejs_root
-        hidden = set(hidden_accounts)
+        hidden = set(hidden_characters)
 
-        # Build the desired flat list, skipping hidden accounts.
+        # Build the desired flat list, skipping hidden characters.
         desired: list[tuple[str, Character]] = []
         for account in accounts:
-            if account.username in hidden or getattr(account, "hidden", False):
+            if account.banned or getattr(account, "hidden", False):
                 continue
             for char in account.characters:
-                desired.append((account.username, char))
+                if char.name not in hidden:
+                    desired.append((account.username, char))
 
         desired_keys = {(u, c.char_id) for u, c in desired}
 
@@ -506,13 +507,13 @@ class CharactersPage(QWidget):
 
     def _on_detail_hide(self) -> None:
         """Hide the character currently shown in the detail panel."""
-        username, _char_name, _char_id = self.detail_panel.get_character()
-        if username:
-            self.hide_character.emit(username)
+        _username, char_name, _char_id = self.detail_panel.get_character()
+        if char_name:
+            self.hide_character.emit(char_name)
 
-    def _on_card_hide_requested(self, username: str) -> None:
+    def _on_card_hide_requested(self, character_name: str) -> None:
         """Hide a character from its card's overflow menu."""
-        self.hide_character.emit(username)
+        self.hide_character.emit(character_name)
 
     # ── Click on empty grid space → deselect ───────────────────────────────
     def eventFilter(self, obj, event) -> bool:  # noqa: N802

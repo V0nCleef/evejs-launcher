@@ -3,9 +3,9 @@
 Sections
 --------
 * General        — EveJS root, client path, proxy URL
-* Launch         — stagger/autologin delays, window title, auto-start toggles
+* Launch         — stagger delay, auto-start toggles
 * UI             — animations toggle, hero rotation interval
-* Hidden Accounts— list of hidden usernames with a "Show Selected" action
+* Hidden Characters— list of hidden character names with a "Show Selected" action
 * Danger Zone    — delete all local launcher data
 
 Values load from / save to :mod:`src.config`.
@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QWheelEvent
 from PyQt6.QtWidgets import (
     QFileDialog,
     QFormLayout,
@@ -33,6 +34,23 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+
+class FocusWheelSpinBox(QSpinBox):
+    """A QSpinBox that only responds to the mouse wheel when it has focus.
+
+    Standard QSpinBox consumes wheel events even when the cursor merely
+    passes over it while the user is scrolling a parent QScrollArea,
+    which hijacks the scroll and changes the spinbox value instead.
+    When unfocused, this subclass ignores wheel events and lets the
+    parent scroll area handle them normally.
+    """
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()  # propagate to parent scroll area
 
 from src import config
 from src.constants import COLORS, APP_VERSION
@@ -91,18 +109,10 @@ class SettingsPage(QWidget):
         launch_form = QFormLayout(launch_box)
         launch_form.setSpacing(10)
 
-        self.stagger_delay_spin = QSpinBox()
+        self.stagger_delay_spin = FocusWheelSpinBox()
         self.stagger_delay_spin.setRange(0, 30)
         self.stagger_delay_spin.setSuffix(" s")
         launch_form.addRow("Stagger Delay:", self.stagger_delay_spin)
-
-        self.autologin_delay_spin = QSpinBox()
-        self.autologin_delay_spin.setRange(0, 10)
-        self.autologin_delay_spin.setSuffix(" s")
-        launch_form.addRow("Autologin Delay:", self.autologin_delay_spin)
-
-        self.autologin_title_edit = QLineEdit()
-        launch_form.addRow("Autologin Window Title:", self.autologin_title_edit)
 
         self.auto_start_server_toggle = ToggleSwitch()
         launch_form.addRow("Auto-Start Server:", self.auto_start_server_toggle)
@@ -120,7 +130,7 @@ class SettingsPage(QWidget):
         self.animations_toggle = ToggleSwitch()
         ui_form.addRow("Animations:", self.animations_toggle)
 
-        self.hero_interval_spin = QSpinBox()
+        self.hero_interval_spin = FocusWheelSpinBox()
         self.hero_interval_spin.setRange(3, 30)
         self.hero_interval_spin.setSuffix(" s")
         ui_form.addRow("Hero Rotation Interval:", self.hero_interval_spin)
@@ -146,7 +156,7 @@ class SettingsPage(QWidget):
         self.update_auto_check_toggle = ToggleSwitch()
         updates_form.addRow("Auto-Check for Updates:", self.update_auto_check_toggle)
 
-        self.update_interval_spin = QSpinBox()
+        self.update_interval_spin = FocusWheelSpinBox()
         self.update_interval_spin.setRange(1, 72)
         self.update_interval_spin.setSuffix(" h")
         updates_form.addRow("Check Interval:", self.update_interval_spin)
@@ -163,8 +173,8 @@ class SettingsPage(QWidget):
 
         root.addWidget(updates_box)
 
-        # ── Hidden Accounts ──────────────────────────────────────────────────
-        hidden_box = QGroupBox("Hidden Accounts")
+        # ── Hidden Characters ────────────────────────────────────────────────
+        hidden_box = QGroupBox("Hidden Characters")
         hidden_layout = QVBoxLayout(hidden_box)
         hidden_layout.setSpacing(8)
 
@@ -184,7 +194,7 @@ class SettingsPage(QWidget):
         show_btn = QPushButton("Show Selected")
         show_btn.setProperty("class", "ghost")
         show_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        show_btn.clicked.connect(self._show_selected_accounts)
+        show_btn.clicked.connect(self._show_selected_characters)
         hidden_layout.addWidget(show_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 
         root.addWidget(hidden_box)
@@ -274,8 +284,6 @@ class SettingsPage(QWidget):
         self.proxy_url_edit.setText(str(cfg.get("proxy_url", "")))
 
         self.stagger_delay_spin.setValue(int(cfg.get("stagger_delay_sec", 3)))
-        self.autologin_delay_spin.setValue(int(cfg.get("autologin_delay_sec", 2)))
-        self.autologin_title_edit.setText(str(cfg.get("autologin_window_title", "EVE")))
         self.auto_start_server_toggle.setChecked(bool(cfg.get("auto_start_server", False)))
         self.auto_start_market_toggle.setChecked(bool(cfg.get("auto_start_market", False)))
 
@@ -289,8 +297,8 @@ class SettingsPage(QWidget):
         self.last_checked_label.setText(last_checked[:16] if last_checked else "Never")
 
         self.hidden_list.clear()
-        for username in cfg.get("hidden_accounts", []):
-            self.hidden_list.addItem(str(username))
+        for name in cfg.get("hidden_characters", []):
+            self.hidden_list.addItem(str(name))
 
     def save_settings(self) -> None:
         """Persist the form values to config."""
@@ -301,15 +309,13 @@ class SettingsPage(QWidget):
                 "client_path": self.client_path_edit.text().strip(),
                 "proxy_url": self.proxy_url_edit.text().strip(),
                 "stagger_delay_sec": self.stagger_delay_spin.value(),
-                "autologin_delay_sec": self.autologin_delay_spin.value(),
-                "autologin_window_title": self.autologin_title_edit.text().strip(),
                 "auto_start_server": self.auto_start_server_toggle.isChecked(),
                 "auto_start_market": self.auto_start_market_toggle.isChecked(),
                 "animations_enabled": self.animations_toggle.isChecked(),
                 "hero_rotation_interval_sec": self.hero_interval_spin.value(),
                 "update_auto_check": self.update_auto_check_toggle.isChecked(),
                 "update_check_interval_hours": self.update_interval_spin.value(),
-                "hidden_accounts": [
+                "hidden_characters": [
                     self.hidden_list.item(i).text()
                     for i in range(self.hidden_list.count())
                 ],
@@ -347,11 +353,29 @@ class SettingsPage(QWidget):
         if changelog_path.exists():
             subprocess.Popen(["start", str(changelog_path)], shell=True)
 
-    # ── Hidden accounts ──────────────────────────────────────────────────────
-    def _show_selected_accounts(self) -> None:
-        """Remove the selected usernames from the hidden list."""
+    # ── Hidden characters ────────────────────────────────────────────────────
+    def _show_selected_characters(self) -> None:
+        """Remove the selected character names from the hidden list and persist.
+
+        Writes ``never_hide_characters`` *before* calling ``save_settings()``
+        so the ``settings_saved → _refresh_characters`` chain sees the
+        exemptions and doesn't immediately re-hide the character.
+        """
+        removed = [self.hidden_list.item(i).text()
+                   for i in range(self.hidden_list.count())
+                   if self.hidden_list.item(i).isSelected()]
         for item in self.hidden_list.selectedItems():
             self.hidden_list.takeItem(self.hidden_list.row(item))
+        if removed:
+            # ── Write never_hide_characters FIRST so _refresh_characters sees it ──
+            cfg = config.load()
+            never = set(cfg.get("never_hide_characters", []))
+            for name in removed:
+                never.add(name)
+            cfg["never_hide_characters"] = sorted(never)
+            config.save(cfg)
+            # Now persist the updated hidden_characters (triggers refresh)
+            self.save_settings()
 
     # ── Danger zone ──────────────────────────────────────────────────────────
     def _delete_all_local_data(self) -> None:
