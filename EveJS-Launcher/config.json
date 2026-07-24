@@ -1,0 +1,21 @@
+{
+  "evejs_root": "",
+  "client_path": "",
+  "proxy_url": "http://127.0.0.1:26002",
+  "game_port": 26000,
+  "auto_start_server": false,
+  "auto_start_market": false,
+  "server_mode": "modded",
+  "stagger_delay_sec": 3,
+  "theme": "dark",
+  "hidden_characters": [],
+  "hide_test_characters": true,
+  "never_hide_characters": [],
+  "animations_enabled": true,
+  "hero_rotation_interval_sec": 6,
+  "update_auto_check": true,
+  "update_check_interval_hours": 6,
+  "update_skip_version": "",
+  "update_skip_versions": [],
+  "update_last_checked": "2026-07-24T17:43:05.184963+00:00"
+}

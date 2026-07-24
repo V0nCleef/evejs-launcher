@@ -40,7 +40,7 @@ from . import config
 from .constants import APP_TITLE, Page, Ports
 from .core.db import Account, load_accounts
 from .core.launcher import launch_client
-from .core.platform import hard_exit, is_linux
+from .core.platform import hard_exit
 from .core.process_tracker import ProcessTracker
 from .core.profiles import PROFILES_ROOT, create_profile, prefill_username, profile_exists
 from .core.server_launcher import (
@@ -101,18 +101,8 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1000, 640)
         self.resize(1366, 768)
 
-        # WSLg/Weston compositors cannot render frameless Qt windows — the
-        # surface ends up at 0×0 with only a taskbar thumbnail visible.
-        # On Linux, keep native window decorations so the compositor can size
-        # and position the window correctly.
-        if not is_linux:
-            self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
-        else:
-            # WSLg often presents a multi-monitor virtual desktop where the
-            # "primary" screen (x=2560) sits to the right of the visible one.
-            # Force the window onto the first screen at (0,0) so it's actually
-            # visible on a single physical monitor.
-            self.move(50, 50)
+        # Frameless window with custom title bar
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
 
         # Window icon
         icon_path = Path(__file__).resolve().parent.parent / "assets" / "logo.png"

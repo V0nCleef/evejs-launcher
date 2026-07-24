@@ -21,8 +21,7 @@ def download_and_install(
     """Download the new .exe and hand off to the update helper.
 
     Delegates to :func:`src.core.platform.run_updater` which is the
-    platform-specific implementation (VBScript/wscript on Windows,
-    bash/nohup on Linux).
+    platform-specific implementation (VBScript/wscript on Windows).
 
     Returns
     -------
