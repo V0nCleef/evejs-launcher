@@ -1,0 +1,33 @@
+# Build artifacts
+build/
+dist/
+*.spec
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+venv/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Temp
+*.tmp
+*.temp
+
+# Environment
+.env
+.env.local
