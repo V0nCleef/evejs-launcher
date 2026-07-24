@@ -39,7 +39,6 @@ from PyQt6.QtWidgets import (
 
 from . import config
 from .constants import APP_TITLE, Page, Ports
-from .core.autologin import auto_login, is_available as autologin_available
 from .core.db import Account, load_accounts
 from .core.launcher import launch_client
 from .core.process_tracker import ProcessTracker
@@ -490,16 +489,8 @@ class MainWindow(QMainWindow):
             daemon=True,
         ).start()
 
-        if autologin_available():
-            delay = self._cfg.get("autologin_delay_sec", 2)
-            title = self._cfg.get("autologin_window_title", "EVE")
-            threading.Thread(
-                target=auto_login,
-                args=(username, "password", character_name, title, delay),
-                daemon=True,
-            ).start()
-        else:
-            log.warning("Auto-login unavailable (pyautogui not found) — skipping for %s", username)
+        # Auto-login disabled — user types password manually.
+        # Username is pre-filled by prefill_username() above.
 
     def _launch_all(self) -> None:
         """Launch every visible, non-banned, non-running account (staggered).
@@ -541,15 +532,7 @@ class MainWindow(QMainWindow):
                 log.exception("Launch failed for %s", account.username)
                 continue
 
-            # ── Serial auto-login: finish this client before next launch ─
-            if autologin_available():
-                delay = self._cfg.get("autologin_delay_sec", 2)
-                title = self._cfg.get("autologin_window_title", "EVE")
-                # Run synchronously so only one EVE window is active at a time
-                auto_login(account.username, "password", char.name, title, delay)
-            else:
-                log.warning("Auto-login unavailable (pyautogui not found) — skipping for %s", account.username)
-
+            # ── Serial launch: start next client after a stagger delay ──
             self._refresh_characters()
             self._update_status_bar()
 

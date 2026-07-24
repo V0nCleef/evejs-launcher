@@ -1,5 +1,14 @@
 # EveJS Multibox Launcher — Changelog
 
+## v1.0.13 — 2026-07-24
+
+### Fixed
+- **New accounts: EVE window never appeared** — root cause was missing bootstrap settings files (`core_user__.dat`, `core_char__.dat`). The EVE client requires these to render the DirectX login window; without them the process stays alive but shows nothing. `create_profile()` now copies template bootstrap files for every new account.
+- **Username pre-fill not working** — `prefill_username()` wrote `username:` as a top-level YAML key, but the EVE client stores it under the `ui:` section and silently drops anything at the wrong nesting level. Now writes username + usernames under `ui:` with correct indentation.
+
+### Changed
+- **Auto-login removed from launch flow** — clicking LAUNCH now spawns the EVE client with username pre-filled and stops. No CMD windows, no typing, no interference. User types password manually.
+
 ## v1.0.12 — 2026-07-24
 
 ### Fixed

@@ -31,6 +31,11 @@ def get_settings_key(client_path: str) -> str:
 def create_profile(username: str, real_client_path: str) -> Path:
     """Create a junction profile for the given account.
 
+    Also bootstraps the EVE settings directory with template files
+    (``core_user__.dat``, ``core_char__.dat``, ``prefs.ini``) so the
+    EVE client can render its login window on first launch.  Without
+    these bootstrap files the DirectX window never materialises.
+
     Args:
         username: Account username (used as profile folder name).
         real_client_path: Path to the real EVE client's tq folder.
@@ -42,21 +47,48 @@ def create_profile(username: str, real_client_path: str) -> Path:
     profile_dir.mkdir(parents=True, exist_ok=True)
 
     junction = profile_dir / "tq"
-    if junction.exists():
-        return profile_dir
-
-    # mklink /J creates a directory junction (no admin required on Win10+)
-    result = subprocess.run(
-        ["cmd", "/c", "mklink", "/J", str(junction), str(Path(real_client_path))],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"Failed to create junction for {username}: {result.stderr.strip()}"
+    if not junction.exists():
+        # mklink /J creates a directory junction (no admin required on Win10+)
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(junction), str(Path(real_client_path))],
+            capture_output=True,
+            text=True,
         )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Failed to create junction for {username}: {result.stderr.strip()}"
+            )
+
+    # ── Bootstrap EVE settings with template files ──────────────────
+    try:
+        _bootstrap_settings(username)
+    except Exception:
+        pass  # non-fatal — username pre-fill will still run
 
     return profile_dir
+
+
+def _bootstrap_settings(username: str) -> None:
+    """Copy template EVE settings files so the login window renders on first launch."""
+    import shutil
+
+    try:
+        settings_dir = get_profile_settings_path(username)
+    except FileNotFoundError:
+        return
+
+    settings_dir.mkdir(parents=True, exist_ok=True)
+
+    # Template files shipped with the launcher
+    template_dir = Path(__file__).resolve().parent / "template_settings"
+    if not template_dir.exists():
+        return
+
+    for name in ("core_user__.dat", "core_char__.dat", "prefs.ini"):
+        src = template_dir / name
+        dst = settings_dir / name
+        if src.exists() and not dst.exists():
+            shutil.copy2(src, dst)
 
 
 def delete_profile(username: str) -> None:
@@ -125,27 +157,82 @@ def prefill_username(username: str) -> None:
         prefs_text += "\nnewbie=0\n"
         prefs_path.write_text(prefs_text, encoding="utf-8")
 
-    # ── core_public__.yaml: pre-fill username ──────────────────────────
+    # ── core_public__.yaml: pre-fill username under the ui: section ─────
+    # The EVE client stores username under the ``ui:`` key, NOT at the top
+    # level.  Writing it at the top level gets silently dropped when the
+    # client rewrites the file on startup.
     yaml_path = settings_dir / "core_public__.yaml"
 
-    # Read existing YAML or start fresh
     if yaml_path.exists():
-        text = yaml_path.read_text(encoding="utf-8", errors="replace")
+        lines = yaml_path.read_text(encoding="utf-8", errors="replace").splitlines(True)
     else:
-        text = "generic: {}\n"
+        lines = ["generic: {}\n", "ui:\n"]
 
-    # The EVE client stores the last username like:
-    #   username: [timestamp, Voncleef]
-    #   usernames: [timestamp, [Voncleef]]
     import time
     ts = int(time.time() * 10_000_000)  # EVE uses 100-nanosecond intervals
 
-    if "username:" in text:
-        text = re.sub(r"username: \[.*?\]", f"username: [{ts}, {username}]", text)
-    else:
-        text += f"\nusername: [{ts}, {username}]"
+    # Find or create the ``ui:`` section and insert/update ``username:``
+    in_ui = False
+    ui_indent = "  "
+    found_username = False
+    found_usernames = False
+    result: list[str] = []
+    username_line = f"{ui_indent}username: [{ts}, {username}]\n"
+    usernames_line = f"{ui_indent}usernames:\n"
 
-    yaml_path.write_text(text, encoding="utf-8")
+    for line in lines:
+        stripped = line.lstrip()
+        # Track when we enter/leave the ui: section
+        if stripped.startswith("ui:") or stripped.startswith('"ui":'):
+            in_ui = True
+            result.append(line)
+            continue
+        if in_ui and not line.startswith((" ", "\t")) and stripped:
+            # Left the ui: section (non-indented, non-empty line)
+            # Insert username/usernames if not yet found
+            if not found_username:
+                result.append(username_line)
+            if not found_usernames:
+                # Write usernames block
+                result.append(usernames_line)
+                result.append(f"{ui_indent}- {ts}\n")
+                result.append(f"{ui_indent}- [{username}]\n")
+            in_ui = False
+
+        if in_ui and stripped.startswith("username:"):
+            result.append(username_line)
+            found_username = True
+            continue
+        if in_ui and stripped.startswith("usernames:"):
+            result.append(usernames_line)
+            found_usernames = True
+            continue
+        # Skip old usernames list entries (indented list items under usernames:)
+        if found_usernames and in_ui and line.startswith(f"{ui_indent}-"):
+            continue
+        # Reset usernames flag when we hit another key
+        if found_usernames and in_ui and stripped and not line.startswith(f"{ui_indent}-"):
+            found_usernames = False
+
+        result.append(line)
+
+    # If we ended inside ui: section, append username/usernames
+    if in_ui and not found_username:
+        result.append(username_line)
+    if in_ui and not found_usernames:
+        result.append(usernames_line)
+        result.append(f"{ui_indent}- {ts}\n")
+        result.append(f"{ui_indent}- [{username}]\n")
+
+    # If no ui: section exists at all, add one
+    if not any("ui:" in l for l in result):
+        result.append("\nui:\n")
+        result.append(username_line)
+        result.append(usernames_line)
+        result.append(f"{ui_indent}- {ts}\n")
+        result.append(f"{ui_indent}- [{username}]\n")
+
+    yaml_path.write_text("".join(result), encoding="utf-8")
 
 
 def list_profiles() -> list[str]:
