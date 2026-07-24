@@ -574,6 +574,15 @@ class MainWindow(QMainWindow):
                 self._accounts = []
 
         hidden = list(self._cfg.get("hidden_accounts", []))
+
+        # ── Auto-hide test/GM accounts (configurable) ──────────────────
+        if self._cfg.get("hide_test_accounts", True):
+            for account in self._accounts:
+                username_lower = account.username.lower()
+                is_test = username_lower.startswith("test") or "gm" in username_lower
+                if is_test and account.username not in hidden:
+                    hidden.append(account.username)
+
         try:
             self._characters_page.refresh(self._accounts, hidden, self._tracker, evejs_root)
         except Exception:
