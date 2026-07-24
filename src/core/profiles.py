@@ -83,7 +83,7 @@ def _bootstrap_settings(username: str) -> None:
     if not template_dir.exists():
         return
 
-    for name in ("prefs.ini",):
+    for name in ("prefs.ini", "core_public__.yaml"):
         src = template_dir / name
         dst = settings_dir / name
         if src.exists() and not dst.exists():
@@ -132,9 +132,9 @@ def prefill_username(username: str) -> None:
     """Write the username to the EVE client settings so it's pre-filled on
     the login screen, even for accounts that have never been launched before.
 
-    Also ensures ``newbie=0`` in ``prefs.ini`` so the EVE client shows the
-    normal login screen instead of the first-run setup wizard (EULA, graphics
-    config) which can fail silently under the EveJS proxy.
+    Also ensures ``newbie=0`` in ``prefs.ini`` and bootstraps a complete
+    ``core_public__.yaml`` with ``audio:``, ``device:``, and ``ui:`` sections
+    so the EVE client renders the full login screen correctly.
     """
     try:
         settings_dir = get_profile_settings_path(username)
@@ -156,82 +156,35 @@ def prefill_username(username: str) -> None:
         prefs_text += "\nnewbie=0\n"
         prefs_path.write_text(prefs_text, encoding="utf-8")
 
-    # ── core_public__.yaml: pre-fill username under the ui: section ─────
-    # The EVE client stores username under the ``ui:`` key, NOT at the top
-    # level.  Writing it at the top level gets silently dropped when the
-    # client rewrites the file on startup.
+    # ── core_public__.yaml: bootstrap from template, then set username ──
     yaml_path = settings_dir / "core_public__.yaml"
+    template_dir = Path(__file__).resolve().parent / "template_settings"
+    template_yaml = template_dir / "core_public__.yaml"
 
-    if yaml_path.exists():
-        lines = yaml_path.read_text(encoding="utf-8", errors="replace").splitlines(True)
-    else:
-        lines = ["generic: {}\n", "ui:\n"]
+    if not yaml_path.exists() and template_yaml.exists():
+        # First launch — copy the complete template (audio + device + ui sections)
+        import shutil
+        shutil.copy2(template_yaml, yaml_path)
 
     import time
     ts = int(time.time() * 10_000_000)  # EVE uses 100-nanosecond intervals
 
-    # Find or create the ``ui:`` section and insert/update ``username:``
-    in_ui = False
-    ui_indent = "  "
-    found_username = False
-    found_usernames = False
-    result: list[str] = []
-    username_line = f"{ui_indent}username: [{ts}, {username}]\n"
-    usernames_line = f"{ui_indent}usernames:\n"
-
-    for line in lines:
-        stripped = line.lstrip()
-        # Track when we enter/leave the ui: section
-        if stripped.startswith("ui:") or stripped.startswith('"ui":'):
-            in_ui = True
-            result.append(line)
-            continue
-        if in_ui and not line.startswith((" ", "\t")) and stripped:
-            # Left the ui: section (non-indented, non-empty line)
-            # Insert username/usernames if not yet found
-            if not found_username:
-                result.append(username_line)
-            if not found_usernames:
-                # Write usernames block
-                result.append(usernames_line)
-                result.append(f"{ui_indent}- {ts}\n")
-                result.append(f"{ui_indent}- [{username}]\n")
-            in_ui = False
-
-        if in_ui and stripped.startswith("username:"):
-            result.append(username_line)
-            found_username = True
-            continue
-        if in_ui and stripped.startswith("usernames:"):
-            result.append(usernames_line)
-            found_usernames = True
-            continue
-        # Skip old usernames list entries (indented list items under usernames:)
-        if found_usernames and in_ui and line.startswith(f"{ui_indent}-"):
-            continue
-        # Reset usernames flag when we hit another key
-        if found_usernames and in_ui and stripped and not line.startswith(f"{ui_indent}-"):
-            found_usernames = False
-
-        result.append(line)
-
-    # If we ended inside ui: section, append username/usernames
-    if in_ui and not found_username:
-        result.append(username_line)
-    if in_ui and not found_usernames:
-        result.append(usernames_line)
-        result.append(f"{ui_indent}- {ts}\n")
-        result.append(f"{ui_indent}- [{username}]\n")
-
-    # If no ui: section exists at all, add one
-    if not any("ui:" in l for l in result):
-        result.append("\nui:\n")
-        result.append(username_line)
-        result.append(usernames_line)
-        result.append(f"{ui_indent}- {ts}\n")
-        result.append(f"{ui_indent}- [{username}]\n")
-
-    yaml_path.write_text("".join(result), encoding="utf-8")
+    # Patch the username under the ``ui:`` section
+    if yaml_path.exists():
+        text = yaml_path.read_text(encoding="utf-8", errors="replace")
+        # Replace placeholder or existing username value
+        text = re.sub(
+            r"(  username: )\[.*?\]",
+            f"\\1[{ts}, {username}]",
+            text,
+        )
+        # Replace placeholder or existing usernames block
+        text = re.sub(
+            r"(  usernames:\n)(  - .*\n  - .*\n)?",
+            f"\\1  - {ts}\n  - [{username}]\n",
+            text,
+        )
+        yaml_path.write_text(text, encoding="utf-8")
 
 
 def list_profiles() -> list[str]:
