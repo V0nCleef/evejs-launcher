@@ -309,6 +309,9 @@ class MainWindow(QMainWindow):
         if self._market_proc:
             self._graceful_kill(self._market_proc)
             self._market_proc = None
+        else:
+            # Market may have been started outside this launcher instance
+            _kill_process_on_port(40111)
         self._update_status_bar()
 
     def _is_market_running(self) -> bool:
