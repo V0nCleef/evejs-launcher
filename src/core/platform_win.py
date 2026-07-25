@@ -345,9 +345,9 @@ def _find_exe_in_folder(folder: Path, exe_name: str) -> Path | None:
 
 _VBS_HELPER = r"""' EveJS Launcher V2 — silent update helper (onedir / folder mode)
 ' Args: oldFolder newFolder exeName [--restart]
-' Does: wait → delete old folder → move new folder in → launch exe
+' Does: wait → delete old → copy new in → clean up → launch exe
 
-Dim oldFolder, newFolder, exeName, restart, fso, attempt, wsh
+Dim oldFolder, newFolder, exeName, restart, fso, attempt, wsh, logFile
 
 Set wsh = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
@@ -357,12 +357,32 @@ newFolder = WScript.Arguments(1)
 exeName   = WScript.Arguments(2)
 restart   = (WScript.Arguments.Count >= 4 And WScript.Arguments(3) = "--restart")
 
-If Not fso.FolderExists(newFolder) Then WScript.Quit 1
+' Write a tiny log for debugging (alongside the helper script)
+logFile = WScript.ScriptFullName & ".log"
+Sub Log(msg)
+    On Error Resume Next
+    Dim f: Set f = fso.OpenTextFile(logFile, 8, True)
+    f.WriteLine Now & " " & msg
+    f.Close
+    On Error GoTo 0
+End Sub
+
+Log "=== Update helper started ==="
+Log "oldFolder=" & oldFolder
+Log "newFolder=" & newFolder
+Log "exeName=" & exeName
+
+If Not fso.FolderExists(newFolder) Then
+    Log "ERROR: new folder not found — aborting"
+    WScript.Quit 1
+End If
 
 ' Wait for old launcher to fully exit (DLLs unload, file locks released)
+Log "Waiting 5s for old launcher to exit..."
 WScript.Sleep 5000
 
 ' Delete old install folder (retry if files still locked)
+Log "Deleting old folder..."
 For attempt = 1 To 30
     On Error Resume Next
     If fso.FolderExists(oldFolder) Then
@@ -373,9 +393,9 @@ For attempt = 1 To 30
     WScript.Sleep 1000
 Next
 
-' If old folder still exists (locked files), rename it out of the way and
-' proceed anyway — the user can clean up the old copy later.
 If fso.FolderExists(oldFolder) Then
+    ' Still locked — rename out of the way
+    Log "Old folder still locked, renaming to .old"
     On Error Resume Next
     Dim backupName: backupName = oldFolder & ".old"
     If fso.FolderExists(backupName) Then fso.DeleteFolder backupName, True
@@ -383,25 +403,51 @@ If fso.FolderExists(oldFolder) Then
     On Error GoTo 0
 End If
 
-' Move new folder into place
+' Copy new folder into place (use CopyFolder — more reliable than MoveFolder)
+Log "Copying new folder into place..."
 On Error Resume Next
-fso.MoveFolder newFolder, oldFolder
-On Error GoTo 0
-
-If Not fso.FolderExists(oldFolder) Then WScript.Quit 2
-
-' Let filesystem settle
-WScript.Sleep 3000
-
-' Launch via explorer.exe — the only method proven to work without
-' triggering the "Failed to load Python DLL" dialog.
-If restart Then
-    Dim exePath: exePath = oldFolder & "\" & exeName
-    If fso.FileExists(exePath) Then
-        wsh.Run "explorer.exe " & Chr(34) & exePath & Chr(34), 0, False
+fso.CopyFolder newFolder, oldFolder, True  ' True = overwrite
+If Err.Number <> 0 Then
+    Log "CopyFolder error " & Err.Number & ": " & Err.Description
+    Err.Clear
+    ' Retry after a short delay
+    WScript.Sleep 2000
+    fso.CopyFolder newFolder, oldFolder, True
+    If Err.Number <> 0 Then
+        Log "CopyFolder retry also failed: " & Err.Number & " " & Err.Description
     End If
 End If
+On Error GoTo 0
 
+If Not fso.FolderExists(oldFolder) Then
+    Log "ERROR: copy failed — target folder does not exist"
+    WScript.Quit 2
+End If
+
+' Verify the exe is present
+Dim exePath: exePath = oldFolder & "\" & exeName
+If Not fso.FileExists(exePath) Then
+    Log "ERROR: exe not found at " & exePath
+    WScript.Quit 3
+End If
+
+' Clean up temp source
+Log "Cleaning up temp source..."
+On Error Resume Next
+fso.DeleteFolder newFolder, True
+On Error GoTo 0
+
+' Let filesystem settle
+Log "Waiting for filesystem..."
+WScript.Sleep 3000
+
+' Launch via explorer.exe
+If restart Then
+    Log "Launching " & exePath
+    wsh.Run "explorer.exe " & Chr(34) & exePath & Chr(34), 0, False
+End If
+
+Log "=== Update helper finished OK ==="
 WScript.Quit 0
 """
 
