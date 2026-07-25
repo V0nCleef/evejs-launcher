@@ -1,6 +1,2 @@
 PyQt6>=6.6.0
 pyinstaller>=6.0.0
-
-# Windows-only (window detection, auto-login)
-pyautogui>=0.9.54; sys_platform == "win32"
-pygetwindow>=0.0.9; sys_platform == "win32"

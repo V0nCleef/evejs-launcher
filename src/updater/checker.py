@@ -130,10 +130,10 @@ class UpdateChecker(QThread):
             self.up_to_date.emit()
             return
 
-        # Try to locate the first .exe asset.
+        # Try to locate the first .zip asset (onedir build).
         download_url = ""
         for asset in release.get("assets", []):
-            if asset.get("name", "").lower().endswith(".exe"):
+            if asset.get("name", "").lower().endswith(".zip"):
                 download_url = asset.get("browser_download_url", "")
                 break
 

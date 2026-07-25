@@ -20,12 +20,12 @@ if errorlevel 1 (
 )
 
 echo Step 3/3: Verifying build...
-if exist "dist\EveJS-Launcher-V2.exe" (
+if exist "dist\EveJS-Launcher-V1\EveJS-Launcher-V1.exe" (
     echo.
     echo ============================================================
     echo   BUILD SUCCESSFUL
-    echo   Output: dist\EveJS-Launcher-V2.exe
-    for %%I in ("dist\EveJS-Launcher-V2.exe") do echo   Size: %%~zI bytes (%%~zI / 1048576 = MB)
+    echo   Output: dist\EveJS-Launcher-V1\  (folder)
+    echo   Run:   dist\EveJS-Launcher-V1\EveJS-Launcher-V1.exe
     echo ============================================================
 ) else (
     echo [ERROR] Executable not found
