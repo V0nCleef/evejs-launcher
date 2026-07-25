@@ -377,20 +377,30 @@ If Not fso.FolderExists(newFolder) Then
     WScript.Quit 1
 End If
 
-' Wait for old launcher to fully exit (DLLs unload, file locks released)
-Log "Waiting 5s for old launcher to exit..."
-WScript.Sleep 5000
+' Clean up any leftover .old backup from a previous update
+Dim oldBackup: oldBackup = oldFolder & ".old"
+If fso.FolderExists(oldBackup) Then
+    Log "Removing leftover .old backup..."
+    On Error Resume Next
+    fso.DeleteFolder oldBackup, True
+    On Error GoTo 0
+End If
 
-' Delete old install folder (retry if files still locked)
+' Wait for old launcher to fully exit (DLLs unload, file locks released)
+' 15 s — PyInstaller onedir DLLs can take a while to unlock on slower machines.
+Log "Waiting 15s for old launcher to exit..."
+WScript.Sleep 15000
+
+' Delete old install folder (retry if files still locked, 500 ms apart)
 Log "Deleting old folder..."
-For attempt = 1 To 30
+For attempt = 1 To 20
     On Error Resume Next
     If fso.FolderExists(oldFolder) Then
         fso.DeleteFolder oldFolder, True
     End If
     If Not fso.FolderExists(oldFolder) Then Exit For
     On Error GoTo 0
-    WScript.Sleep 1000
+    WScript.Sleep 500
 Next
 
 If fso.FolderExists(oldFolder) Then
