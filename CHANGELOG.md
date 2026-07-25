@@ -2,6 +2,21 @@
 
 ## Changelog
 
+## v1.0.25 — 2026-07-25
+
+### 🔒 Fixed — Antivirus false-positive detections
+- **Switched from PyInstaller `--onefile` to `--onedir`** — eliminates `%TEMP%` extraction that triggered malware heuristics (T1027, T1497, T1129). Launcher is now a folder with a small bootloader + `_internal/` directory.
+- **Replaced `pyautogui`/`pygetwindow`** with native Win32 API (`ctypes` — `EnumWindows`, `SetForegroundWindow`). Removes riskware-classified input simulation library.
+- **Unbundled VBS updater** — VBScript is now a Python string constant, not a separate bundled file. AV heuristics no longer see a file-deletion script in the binary.
+- **VirusTotal: 0/59** (was 4/70). Sigma rules: NOT FOUND. MITRE signatures cleared.
+- **Exe size: 35 MB → 2.1 MB** (DLLs now live in `_internal/` folder).
+
+### Changed
+- **Distribution format** — now ships as a `.zip` containing the onedir folder. Extract and run `EveJS-Launcher-V1.exe` from inside the folder (do not move the exe out).
+- **Updater rewritten** for folder-based distribution — downloads `.zip`, extracts, and replaces the install folder.
+- **Update checker** now looks for `.zip` assets (not `.exe`) in GitHub releases.
+- **`requirements.txt`** simplified: only PyQt6 + pyinstaller remain.
+
 ## v1.0.24 — 2026-07-24
 
 ### Fixed
