@@ -7,6 +7,7 @@ signals depending on the outcome.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -15,12 +16,16 @@ from src.updater.github import get_latest_release
 
 
 def get_current_version() -> str:
-    """Return the version string from the VERSION file at the repo root.
+    """Return the version string from the VERSION file.
 
-    This is callable from any thread — it does a plain file read with no
-    Qt involvement.
+    In frozen (onedir) builds the VERSION file lives inside ``_internal/``
+    alongside the other bundled data; in source runs it sits at the repo root.
     """
-    version_path = Path(__file__).resolve().parent.parent.parent / "VERSION"
+    if getattr(sys, "frozen", False):
+        # Onedir: VERSION is at _internal/VERSION (sys._MEIPASS)
+        version_path = Path(sys._MEIPASS) / "VERSION"
+    else:
+        version_path = Path(__file__).resolve().parent.parent.parent / "VERSION"
     try:
         return version_path.read_text(encoding="utf-8").strip()
     except (FileNotFoundError, OSError):
