@@ -9,6 +9,12 @@ from pathlib import Path
 _SOLAR_SYSTEM_NAMES: dict[int, str] | None = None
 
 
+def clear_solar_system_name_cache() -> None:
+    """Discard location names cached for the previously configured EveJS root."""
+    global _SOLAR_SYSTEM_NAMES
+    _SOLAR_SYSTEM_NAMES = None
+
+
 def _load_solar_system_names(evejs_root: str) -> dict[int, str]:
     """Build a solarSystemID → name lookup from EveJS static data."""
     global _SOLAR_SYSTEM_NAMES

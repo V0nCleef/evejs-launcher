@@ -101,7 +101,7 @@ class SetupWizard(QDialog):
         # Page 1: Path selection
         p1 = _WizardPage(
             "Locate Your EveJS Installation",
-            "Select the root folder containing StartServerWithMods.bat and the server directory."
+            "Select the root folder containing a StartServer .bat script and the server directory."
         )
         ph = QHBoxLayout()
         self._path_input = QLineEdit()

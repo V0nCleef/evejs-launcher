@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (
     QDialog,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
+    QInputDialog,
     QMainWindow,
     QMessageBox,
     QStackedWidget,
@@ -38,13 +39,12 @@ from PyQt6.QtWidgets import (
 
 from . import config
 from .constants import APP_TITLE, Page, Ports
-from .core.db import Account, load_accounts
+from .core.db import Account, clear_solar_system_name_cache, load_accounts
 from .core.launcher import launch_client
 from .core.platform import hard_exit
 from .core.process_tracker import ProcessTracker
 from .core.profiles import PROFILES_ROOT, create_profile, prefill_username, profile_exists
 from .core.server_launcher import (
-    detect_server_scripts,
     get_server_console_log,
     get_market_console_log,
     get_server_log_path,
@@ -52,10 +52,17 @@ from .core.server_launcher import (
     start_game_server,
     start_market_server,
 )
+from .core.server_selection import (
+    ASK_EVERY_TIME,
+    choose_saved_script,
+    discover_server_scripts,
+    mode_for_script,
+)
 from .pages.characters_page import CharactersPage
 from .pages.home_page import HomePage
 from .pages.mods_page import ModsPage
 from .pages.settings_page import SettingsPage
+from .utils.cache import PortraitCache
 from .utils.logger import setup_logger
 from .widgets.console_panel import ConsolePanel
 from .widgets.nav_panel import NavPanel
@@ -146,6 +153,7 @@ class MainWindow(QMainWindow):
 
         self._characters_page.launch_character.connect(self._on_character_launch)
         self._characters_page.hide_character.connect(self._on_hide_character)
+        self._mods_page.apply_restart_clicked.connect(self._restart_server)
 
         self._status_bar.console_toggled.connect(self._on_console_toggled)
 
@@ -255,6 +263,68 @@ class MainWindow(QMainWindow):
 
     # ── Server control ─────────────────────────────────────────────────
 
+    def _resolve_server_start(self) -> tuple[str, Path | None] | None:
+        """Resolve the explicit Node launch mode and its indicator script."""
+        evejs_root = str(self._cfg.get("evejs_root", ""))
+        scripts = discover_server_scripts(evejs_root)
+        if not scripts:
+            index_js = Path(evejs_root) / "server" / "index.js"
+            fallback_mode = str(self._cfg.get("server_mode", "modded"))
+            if not index_js.is_file():
+                QMessageBox.critical(
+                    self,
+                    "Invalid EveJS Installation",
+                    "No StartServer*.bat indicator was found, and the legacy "
+                    "server/index.js entry point is missing.",
+                )
+                return None
+            if fallback_mode in {"vanilla", "modded"}:
+                log.info(
+                    "Resolved server start: no indicator script -> legacy %s mode",
+                    fallback_mode,
+                )
+                return fallback_mode, None
+            QMessageBox.critical(
+                self,
+                "Invalid Server Mode",
+                f"Unsupported legacy server mode: {fallback_mode}",
+            )
+            return None
+        preference = str(
+            self._cfg.get("server_start_preference", ASK_EVERY_TIME)
+        )
+        selected = choose_saved_script(
+            scripts,
+            preference,
+        )
+        if selected is None and len(scripts) > 1:
+            if preference and preference.casefold() != ASK_EVERY_TIME:
+                self._cfg["server_start_preference"] = ASK_EVERY_TIME
+                config.save(self._cfg)
+            chosen_name, accepted = QInputDialog.getItem(
+                self,
+                "Choose Server Start Script",
+                "Select the server mode indicator for this start:",
+                [script.name for script in scripts],
+                0,
+                False,
+            )
+            if not accepted:
+                return None
+            selected = next(
+                (script for script in scripts if script.name == chosen_name),
+                None,
+            )
+        if selected is None:
+            return None
+        try:
+            mode = mode_for_script(selected)
+        except ValueError as exc:
+            QMessageBox.critical(self, "Unsupported Server Script", str(exc))
+            return None
+        log.info("Resolved server start: %s -> %s", selected.name, mode)
+        return mode, selected
+
     def _on_server_toggle(self) -> None:
         if is_server_running(port=int(Ports.GAME)):
             self._stop_server()
@@ -267,19 +337,48 @@ class MainWindow(QMainWindow):
         else:
             self._start_market()
 
+    def _server_process_alive(self) -> bool:
+        """Return whether this launcher owns a live game-server process."""
+        return self._server_proc is not None and self._server_proc.poll() is None
+
+    def _start_resolved_server(
+        self,
+        mode: str,
+        indicator_script: Path | None,
+        *,
+        error_title: str = "Server Error",
+    ) -> bool:
+        """Launch the game server using an already-resolved explicit mode."""
+        evejs_root = str(self._cfg.get("evejs_root", ""))
+        try:
+            self._server_proc = start_game_server(evejs_root, mode=mode)
+            indicator = indicator_script.name if indicator_script else "legacy fallback"
+            log.info(
+                "Started game server (pid=%s, mode=%s, indicator=%s)",
+                self._server_proc.pid,
+                mode,
+                indicator,
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001
+            log.exception("Failed to start game server")
+            QMessageBox.critical(self, error_title, str(exc))
+            return False
+
     def _start_server(self) -> None:
         evejs_root = self._cfg.get("evejs_root", "")
         if not evejs_root:
             QMessageBox.warning(self, "Not Configured", "Set up EveJS root in Settings first.")
             return
-        try:
-            self._server_proc = start_game_server(
-                evejs_root, mode=self._cfg.get("server_mode", "modded")
-            )
-            log.info("Started game server (pid=%s)", self._server_proc.pid)
-        except Exception as exc:  # noqa: BLE001
-            log.exception("Failed to start game server")
-            QMessageBox.critical(self, "Server Error", str(exc))
+        if self._server_process_alive() or is_server_running(port=int(Ports.GAME)):
+            log.info("Ignored duplicate game-server start while already active")
+            self._update_status_bar()
+            return
+        resolved = self._resolve_server_start()
+        if resolved is None:
+            return
+        mode, indicator_script = resolved
+        self._start_resolved_server(mode, indicator_script)
         self._update_status_bar()
 
     def _stop_server(self) -> None:
@@ -288,6 +387,27 @@ class MainWindow(QMainWindow):
             self._server_proc = None
         else:
             self._kill_process_on_port(int(Ports.GAME))
+        self._update_status_bar()
+
+    def _restart_server(self) -> None:
+        """Resolve the launch mode before stopping, then restart the server."""
+        evejs_root = self._cfg.get("evejs_root", "")
+        if not evejs_root:
+            QMessageBox.warning(self, "Not Configured", "Set up EveJS root in Settings first.")
+            return
+
+        resolved = self._resolve_server_start()
+        if resolved is None:
+            return
+        mode, indicator_script = resolved
+
+        if self._server_process_alive() or is_server_running(port=int(Ports.GAME)):
+            self._stop_server()
+        self._start_resolved_server(
+            mode,
+            indicator_script,
+            error_title="Restart Server Error",
+        )
         self._update_status_bar()
 
     def _start_market(self) -> None:
@@ -333,6 +453,17 @@ class MainWindow(QMainWindow):
         if not evejs_root:
             QMessageBox.warning(self, "Not Configured", "Set up EveJS first.")
             return
+
+        game_active = self._server_process_alive() or is_server_running(
+            port=int(Ports.GAME)
+        )
+        resolved: tuple[str, Path | None] | None = None
+        if not game_active:
+            # Resolve before Market so cancelling cannot leave a partial stack.
+            resolved = self._resolve_server_start()
+            if resolved is None:
+                return
+
         started = False
         if not self._is_market_running():
             try:
@@ -340,14 +471,13 @@ class MainWindow(QMainWindow):
                 started = True
             except Exception as exc:  # noqa: BLE001
                 QMessageBox.critical(self, "Market Server Error", str(exc))
-        if not is_server_running(port=int(Ports.GAME)):
-            try:
-                self._server_proc = start_game_server(
-                    evejs_root, mode=self._cfg.get("server_mode", "modded")
-                )
-                started = True
-            except Exception as exc:  # noqa: BLE001
-                QMessageBox.critical(self, "Game Server Error", str(exc))
+        if not game_active and resolved is not None:
+            mode, indicator_script = resolved
+            started = self._start_resolved_server(
+                mode,
+                indicator_script,
+                error_title="Game Server Error",
+            ) or started
         self._update_status_bar()
         if not started:
             QMessageBox.information(self, "Already Running", "Both servers are already online.")
@@ -411,25 +541,40 @@ class MainWindow(QMainWindow):
 
     # ── Auto-start hook used before client launches ───────────────────
 
-    def _ensure_server_if_needed(self) -> None:
-        """Auto-start server/market when config says so."""
+    def _ensure_server_if_needed(self) -> bool:
+        """Auto-start configured services; return False on cancel or failure."""
         evejs_root = self._cfg.get("evejs_root", "")
         if not evejs_root:
-            return
+            return True
+
+        auto_start_server = bool(self._cfg.get("auto_start_server", False))
+        game_active = self._server_process_alive() or is_server_running(
+            port=int(Ports.GAME)
+        )
+        resolved: tuple[str, Path | None] | None = None
+        if auto_start_server and not game_active:
+            # Resolve before Market so cancelling also aborts the client action.
+            resolved = self._resolve_server_start()
+            if resolved is None:
+                return False
 
         if self._cfg.get("auto_start_market", False) and not self._is_market_running():
             try:
                 self._market_proc = start_market_server(evejs_root)
             except Exception:
                 log.exception("Auto-start market failed")
+                return False
 
-        if self._cfg.get("auto_start_server", False) and not is_server_running(port=int(Ports.GAME)):
-            try:
-                mode = self._cfg.get("server_mode", "modded")
-                if detect_server_scripts(evejs_root):
-                    self._server_proc = start_game_server(evejs_root, mode=mode)
-            except Exception:
-                log.exception("Auto-start server failed")
+        if auto_start_server and not game_active and resolved is not None:
+            mode, indicator_script = resolved
+            if not self._start_resolved_server(
+                mode,
+                indicator_script,
+                error_title="Auto-start Server Error",
+            ):
+                return False
+
+        return True
 
     # ── Character launching ───────────────────────────────────────────
 
@@ -449,7 +594,8 @@ class MainWindow(QMainWindow):
             )
             return
 
-        self._ensure_server_if_needed()
+        if not self._ensure_server_if_needed():
+            return
 
         if not profile_exists(username):
             try:
@@ -500,7 +646,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Not Configured", "Set up EveJS first.")
             return
 
-        self._ensure_server_if_needed()
+        if not self._ensure_server_if_needed():
+            return
 
         stagger = max(0, int(self._cfg.get("stagger_delay_sec", 3)))
         launched = 0
@@ -873,7 +1020,12 @@ class MainWindow(QMainWindow):
 
     def _on_settings_saved(self, cfg: dict) -> None:
         """Refresh in-memory config and character grid after settings save."""
+        previous_root = str(self._cfg.get("evejs_root", ""))
         self._cfg.update(cfg)
+        if str(self._cfg.get("evejs_root", "")) != previous_root:
+            clear_solar_system_name_cache()
+            PortraitCache.clear()
+            self._mods_page.refresh_mods()
         self._refresh_characters()
 
     def _on_manual_update_check(self) -> None:

@@ -1,6 +1,8 @@
 """EveJS path discovery and validation."""
 from pathlib import Path
 
+from .server_selection import discover_server_scripts
+
 
 def validate_evejs_root(path: str) -> tuple[bool, str]:
     """Validate that a path looks like an EveJS installation root.
@@ -18,12 +20,16 @@ def validate_evejs_root(path: str) -> tuple[bool, str]:
         ("server/certs/xmpp-ca-cert.pem", "SSL cert (server may not be configured)"),
         ("_local/gameStore/gamestore.sqlite", "Game store database"),
         ("tools/ClientSETUP/scripts/EvEJSConfig.bat", "Client config script"),
-        ("StartServerWithMods.bat", "Server start script"),
     ]
 
     for rel_path, desc in required:
         if not (p / rel_path).exists():
             return False, f"Missing {desc}: {rel_path}"
+
+    # ── Server start script: accept any StartServer*.bat ─────────────────
+    server_bats = discover_server_scripts(p)
+    if not server_bats and not (p / "server" / "index.js").exists():
+        return False, "Missing server start script (StartServer*.bat) or server/index.js"
 
     return True, ""
 

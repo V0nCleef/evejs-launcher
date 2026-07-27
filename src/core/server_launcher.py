@@ -67,9 +67,26 @@ def _find_mod_preloads(evejs_root: str) -> list[str]:
     return args
 
 
+def build_game_server_command(evejs_root: str | Path, mode: str) -> list[str]:
+    """Build the direct-Node game-server command for an explicit mode."""
+    if mode not in {"vanilla", "modded"}:
+        raise ValueError(f"Unsupported server mode: {mode}")
+    command = [
+        "node",
+        "--report-on-fatalerror",
+        "--report-uncaught-exception",
+        "--report-dir=./logs/node-reports",
+        "--max-old-space-size=8192",
+    ]
+    if mode == "modded":
+        command.extend(_find_mod_preloads(str(evejs_root)))
+    command.append(".")
+    return command
+
+
 # ── Game server (direct Node.js launch with stdout capture) ────────────
 
-def start_game_server(evejs_root: str, mode: str = "modded") -> subprocess.Popen:
+def start_game_server(evejs_root: str, mode: str) -> subprocess.Popen:
     """Start the game server by launching Node.js directly.
 
     Stdout and stderr are piped to a temp log file so the launcher's
@@ -80,16 +97,7 @@ def start_game_server(evejs_root: str, mode: str = "modded") -> subprocess.Popen
     if not index_js.exists():
         raise FileNotFoundError(f"Server entry point not found: {index_js}")
 
-    cmd = [
-        "node",
-        "--report-on-fatalerror",
-        "--report-uncaught-exception",
-        "--report-dir=./logs/node-reports",
-        "--max-old-space-size=8192",
-    ]
-    if mode == "modded":
-        cmd.extend(_find_mod_preloads(evejs_root))
-    cmd.append(".")
+    cmd = build_game_server_command(evejs_root, mode)
 
     env = os.environ.copy()
     env["EVEJS_PROXY_LOCAL_INTERCEPT"] = "1"
@@ -168,17 +176,6 @@ def start_market_server(evejs_root: str) -> subprocess.Popen:
 
 
 # ── Shared utilities ───────────────────────────────────────────────────
-
-def detect_server_scripts(evejs_root: str) -> dict[str, Path]:
-    """Detect which server start scripts exist."""
-    root = Path(evejs_root)
-    scripts = {}
-    if (root / "StartServer.bat").exists():
-        scripts["vanilla"] = root / "StartServer.bat"
-    if (root / "StartServerWithMods.bat").exists():
-        scripts["modded"] = root / "StartServerWithMods.bat"
-    return scripts
-
 
 def wait_for_server_ready(host: str = "127.0.0.1", port: int = 26000,
                           timeout: int = 60) -> bool:

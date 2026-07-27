@@ -2,6 +2,30 @@
 
 ## Changelog
 
+## v1.0.31 — 2026-07-28
+
+### Added
+- **Server start selector** — Settings now discovers `StartServer*.bat` mode indicators from the configured EveJS root. Choose **Always ask**, save a specific indicator, or rescan after changing roots.
+- **Runtime chooser behavior** — one supported indicator is selected automatically; multiple indicators prompt at the moment the game server is started; a saved filename skips the prompt while it remains available.
+- **Complete start-path integration** — manual Start Server, Start All, client-triggered auto-start, server restart, and Mods → Apply & Restart all use the same resolver.
+- **Selector regression coverage** — added focused tests for discovery, saved/stale preferences, cancellation, vanilla/modded commands, all start routes, settings behavior, cache invalidation, and config recovery.
+
+### Changed
+- **Batch files are mode indicators only** — `StartServer.bat` maps exactly to vanilla and `StartServerWithMods.bat` maps exactly to modded. The launcher never executes either batch file; it continues to launch Node.js directly with an explicit mode.
+- **Safe cancellation ordering** — Start All and client auto-start resolve the selected mode before starting Market, so cancelling the chooser starts nothing.
+- **Single preference model** — server selection is stored as `ask` or a root-relative filename. Legacy selector keys migrate automatically.
+
+### Fixed
+- **Stale saved selections** now reset to Always ask and show the chooser instead of silently choosing another mode.
+- **Unknown custom indicators** are rejected and described as unsupported instead of being treated as automatically usable.
+- **Settings explanations** refresh immediately after the user changes a stale selection.
+- **EveJS root changes** clear solar-system and portrait caches and refresh the Mods page, preventing data from the previous installation from remaining visible.
+- **Config persistence** now uses an atomic temporary-file replacement, isolated defaults, malformed-file backup, and recovery to clean defaults.
+
+### Verification
+- **59 automated tests passed**, including the Foundation smoke suite.
+- Source-mode startup and the complete live selector matrix passed for Always Ask, cancellation, vanilla, modded, saved preference, single-script automatic selection, Start All, and Mods → Apply & Restart.
+
 ## v1.0.25 — 2026-07-25
 
 ### 🔒 Fixed — Antivirus false-positive detections
