@@ -9,7 +9,9 @@ from src.widgets.hero_banner import HeroBanner
 
 
 def test_latest_release_parser_uses_the_first_release_and_caps_highlights() -> None:
-    changelog = """# Changelog
+    changelog = """# EveJS Launcher V1
+
+## Changelog
 
 ## v9.9.9 — 2026-07-28
 

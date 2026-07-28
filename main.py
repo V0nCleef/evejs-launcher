@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import traceback
 from pathlib import Path
 
@@ -61,6 +62,22 @@ def _parse_update_handoff(argv: list[str]):  # type: ignore[no-untyped-def]
     return parse_update_handoff_args(argv)
 
 
+def _schedule_pending_update_cleanup() -> None:
+    """Clean validated update artifacts from the freshly restarted build."""
+    if not getattr(sys, "frozen", False):
+        return
+
+    from src.updater.handoff import cleanup_pending_update
+
+    install_dir = Path(sys.executable).resolve().parent
+    threading.Thread(
+        target=cleanup_pending_update,
+        args=(install_dir,),
+        daemon=True,
+        name="update-cleanup",
+    ).start()
+
+
 def main() -> int:
     handoff = _parse_update_handoff(sys.argv[1:])
     app = QApplication([sys.argv[0]] if handoff is not None else sys.argv)
@@ -102,6 +119,7 @@ def main() -> int:
 
     window = MainWindow()
     window.show()
+    _schedule_pending_update_cleanup()
     return app.exec()
 
 

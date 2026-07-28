@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 from pathlib import Path
 import shutil
 import tempfile
@@ -92,7 +93,7 @@ def test_progress_dialog_turns_live_download_bytes_into_clear_status(
     """The visible updater should make both byte progress and phases explicit."""
     from src.updater.progress_dialog import UpdateProgressDialog
 
-    dialog = UpdateProgressDialog("v1.0.32")
+    dialog = UpdateProgressDialog("v1.0.33")
     try:
         dialog.set_download_progress(2 * 1024 * 1024, 4 * 1024 * 1024)
 
@@ -117,7 +118,7 @@ def test_progress_dialog_reuses_the_launchers_space_art(qapp) -> None:
     """The update window should feel like part of the launcher, not a system popup."""
     from src.updater.progress_dialog import UpdateProgressDialog
 
-    dialog = UpdateProgressDialog("v1.0.32")
+    dialog = UpdateProgressDialog("v1.0.33")
     try:
         assert dialog.hero_banner.pixmap() is not None
         assert not dialog.hero_banner.pixmap().isNull()
@@ -320,7 +321,7 @@ def test_main_window_shows_update_progress_before_starting_install_worker(
 
     class FakeProgressDialog:
         def __init__(self, version, parent=None):  # type: ignore[no-untyped-def]
-            assert version == "v1.0.32"
+            assert version == "v1.0.33"
             assert parent is not None
 
         def set_stage(self, _stage, _detail):  # type: ignore[no-untyped-def]
@@ -351,7 +352,7 @@ def test_main_window_shows_update_progress_before_starting_install_worker(
     window = MainWindow()
     window._status_timer.stop()
     window._prune_timer.stop()
-    window._latest_version = "v1.0.32"
+    window._latest_version = "v1.0.33"
     window._latest_download_url = "https://example.invalid/EveJS-Launcher-V1.zip"
     try:
         window._begin_update_install()
@@ -361,3 +362,100 @@ def test_main_window_shows_update_progress_before_starting_install_worker(
         window._update_install_worker = None
         window._update_progress_dialog = None
         window.deleteLater()
+
+
+def test_update_cleanup_is_deferred_to_the_restarted_launcher_without_a_shell(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A completed update must not spawn cmd.exe just to remove its own artifacts."""
+    from src.updater import handoff
+
+    install_dir = tmp_path / "installed" / "EveJS-Launcher-V1"
+    install_dir.mkdir(parents=True)
+    backup_dir = install_dir.with_name(f"{install_dir.name}.old")
+    backup_dir.mkdir()
+
+    staging_root = Path(tempfile.mkdtemp(prefix="evejs_launcher_update_"))
+    source_dir = staging_root / "staged" / "EveJS-Launcher-V1"
+    source_dir.mkdir(parents=True)
+
+    spawned: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def fake_popen(*args: object, **kwargs: object) -> None:
+        spawned.append((args, kwargs))
+
+    monkeypatch.setattr(handoff.subprocess, "Popen", fake_popen)
+
+    try:
+        handoff.schedule_update_cleanup(install_dir, source_dir, backup_dir)
+
+        marker = install_dir / ".evejs-update-cleanup.json"
+        assert marker.is_file()
+        assert spawned == []
+        assert staging_root.is_dir()
+        assert backup_dir.is_dir()
+
+        handoff.cleanup_pending_update(install_dir)
+
+        assert not marker.exists()
+        assert not staging_root.exists()
+        assert not backup_dir.exists()
+    finally:
+        shutil.rmtree(staging_root, ignore_errors=True)
+
+
+def test_update_cleanup_rejects_a_marker_that_targets_an_untrusted_path(
+    tmp_path: Path,
+) -> None:
+    """A tampered marker must never turn the launcher into a generic deleter."""
+    from src.updater.handoff import cleanup_pending_update
+
+    install_dir = tmp_path / "installed" / "EveJS-Launcher-V1"
+    install_dir.mkdir(parents=True)
+    unrelated_dir = tmp_path / "must-not-delete"
+    unrelated_dir.mkdir()
+    marker = install_dir / ".evejs-update-cleanup.json"
+    marker.write_text(
+        json.dumps({"source_root": str(unrelated_dir)}),
+        encoding="utf-8",
+    )
+
+    assert cleanup_pending_update(install_dir) is False
+    assert unrelated_dir.is_dir()
+    assert not marker.exists()
+
+
+def test_frozen_launcher_starts_the_deferred_cleanup_in_a_background_thread(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A successful handoff must actually consume its marker after restart."""
+    import main
+    from src.updater import handoff
+
+    executable = tmp_path / "EveJS-Launcher-V1" / "EveJS-Launcher-V1.exe"
+    calls: list[Path] = []
+
+    class FakeThread:
+        def __init__(self, *, target, args, daemon, name):  # type: ignore[no-untyped-def]
+            assert daemon is True
+            assert name == "update-cleanup"
+            self._target = target
+            self._args = args
+
+        def start(self) -> None:
+            self._target(*self._args)
+
+    monkeypatch.setattr(main.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(main.sys, "executable", str(executable))
+    monkeypatch.setattr(
+        handoff,
+        "cleanup_pending_update",
+        lambda install_dir: calls.append(install_dir),
+    )
+    monkeypatch.setattr(main.threading, "Thread", FakeThread)
+
+    main._schedule_pending_update_cleanup()
+
+    assert calls == [executable.parent.resolve()]

@@ -2,6 +2,12 @@
 
 ## Changelog
 
+## v1.0.33 — 2026-07-28
+
+### Fixed
+- **Update cleanup reliability** — completed self-updates no longer spawn a detached `cmd.exe` cleanup process. The restarted launcher removes only its validated temporary staging folder and adjacent rollback copy.
+- **Home release notes** — Home now recognizes the newest version heading instead of treating the document's `Changelog` heading as a release, so the current version and highlights display again.
+
 ## v1.0.32 — 2026-07-28
 
 ### Added
@@ -50,11 +56,10 @@
 
 ## v1.0.25 — 2026-07-25
 
-### 🔒 Fixed — Antivirus false-positive detections
-- **Switched from PyInstaller `--onefile` to `--onedir`** — eliminates `%TEMP%` extraction that triggered malware heuristics (T1027, T1497, T1129). Launcher is now a folder with a small bootloader + `_internal/` directory.
-- **Replaced `pyautogui`/`pygetwindow`** with native Win32 API (`ctypes` — `EnumWindows`, `SetForegroundWindow`). Removes riskware-classified input simulation library.
-- **Unbundled VBS updater** — VBScript is now a Python string constant, not a separate bundled file. AV heuristics no longer see a file-deletion script in the binary.
-- **VirusTotal: 0/59** (was 4/70). Sigma rules: NOT FOUND. MITRE signatures cleared.
+### Fixed — Distribution packaging refinements
+- **Switched from PyInstaller `--onefile` to `--onedir`** — the launcher is now a folder with a small bootloader and `_internal/` directory.
+- **Replaced `pyautogui`/`pygetwindow`** with native Win32 APIs (`ctypes` — `EnumWindows`, `SetForegroundWindow`) for window focus and restoration.
+- **Unbundled VBS updater** — VBScript is now a Python string constant, not a separate bundled file, avoiding a shipped file-deletion helper.
 - **Exe size: 35 MB → 2.1 MB** (DLLs now live in `_internal/` folder).
 
 ### Changed

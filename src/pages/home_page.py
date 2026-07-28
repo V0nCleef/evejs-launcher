@@ -40,7 +40,7 @@ def extract_latest_release(text: str, *, limit: int = 3) -> tuple[str, list[str]
     """Return the newest changelog heading and a capped list of its bullets."""
     lines = text.splitlines()
     header_index = next(
-        (index for index, line in enumerate(lines) if line.startswith("## ")),
+        (index for index, line in enumerate(lines) if line.startswith("## v")),
         None,
     )
     if header_index is None:

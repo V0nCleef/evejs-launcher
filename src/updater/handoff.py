@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 import shutil
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -162,24 +164,87 @@ def launch_installed_launcher(exe_path: Path) -> None:
     )
 
 
-def schedule_update_cleanup(source_dir: Path, backup_dir: Path | None) -> None:
-    """Remove the staged package and old backup after the fresh launcher starts."""
-    paths = [source_dir]
-    if backup_dir is not None:
-        paths.append(backup_dir)
-    commands = [f'rmdir /s /q "{path}"' for path in paths if path.exists()]
-    if not commands:
+_UPDATE_CLEANUP_MARKER = ".evejs-update-cleanup.json"
+_UPDATE_STAGING_PREFIX = "evejs_launcher_update_"
+
+
+def schedule_update_cleanup(
+    install_dir: Path,
+    source_dir: Path,
+    backup_dir: Path | None,
+) -> None:
+    """Record validated artifacts for cleanup by the restarted launcher.
+
+    Keeping the cleanup inside the normal launcher process avoids spawning a
+    detached shell whose only job is to delete directories after a delay.
+    """
+    try:
+        install_dir = install_dir.resolve()
+    except OSError:
         return
 
-    command = "timeout /t 8 /nobreak > nul & " + " & ".join(commands)
-    subprocess.Popen(
-        ["cmd.exe", "/d", "/c", command],
-        creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        close_fds=True,
-    )
+    staging_root = _find_update_staging_root(source_dir)
+    if staging_root is None or not install_dir.is_dir():
+        return
+
+    payload: dict[str, str] = {"source_root": str(staging_root)}
+    if backup_dir is not None:
+        if not _is_expected_backup_dir(backup_dir, install_dir):
+            return
+        payload["backup_dir"] = str(backup_dir.resolve())
+
+    marker_path = install_dir / _UPDATE_CLEANUP_MARKER
+    temporary_marker = marker_path.with_suffix(".tmp")
+    try:
+        temporary_marker.write_text(json.dumps(payload), encoding="utf-8")
+        temporary_marker.replace(marker_path)
+    except OSError:
+        try:
+            temporary_marker.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def cleanup_pending_update(install_dir: Path) -> bool:
+    """Remove only the validated artifacts left by a completed update."""
+    try:
+        install_dir = install_dir.resolve()
+    except OSError:
+        return False
+
+    marker_path = install_dir / _UPDATE_CLEANUP_MARKER
+    try:
+        payload = json.loads(marker_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return True
+    except (OSError, json.JSONDecodeError):
+        _remove_cleanup_marker(marker_path)
+        return False
+
+    source_value = payload.get("source_root") if isinstance(payload, dict) else None
+    backup_value = payload.get("backup_dir") if isinstance(payload, dict) else None
+    if not isinstance(source_value, str) or not isinstance(backup_value, (str, type(None))):
+        _remove_cleanup_marker(marker_path)
+        return False
+
+    staging_root = _find_update_staging_root(Path(source_value))
+    backup_dir = Path(backup_value) if backup_value else None
+    if staging_root is None or (
+        backup_dir is not None and not _is_expected_backup_dir(backup_dir, install_dir)
+    ):
+        _remove_cleanup_marker(marker_path)
+        return False
+
+    try:
+        if staging_root.exists():
+            shutil.rmtree(staging_root)
+        if backup_dir is not None and backup_dir.exists():
+            shutil.rmtree(backup_dir)
+    except OSError:
+        return False
+
+    _remove_cleanup_marker(marker_path)
+    return not marker_path.exists()
 
 
 class UpdateHandoffWorker(QThread):
@@ -205,8 +270,12 @@ class UpdateHandoffWorker(QThread):
             return
 
         try:
+            schedule_update_cleanup(
+                self._handoff.target_dir,
+                self._handoff.source_dir,
+                result.backup_dir,
+            )
             launch_installed_launcher(result.installed_exe)
-            schedule_update_cleanup(self._handoff.source_dir, result.backup_dir)
         except OSError as exc:
             self.completed.emit(
                 False,
@@ -294,6 +363,37 @@ def _validate_handoff(source_dir: Path, target_dir: Path, exe_name: str) -> str:
     if source_dir == target_dir or source_dir in target_dir.parents or target_dir in source_dir.parents:
         return "The update source overlaps the installation folder. Your existing installation is unchanged."
     return ""
+
+
+def _find_update_staging_root(source_dir: Path) -> Path | None:
+    """Return the trusted temp root that contains a staged update, if any."""
+    try:
+        source_dir = source_dir.resolve()
+        temp_dir = Path(tempfile.gettempdir()).resolve()
+    except OSError:
+        return None
+
+    for candidate in (source_dir, *source_dir.parents):
+        if candidate.parent == temp_dir and candidate.name.startswith(_UPDATE_STAGING_PREFIX):
+            return candidate
+    return None
+
+
+def _is_expected_backup_dir(backup_dir: Path, install_dir: Path) -> bool:
+    """Accept only the adjacent rollback directory created by this updater."""
+    try:
+        expected = install_dir.with_name(f"{install_dir.name}.old")
+        return backup_dir.resolve() == expected
+    except OSError:
+        return False
+
+
+def _remove_cleanup_marker(marker_path: Path) -> None:
+    """Best-effort marker cleanup; a failed removal is retried on next launch."""
+    try:
+        marker_path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _wait_for_process_exit(
