@@ -1,6 +1,8 @@
 """Navigation panel widget for EveJS Launcher V2."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QRect
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont, QIcon
 from PyQt6.QtWidgets import (
@@ -14,7 +16,13 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
 )
 
-from src.constants import COLORS
+from src.constants import COLORS, CONTROL_HEIGHTS
+
+
+def logo_asset_path(module_file: str | Path | None = None) -> Path:
+    """Resolve the bundled logo independently of the process working directory."""
+    source_file = Path(module_file) if module_file is not None else Path(__file__)
+    return source_file.resolve().parent.parent.parent / "assets" / "logo.png"
 
 
 class NavButton(QPushButton):
@@ -123,7 +131,7 @@ class NavPanel(QFrame):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setFixedWidth(220)
+        self.setFixedWidth(244)
         self.setStyleSheet(f"""
             NavPanel {{
                 background-color: {COLORS['deep_space']};
@@ -144,7 +152,7 @@ class NavPanel(QFrame):
         logo_layout = QHBoxLayout(logo_area)
         logo_layout.setContentsMargins(0, 0, 0, 0)
         logo_label = QLabel()
-        logo_pixmap = QPixmap("assets/logo.png")
+        logo_pixmap = QPixmap(str(logo_asset_path()))
         if not logo_pixmap.isNull():
             logo_label.setPixmap(logo_pixmap.scaled(
                 40, 40,
@@ -205,14 +213,14 @@ class NavPanel(QFrame):
         # Kill All Clients
         self.btn_kill_all = QPushButton("Kill All Clients")
         self.btn_kill_all.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_kill_all.setFixedHeight(36)
+        self.btn_kill_all.setFixedHeight(CONTROL_HEIGHTS["compact"])
         self.btn_kill_all.setStyleSheet(f"""
             QPushButton {{
-                background-color: transparent;
-                color: {COLORS['red']};
-                border: 1px solid {COLORS['red']};
+                background-color: {COLORS['red']};
+                color: {COLORS['white']};
+                border: none;
                 border-radius: 4px;
-                margin: 8px 12px 0 12px;
+                padding: 0 12px;
                 font-size: 13px;
                 font-weight: 600;
             }}

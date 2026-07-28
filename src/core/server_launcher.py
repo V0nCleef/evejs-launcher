@@ -11,6 +11,7 @@ import threading
 import time
 from pathlib import Path
 
+from ..constants import Ports
 from ..config import CONFIG_DIR
 from .platform import get_hidden_process_flags, get_market_binary_name
 
@@ -177,7 +178,7 @@ def start_market_server(evejs_root: str) -> subprocess.Popen:
 
 # ── Shared utilities ───────────────────────────────────────────────────
 
-def wait_for_server_ready(host: str = "127.0.0.1", port: int = 26000,
+def wait_for_server_ready(host: str = "127.0.0.1", port: int = int(Ports.GAME_TCP),
                           timeout: int = 60) -> bool:
     """Wait until the server port accepts connections."""
     start = time.time()
@@ -190,7 +191,7 @@ def wait_for_server_ready(host: str = "127.0.0.1", port: int = 26000,
     return False
 
 
-def is_server_running(host: str = "127.0.0.1", port: int = 26000) -> bool:
+def is_server_running(host: str = "127.0.0.1", port: int = int(Ports.GAME_TCP)) -> bool:
     """Quick check if the server is currently running."""
     try:
         with socket.create_connection((host, port), timeout=0.5):

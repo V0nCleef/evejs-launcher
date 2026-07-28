@@ -42,6 +42,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.constants import Status
+from src.core.dashboard import visible_character_rows
 from src.core.db import Account, Character, _fmt_isk, _fmt_sp
 from src.core.process_tracker import ProcessTracker
 from src.widgets.character_card import CharacterCard
@@ -177,14 +178,11 @@ class CharactersPage(QWidget):
         self._evejs_root = evejs_root
         hidden = set(hidden_characters)
 
-        # Build the desired flat list, skipping hidden characters.
-        desired: list[tuple[str, Character]] = []
-        for account in accounts:
-            if account.banned or getattr(account, "hidden", False):
-                continue
-            for char in account.characters:
-                if char.name not in hidden:
-                    desired.append((account.username, char))
+        # Use the same pure visible-character view as Home and Launch All.
+        desired = [
+            (account.username, character)
+            for account, character in visible_character_rows(accounts, hidden)
+        ]
 
         desired_keys = {(u, c.char_id) for u, c in desired}
 

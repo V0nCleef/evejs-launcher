@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import (
     Qt,
+    QPoint,
     QRectF,
     QPropertyAnimation,
     QEasingCurve,
@@ -61,6 +62,10 @@ class ToggleSwitch(QCheckBox):
         self._anim.setStartValue(self._get_thumb_pos())
         self._anim.setEndValue(1.0 if checked else 0.0)
         self._anim.start()
+
+    def hitButton(self, pos: QPoint) -> bool:  # noqa: N802
+        """Accept clicks anywhere within the visible 40×20 pill."""
+        return self.rect().contains(pos)
 
     # ── Painting ─────────────────────────────────────────────────────────
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802

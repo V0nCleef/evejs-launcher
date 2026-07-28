@@ -19,7 +19,11 @@ app = QApplication([])
 assert COLORS["teal"] == "#00C8E0"
 assert Status.READY.value == "ready"
 assert Page.HOME == 0 and Page.SETTINGS == 3
-assert Ports.GAME == 26000 and Ports.MARKET == 26001 and Ports.PROXY == 26002
+assert Ports.GAME_TCP == 26000
+assert Ports.GAME_MARKET_PROXY == 26001
+assert Ports.CLIENT_HTTP_PROXY == 26002
+assert Ports.MARKET_HTTP == 40110
+assert Ports.MARKET_RPC == 40111
 print(f"constants OK  | APP_NAME={APP_NAME!r}  APP_TITLE={APP_TITLE!r}")
 
 # theme

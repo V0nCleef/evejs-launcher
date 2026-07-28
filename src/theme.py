@@ -69,6 +69,9 @@ QPushButton:hover {{
 QPushButton:pressed {{
     background-color: {c['deep_space']};
 }}
+QPushButton:focus {{
+    border: 2px solid {c['teal']};
+}}
 QPushButton:disabled {{
     background-color: {c['deep_space']};
     color: {c['grey']};
@@ -89,6 +92,17 @@ QPushButton[class="primary"]:pressed {{
     background-color: {c['teal_dim']};
 }}
 
+QPushButton[class="secondary"] {{
+    background-color: {c['carbon']};
+    border: 1px solid {c['teal_dim']};
+    color: {c['white']};
+    font-weight: 600;
+}}
+QPushButton[class="secondary"]:hover {{
+    background-color: {c['steel']};
+    border-color: {c['teal']};
+}}
+
 QPushButton[class="danger"] {{
     background-color: {c['red']};
     border: none;
@@ -104,12 +118,42 @@ QPushButton[class="danger"]:pressed {{
     opacity: 0.8;
 }}
 
+QPushButton[class="dangerOutline"] {{
+    background-color: transparent;
+    border: 1px solid {c['red']};
+    color: {c['red']};
+    font-weight: 600;
+}}
+QPushButton[class="dangerOutline"]:hover {{
+    background-color: {c['red']};
+    color: {c['void_black']};
+}}
+QPushButton[class="dangerOutline"]:disabled {{
+    background-color: transparent;
+    border-color: {c['steel']};
+    color: {c['grey']};
+}}
+
 QPushButton[class="ghost"] {{
     background-color: transparent;
     border: 1px solid {c['steel']};
     color: {c['grey']};
 }}
 QPushButton[class="ghost"]:hover {{
+    border-color: {c['teal']};
+    color: {c['teal']};
+}}
+
+QPushButton[class="compactGhost"] {{
+    background-color: transparent;
+    border: 1px solid {c['steel']};
+    border-radius: 4px;
+    color: {c['grey']};
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 500;
+}}
+QPushButton[class="compactGhost"]:hover {{
     border-color: {c['teal']};
     color: {c['teal']};
 }}
@@ -152,6 +196,28 @@ QLabel[class="secondary"] {{
 QLabel[class="muted"] {{
     color: {c['grey']};
     font-size: 11px;
+}}
+QLabel[class="metricValue"] {{
+    color: {c['white']};
+    font-family: '{header}';
+    font-size: 28px;
+    font-weight: 700;
+}}
+QLabel[class="eyebrow"] {{
+    color: {c['grey']};
+    font-size: 10px;
+    font-weight: 600;
+}}
+QLabel[class="sectionTitle"] {{
+    color: {c['teal']};
+    font-family: '{header}';
+    font-size: 13px;
+    font-weight: 700;
+}}
+QLabel[class="serviceState"] {{
+    color: {c['white']};
+    font-size: 13px;
+    font-weight: 600;
 }}
 
 /* ── Frames / Panels ──────────────────────────────────────────────────────── */

@@ -15,7 +15,7 @@ COLORS: dict[str, str] = {
     "gold": "#FFB800",
     "red": "#E04F4F",
     "white": "#F0F4F8",
-    "grey": "#7A8A99",
+    "grey": "#8F9EAD",
     "green": "#4FE07F",
 }
 
@@ -24,6 +24,11 @@ COLORS["bg"] = COLORS["void_black"]
 COLORS["panel"] = COLORS["deep_space"]
 COLORS["card"] = COLORS["carbon"]
 COLORS["hover"] = COLORS["steel"]
+
+# ── Shared visual scales ─────────────────────────────────────────────────────
+SPACING: dict[str, int] = {"xs": 4, "sm": 8, "md": 12, "lg": 16, "xl": 24}
+RADII: dict[str, int] = {"control": 4, "card": 6, "panel": 8}
+CONTROL_HEIGHTS: dict[str, int] = {"compact": 36, "action": 44}
 
 # ── Application metadata ─────────────────────────────────────────────────────
 APP_NAME: str = "EveJS-Launcher"
@@ -39,9 +44,11 @@ GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 # ── Network ports ────────────────────────────────────────────────────────────
 class Ports(IntEnum):
-    GAME = 26000
-    MARKET = 26001
-    PROXY = 26002
+    GAME_TCP = 26000
+    GAME_MARKET_PROXY = 26001
+    CLIENT_HTTP_PROXY = 26002
+    MARKET_HTTP = 40110
+    MARKET_RPC = 40111
 
 
 # ── Runtime status for accounts / clients ────────────────────────────────────

@@ -17,7 +17,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QWheelEvent
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -77,6 +77,12 @@ class SettingsPage(QWidget):
 
     # ── UI construction ──────────────────────────────────────────────────────
     def _build_ui(self) -> None:
+        self._save_feedback_timer = QTimer(self)
+        self._save_feedback_timer.setObjectName("settingsSaveFeedbackTimer")
+        self._save_feedback_timer.setSingleShot(True)
+        self._save_feedback_timer.setInterval(2_500)
+        self._save_feedback_timer.timeout.connect(self._clear_save_feedback)
+
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
 
@@ -108,6 +114,12 @@ class SettingsPage(QWidget):
         general_form.addRow("EVE Client Path:", self._with_browse(self.client_path_edit, directory=False))
 
         self.proxy_url_edit = QLineEdit()
+        proxy_help = (
+            "Local EveJS client-traffic proxy. Keep http://127.0.0.1:26002 "
+            "unless your EveJS proxy runs elsewhere."
+        )
+        self.proxy_url_edit.setToolTip(proxy_help)
+        self.proxy_url_edit.setAccessibleDescription(proxy_help)
         general_form.addRow("Proxy URL:", self.proxy_url_edit)
 
         root.addWidget(general_box)
@@ -270,6 +282,12 @@ class SettingsPage(QWidget):
         # ── Save / Cancel ────────────────────────────────────────────────────
         buttons = QHBoxLayout()
         buttons.setSpacing(10)
+
+        self.save_feedback_label = QLabel()
+        self.save_feedback_label.setObjectName("settingsSaveFeedback")
+        self.save_feedback_label.setAccessibleName("Settings save feedback")
+        self.save_feedback_label.hide()
+        buttons.addWidget(self.save_feedback_label)
         buttons.addStretch()
 
         cancel_btn = QPushButton("Cancel")
@@ -278,12 +296,13 @@ class SettingsPage(QWidget):
         cancel_btn.clicked.connect(self.load_settings)
         buttons.addWidget(cancel_btn)
 
-        save_btn = QPushButton("Save")
-        save_btn.setProperty("class", "primary")
-        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        save_btn.setDefault(True)
-        save_btn.clicked.connect(self.save_settings)
-        buttons.addWidget(save_btn)
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setObjectName("settingsSaveButton")
+        self.save_btn.setProperty("class", "primary")
+        self.save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.save_btn.setDefault(True)
+        self.save_btn.clicked.connect(self.save_settings)
+        buttons.addWidget(self.save_btn)
 
         root.addLayout(buttons)
         root.addStretch()
@@ -376,10 +395,35 @@ class SettingsPage(QWidget):
                 ),
             }
         )
-        config.save(cfg)
+        try:
+            config.save(cfg)
+        except OSError:
+            self._show_save_feedback("Save failed — please try again.", success=False)
+            return
+
         self._stale_server_preference = ""
         self._update_script_info()
+        self._show_save_feedback("Saved ✓", success=True)
         self.settings_saved.emit(cfg)
+
+    def _show_save_feedback(self, message: str, *, success: bool) -> None:
+        """Render a truthful inline result without interrupting form editing."""
+        self._save_feedback_timer.stop()
+        color = COLORS["green"] if success else COLORS["red"]
+        self.save_feedback_label.setStyleSheet(
+            f"color: {color}; font-size: 12px; font-weight: 600;"
+        )
+        self.save_feedback_label.setText(message)
+        self.save_feedback_label.setToolTip(message)
+        self.save_feedback_label.show()
+        if success:
+            self._save_feedback_timer.start()
+
+    def _clear_save_feedback(self) -> None:
+        """Return the save area to its neutral state after a successful save."""
+        self.save_feedback_label.clear()
+        self.save_feedback_label.setToolTip("")
+        self.save_feedback_label.hide()
 
     # ── Update helpers ───────────────────────────────────────────────────────
     def _on_check_clicked(self) -> None:

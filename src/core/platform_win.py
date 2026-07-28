@@ -9,9 +9,9 @@ from __future__ import annotations
 import ctypes
 import os
 import subprocess
-import sys
 from ctypes import wintypes
 from pathlib import Path
+from typing import Callable
 
 # ── Native Win32 API handles (loaded once at module level) ────────────────
 user32 = ctypes.windll.user32
@@ -219,16 +219,22 @@ def hard_exit() -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Auto-updater  (VBScript helper via wscript.exe)
+# Auto-updater  (staged GUI agent from the downloaded build)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def run_updater(download_url: str, current_exe_path: Path) -> bool:
-    """Download + replace the launcher via a silent VBScript helper.
+def run_updater(
+    download_url: str,
+    current_exe_path: Path,
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+    status_callback: Callable[[str, str], None] | None = None,
+) -> bool:
+    """Stage an update and start the new build in dedicated updater mode.
 
-    Downloads a zip of the new onedir build, extracts it to a temp folder,
-    then spawns a VBS helper that swaps the old install folder for the new
-    one and restarts.  The caller should call :func:`hard_exit` after this
-    returns ``True``.
+    The downloaded onedir build supplies the independent GUI process that
+    stays visible while the current launcher exits and the folder is swapped.
+    This avoids the otherwise unexplained gap between the old app closing and
+    the new app restarting.
     """
     import shutil
     import tempfile
@@ -237,96 +243,100 @@ def run_updater(download_url: str, current_exe_path: Path) -> bool:
     from ..updater.github import download_asset
 
     current_exe_path = Path(current_exe_path)
-    install_dir = current_exe_path.parent  # the onedir folder
-    exe_name = current_exe_path.name       # e.g. "EveJS-Launcher-V1.exe"
-    temp_dir = Path(tempfile.gettempdir())
-    zip_path = temp_dir / "evejs_launcher_update.zip"
-    extract_dir = temp_dir / "evejs_launcher_update"
+    install_dir = current_exe_path.parent
+    exe_name = current_exe_path.name
+    staging_root = Path(tempfile.mkdtemp(prefix="evejs_launcher_update_"))
+    zip_path = staging_root / "update.zip"
+    extract_dir = staging_root / "staged"
 
-    # 1. Download zip
-    ok = download_asset(download_url, zip_path)
-    if not ok:
+    _notify_update_status(status_callback, "download", "Downloading update…")
+    if not download_asset(download_url, zip_path, progress_callback=progress_callback):
+        shutil.rmtree(staging_root, ignore_errors=True)
         return False
 
-    # 2. Extract zip to temp
+    _notify_update_status(status_callback, "prepare", "Validating update package…")
     try:
-        if extract_dir.exists():
-            shutil.rmtree(extract_dir, ignore_errors=True)
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            zf.extractall(extract_dir)
-    except (zipfile.BadZipFile, OSError) as exc:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            if archive.testzip() is not None:
+                raise zipfile.BadZipFile("Update package failed its CRC check")
+            _notify_update_status(status_callback, "prepare", "Unpacking update package…")
+            _safe_extract_update_archive(archive, extract_dir)
+    except (zipfile.BadZipFile, OSError):
+        shutil.rmtree(staging_root, ignore_errors=True)
+        return False
+    finally:
         try:
             zip_path.unlink(missing_ok=True)
         except OSError:
             pass
-        return False
 
-    # 3. Clean up the zip (no longer needed)
-    try:
-        zip_path.unlink(missing_ok=True)
-    except OSError:
-        pass
-
-    # 4. Verify extracted folder contains the launcher exe
     new_exe = _find_exe_in_folder(extract_dir, exe_name)
     if new_exe is None:
-        shutil.rmtree(extract_dir, ignore_errors=True)
+        shutil.rmtree(staging_root, ignore_errors=True)
         return False
 
-    # 5. Get the actual extracted folder (might be nested one level)
     new_install_dir = new_exe.parent
-
-    # 6. Write VBS helper and spawn
-    helper_source = _find_vbs_helper()
-    if helper_source is None:
-        shutil.rmtree(extract_dir, ignore_errors=True)
-        return False
-
-    helper_dest = temp_dir / "evejs_launcher_update_helper.vbs"
-    helper_dest.write_text(helper_source, encoding="utf-8")
-
+    _notify_update_status(status_callback, "install", "Starting the updater…")
     try:
         subprocess.Popen(
             [
-                "wscript.exe",
-                str(helper_dest),
+                str(new_exe),
+                "--apply-update",
+                "--target-dir",
                 str(install_dir),
+                "--source-dir",
                 str(new_install_dir),
+                "--exe-name",
                 exe_name,
-                "--restart",
+                "--parent-pid",
+                str(os.getpid()),
             ],
-            creationflags=subprocess.DETACHED_PROCESS,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
+            cwd=str(new_install_dir),
+            creationflags=(
+                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+            ),
             close_fds=True,
         )
         return True
     except OSError:
-        shutil.rmtree(extract_dir, ignore_errors=True)
+        shutil.rmtree(staging_root, ignore_errors=True)
         return False
 
 
 # ── Updater helpers ──────────────────────────────────────────────────────
 
 
+def _notify_update_status(
+    callback: Callable[[str, str], None] | None,
+    stage: str,
+    detail: str,
+) -> None:
+    """Deliver an optional updater phase without letting UI failures abort it."""
+    if callback is None:
+        return
+    try:
+        callback(stage, detail)
+    except Exception:
+        pass
+
+
+def _safe_extract_update_archive(archive, destination: Path) -> None:  # type: ignore[no-untyped-def]
+    """Extract only archive members that remain inside *destination*."""
+    destination.mkdir(parents=True, exist_ok=True)
+    destination_root = destination.resolve()
+    for member in archive.infolist():
+        member_path = (destination / member.filename).resolve()
+        if not member_path.is_relative_to(destination_root):
+            raise OSError(f"Unsafe update archive member: {member.filename}")
+    archive.extractall(destination)
+
+
 def _find_exe_in_folder(folder: Path, exe_name: str) -> Path | None:
-    """Search *folder* (and one level of nesting) for *exe_name*.
-
-    Zip archives often wrap the onedir folder one level deep, e.g.::
-
-        evejs-launcher-v1.0.25.zip
-        └── EveJS-Launcher-V1/
-            └── EveJS-Launcher-V1.exe
-
-    Returns the absolute path to the exe, or *None* if not found.
-    """
-    # Direct match
+    """Search *folder* (and one nested release folder) for *exe_name*."""
     candidate = folder / exe_name
     if candidate.is_file():
         return candidate
 
-    # One level of nesting (GitHub's default zip wrapper)
     try:
         for child in folder.iterdir():
             if child.is_dir():
@@ -335,138 +345,4 @@ def _find_exe_in_folder(folder: Path, exe_name: str) -> Path | None:
                     return nested
     except OSError:
         pass
-
     return None
-
-
-# ── Embedded VBS helper (not bundled as a separate file) ──────────────────
-# Kept as a Python string to avoid AV heuristics flagging a bundled .vbs
-# script that deletes/replaces executables.
-
-_VBS_HELPER = r"""' EveJS Launcher V2 — silent update helper (onedir / folder mode)
-' Args: oldFolder newFolder exeName [--restart]
-' Does: wait → delete old → copy new in → clean up → launch exe
-
-Dim oldFolder, newFolder, exeName, restart, fso, attempt, wsh, logFile
-
-Set wsh = CreateObject("WScript.Shell")
-Set fso = CreateObject("Scripting.FileSystemObject")
-
-oldFolder = WScript.Arguments(0)
-newFolder = WScript.Arguments(1)
-exeName   = WScript.Arguments(2)
-restart   = (WScript.Arguments.Count >= 4 And WScript.Arguments(3) = "--restart")
-
-' Write a tiny log for debugging (alongside the helper script)
-logFile = WScript.ScriptFullName & ".log"
-Sub Log(msg)
-    On Error Resume Next
-    Dim f: Set f = fso.OpenTextFile(logFile, 8, True)
-    f.WriteLine Now & " " & msg
-    f.Close
-    On Error GoTo 0
-End Sub
-
-Log "=== Update helper started ==="
-Log "oldFolder=" & oldFolder
-Log "newFolder=" & newFolder
-Log "exeName=" & exeName
-
-If Not fso.FolderExists(newFolder) Then
-    Log "ERROR: new folder not found — aborting"
-    WScript.Quit 1
-End If
-
-' Clean up any leftover .old backup from a previous update
-Dim oldBackup: oldBackup = oldFolder & ".old"
-If fso.FolderExists(oldBackup) Then
-    Log "Removing leftover .old backup..."
-    On Error Resume Next
-    fso.DeleteFolder oldBackup, True
-    On Error GoTo 0
-End If
-
-' Wait for old launcher to fully exit (DLLs unload, file locks released)
-' 15 s — PyInstaller onedir DLLs can take a while to unlock on slower machines.
-Log "Waiting 15s for old launcher to exit..."
-WScript.Sleep 15000
-
-' Delete old install folder (retry if files still locked, 500 ms apart)
-Log "Deleting old folder..."
-For attempt = 1 To 20
-    On Error Resume Next
-    If fso.FolderExists(oldFolder) Then
-        fso.DeleteFolder oldFolder, True
-    End If
-    If Not fso.FolderExists(oldFolder) Then Exit For
-    On Error GoTo 0
-    WScript.Sleep 500
-Next
-
-If fso.FolderExists(oldFolder) Then
-    ' Still locked — rename out of the way
-    Log "Old folder still locked, renaming to .old"
-    On Error Resume Next
-    Dim backupName: backupName = oldFolder & ".old"
-    If fso.FolderExists(backupName) Then fso.DeleteFolder backupName, True
-    fso.MoveFolder oldFolder, backupName
-    On Error GoTo 0
-End If
-
-' Copy new folder into place (use CopyFolder — more reliable than MoveFolder)
-Log "Copying new folder into place..."
-On Error Resume Next
-fso.CopyFolder newFolder, oldFolder, True  ' True = overwrite
-If Err.Number <> 0 Then
-    Log "CopyFolder error " & Err.Number & ": " & Err.Description
-    Err.Clear
-    ' Retry after a short delay
-    WScript.Sleep 2000
-    fso.CopyFolder newFolder, oldFolder, True
-    If Err.Number <> 0 Then
-        Log "CopyFolder retry also failed: " & Err.Number & " " & Err.Description
-    End If
-End If
-On Error GoTo 0
-
-If Not fso.FolderExists(oldFolder) Then
-    Log "ERROR: copy failed — target folder does not exist"
-    WScript.Quit 2
-End If
-
-' Verify the exe is present
-Dim exePath: exePath = oldFolder & "\" & exeName
-If Not fso.FileExists(exePath) Then
-    Log "ERROR: exe not found at " & exePath
-    WScript.Quit 3
-End If
-
-' Clean up temp source
-Log "Cleaning up temp source..."
-On Error Resume Next
-fso.DeleteFolder newFolder, True
-On Error GoTo 0
-
-' Let filesystem settle
-Log "Waiting for filesystem..."
-WScript.Sleep 3000
-
-' Launch via explorer.exe
-If restart Then
-    Log "Launching " & exePath
-    wsh.Run "explorer.exe " & Chr(34) & exePath & Chr(34), 0, False
-End If
-
-Log "=== Update helper finished OK ==="
-WScript.Quit 0
-"""
-
-
-def _find_vbs_helper() -> str | None:
-    """Return the VBScript updater helper content.
-
-    The helper is now embedded as a Python string constant rather than read
-    from a bundled ``.vbs`` file — this prevents antivirus heuristics from
-    flagging the launcher for embedding a file-deletion script.
-    """
-    return _VBS_HELPER

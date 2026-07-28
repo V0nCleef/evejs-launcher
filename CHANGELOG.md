@@ -2,6 +2,28 @@
 
 ## Changelog
 
+## v1.0.32 — 2026-07-28
+
+### Added
+- **Transparent self-update progress** — a branded launcher-style progress window now shows real download bytes, package preparation, installation, restart activity, and actionable errors instead of leaving an unexplained gap.
+- **Safe visible update handoff** — the staged new launcher keeps the update window open while the old launcher exits, then reports each backup, file-copy, verification, and restart step.
+- **Non-blocking Launch All queue** — clients launch serially with the configured stagger while the UI stays responsive, reports progress, and can cancel future launches without closing clients already started.
+- **Shared runtime service snapshot** — Home, navigation, and footer now present one consistent Game/Market state, including Starting, Online, Stopping, Failed, and externally managed services.
+
+### Changed
+- **Service lifecycle work moved off the UI thread** — Market readiness, Game readiness, graceful shutdown, and fallback termination run in dedicated workers, keeping the launcher interactive during long operations.
+- **Home and dashboard polish** — visible-character totals, service action labels, compact layout behavior, footer status, toggles, save feedback, and hero-animation settings now update consistently at runtime.
+- **Update replacement safety** — the current onedir install is renamed to `.old` before replacement and retained until the new executable has been copied and verified.
+
+### Fixed
+- **Windows update lock delay is now explicit** — the updater visibly counts down while Windows releases PyInstaller/DLL file locks before it swaps launcher folders.
+- **No accidental control of external services** — a reachable Game or Market service that was not started by this launcher is shown as externally managed and is never force-stopped by the launcher.
+- **Lifecycle close races** — closing during an update check, service monitor startup, or service lifecycle work now waits for the retained worker to finish cleanly instead of risking a frozen or abruptly terminated launcher.
+- **Launch All responsiveness and consistency** — hidden/banned character filtering, username prefill, dashboard metrics, and bulk launch now use the same visible-character view.
+
+### Verification
+- Full automated regression suite, source-mode GUI smoke, and packaged onedir smoke passed before release packaging.
+
 ## v1.0.31 — 2026-07-28
 
 ### Added

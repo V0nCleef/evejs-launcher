@@ -51,8 +51,19 @@ def _load_fonts() -> dict[str, str]:
         return {"header": "Segoe UI", "body": "Segoe UI", "mono": "Consolas"}
 
 
+def _parse_update_handoff(argv: list[str]):  # type: ignore[no-untyped-def]
+    """Return a staged-update request when this build was launched as an agent."""
+    if "--apply-update" not in argv:
+        return None
+
+    from src.updater.handoff import parse_update_handoff_args
+
+    return parse_update_handoff_args(argv)
+
+
 def main() -> int:
-    app = QApplication(sys.argv)
+    handoff = _parse_update_handoff(sys.argv[1:])
+    app = QApplication([sys.argv[0]] if handoff is not None else sys.argv)
     app.setApplicationName(APP_NAME)
     app.setOrganizationName("NousResearch")
 
@@ -66,6 +77,14 @@ def main() -> int:
     except Exception:
         # QSS failure shouldn't prevent the app from starting.
         pass
+
+    if handoff is not None:
+        from src.updater.checker import get_current_version
+        from src.updater.handoff import UpdateHandoffWindow
+
+        window = UpdateHandoffWindow(handoff, get_current_version())
+        window.show()
+        return app.exec()
 
     # ── First-run setup wizard ────────────────────────────────────────
     from src import config

@@ -43,6 +43,20 @@ def test_resolver_uses_the_only_discovered_script_without_prompt(
     assert result == ("vanilla", script)
 
 
+def test_effective_mode_label_uses_the_only_script_instead_of_asking(
+    bare_window: MainWindow,
+    tmp_path: Path,
+) -> None:
+    _write_script(tmp_path, "StartServer.bat")
+    bare_window._cfg = {
+        "evejs_root": str(tmp_path),
+        "server_start_preference": "ask",
+        "server_mode": "modded",
+    }
+
+    assert bare_window._effective_server_mode_label() == "Vanilla"
+
+
 def test_resolver_uses_valid_saved_filename_without_prompt(
     bare_window: MainWindow,
     tmp_path: Path,

@@ -1,6 +1,6 @@
 """Rotating hero banner for EveJS Launcher V2.
 
-A 200px-tall widget that pre-loads every ``hero_*.png`` under
+A 176px-tall widget that pre-loads every ``hero_*.png`` under
 ``assets/hero/``, then cycles through them with cross-fade and
 Ken Burns zoom. Images dynamically scale to fill the widget width.
 
@@ -34,9 +34,9 @@ _ASSETS_HERO_DIR = (
 
 
 class HeroBanner(QWidget):
-    """Rotating, cross-fading, Ken-Burns hero banner (200px tall, full width)."""
+    """Rotating, cross-fading, Ken-Burns hero banner (176px tall, full width)."""
 
-    HEIGHT = 200
+    HEIGHT = 176
 
     ROTATION_INTERVAL_MS = 6_000
     FADE_DURATION_MS = 1_200
@@ -56,6 +56,8 @@ class HeroBanner(QWidget):
         # ── Pre-load hero images (raw, not pre-cropped) ──────────────────
         self._sources: list[QPixmap] = self._load_sources()
         self._current_index: int = 0
+        self._animations_enabled = True
+        self._rotation_interval_ms = self.ROTATION_INTERVAL_MS
 
         # ── Two labels as direct children (NO layout — manually positioned) ─
         self._label_front = QLabel(self)
@@ -89,12 +91,11 @@ class HeroBanner(QWidget):
 
         # ── Rotation timer ───────────────────────────────────────────────
         self._rotate_timer = QTimer(self)
-        self._rotate_timer.setInterval(self.ROTATION_INTERVAL_MS)
+        self._rotate_timer.setInterval(self._rotation_interval_ms)
         self._rotate_timer.timeout.connect(self._advance)
 
-        # Initial paint (deferred until first resize)
-        if self._sources:
-            self.start()
+        # Initial paint and animation both wait for showEvent().  Keeping
+        # hidden banners inactive prevents invisible repaint/timer work.
 
     # ── Width helper ────────────────────────────────────────────────────
     def _w(self) -> int:
@@ -157,40 +158,34 @@ class HeroBanner(QWidget):
         self._apply_zoom()
 
     def _apply_zoom(self) -> None:
-        """Re-crop the active pixmap slightly smaller and scale it back
-        up — a cheap Ken Burns zoom driven by _zoom_value.
+        """Scale the front label around its center for a stable Ken Burns zoom.
 
-        Always produces a pixmap at EXACT widget size (IgnoreAspectRatio
-        final scale) so we never rely on QLabel.scaledContents alone.
+        The source frame stays unchanged for the entire zoom cycle.  Re-cropping
+        and re-scaling a pixmap on every animation frame causes visible shimmer
+        as integer crop boundaries alternate, so only the display geometry moves.
         """
         if not self._sources:
             return
 
         w = self._w()
-        base = self._make_pixmap()
         zoom = max(self.ZOOM_MIN, self._zoom_value_storage)
-        if zoom <= 1.0:
-            # base is already w×HEIGHT — just set it
-            self._label_front.setPixmap(base)
-            return
-
-        # Crop to (1/zoom) of the base, then scale back to label size
-        crop_w = max(1, int(base.width() / zoom))
-        crop_h = max(1, int(base.height() / zoom))
-        x = (base.width() - crop_w) // 2
-        y = (base.height() - crop_h) // 2
-        cropped = base.copy(QRect(x, y, crop_w, crop_h))
-        zoomed = cropped.scaled(
-            w, self.HEIGHT,
-            Qt.AspectRatioMode.IgnoreAspectRatio,
-            Qt.TransformationMode.FastTransformation,
+        zoomed_width = max(w, round(w * zoom))
+        zoomed_height = max(self.HEIGHT, round(self.HEIGHT * zoom))
+        self._label_front.setGeometry(
+            (w - zoomed_width) // 2,
+            (self.HEIGHT - zoomed_height) // 2,
+            zoomed_width,
+            zoomed_height,
         )
-        self._label_front.setPixmap(zoomed)
+
+    def _reset_front_geometry(self) -> None:
+        """Return the front frame to its unzoomed, full-banner geometry."""
+        self._label_front.setGeometry(0, 0, self._w(), self.HEIGHT)
 
     # ── Rotation / cross-fade ────────────────────────────────────────────
     def _advance(self) -> None:
         """Cross-fade to the next hero image and restart the Ken Burns."""
-        if len(self._sources) < 2:
+        if not self._animations_enabled or len(self._sources) < 2:
             return
 
         w = self._w()
@@ -232,27 +227,69 @@ class HeroBanner(QWidget):
 
     def _start_zoom(self) -> None:
         """Restart the Ken Burns zoom on the now-current image."""
+        if not self._animations_enabled:
+            return
         self._zoom_anim.stop()
         self._zoom_value_storage = self.ZOOM_MIN
+        self._reset_front_geometry()
         self._zoom_anim.setStartValue(self.ZOOM_MIN)
         self._zoom_anim.setEndValue(self.ZOOM_MAX)
         self._zoom_anim.start()
 
     # ── Public controls ──────────────────────────────────────────────────
+    @property
+    def animations_enabled(self) -> bool:
+        """Whether the banner is allowed to animate while visible."""
+        return self._animations_enabled
+
+    @property
+    def rotation_interval_ms(self) -> int:
+        """The configured rotation interval in milliseconds."""
+        return self._rotation_interval_ms
+
+    def set_rotation_interval(self, seconds: int) -> None:
+        """Apply one rotation interval to both the cross-fade and zoom cycle."""
+        self._rotation_interval_ms = max(1, int(seconds)) * 1_000
+        self._rotate_timer.setInterval(self._rotation_interval_ms)
+        self._zoom_anim.setDuration(self._rotation_interval_ms)
+
+    def set_animations_enabled(self, enabled: bool) -> None:
+        """Enable or disable motion immediately without losing the current image."""
+        self._animations_enabled = bool(enabled)
+        if not self._animations_enabled:
+            self.stop()
+            self._show_static_frame()
+        elif self.isVisible():
+            self.start()
+
+    def _show_static_frame(self) -> None:
+        """Render one stable frame after motion is disabled or interrupted."""
+        self._zoom_value_storage = self.ZOOM_MIN
+        self._opacity_back.setOpacity(0.0)
+        self._reset_front_geometry()
+        self._label_front.raise_()
+        if self._sources and self.width() > 0:
+            self._label_front.setPixmap(self._make_pixmap())
+
     def start(self) -> None:
         """Start rotation + Ken Burns. Safe to call repeatedly."""
-        if not self._sources:
+        if not self._animations_enabled or not self.isVisible() or not self._sources:
             return
         if not self._rotate_timer.isActive():
             self._rotate_timer.start()
         self._start_zoom()
 
     def stop(self) -> None:
-        """Stop rotation and all running animations."""
+        """Stop rotation and restore the front image as one stable frame."""
         self._rotate_timer.stop()
         self._zoom_anim.stop()
         if self._fade_anim is not None:
             self._fade_anim.stop()
+            self._fade_anim.deleteLater()
+            self._fade_anim = None
+        self._opacity_back.setOpacity(0.0)
+        self._reset_front_geometry()
+        self._label_front.raise_()
 
     def is_running(self) -> bool:
         return self._rotate_timer.isActive()
@@ -277,14 +314,17 @@ class HeroBanner(QWidget):
         self._apply_zoom()
 
     def showEvent(self, event) -> None:  # noqa: N802
-        """Trigger initial render when widget becomes visible."""
+        """Render and resume only when this visible banner permits animation."""
         super().showEvent(event)
         if self._sources and self.width() > 0:
             w = self._w()
             self._label_front.setGeometry(0, 0, w, self.HEIGHT)
             self._label_back.setGeometry(0, 0, w, self.HEIGHT)
             self._label_front.setPixmap(self._make_pixmap())
-            self._apply_zoom()
+            if self._animations_enabled:
+                self.start()
+            else:
+                self._show_static_frame()
 
     def hideEvent(self, event) -> None:  # noqa: N802
         self.stop()
