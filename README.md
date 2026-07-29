@@ -1,265 +1,290 @@
-# 🚀 EveJS Launcher V1
+# EveJS Launcher
 
-<p align="center">
-  <img src="assets/logo.ico" alt="EveJS Launcher" width="96" />
-</p>
+EveJS Launcher is a Windows desktop control panel for a local EveJS installation. It brings the game server, market server, EVE clients, character profiles, mods, maintenance tools, and launcher updates into one application.
 
-<p align="center">
-  <strong>A dark, cinematic desktop launcher for <a href="https://github.com/V0nCleef/evejs-launcher">EveJS</a> —<br>manage multiple EVE Online accounts, start servers, toggle mods, and launch clients, all from one window.</strong>
-</p>
+[Download the latest release](https://github.com/V0nCleef/evejs-launcher/releases/latest) · [Read the release notes](https://github.com/V0nCleef/evejs-launcher/releases) · [Join the EveJS Discord](https://discord.gg/HVTfKeqX3t)
 
-<p align="center">
-  <img src="https://img.shields.io/badge/version-1.4.6-teal?style=flat-square" alt="Version" />
-  <img src="https://img.shields.io/badge/python-3.11+-blue?style=flat-square&logo=python" alt="Python" />
-  <img src="https://img.shields.io/badge/platform-Windows%2010%2B-0078D4?style=flat-square&logo=windows" alt="Windows" />
-  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" />
-</p>
+![EveJS Launcher Home page with the Game and Market services online](screenshots/home.png)
 
----
+The Home page is the operational view: current service state, account and character totals, running clients, stack controls, release notes, and direct access to both service consoles.
 
-## What is this?
+## Start here
 
-The **EveJS Launcher V1** is a native Windows desktop app (PyQt6) that replaces the command-line workflow of [EveJS](https://github.com/V0nCleef/evejs-launcher) with a polished graphical interface. It handles everything you'd normally do across multiple terminal windows:
+### What you need
 
-- **Start & stop** the Game Server, Market Server, and Proxy (ports 26000/26001/26002)
-- **Manage multiple EVE accounts** with character portraits, stats (ISK, SP, ship, sec status), and zero-copy Junction profiles
-- **Launch EVE clients** in parallel with configurable stagger delays — then kill them all with one click
-- **Toggle mods** on/off without manually renaming `loader.js` files
-- **Auto-update** itself silently from GitHub Releases
+- Windows 10 or Windows 11
+- An existing EveJS installation
+- An EVE client prepared for use with EveJS
 
-The UI is a dark, EVE Online-inspired theme with teal accents, animated hero banners, cross-fade transitions, and a scanline overlay.
+### Install the launcher
 
----
+1. Open the [latest release](https://github.com/V0nCleef/evejs-launcher/releases/latest).
+2. Download `EveJS-Launcher-V1.zip`.
+3. Extract the complete `EveJS-Launcher-V1` folder.
+4. Run `EveJS-Launcher-V1.exe` from inside that folder.
+5. On first launch, select the root folder of your EveJS installation.
 
-## ✨ Features
+Keep the `_internal` folder beside the executable. The release is a portable application folder, not a single standalone executable. Python is not required when using a release build.
 
-### 🖥️ Server Management
-- One-click **Start All Servers** (Market → Game, with dependency wait)
-- One-click **Stop Server** with graceful shutdown
-- Live status dots in the status bar (click to open the console panel)
-- Process tracking — see exactly what's running
+### First launch
 
-### 👤 Character Management
-- **Grid layout** (3 per row) with animated cards
-- **Junction-based profiles** — zero disk copy, pure symlink/hardlink
-- Character detail panel: portrait, ISK, ship, SP, location, security status
-- **Hide / unhide** characters without deleting config
-- Selection glow + lift animation on click
-- Async portrait loading with hex-masked rendering
+The setup wizard validates the EveJS root, attempts to locate the EVE client, saves the configuration, and then loads the character list. After setup:
 
-### 🚀 Client Launcher
-- **Launch All** — fires up every visible account with a stagger delay
-- **Kill All Clients** — terminates all running EVE clients instantly
-- **Auto-login** support — skip the character select screen
-- **Group-based launching** — group characters by fleet or role
+1. Use **Start Stack** on Home to start Market followed by Game.
+2. Wait for both services to report **Online**.
+3. Open **Characters** and launch the account you want to use.
+4. Enter the password in the EVE client. The launcher does not store or type passwords.
 
-### 🧩 Mod Manager
-- Auto-discovers mods from your EveJS `mods/` folder
-- **Toggle switches** enable/disable mods with a click (renames `loader.js`)
-- Server restart indicator reminds you changes take effect on next boot
+## Interface tour
 
-### 🧰 Tool Deck
-- Curated launch cards for 11 reviewed utilities from the configured EveJS `tools/` folder
-- Search, semantic category filters, availability status, prerequisites, and one-click refresh
-- Interactive wrappers open in their own visible Windows consoles and remain independent of launcher shutdown
-- Destructive database reset requires confirmation, with a separate non-destructive **Reset Preview** action
-- Only reviewed top-level wrappers are exposed; nested implementation scripts and arbitrary custom commands are excluded
-
-### 🪟 UI & UX
-- **Frameless window** with custom title bar (minimize, maximize, close)
-- **Animated hero banner** — cross-fading fleet/station/nebula art with Ken Burns zoom
-- **Page transitions** — smooth fade between Home, Characters, Mods, Tools, and Settings
-- **Card hover effects** — teal glow + lift
-- **EVE-style scanline overlay** on the home page
-- Animation toggle in Settings for a classic static look
-- **Discord invite card** — dark-themed, links to the EveJS community
-
-### 🔄 Auto-Update
-- Checks GitHub Releases for new versions on launch
-- One-click **"Update Available"** gold button in the status bar
-- Silent VBScript updater — waits for exit, swaps the `.exe`, relaunches
-- No UAC prompts, no installer, no manual downloads
-
-### 🧙 First-Run Wizard
-- Automatically appears when no `evejs_root` is configured
-- Walks you through: Welcome → Browse EveJS folder → Validation → Done
-- Saves config and launches the full app
-
----
-
-## 📸 Screenshots
+The launcher has five navigation pages. The screenshots below were captured from v1.0.34. Character and account names are intentionally blurred, and local paths use generic examples.
 
 ### Home
-![Home page showing animated hero banner, server stats, quick actions, changelog, and Discord card](screenshots/home.png)
+
+Home combines service controls and status in one place. Game and Market are tracked independently through Offline, Starting, Online, Stopping, and Failed states. A service started outside the launcher is detected as externally managed and is never force-stopped by the launcher.
+
+The screenshot at the top of this page uses a simulated healthy runtime state; no server processes were started to create it.
 
 ### Characters
-![Character grid with cards, detail panel, and selection glow](screenshots/characters.png)
 
----
+![Characters page with private character and account names blurred](screenshots/characters.png)
 
-## 📦 Installation
+Characters are read from the configured EveJS installation and grouped into account-aware cards. Each card shows the portrait, wallet balance, ship, launch state, and account state. Selecting a card opens the detail panel with skill points, location, security status, and launch controls.
 
-### Download (recommended)
+The launcher prevents two characters on the same account from being launched at the same time. Hidden and development accounts can be removed from the normal grid without deleting their game data.
 
-Grab the latest `EveJS-Launcher-V2.exe` from the [Releases](https://github.com/V0nCleef/evejs-launcher/releases) page.
+### Mods
 
-1. Download the `.exe`
-2. Place it anywhere (Desktop, EveJS folder, etc.)
-3. Run it — the first-run wizard will ask for your EveJS root folder
+![Mod Manager page](screenshots/mods.png)
 
-**That's it.** No Python, no dependencies, no install. The auto-updater keeps it current.
+The Mod Manager scans the configured `mods` folder and shows the active state of each discovered mod. Changes take effect after the game server restarts. **Apply & Restart Server** routes through the same server-mode selection used by every other start path.
 
----
+### Tools
 
-## 🔨 Building from Source
+![Tool Deck page](screenshots/tools.png)
 
-### Prerequisites
-- Python 3.11+
-- Git
-- Windows 10 or newer
+Tool Deck exposes a reviewed set of utilities from the configured EveJS `tools` folder. It supports text search, category filtering, prerequisite labels, wrapper availability, and responsive one- or two-column layouts.
 
-```bash
-# Clone the repo
+The launcher does not recursively expose arbitrary scripts. It resolves only known top-level wrappers, opens them in independent visible consoles, and asks for confirmation before destructive or system-changing actions.
+
+### Settings
+
+![Settings page with generic example paths](screenshots/settings.png)
+
+Settings covers the EveJS root, EVE client path, proxy address, launch timing, service auto-start, animation preferences, update checks, server-mode selection, hidden characters, and local-data cleanup.
+
+## What the launcher manages
+
+| Area | Behaviour |
+|---|---|
+| Game service | Starts Node.js directly in vanilla or modded mode and reports lifecycle state. |
+| Market service | Starts the market service before Game when the complete stack is requested. |
+| EVE clients | Creates account-specific profiles, launches clients through the local proxy, and tracks running state. |
+| Bulk launch | Launches eligible accounts serially with a configurable delay; remaining queued launches can be cancelled. |
+| Characters | Reads account and character data, loads generated portraits asynchronously, and supports search and hiding. |
+| Mods | Discovers mods, toggles their loader state, and restarts Game when requested. |
+| Tools | Resolves 11 reviewed external utility wrappers with prerequisite and risk information. |
+| Updates | Checks GitHub Releases, downloads the release ZIP, shows progress, stages replacement, restarts, and cleans validated update artifacts. |
+
+## Service startup and detection
+
+EveJS installations may include more than one `StartServer*.bat` file. The launcher uses those filenames as mode indicators:
+
+- `StartServer.bat` means vanilla mode.
+- `StartServerWithMods.bat` means modded mode.
+- With more than one supported indicator, Settings can save a default or keep **Always ask**.
+- With one supported indicator, that mode is selected automatically.
+
+The batch files are not executed. They may contain interactive prompts that do not behave correctly inside a GUI launcher. Game is always started through Node.js directly with an explicit mode.
+
+When **Start Stack** is used, Market is started first and Game waits for the required readiness state. Controls remain responsive while startup and shutdown checks run in background workers.
+
+If an already-running Game or Market endpoint is detected, it is shown as externally managed. The launcher can use that service but will not claim ownership or terminate it.
+
+<details>
+<summary>Service ports and readiness checks</summary>
+
+| Port | Purpose |
+|---:|---|
+| `26000` | Game TCP endpoint used by EVE clients |
+| `26001` | Game server's internal market proxy |
+| `26002` | Local HTTP proxy used by launched clients |
+| `40110` | Market HTTP administration endpoint |
+| `40111` | Market RPC endpoint used for Market readiness detection |
+
+Market readiness is checked against port `40111`, not `26001`. Port `26001` can be reachable while only the game server is running, so treating it as the Market service would produce a false Online state.
+
+</details>
+
+## Client profiles and launching
+
+Each account receives an isolated launcher profile under:
+
+```text
+%APPDATA%\EveJS-Launcher\Profiles\<account>\tq
+```
+
+On Windows these profiles use directory junctions rather than copying the complete EVE client. The launcher prepares the minimum settings required by the client, pre-fills the account username, points traffic at the configured local proxy, and launches the selected EVE executable.
+
+Passwords are not stored by the launcher. Password entry remains inside the EVE client.
+
+**Launch All** uses a serial queue instead of opening every client at once. The configured stagger delay is applied between accounts, the application stays responsive, and cancelling the queue stops only future launches. Clients that already started remain open.
+
+## Mod handling
+
+A mod is discovered from the configured EveJS `mods` directory. Its active state is derived from its loader file. Toggling a row changes that loader state on disk; it does not hot-reload the running game server.
+
+Use **Apply & Restart Server** when the new mod state should take effect. The restart uses the same saved or prompted vanilla/modded selection as Home, client-triggered auto-start, and the navigation controls.
+
+## Tool Deck catalogue
+
+Tool Deck currently recognises 11 reviewed wrappers. Availability is resolved from the selected EveJS installation; the tools are not bundled into the launcher.
+
+<details>
+<summary>View the complete tool catalogue</summary>
+
+| Category | Tool | Notes shown by the launcher |
+|---|---|---|
+| Client & Setup | Client Setup Wizard | Prepares client paths, certificates, `blue.dll`, and `start.ini`. |
+| Client & Setup | Blue DLL Patcher | Opens the guided patcher for a selected client DLL. |
+| Client & Setup | Client Code Grabber | Requires Python; extracts and processes client code. |
+| Configuration | Server Config Editor | Docker Desktop is required for containerized installations. |
+| Data & Content | Local Database Creator | Downloads SDE data and generates local database content. |
+| Data & Content | Reset Local Databases | Includes a non-destructive preview and confirmation before reset. |
+| Data & Content | New Eden Store Editor | Requires Python; edits store catalogue and configuration data. |
+| Market | Market Seed Builder | Opens an interactive build, smoke-check, and diagnostics menu. |
+| Market | Market Seed Builder GUI | Opens graphical market-seed build and diagnostics controls. |
+| Market | TQ Market Snapshot Seeder v2 | Builds and inspects public market snapshot seed data. |
+| Market | Rust & MSVC Market Setup | May request Administrator permission and change the system toolchain. |
+
+Every launch request is re-resolved against the current EveJS root before a process is created. Destructive and system-level actions are confirmed at the final launch boundary rather than relying only on the visible card state.
+
+</details>
+
+## Updates
+
+The launcher checks the latest GitHub Release on startup when automatic checks are enabled. Manual checks are available in Settings.
+
+For an update, the launcher:
+
+1. Downloads the release ZIP with visible byte progress.
+2. Extracts and validates the new application folder in a staging location.
+3. Keeps the update window open while the old launcher exits.
+4. Renames the current installation to a rollback copy ending in `.old`.
+5. Copies and verifies the new onedir installation.
+6. Restarts the new executable.
+7. Removes only the validated staging and rollback artifacts after successful restart.
+
+The updater works with the complete application folder. Moving only the executable or deleting `_internal` breaks both normal startup and updates.
+
+## Configuration reference
+
+Configuration is stored in:
+
+```text
+%APPDATA%\EveJS-Launcher\config.json
+```
+
+| Setting | Purpose | Default |
+|---|---|---|
+| EveJS Root | Installation containing the server, mods, tools, and game data | Not set |
+| EVE Client Path | `exefile.exe` used for launched clients | Detected during setup when possible |
+| Proxy URL | Local client-traffic proxy | `http://127.0.0.1:26002` |
+| Stagger Delay | Delay between queued client launches | `3 seconds` |
+| Auto-Start Server | Starts Game when a client requires it | Off |
+| Auto-Start Market | Starts Market when required | Off |
+| Server Start Selection | Always ask or a detected vanilla/modded indicator | Always ask |
+| Animations | Hero rotation and page effects | On |
+| Hero Rotation Interval | Time between Home banner images | `6 seconds` |
+| Auto-Check for Updates | Periodic GitHub Release checks | On |
+| Update Check Interval | Time between automatic checks | `6 hours` |
+| Hidden Characters | Characters omitted from the normal grid | Empty |
+
+Settings are written atomically. If the stored configuration is malformed, the launcher backs it up and recovers with defaults rather than continuing with a partially loaded file.
+
+## Common questions
+
+<details>
+<summary>Why does a service say it is managed externally?</summary>
+
+The endpoint is reachable, but the process was not started by this launcher instance. The launcher reports the service and can continue using it, but it will not terminate a process it does not own. Stop it from the console or application that originally started it.
+
+</details>
+
+<details>
+<summary>Why did a mod change not take effect?</summary>
+
+Mod toggles change files on disk. Restart the game server after changing them. **Apply & Restart Server** performs that restart through the normal server-mode resolver.
+
+</details>
+
+<details>
+<summary>Why is a tool marked unavailable?</summary>
+
+Tool Deck checks the configured EveJS root and the known wrapper path under its `tools` folder. Use Refresh after changing the root or adding a tool. An inaccessible wrapper disables only that card; it does not break the rest of the page.
+
+</details>
+
+<details>
+<summary>Why is a character portrait missing?</summary>
+
+Portraits are generated by the EveJS server and are not stored in the main game database. After moving or upgrading an EveJS installation, copy the generated Character image directory as well or let the server regenerate the portraits.
+
+</details>
+
+<details>
+<summary>Can I move the executable out of the extracted folder?</summary>
+
+No. The current release uses PyInstaller onedir packaging. Run the executable with its `_internal` directory beside it.
+
+</details>
+
+## Running from source
+
+Python 3.11 or newer is recommended.
+
+```text
 git clone https://github.com/V0nCleef/evejs-launcher.git
 cd evejs-launcher
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run directly
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install -r requirements.txt -r requirements-dev.txt
 python main.py
 ```
 
-### Build the standalone `.exe`
+Run the automated checks with:
 
-```bash
-build.bat
+```text
+python -m pytest
 ```
 
-The optimized executable lands at `dist/EveJS-Launcher-V2.exe` (~28 MB, UPX disabled for stability).
+<details>
+<summary>Project layout</summary>
 
----
-
-## ⚙️ Configuration
-
-On first launch the setup wizard guides you through:
-
-| Setting | Description |
-|---|---|
-| **EveJS Root** | Path to your EveJS installation (contains `game-server/`, `market-server/`, `mods/`) |
-| **EVE Client Path** | Path to `ExeFile.exe` (e.g. `C:\EVE\SharedCache\tq\bin\exefile.exe`) |
-| **Stagger Delay** | Seconds between launching each EVE client (default: 3) |
-| **Animations** | Enable/disable animated hero banner, page transitions, and card effects |
-| **Hero Rotation** | Interval in seconds between hero banner cross-fades (3–30s) |
-
-Config is stored at `%APPDATA%/EveJS-Launcher-V2/config.json`.
-
----
-
-## 🧱 Project Structure
-
-```
-evejs-launcher/
-├── main.py                  # Entry point — boots QApplication + MainWindow
-├── build.spec               # PyInstaller spec (aggressive pruning for small .exe)
-├── build.bat                # One-click build script
-├── requirements.txt         # PyQt6, pyautogui, pygetwindow, pyinstaller
-├── CHANGELOG.md             # Release notes per version
-├── VERSION                  # Current version (semver)
-├── update_helper.py         # Python updater (fallback)
-├── update_helper.vbs        # Silent VBScript updater (primary)
-│
-├── assets/
-│   ├── hero/                # Animated banner images (fleet, station, nebula)
-│   ├── logo.ico             # App icon
-│   └── *.png                # Discord logo, etc.
-│
-└── src/
-    ├── app.py               # MainWindow — frameless window, navigation, resize
-    ├── config.py            # JSON config load/save
-    ├── constants.py         # Colors, ports (26000/26001/26002), enums
-    ├── theme.py             # QSS stylesheet builder + font loader
-    ├── wizard.py            # First-run setup wizard dialog
-    │
-    ├── core/
-    │   ├── launcher.py      # EVE client process management
-    │   ├── server_launcher.py  # Game + Market server lifecycle
-    │   ├── process_tracker.py  # Live process monitoring
-    │   ├── profiles.py      # Junction-based profile creation
-    │   ├── mod_manager.py   # Mod discovery + loader.js toggle
-    │   ├── discovery.py     # Account scanning
-    │   ├── db.py            # SQLite character database
-    │   └── groups.py        # Character grouping
-    │
-    ├── pages/
-    │   ├── home_page.py     # Stats, buttons, changelog, Discord card
-    │   ├── characters_page.py  # Grid, cards, detail panel
-    │   ├── mods_page.py     # Mod list with toggle switches
-    │   └── settings_page.py # All configuration options
-    │
-    ├── widgets/
-    │   ├── character_card.py   # Animated selection card
-    │   ├── detail_panel.py     # ISK, SP, ship, location, sec status
-    │   ├── hero_banner.py      # Cross-fading animated banner
-    │   ├── console_panel.py    # Server output viewer
-    │   ├── toggle_switch.py    # Custom toggle widget
-    │   ├── update_button.py    # Gold update-available button
-    │   ├── status_bar.py       # Clickable status indicators
-    │   ├── title_bar.py        # Frameless window chrome
-    │   ├── nav_panel.py        # Sidebar navigation
-    │   └── skeleton_card.py    # Loading placeholder
-    │
-    ├── workers/
-    │   ├── db_worker.py        # Threaded database ops
-    │   ├── portrait_worker.py  # Async portrait loading
-    │   └── server_worker.py    # Server status polling
-    │
-    └── updater/
-        ├── github.py       # GitHub Releases API client (stdlib only)
-        ├── checker.py      # Version comparison + update notification
-        ├── dialog.py       # "Update available" modal
-        └── installer.py    # Download + spawn VBS updater
+```text
+main.py                     Application entry point
+src/app.py                  Main window and application wiring
+src/config.py               Atomic JSON configuration storage
+src/core/                    Service, client, profile, database, mod, and tool logic
+src/pages/home_page.py       Runtime dashboard
+src/pages/characters_page.py Character grid and detail panel
+src/pages/mods_page.py       Mod discovery and toggles
+src/pages/tools_page.py      Curated external Tool Deck
+src/pages/settings_page.py   Configuration and maintenance controls
+src/widgets/                 Shared PyQt6 controls and panels
+src/workers/                 Background database, portrait, and service work
+src/updater/                 Release checks, progress UI, and staged replacement
+tests/                       Automated regression and layout coverage
 ```
 
----
+The application is built with PyQt6 and packaged for Windows with PyInstaller in onedir mode.
 
-## 🔄 Auto-Update Flow
+</details>
 
-```
-Launch → Check GitHub API → New version found?
-  ├─ No  → Continue normally
-  └─ Yes → Show gold "Update Available" button
-            → Click → Download .exe to %TEMP%
-            → Spawn update_helper.vbs (silent, no console)
-            → Launcher closes
-            → VBS waits 5s, replaces old .exe, launches new one via explorer.exe
-            → Done — zero clicks after the initial button press
-```
+## Project status
 
-The VBScript approach avoids all the pitfalls of Python-based update helpers — no inherited process handles, no stale DLL state, no UAC prompts.
+The launcher is Windows-only. Releases are published as portable ZIP archives on the [Releases page](https://github.com/V0nCleef/evejs-launcher/releases).
 
----
+Bug reports and focused pull requests are welcome. When reporting a service problem, include the launcher version, which service failed, whether it was started inside or outside the launcher, and the relevant console output. Do not include account names, character names, passwords, or tokens in public reports.
 
-## 🤝 Contributing
-
-1. Fork the repo
-2. Create a feature branch (`git checkout -b feature/cool-thing`)
-3. Make your changes
-4. Run `python main.py` to test locally
-5. Submit a PR
-
-Please keep the dark EVE aesthetic and test on Windows 10+.
-
----
-
-## 📝 License
-
-MIT — see [LICENSE](LICENSE).
-
----
-
-## 🔗 Links
-
-- [EveJS Launcher Releases](https://github.com/V0nCleef/evejs-launcher/releases)
-- [EveJS Discord](https://discord.gg/HVTfKeqX3t)
-- [EveJS (the server)](https://github.com/V0nCleef/evejs-launcher)
+EVE Online and EVE are registered trademarks of CCP hf. This project is not affiliated with CCP Games.
