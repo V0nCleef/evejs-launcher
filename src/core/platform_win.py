@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import re
 import subprocess
 from ctypes import wintypes
 from pathlib import Path
@@ -42,6 +43,72 @@ def launch_eve_client(exe_path: Path, env: dict[str, str], cwd: Path) -> subproc
 def get_hidden_process_flags() -> dict[str, int]:
     """Popen kwargs for background server processes (no console window)."""
     return {"creationflags": subprocess.CREATE_NO_WINDOW}
+
+
+_SAFE_TOOL_ARGUMENT = re.compile(r"[A-Za-z0-9_./:=+\-]+\Z")
+_TOOL_WRAPPER_ENV_VAR = "EVEJS_LAUNCHER_TOOL_WRAPPER"
+
+
+def build_tool_batch_command(
+    entrypoint: str | Path,
+    arguments: tuple[str, ...] = (),
+) -> str:
+    """Build the exact ``cmd.exe`` command for a curated tool wrapper.
+
+    ``cmd.exe /s /c`` requires the inner executable path and the complete
+    command string to have distinct quote pairs.  Passing this command as a
+    string avoids Python's Windows argv quoting, which would otherwise escape
+    the wrapper quotes with backslashes that ``cmd.exe`` does not understand.
+    """
+    wrapper = Path(entrypoint)
+    wrapper_text = str(wrapper)
+    if '"' in wrapper_text or "\r" in wrapper_text or "\n" in wrapper_text:
+        raise ValueError(f"Unsupported tool wrapper path: {wrapper}")
+
+    safe_arguments: list[str] = []
+    for argument in arguments:
+        value = str(argument)
+        if not _SAFE_TOOL_ARGUMENT.fullmatch(value):
+            raise ValueError(f"Unsupported tool argument: {value!r}")
+        safe_arguments.append(value)
+
+    # Do not interpolate the path into the command text.  Expanding one dedicated
+    # environment variable keeps literal ``%NAME%`` text in its value from being
+    # expanded again, while /v:off preserves legal exclamation marks in paths.
+    command = f'cmd.exe /d /v:off /s /c ""%{_TOOL_WRAPPER_ENV_VAR}%"'
+    if safe_arguments:
+        command += " " + " ".join(safe_arguments)
+    return command + '"'
+
+
+def launch_tool_wrapper(
+    entrypoint: str | Path,
+    arguments: tuple[str, ...] = (),
+) -> subprocess.Popen:
+    """Launch a reviewed tool ``.bat`` in a visible independent console."""
+    wrapper = Path(entrypoint)
+    if wrapper.suffix.casefold() != ".bat":
+        raise ValueError(f"Tool wrapper must be a .bat file: {wrapper}")
+    if not wrapper.is_file():
+        raise FileNotFoundError(f"Tool wrapper not found: {wrapper}")
+
+    command = build_tool_batch_command(wrapper, arguments)
+    env = os.environ.copy()
+    env[_TOOL_WRAPPER_ENV_VAR] = str(wrapper)
+    try:
+        return subprocess.Popen(
+            command,
+            cwd=str(wrapper.parent),
+            env=env,
+            creationflags=(
+                subprocess.CREATE_NEW_CONSOLE
+                | subprocess.CREATE_NEW_PROCESS_GROUP
+            ),
+        )
+    except OSError as exc:
+        raise RuntimeError(
+            f"Failed to launch tool wrapper '{wrapper.name}': {exc}"
+        ) from exc
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -7,6 +7,7 @@ Callers import from here and never check ``sys.platform`` themselves.
 from __future__ import annotations
 
 from .platform_win import (  # noqa: F401 — re-exported below
+    build_tool_batch_command,
     create_directory_link,
     find_and_focus_eve_window,
     find_eve_window,
@@ -19,6 +20,7 @@ from .platform_win import (  # noqa: F401 — re-exported below
     get_market_binary_name,
     hard_exit,
     launch_eve_client,
+    launch_tool_wrapper,
     open_text_editor,
     remove_directory_link,
     run_updater,
@@ -27,6 +29,7 @@ from .platform_win import (  # noqa: F401 — re-exported below
 
 # Re-export everything so callers do ``from .platform import create_directory_link``.
 __all__ = [
+    "build_tool_batch_command",
     "create_directory_link",
     "find_and_focus_eve_window",
     "find_eve_window",
@@ -39,6 +42,7 @@ __all__ = [
     "get_market_binary_name",
     "hard_exit",
     "launch_eve_client",
+    "launch_tool_wrapper",
     "open_text_editor",
     "remove_directory_link",
     "run_updater",

@@ -67,4 +67,5 @@ class Page(IntEnum):
     HOME = 0
     CHARACTERS = 1
     MODS = 2
-    SETTINGS = 3
+    TOOLS = 3
+    SETTINGS = 4

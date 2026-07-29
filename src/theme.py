@@ -242,6 +242,180 @@ QFrame[class="card"]:hover {{
     border-color: {c['teal_dim']};
 }}
 
+/* ── Tool Deck ────────────────────────────────────────────────────────────── */
+QFrame[class="toolCard"] {{
+    background-color: {c['carbon']};
+    border: 1px solid {c['steel']};
+    border-radius: 8px;
+}}
+QFrame[class="toolCard"]:hover {{
+    border-color: {c['teal_dim']};
+}}
+QFrame[class="toolIconPlate"] {{
+    background-color: {c['deep_space']};
+    border: 1px solid {c['teal_dim']};
+    border-radius: 6px;
+}}
+QFrame[class="toolIconPlate"][accent="data"],
+QFrame[class="toolIconPlate"][accent="market"] {{
+    border-color: {c['gold']};
+}}
+QFrame[class="toolIconPlate"][accent="danger"] {{
+    border-color: {c['red']};
+}}
+QLabel[class="toolIcon"] {{
+    color: {c['teal']};
+    font-family: '{header}';
+    font-size: 13px;
+    font-weight: 700;
+}}
+QLabel[class="toolName"] {{
+    color: {c['white']};
+    font-family: '{header}';
+    font-size: 15px;
+    font-weight: 700;
+}}
+QLabel[class="toolDescription"] {{
+    color: {c['grey']};
+    font-size: 11px;
+}}
+QLabel[class="toolCategoryPill"] {{
+    background-color: {c['deep_space']};
+    border: 1px solid {c['teal_dim']};
+    border-radius: 3px;
+    color: {c['teal']};
+    padding: 2px 6px;
+    font-size: 9px;
+    font-weight: 700;
+}}
+QLabel[class="toolSource"] {{
+    color: {c['grey']};
+    font-family: '{mono}';
+    font-size: 10px;
+}}
+QLabel[class="toolSectionTitle"] {{
+    color: {c['teal']};
+    font-family: '{header}';
+    font-size: 13px;
+    font-weight: 700;
+}}
+QLabel[class="toolSectionCount"],
+QLabel[class="toolAvailableCount"] {{
+    color: {c['grey']};
+    font-size: 11px;
+}}
+QLabel[class="toolAvailability"],
+QLabel[class="toolAvailabilityDot"] {{
+    color: {c['grey']};
+    font-size: 11px;
+}}
+QLabel[class="toolAvailabilityDot"][state="ready"],
+QLabel[class="toolAvailabilityDot"][state="launched"] {{
+    color: {c['green']};
+}}
+QLabel[class="toolAvailabilityDot"][state="missing"] {{
+    color: {c['grey']};
+}}
+QLabel[class="toolAvailabilityDot"][state="error"] {{
+    color: {c['red']};
+}}
+QLabel[class="toolAvailability"][state="launched"] {{
+    color: {c['green']};
+    font-weight: 600;
+}}
+QLabel[class="toolAvailability"][state="error"] {{
+    color: {c['red']};
+    font-weight: 600;
+}}
+QLabel[class="toolRiskBadge"] {{
+    background-color: {c['deep_space']};
+    border: 1px solid {c['steel']};
+    border-radius: 3px;
+    color: {c['grey']};
+    padding: 2px 6px;
+    font-size: 9px;
+    font-weight: 600;
+}}
+QLabel[class="toolRiskBadge"][risk="system"] {{
+    border-color: {c['gold']};
+    color: {c['gold']};
+}}
+QLabel[class="toolRiskBadge"][risk="caution"] {{
+    border-color: {c['gold']};
+    color: {c['gold']};
+}}
+QLabel[class="toolRiskBadge"][risk="destructive"] {{
+    border-color: {c['red']};
+    color: {c['red']};
+}}
+QPushButton[class="toolPrimary"] {{
+    background-color: {c['teal']};
+    border: 1px solid {c['teal']};
+    color: {c['void_black']};
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 700;
+}}
+QPushButton[class="toolPrimary"]:hover {{
+    background-color: {c['teal_dim']};
+}}
+QPushButton[class="toolPrimary"]:focus {{
+    border: 2px solid {c['white']};
+}}
+QPushButton[class="toolSecondary"] {{
+    background-color: transparent;
+    border: 1px solid {c['teal_dim']};
+    color: {c['teal']};
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 600;
+}}
+QPushButton[class="toolSecondary"]:hover {{
+    background-color: {c['steel']};
+    border-color: {c['teal']};
+}}
+QPushButton[class="toolSecondary"]:focus {{
+    border: 2px solid {c['teal']};
+}}
+QPushButton[class="toolDanger"] {{
+    background-color: {c['red']};
+    border: 1px solid {c['red']};
+    color: {c['void_black']};
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 700;
+}}
+QPushButton[class="toolDanger"]:hover {{
+    background-color: {c['red']};
+    color: {c['white']};
+}}
+QPushButton[class="toolDanger"]:focus {{
+    border: 2px solid {c['white']};
+}}
+QPushButton[class="toolPrimary"]:disabled,
+QPushButton[class="toolSecondary"]:disabled,
+QPushButton[class="toolDanger"]:disabled {{
+    background-color: {c['deep_space']};
+    border-color: {c['carbon']};
+    color: {c['grey']};
+}}
+QFrame[class="toolEmptyState"] {{
+    background-color: {c['deep_space']};
+    border: 1px dashed {c['steel']};
+    border-radius: 8px;
+}}
+QLabel[class="toolEmptyIcon"] {{
+    color: {c['teal_dim']};
+    font-family: '{header}';
+    font-size: 32px;
+}}
+QLabel[class="toolEmptyTitle"] {{
+    color: {c['white']};
+    font-family: '{header}';
+    font-size: 16px;
+    font-weight: 700;
+}}
+
 /* ── Line Edit ────────────────────────────────────────────────────────────── */
 QLineEdit {{
     background-color: {c['deep_space']};
@@ -257,6 +431,36 @@ QLineEdit:focus {{
 QLineEdit:disabled {{
     background-color: {c['carbon']};
     color: {c['grey']};
+}}
+
+/* ── Combo Box ────────────────────────────────────────────────────────────── */
+QComboBox {{
+    background-color: {c['deep_space']};
+    border: 1px solid {c['steel']};
+    border-radius: 4px;
+    color: {c['white']};
+    padding: 6px 28px 6px 10px;
+}}
+QComboBox:hover {{
+    border-color: {c['teal_dim']};
+}}
+QComboBox:focus {{
+    border-color: {c['teal']};
+}}
+QComboBox:disabled {{
+    background-color: {c['carbon']};
+    color: {c['grey']};
+}}
+QComboBox::drop-down {{
+    border: none;
+    width: 24px;
+}}
+QComboBox QAbstractItemView {{
+    background-color: {c['deep_space']};
+    border: 1px solid {c['steel']};
+    color: {c['white']};
+    selection-background-color: {c['teal_dim']};
+    selection-color: {c['void_black']};
 }}
 
 /* ── Scroll Area ──────────────────────────────────────────────────────────── */

@@ -2,7 +2,7 @@
 
 Composes the frameless top-level window:
     TitleBar (top)
-    NavPanel | QStackedWidget (4 pages; CharactersPage owns its DetailPanel)
+    NavPanel | QStackedWidget (5 pages; CharactersPage owns its DetailPanel)
     StatusBar (bottom)
     ConsolePanel (overlay child of central widget)
 
@@ -47,7 +47,7 @@ from .core.client_launch_queue import ClientLaunchQueue
 from .core.dashboard import visible_account_count, visible_character_rows
 from .core.db import Account, Character, clear_solar_system_name_cache, load_accounts
 from .core.launcher import launch_client
-from .core.platform import hard_exit
+from .core.platform import hard_exit, launch_tool_wrapper
 from .core.process_tracker import ProcessTracker
 from .core.profiles import PROFILES_ROOT, create_profile, prefill_username, profile_exists
 from .core.server_launcher import (
@@ -69,10 +69,12 @@ from .core.service_status import (
     ServiceState,
     derive_service_state,
 )
+from .core.tool_catalog import ResolvedTool, ToolAction, resolve_tools
 from .pages.characters_page import CharactersPage
 from .pages.home_page import HomePage
 from .pages.mods_page import ModsPage
 from .pages.settings_page import SettingsPage
+from .pages.tools_page import ToolsPage
 from .utils.cache import PortraitCache
 from .utils.logger import setup_logger
 from .widgets.console_panel import ConsolePanel
@@ -210,6 +212,8 @@ class MainWindow(QMainWindow):
         self._characters_page.launch_character.connect(self._on_character_launch)
         self._characters_page.hide_character.connect(self._on_hide_character)
         self._mods_page.apply_restart_clicked.connect(self._restart_server)
+        self._tools_page.open_settings_requested.connect(self._open_settings_page)
+        self._tools_page.launch_requested.connect(self._on_tool_launch_requested)
 
         self._status_bar.console_toggled.connect(self._on_console_toggled)
         self._home_page.console_requested.connect(self._on_console_toggled)
@@ -276,11 +280,13 @@ class MainWindow(QMainWindow):
         self._home_page = HomePage()
         self._characters_page = CharactersPage()
         self._mods_page = ModsPage()
+        self._tools_page = ToolsPage(str(self._cfg.get("evejs_root", "")))
         self._settings_page = SettingsPage()
         self._stack.addWidget(self._home_page)        # Page.HOME = 0
         self._stack.addWidget(self._characters_page)  # Page.CHARACTERS = 1
         self._stack.addWidget(self._mods_page)        # Page.MODS = 2
-        self._stack.addWidget(self._settings_page)    # Page.SETTINGS = 3
+        self._stack.addWidget(self._tools_page)       # Page.TOOLS = 3
+        self._stack.addWidget(self._settings_page)    # Page.SETTINGS = 4
         content.addWidget(self._stack, 1)
 
         root.addLayout(content, 1)
@@ -315,6 +321,8 @@ class MainWindow(QMainWindow):
         # startup) show up in the Hidden Accounts list.
         if index == int(Page.SETTINGS):
             self._settings_page.load_settings()
+        elif index == int(Page.TOOLS):
+            self._tools_page.refresh_tools(str(self._cfg.get("evejs_root", "")))
 
     def _apply_runtime_settings(self) -> None:
         """Apply persisted Home animation preferences without restarting the app."""
@@ -325,6 +333,112 @@ class MainWindow(QMainWindow):
         hero = self._home_page.hero
         hero.set_rotation_interval(interval_sec)
         hero.set_animations_enabled(bool(self._cfg.get("animations_enabled", True)))
+
+    def _open_settings_page(self) -> None:
+        """Route page-owned setup actions through the central navigation state."""
+        self._switch_page(int(Page.SETTINGS))
+
+    def _on_tool_launch_requested(
+        self,
+        tool: ResolvedTool,
+        action: ToolAction,
+    ) -> None:
+        """Validate and spawn one tool action without taking process ownership."""
+        tool_id = tool.definition.id
+        action_id = action.id
+        current_tools = resolve_tools(str(self._cfg.get("evejs_root", "")))
+        canonical_tool = next(
+            (
+                resolved
+                for resolved in current_tools
+                if resolved.definition.id == tool_id
+            ),
+            None,
+        )
+        canonical_action = (
+            next(
+                (
+                    candidate
+                    for candidate in canonical_tool.definition.actions
+                    if candidate.id == action_id
+                ),
+                None,
+            )
+            if canonical_tool is not None
+            else None
+        )
+        if canonical_tool is None or canonical_action is None:
+            message = "This tool action is not in the reviewed launcher catalog"
+            log.warning("Unsupported tool launch request: %s/%s", tool_id, action_id)
+            self._tools_page.set_launch_result(
+                tool_id,
+                action_id,
+                success=False,
+                message=message,
+            )
+            QMessageBox.warning(self, "Unsupported Tool Action", message)
+            return
+
+        tool = canonical_tool
+        action = canonical_action
+        entrypoint = tool.absolute_entrypoint
+        if not tool.available or entrypoint is None:
+            message = tool.unavailable_reason or "Tool wrapper is unavailable"
+            log.warning("Tool launch rejected for %s: %s", tool.definition.id, message)
+            self._tools_page.set_launch_result(
+                tool.definition.id,
+                action.id,
+                success=False,
+                message=message,
+            )
+            QMessageBox.warning(self, "Tool Unavailable", message)
+            return
+
+        if action.confirmation_title:
+            result = QMessageBox.warning(
+                self,
+                action.confirmation_title,
+                action.confirmation_body,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if result != QMessageBox.StandardButton.Yes:
+                log.info(
+                    "Tool launch cancelled for %s action %s",
+                    tool.definition.id,
+                    action.id,
+                )
+                return
+
+        try:
+            launch_tool_wrapper(entrypoint, action.arguments)
+        except (OSError, RuntimeError, ValueError) as exc:
+            message = str(exc)
+            log.error("Tool launch failed for %s: %s", tool.definition.id, message)
+            self._tools_page.set_launch_result(
+                tool.definition.id,
+                action.id,
+                success=False,
+                message=message,
+            )
+            QMessageBox.critical(
+                self,
+                "Tool Launch Failed",
+                f"{tool.definition.name} could not be launched.\n\n{message}",
+            )
+            return
+
+        log.info(
+            "Launched tool %s via %s",
+            tool.definition.id,
+            tool.definition.relative_entrypoint,
+        )
+        self._tools_page.set_launch_result(
+            tool.definition.id,
+            action.id,
+            success=True,
+            message="Tool wrapper launched",
+        )
 
     # ── Server control ─────────────────────────────────────────────────
 
@@ -1727,10 +1841,12 @@ class MainWindow(QMainWindow):
         """Refresh in-memory config and character grid after settings save."""
         previous_root = str(self._cfg.get("evejs_root", ""))
         self._cfg.update(cfg)
-        if str(self._cfg.get("evejs_root", "")) != previous_root:
+        current_root = str(self._cfg.get("evejs_root", ""))
+        if current_root != previous_root:
             clear_solar_system_name_cache()
             PortraitCache.clear()
             self._mods_page.refresh_mods()
+            self._tools_page.set_evejs_root(current_root)
         self._apply_runtime_settings()
         self._home_page.set_server_mode(self._effective_server_mode_label())
         self._refresh_characters()

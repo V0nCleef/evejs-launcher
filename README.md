@@ -58,10 +58,17 @@ The UI is a dark, EVE Online-inspired theme with teal accents, animated hero ban
 - **Toggle switches** enable/disable mods with a click (renames `loader.js`)
 - Server restart indicator reminds you changes take effect on next boot
 
+### 🧰 Tool Deck
+- Curated launch cards for 11 reviewed utilities from the configured EveJS `tools/` folder
+- Search, semantic category filters, availability status, prerequisites, and one-click refresh
+- Interactive wrappers open in their own visible Windows consoles and remain independent of launcher shutdown
+- Destructive database reset requires confirmation, with a separate non-destructive **Reset Preview** action
+- Only reviewed top-level wrappers are exposed; nested implementation scripts and arbitrary custom commands are excluded
+
 ### 🪟 UI & UX
 - **Frameless window** with custom title bar (minimize, maximize, close)
 - **Animated hero banner** — cross-fading fleet/station/nebula art with Ken Burns zoom
-- **Page transitions** — smooth fade between Home, Characters, Mods, Settings
+- **Page transitions** — smooth fade between Home, Characters, Mods, Tools, and Settings
 - **Card hover effects** — teal glow + lift
 - **EVE-style scanline overlay** on the home page
 - Animation toggle in Settings for a classic static look

@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
 )
 
-from src.constants import COLORS, CONTROL_HEIGHTS
+from src.constants import COLORS, CONTROL_HEIGHTS, Page
 
 
 def logo_asset_path(module_file: str | Path | None = None) -> Path:
@@ -178,16 +178,18 @@ class NavPanel(QFrame):
         self.btn_home = NavButton("Home")
         self.btn_characters = NavButton("Characters")
         self.btn_mods = NavButton("Mods")
+        self.btn_tools = NavButton("Tools")
         self.btn_settings = NavButton("Settings")
 
         nav_buttons = [
-            (self.btn_home, 0),
-            (self.btn_characters, 1),
-            (self.btn_mods, 2),
-            (self.btn_settings, 3),
+            (self.btn_home, Page.HOME),
+            (self.btn_characters, Page.CHARACTERS),
+            (self.btn_mods, Page.MODS),
+            (self.btn_tools, Page.TOOLS),
+            (self.btn_settings, Page.SETTINGS),
         ]
         for btn, idx in nav_buttons:
-            self.nav_group.addButton(btn, idx)
+            self.nav_group.addButton(btn, int(idx))
             layout.addWidget(btn)
 
         self.nav_group.idClicked.connect(self.page_changed.emit)

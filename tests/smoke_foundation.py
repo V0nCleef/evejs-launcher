@@ -18,7 +18,7 @@ app = QApplication([])
 # constants
 assert COLORS["teal"] == "#00C8E0"
 assert Status.READY.value == "ready"
-assert Page.HOME == 0 and Page.SETTINGS == 3
+assert Page.HOME == 0 and Page.TOOLS == 3 and Page.SETTINGS == 4
 assert Ports.GAME_TCP == 26000
 assert Ports.GAME_MARKET_PROXY == 26001
 assert Ports.CLIENT_HTTP_PROXY == 26002
@@ -35,6 +35,7 @@ for token in ["QPushButton", "QLineEdit:focus", "QScrollBar::handle:vertical",
               "QCheckBox::indicator", "QGroupBox::title", "QTabBar::tab",
               "QToolTip", "QMenu::item", "QProgressBar::chunk",
               "QFrame#navPanel", "QFrame#detailPanel", "QFrame#statusBar",
+              'QFrame[class="toolCard"]',
               COLORS["teal"], COLORS["void_black"]]:
     assert token in qss, f"missing QSS token: {token}"
 print(f"theme OK      | {len(qss)} chars, all tokens present")

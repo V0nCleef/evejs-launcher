@@ -2,6 +2,27 @@
 
 ## Changelog
 
+## v1.0.34 — 2026-07-29
+
+### Added
+- **Curated Tool Deck** — a searchable Tools page groups 11 reviewed EveJS utilities into Client & Setup, Configuration, Data & Content, and Market sections, with availability, prerequisites, source folders, and responsive cards.
+- **Safe external tool launching** — supported wrappers run from the configured EveJS installation in independent visible consoles with explicit working directories. The launcher does not recursively expose arbitrary or internal scripts.
+- **Guarded maintenance actions** — database reset includes a non-destructive preview mode and requires explicit confirmation before the real reset. System-changing setup actions also require confirmation.
+
+### Changed
+- **Root-aware refresh** — Tools refreshes when opened and when the configured EveJS root changes, while missing roots, folders, and wrappers now have deliberate explanatory states.
+
+### Fixed
+- **Server Config Editor prerequisite** — its Tool Deck card now states that Docker Desktop must be running for containerized EveJS installations instead of presenting the utility without that requirement.
+- **Clean Tool Deck tab transitions** — returning to Tools now reuses unchanged cards instead of rebuilding them, eliminating transient mini-windows and card pop-in while still rescanning wrapper availability.
+- **CMD-sensitive tool paths** — wrapper paths are passed through a dedicated environment variable with delayed expansion disabled, preserving legal `%`, `!`, `&`, `^`, parenthesis, and space characters without interpolating them into command text.
+- **Per-tool path resolution failures** — inaccessible reparse points and resolution loops now mark only the affected tool unavailable instead of breaking the entire Tool Deck refresh.
+- **Central launch guardrails** — the application re-resolves the current curated wrapper and action, restores catalog-owned arguments, and enforces destructive/system confirmation at the final spawn boundary.
+
+### Verification
+- **210 automated tests passed**, including focused Tool Deck safety and integration coverage, the Foundation smoke suite, and layout checks at 100%, 125%, and 150% scaling.
+- Source-mode and isolated packaged onedir smoke checks confirmed the Tool Deck resolves all 11 wrappers from the configured external EveJS installation without bundling the tools tree.
+
 ## v1.0.33 — 2026-07-28
 
 ### Fixed

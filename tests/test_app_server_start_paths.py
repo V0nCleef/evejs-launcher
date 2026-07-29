@@ -47,6 +47,11 @@ def bare_window(qapp: QApplication) -> MainWindow:
         def set_server_mode(_mode: str) -> None:
             return None
 
+    class FakeToolsPage:
+        @staticmethod
+        def set_evejs_root(_root: str) -> None:
+            return None
+
     window = MainWindow.__new__(MainWindow)
     QMainWindow.__init__(window)
     window._cfg = _minimal_window_config()
@@ -59,6 +64,7 @@ def bare_window(qapp: QApplication) -> MainWindow:
     window._update_install_worker = None
     window._close_in_progress = False
     window._home_page = FakeHomePage()
+    window._tools_page = FakeToolsPage()
     yield window
     window.deleteLater()
 
