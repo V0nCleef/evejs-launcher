@@ -22,10 +22,12 @@ from PyQt6.QtWidgets import (
 from src.core.tool_catalog import (
     TOOL_CATEGORIES,
     ResolvedTool,
-    ToolAction,
+    ResolvedToolAction,
+    ToolDispatchKind,
     filter_tools,
     resolve_tools,
 )
+from src.core.service_status import DockerControlPolicy, RuntimeBackend
 
 
 _ROOT_STATE_REASONS = {
@@ -53,7 +55,7 @@ class ToolCard(QFrame):
         # event and can reflow before a hidden horizontal overflow develops.
         self.setMinimumWidth(240)
         self.setMinimumHeight(214)
-        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
 
         self._feedback_action_id = ""
         self._feedback_timer = QTimer(self)
@@ -129,11 +131,18 @@ class ToolCard(QFrame):
         state_row.addWidget(self.risk_label)
         root.addLayout(state_row)
 
-        action_row = QHBoxLayout()
-        action_row.setSpacing(8)
-        action_row.addStretch()
+        many_actions = len(tool.actions) > 2
+        action_layout: QHBoxLayout | QGridLayout
+        if many_actions:
+            action_layout = QGridLayout()
+            action_layout.setHorizontalSpacing(8)
+            action_layout.setVerticalSpacing(6)
+        else:
+            action_layout = QHBoxLayout()
+            action_layout.setSpacing(8)
+            action_layout.addStretch()
         self.action_buttons: dict[str, QPushButton] = {}
-        for action in definition.actions:
+        for index, action in enumerate(tool.actions):
             # Parent before asking Qt for a native size hint. A parentless
             # QPushButton can briefly materialize as a top-level Windows
             # window while a visible Tool Deck is being rebuilt.
@@ -141,15 +150,23 @@ class ToolCard(QFrame):
             button.setObjectName(f"toolAction-{definition.id}-{action.id}")
             button.setProperty("class", self._action_class(action))
             button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.setEnabled(tool.available)
+            button.setEnabled(action.available)
             button.setAccessibleName(f"{action.label} {definition.name}")
             button.setAccessibleDescription(
-                f"{action.label} via {definition.relative_entrypoint}"
+                (
+                    f"{action.label} via the selected Docker Compose target"
+                    if action.dispatch_kind is ToolDispatchKind.DOCKER_COMPOSE
+                    else f"{action.label} via {definition.relative_entrypoint}"
+                )
             )
             button.setToolTip(
-                f"{action.label}: {definition.relative_entrypoint}"
-                if tool.available
-                else tool.unavailable_reason
+                (
+                    f"{action.label}: selected Docker Compose target"
+                    if action.dispatch_kind is ToolDispatchKind.DOCKER_COMPOSE
+                    else f"{action.label}: {definition.relative_entrypoint}"
+                )
+                if action.available
+                else action.unavailable_reason
             )
             button.clicked.connect(
                 lambda _checked=False, selected=action: self.action_requested.emit(
@@ -157,10 +174,20 @@ class ToolCard(QFrame):
                     selected,
                 )
             )
-            button.setMinimumWidth(button.sizeHint().width())
+            if many_actions:
+                button.setMinimumWidth(0)
+                button.setSizePolicy(
+                    QSizePolicy.Policy.Ignored,
+                    QSizePolicy.Policy.Fixed,
+                )
+            else:
+                button.setMinimumWidth(button.sizeHint().width())
             self.action_buttons[action.id] = button
-            action_row.addWidget(button)
-        root.addLayout(action_row)
+            if many_actions:
+                action_layout.addWidget(button, index, 0)
+            else:
+                action_layout.addWidget(button)
+        root.addLayout(action_layout)
 
         self._restore_ready_state()
 
@@ -173,7 +200,7 @@ class ToolCard(QFrame):
         return "caution"
 
     @staticmethod
-    def _action_class(action: ToolAction) -> str:
+    def _action_class(action: ResolvedToolAction) -> str:
         if action.risk_level == "destructive":
             return "toolDanger"
         if action.id == "preview":
@@ -186,20 +213,24 @@ class ToolCard(QFrame):
         *,
         success: bool,
         message: str = "",
+        completed: bool = False,
     ) -> None:
-        """Show brief truthful spawn feedback without claiming process ownership."""
+        """Show truthful wrapper-spawn or managed-operation feedback."""
         self._feedback_timer.stop()
         self._feedback_action_id = action_id
         button = self.action_buttons.get(action_id)
         if success:
-            self.status_label.setText("Launched")
+            success_text = "Completed" if completed else "Launched"
+            self.status_label.setText(success_text)
             self.status_label.setProperty("state", "launched")
             self.status_dot.setProperty("state", "launched")
             self.status_label.setToolTip(message or "Tool wrapper launched")
             if button is not None:
-                button.setText("Launched")
+                button.setText(success_text)
         else:
-            self.status_label.setText("Launch failed")
+            self.status_label.setText(
+                "Operation failed" if completed else "Launch failed"
+            )
             self.status_label.setProperty("state", "error")
             self.status_dot.setProperty("state", "error")
             self.status_label.setToolTip(message or "Tool wrapper could not be launched")
@@ -217,11 +248,11 @@ class ToolCard(QFrame):
         self.status_dot.setProperty("state", state)
         self.status_label.setToolTip(f"{status}\n{definition.relative_entrypoint}")
 
-        for action in definition.actions:
+        for action in self.tool.actions:
             button = self.action_buttons.get(action.id)
             if button is not None:
                 button.setText(action.label)
-                button.setEnabled(self.tool.available)
+                button.setEnabled(action.available)
         self._feedback_action_id = ""
         self._refresh_dynamic_style()
 
@@ -295,9 +326,16 @@ class ToolsPage(QWidget):
         self,
         evejs_root: str | Path = "",
         parent: QWidget | None = None,
+        *,
+        backend: RuntimeBackend = RuntimeBackend.NATIVE,
+        docker_policy: DockerControlPolicy = DockerControlPolicy.CONNECT_ONLY,
+        compose_file: str | Path | None = None,
     ) -> None:
         super().__init__(parent)
         self._evejs_root = str(evejs_root or "")
+        self._runtime_backend = backend
+        self._docker_policy = docker_policy
+        self._compose_file = str(compose_file or "")
         self._resolved_tools: tuple[ResolvedTool, ...] = ()
         self._cards: dict[str, ToolCard] = {}
         self._sections: dict[str, ToolCategorySection] = {}
@@ -435,7 +473,12 @@ class ToolsPage(QWidget):
         """Re-resolve availability without recreating the page itself."""
         if evejs_root is not None:
             self._evejs_root = str(evejs_root or "")
-        resolved_tools = resolve_tools(self._evejs_root)
+        resolved_tools = resolve_tools(
+            self._evejs_root,
+            backend=self._runtime_backend,
+            docker_policy=self._docker_policy,
+            compose_file=self._compose_file,
+        )
         available = sum(tool.available for tool in resolved_tools)
         self.available_count_label.setText(f"{available} available")
         if resolved_tools == self._resolved_tools:
@@ -446,6 +489,23 @@ class ToolsPage(QWidget):
     def set_evejs_root(self, evejs_root: str | Path) -> None:
         """Update the configured root and immediately refresh availability."""
         self.refresh_tools(evejs_root)
+
+    def set_runtime_context(
+        self,
+        backend: RuntimeBackend,
+        docker_policy: DockerControlPolicy,
+        compose_file: str | Path | None = None,
+    ) -> None:
+        """Resolve cards and actions for the selected runtime capability."""
+        context = (backend, docker_policy, str(compose_file or ""))
+        if context == (
+            self._runtime_backend,
+            self._docker_policy,
+            self._compose_file,
+        ):
+            return
+        self._runtime_backend, self._docker_policy, self._compose_file = context
+        self.refresh_tools()
 
     def _render_tools(self, *_args: object) -> None:
         self._clear_sections()
@@ -525,10 +585,37 @@ class ToolsPage(QWidget):
         self.no_results_label.hide()
 
     # ── Actions and feedback ──────────────────────────────────────────────────
-    def _on_action_requested(self, tool: ResolvedTool, action: ToolAction) -> None:
-        if not tool.available or tool.absolute_entrypoint is None:
+    def _on_action_requested(
+        self,
+        tool: ResolvedTool,
+        action: ResolvedToolAction,
+    ) -> None:
+        current_tool = next(
+            (
+                candidate
+                for candidate in self._resolved_tools
+                if candidate.definition.id == tool.definition.id
+            ),
+            None,
+        )
+        if current_tool is None or current_tool != tool:
             return
-        self.launch_requested.emit(tool, action)
+        canonical = next(
+            (
+                candidate
+                for candidate in current_tool.actions
+                if candidate.id == action.id
+            ),
+            None,
+        )
+        if (
+            canonical is None
+            or canonical != action
+            or not canonical.available
+            or canonical.dispatch_kind is ToolDispatchKind.UNAVAILABLE
+        ):
+            return
+        self.launch_requested.emit(current_tool, canonical)
 
     def set_launch_result(
         self,
@@ -537,11 +624,17 @@ class ToolsPage(QWidget):
         *,
         success: bool,
         message: str = "",
+        completed: bool = False,
     ) -> None:
-        """Apply a spawn result to a visible card as brief inline feedback."""
+        """Apply a reviewed action result to a visible card."""
         card = self._cards.get(tool_id)
         if card is not None:
-            card.set_launch_result(action_id, success=success, message=message)
+            card.set_launch_result(
+                action_id,
+                success=success,
+                message=message,
+                completed=completed,
+            )
 
     # ── Testable presentation state ───────────────────────────────────────────
     def card_for(self, tool_id: str) -> ToolCard:

@@ -2,16 +2,29 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import time
 
 import pytest
-from PyQt6.QtTest import QTest
+from PyQt6.QtTest import QSignalSpy, QTest
 from PyQt6.QtWidgets import QApplication
 
 from src import app as app_module
 from src import config
 from src.app import MainWindow
-from src.core.client_launch_queue import ClientLaunchQueue
+from src.core.client_launch_queue import AsyncClientLaunchQueue, ClientLaunchQueue
 from src.core.db import Account, Character
+from src.core.launcher import ClientLaunchContext
+
+
+def _wait_for_data(qapp: QApplication, window: MainWindow) -> None:
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        qapp.processEvents()
+        if not window._data_load_active():
+            qapp.processEvents()
+            return
+        QTest.qWait(5)
+    assert not window._data_load_active()
 
 
 def test_queue_launches_items_in_order_with_qt_staggers(
@@ -31,6 +44,7 @@ def test_queue_launches_items_in_order_with_qt_staggers(
     queue.finished.connect(lambda attempted, succeeded, cancelled: finished.append(
         (attempted, succeeded, cancelled)
     ))
+    completion = QSignalSpy(queue.finished)
 
     queue.start()
 
@@ -38,7 +52,7 @@ def test_queue_launches_items_in_order_with_qt_staggers(
     assert progress == [(1, 3, 1)]
     assert queue.is_active is True
 
-    QTest.qWait(80)
+    assert completion.wait(500)
 
     assert launched == ["first", "second", "third"]
     assert progress == [(1, 3, 1), (2, 3, 2), (3, 3, 3)]
@@ -93,6 +107,70 @@ def test_queue_continues_after_one_launch_callback_reports_failure(
 
     assert attempted == ["first", "second", "third"]
     assert finished == [(3, 2, False)]
+
+
+def test_async_queue_waits_for_completion_before_starting_next_item(
+    qapp: QApplication,
+) -> None:
+    started: list[str] = []
+    progress: list[tuple[int, int, int]] = []
+    queue = AsyncClientLaunchQueue(
+        ["first", "second"],
+        lambda item: started.append(item) is None,
+        stagger_ms=0,
+    )
+    queue.progress.connect(
+        lambda attempted, total, succeeded: progress.append(
+            (attempted, total, succeeded)
+        )
+    )
+
+    queue.start()
+    QTest.qWait(20)
+    assert started == ["first"]
+    assert progress == []
+
+    queue.item_finished(True)
+    QTest.qWait(20)
+    assert started == ["first", "second"]
+    assert progress == [(1, 2, 1)]
+
+    queue.item_finished(False)
+    QTest.qWait(20)
+    assert progress == [(1, 2, 1), (2, 2, 1)]
+    assert queue.is_active is False
+
+
+def test_async_queue_cancellation_waits_for_in_flight_item_and_skips_future_items(
+    qapp: QApplication,
+) -> None:
+    started: list[str] = []
+    finished: list[tuple[int, int, bool]] = []
+    queue = AsyncClientLaunchQueue(
+        ["first", "second"],
+        lambda item: started.append(item) is None,
+        stagger_ms=0,
+    )
+    queue.finished.connect(
+        lambda attempted, succeeded, cancelled: finished.append(
+            (attempted, succeeded, cancelled)
+        )
+    )
+
+    queue.start()
+    queue.cancel()
+    QTest.qWait(20)
+
+    assert started == ["first"]
+    assert finished == []
+    assert queue.is_active is True
+
+    queue.item_finished(True)
+    QTest.qWait(20)
+
+    assert started == ["first"]
+    assert finished == [(1, 1, True)]
+    assert queue.is_active is False
 
 
 def test_launch_all_uses_shared_queue_and_cancellation_preserves_started_clients(
@@ -154,15 +232,19 @@ def test_launch_all_uses_shared_queue_and_cancellation_preserves_started_clients
     window._status_timer.stop()
     window._prune_timer.stop()
     try:
+        _wait_for_data(qapp, window)
         ready_callbacks: list[object] = []
         window._ensure_server_if_needed = (
             lambda on_ready: ready_callbacks.append(on_ready) or True
         )
         window._refresh_characters = lambda: None
         window._update_status_bar = lambda: None
-        shared_launches: list[tuple[str, str]] = []
-        window._launch_account = lambda username, character: (
-            shared_launches.append((username, character)) or True
+        shared_launches: list[tuple[str, str, object]] = []
+        window._start_client_launch = lambda username, character, **kwargs: (
+            shared_launches.append(
+                (username, character, kwargs.get("launch_context"))
+            )
+            or True
         )
 
         window._launch_all()
@@ -172,13 +254,19 @@ def test_launch_all_uses_shared_queue_and_cancellation_preserves_started_clients
         callback = ready_callbacks[0]
         assert callable(callback)
         callback()
-        assert shared_launches == [("account-a", "Pilot One")]
+        assert len(shared_launches) == 1
+        assert shared_launches[0][:2] == ("account-a", "Pilot One")
+        assert isinstance(shared_launches[0][2], ClientLaunchContext)
 
         window._cancel_launch_queue()
+        assert window._launch_queue is not None
+        window._launch_queue.item_finished(True)
         QTest.qWait(25)
 
-        assert shared_launches == [("account-a", "Pilot One")]
+        assert len(shared_launches) == 1
         assert window._home_page.btn_launch_all.text() == "Launch All"
         assert load_calls == ["C:/Games/EveJS"]
     finally:
+        window.close()
+        _wait_for_data(qapp, window)
         window.deleteLater()

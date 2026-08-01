@@ -11,6 +11,7 @@ Wires together nav, server, character launching, and process tracking.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass, replace
 import subprocess
 import sys
 import threading
@@ -43,13 +44,25 @@ from PyQt6.QtWidgets import (
 
 from . import config
 from .constants import APP_TITLE, Page, Ports
-from .core.client_launch_queue import ClientLaunchQueue
+from .core.client_launch_queue import AsyncClientLaunchQueue
 from .core.dashboard import visible_account_count, visible_character_rows
-from .core.db import Account, Character, clear_solar_system_name_cache, load_accounts
-from .core.launcher import launch_client
+from .core.db import (
+    Account,
+    Character,
+    clear_solar_system_name_cache,
+    get_character_detail,
+    load_accounts,
+)
+from .core.launcher import ClientLaunchContext, launch_client
 from .core.platform import hard_exit, launch_tool_wrapper
 from .core.process_tracker import ProcessTracker
-from .core.profiles import PROFILES_ROOT, create_profile, prefill_username, profile_exists
+from .core.profiles import (
+    PROFILES_ROOT,
+    configure_profile_game_endpoint,
+    create_profile,
+    prefill_username,
+    profile_exists,
+)
 from .core.server_launcher import (
     get_server_console_log,
     get_market_console_log,
@@ -65,11 +78,45 @@ from .core.server_selection import (
     mode_for_script,
 )
 from .core.service_status import (
+    DockerControlPolicy,
+    RuntimeBackend,
     RuntimeSnapshot,
     ServiceState,
     derive_service_state,
 )
-from .core.tool_catalog import ResolvedTool, ToolAction, resolve_tools
+from .core.runtime.docker_cli import DockerCommandRunner
+from .core.runtime.docker_compose import ComposeInspector, ComposeTarget
+from .core.runtime.docker_controller import DockerLifecycleAction, ManagedComposeController
+from .core.runtime.docker_setup import (
+    DockerPreflightRequest,
+    DockerSetupDraft,
+    build_compose_target,
+)
+from .core.runtime.docker_tools import (
+    DockerToolAction,
+    DockerToolResult,
+    ManagedDockerToolController,
+)
+from .core.runtime.docker_mods import (
+    DockerModBridgeError,
+    apply_docker_mod_override,
+    attach_docker_mod_override,
+)
+from .core.runtime.data import (
+    RuntimeDataSelection,
+    docker_settings_identity,
+    inspect_docker_data_source,
+    native_data_selection,
+)
+from .core.runtime.portraits import PortraitTarget
+from .core.tool_catalog import (
+    ResolvedTool,
+    ResolvedToolAction,
+    ToolAction,
+    ToolDispatchKind,
+    resolve_tools,
+)
+
 from .pages.characters_page import CharactersPage
 from .pages.home_page import HomePage
 from .pages.mods_page import ModsPage
@@ -81,6 +128,25 @@ from .widgets.console_panel import ConsolePanel
 from .widgets.nav_panel import NavPanel
 from .widgets.status_bar import StatusBar
 from .widgets.title_bar import TitleBar
+from .workers.docker_lifecycle_worker import DockerLifecycleWorker
+from .workers.docker_log_worker import DockerLogWorker
+from .workers.docker_monitor import DockerMonitor, DockerObservation
+from .workers.docker_preflight_worker import DockerPreflightWorker
+from .workers.docker_tool_worker import DockerToolWorker
+from .workers.db_worker import (
+    AccountLoadResult,
+    AccountLoader,
+    CharacterDetailLoader,
+    CharacterDetailResult,
+    DataLoadFailure,
+)
+from .workers.client_launch_worker import (
+    ClientLaunchFailure,
+    ClientLaunchRequest,
+    ClientLaunchResult,
+    ClientLaunchWorker,
+    LaunchedProcess,
+)
 from .workers.server_worker import (
     ServiceMonitor,
     ServiceProbe,
@@ -95,6 +161,18 @@ from .updater.installer import UpdateInstallWorker
 from .updater.progress_dialog import UpdateProgressDialog
 
 log = setup_logger(__name__)
+
+
+@dataclass(frozen=True)
+class _DataRequestToken:
+    """Private in-process attribution for one asynchronous data request."""
+
+    sequence: int
+    settings_generation: int
+    settings_identity: tuple[object, ...]
+    target_identity: str | None = None
+    username: str | None = None
+    character_id: int | None = None
 
 
 def _restore_eve_window(window_title: str = "EVE", timeout: int = 30) -> None:
@@ -114,6 +192,32 @@ def _restore_eve_window(window_title: str = "EVE", timeout: int = 30) -> None:
     log.debug("EVE window '%s' not detected within %ss", window_title, timeout)
 
 
+def _perform_client_launch(request: ClientLaunchRequest) -> LaunchedProcess:
+    """Prepare one profile and create its EVE process outside the GUI thread."""
+    if not profile_exists(request.username):
+        create_profile(request.username, request.client_path)
+
+    profile_path = request.profiles_root / request.username / "tq"
+    if not profile_path.exists():
+        raise FileNotFoundError("Profile junction not found.")
+
+    # Refresh the account and endpoint settings immediately before every spawn.
+    prefill_username(request.username)
+    configure_profile_game_endpoint(
+        request.username,
+        profile_path,
+        host=request.launch_context.game_host,
+        port=request.launch_context.game_port,
+    )
+    return launch_client(
+        evejs_root=request.evejs_root,
+        profile_tq_path=profile_path,
+        proxy_url=request.launch_context.proxy_url,
+        client_path=request.client_path,
+        launch_context=request.launch_context,
+    )
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # MainWindow
 # ═════════════════════════════════════════════════════════════════════════════
@@ -123,6 +227,7 @@ class MainWindow(QMainWindow):
     """Top-level frameless window hosting the entire launcher UI."""
 
     _service_probe_requested = pyqtSignal()
+    _docker_observe_requested = pyqtSignal()
     _service_monitor_stop_requested = pyqtSignal()
 
     _MARGIN = 8  # px resize-hit border around the frame
@@ -164,8 +269,20 @@ class MainWindow(QMainWindow):
         )
         self._service_reachability = (False, False)
         self._service_thread: QThread | None = None
-        self._service_monitor: ServiceMonitor | None = None
+        self._service_monitor: ServiceMonitor | DockerMonitor | None = None
         self._service_monitor_start_pending = False
+        self._service_monitor_restart_pending = False
+        self._docker_preflight_thread: QThread | None = None
+        self._docker_preflight_worker: DockerPreflightWorker | None = None
+        self._docker_preflight_result_received = False
+        self._docker_preflight_thread_finished = False
+        self._monitor_generation = 0
+        self._log_generation = 0
+        self._docker_log_thread: QThread | None = None
+        self._docker_log_worker: DockerLogWorker | None = None
+        self._docker_log_service: str | None = None
+        self._docker_log_token: object | None = None
+        self._pending_docker_log_service: str | None = None
         self._lifecycle_thread: QThread | None = None
         self._lifecycle_worker: QObject | None = None
         self._lifecycle_start_scope = (False, False)
@@ -176,11 +293,53 @@ class MainWindow(QMainWindow):
         self._lifecycle_result_received = False
         self._lifecycle_thread_finished = False
         self._close_after_lifecycle = False
+        # Docker close coordination is separate from the proven Native flow.
+        self._docker_close_pending = False
+        self._docker_close_stop_started = False
+        self._docker_close_stop_succeeded = False
+        self._docker_lifecycle_snapshot: RuntimeSnapshot | None = None
+        self._docker_lifecycle_generation: int | None = None
+        self._docker_lifecycle_target: tuple[object, ...] | None = None
+        self._docker_lifecycle_action: DockerLifecycleAction | None = None
+        self._docker_tool_token: object | None = None
+        self._docker_tool_generation: int | None = None
+        self._docker_tool_target: tuple[object, ...] | None = None
+        self._docker_tool_observed_target: str | None = None
+        self._docker_tool_action: DockerToolAction | None = None
+        self._docker_tool_request: tuple[str, str] | None = None
         self._close_in_progress = False
-        self._launch_queue: ClientLaunchQueue | None = None
+        self._launch_queue: AsyncClientLaunchQueue | None = None
+        self._client_launch_thread: QThread | None = None
+        self._client_launch_worker: ClientLaunchWorker | None = None
+        self._client_launch_request: ClientLaunchRequest | None = None
+        self._client_launch_show_errors = False
+        self._client_launch_from_queue = False
+        self._client_launch_result_received = False
+        self._client_launch_thread_finished = False
+        self._client_launch_succeeded = False
+        self._pending_client_launches: set[str] = set()
         self._resizing = False
         self._cursor_override_active = False
         self._accounts: list[Account] = []
+        self._data_selection: RuntimeDataSelection | None = None
+        self._settings_generation = 0
+        self._data_request_sequence = 0
+        self._account_thread: QThread | None = None
+        self._account_worker: AccountLoader | None = None
+        self._account_request_token: _DataRequestToken | None = None
+        self._pending_account_request: tuple[
+            _DataRequestToken,
+            Callable[[], RuntimeDataSelection],
+        ] | None = None
+        self._account_start_scheduled = False
+        self._detail_thread: QThread | None = None
+        self._detail_worker: CharacterDetailLoader | None = None
+        self._detail_request_token: _DataRequestToken | None = None
+        self._pending_detail_request: tuple[
+            _DataRequestToken,
+            Callable[[], RuntimeDataSelection],
+        ] | None = None
+        self._detail_start_scheduled = False
 
         # ── Update state ───────────────────────────────────────────────
         self._latest_version: str = ""
@@ -210,8 +369,10 @@ class MainWindow(QMainWindow):
         self._home_page.kill_all_clicked.connect(self._kill_all_clients)
 
         self._characters_page.launch_character.connect(self._on_character_launch)
+        self._characters_page.character_selected.connect(self._on_character_selected)
         self._characters_page.hide_character.connect(self._on_hide_character)
-        self._mods_page.apply_restart_clicked.connect(self._restart_server)
+        self._characters_page.portrait_loads_idle.connect(self._resume_close_after_data)
+        self._mods_page.apply_restart_clicked.connect(self._on_mods_apply_restart)
         self._tools_page.open_settings_requested.connect(self._open_settings_page)
         self._tools_page.launch_requested.connect(self._on_tool_launch_requested)
 
@@ -226,6 +387,9 @@ class MainWindow(QMainWindow):
 
         self._settings_page.settings_update_check.connect(self._on_manual_update_check)
         self._settings_page.settings_saved.connect(self._on_settings_saved)
+        self._settings_page.docker_preflight_requested.connect(
+            self._begin_docker_preflight
+        )
 
         if self._cfg.get("update_auto_check", True):
             QTimer.singleShot(2000, self._start_automatic_update_check)
@@ -293,6 +457,7 @@ class MainWindow(QMainWindow):
 
         # Console overlay (child of central widget — floats above content)
         self._console_panel = ConsolePanel(central)
+        self._console_panel.closed.connect(self._on_console_panel_closed)
         self._console_panel.hide()
 
         # Status bar (bottom)
@@ -341,12 +506,60 @@ class MainWindow(QMainWindow):
     def _on_tool_launch_requested(
         self,
         tool: ResolvedTool,
-        action: ToolAction,
+        action: ResolvedToolAction | ToolAction,
     ) -> None:
-        """Validate and spawn one tool action without taking process ownership."""
+        """Re-resolve one reviewed action, then dispatch its semantic backend."""
+        if not isinstance(tool, ResolvedTool) or not isinstance(
+            action,
+            (ResolvedToolAction, ToolAction),
+        ):
+            log.warning("Rejected malformed tool launch request")
+            return
         tool_id = tool.definition.id
         action_id = action.id
-        current_tools = resolve_tools(str(self._cfg.get("evejs_root", "")))
+        try:
+            backend = RuntimeBackend(
+                str(self._cfg.get("runtime_backend", RuntimeBackend.NATIVE.value))
+            )
+        except ValueError:
+            message = "Tool Deck runtime configuration is invalid"
+            log.warning("Rejected tool launch with invalid runtime backend")
+            self._tools_page.set_launch_result(
+                tool_id,
+                action_id,
+                success=False,
+                message=message,
+            )
+            QMessageBox.warning(self, "Tool Unavailable", message)
+            return
+        policy = DockerControlPolicy.CONNECT_ONLY
+        if backend is RuntimeBackend.DOCKER_COMPOSE:
+            try:
+                policy = DockerControlPolicy(
+                    str(
+                        self._cfg.get(
+                            "docker_control_policy",
+                            DockerControlPolicy.CONNECT_ONLY.value,
+                        )
+                    )
+                )
+            except ValueError:
+                message = "Docker Tool Deck runtime configuration is invalid"
+                log.warning("Rejected Docker tool launch with invalid control policy")
+                self._tools_page.set_launch_result(
+                    tool_id,
+                    action_id,
+                    success=False,
+                    message=message,
+                )
+                QMessageBox.warning(self, "Tool Unavailable", message)
+                return
+        current_tools = resolve_tools(
+            str(self._cfg.get("evejs_root", "")),
+            backend=backend,
+            docker_policy=policy,
+            compose_file=self._cfg.get("docker_compose_file") or None,
+        )
         canonical_tool = next(
             (
                 resolved
@@ -358,8 +571,7 @@ class MainWindow(QMainWindow):
         canonical_action = (
             next(
                 (
-                    candidate
-                    for candidate in canonical_tool.definition.actions
+                    candidate for candidate in canonical_tool.actions
                     if candidate.id == action_id
                 ),
                 None,
@@ -379,12 +591,82 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Unsupported Tool Action", message)
             return
 
-        tool = canonical_tool
-        action = canonical_action
+        if backend is RuntimeBackend.DOCKER_COMPOSE and (
+            not isinstance(action, ResolvedToolAction)
+            or action != canonical_action
+            or tool != canonical_tool
+        ):
+            message = "This Docker tool request is stale or not reviewed"
+            log.warning("Rejected stale Docker tool request: %s/%s", tool_id, action_id)
+            self._tools_page.set_launch_result(
+                tool_id,
+                action_id,
+                success=False,
+                message=message,
+            )
+            QMessageBox.warning(self, "Unsupported Tool Action", message)
+            return
+
+        if (
+            not canonical_tool.available
+            or not canonical_action.available
+            or canonical_action.dispatch_kind is ToolDispatchKind.UNAVAILABLE
+        ):
+            message = (
+                canonical_action.unavailable_reason
+                or canonical_tool.unavailable_reason
+                or "Tool action is unavailable"
+            )
+            log.warning("Tool launch rejected for %s: %s", tool_id, message)
+            self._tools_page.set_launch_result(
+                tool_id,
+                action_id,
+                success=False,
+                message=message,
+            )
+            QMessageBox.warning(self, "Tool Unavailable", message)
+            return
+
+        if (
+            canonical_action.dispatch_kind is ToolDispatchKind.DOCKER_COMPOSE
+            and self._lifecycle_active()
+        ):
+            self._docker_unavailable(
+                "Another service or Docker tool operation is already running."
+            )
+            return
+
+        reviewed_action = canonical_action.action
+        if reviewed_action.confirmation_title:
+            result = QMessageBox.warning(
+                self,
+                reviewed_action.confirmation_title,
+                reviewed_action.confirmation_body,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if result != QMessageBox.StandardButton.Yes:
+                log.info(
+                    "Tool launch cancelled for %s action %s",
+                    canonical_tool.definition.id,
+                    reviewed_action.id,
+                )
+                return
+
+        if canonical_action.dispatch_kind is ToolDispatchKind.DOCKER_COMPOSE:
+            self._begin_docker_tool(canonical_tool, canonical_action)
+            return
+        self._launch_native_tool(canonical_tool, reviewed_action)
+
+    def _launch_native_tool(
+        self,
+        tool: ResolvedTool,
+        action: ToolAction,
+    ) -> None:
+        """Preserve the reviewed Native wrapper launch boundary unchanged."""
         entrypoint = tool.absolute_entrypoint
-        if not tool.available or entrypoint is None:
+        if entrypoint is None:
             message = tool.unavailable_reason or "Tool wrapper is unavailable"
-            log.warning("Tool launch rejected for %s: %s", tool.definition.id, message)
             self._tools_page.set_launch_result(
                 tool.definition.id,
                 action.id,
@@ -393,22 +675,6 @@ class MainWindow(QMainWindow):
             )
             QMessageBox.warning(self, "Tool Unavailable", message)
             return
-
-        if action.confirmation_title:
-            result = QMessageBox.warning(
-                self,
-                action.confirmation_title,
-                action.confirmation_body,
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Cancel,
-            )
-            if result != QMessageBox.StandardButton.Yes:
-                log.info(
-                    "Tool launch cancelled for %s action %s",
-                    tool.definition.id,
-                    action.id,
-                )
-                return
 
         try:
             launch_tool_wrapper(entrypoint, action.arguments)
@@ -440,6 +706,291 @@ class MainWindow(QMainWindow):
             message="Tool wrapper launched",
         )
 
+    def _begin_docker_tool(
+        self,
+        tool: ResolvedTool,
+        action: ResolvedToolAction,
+    ) -> bool:
+        """Own one managed semantic Tool Deck operation in the lifecycle slot."""
+        docker_action = action.docker_action
+        if not self._docker_managed() or docker_action is None:
+            self._docker_unavailable(self._docker_control_reason())
+            return False
+        if self._lifecycle_active():
+            self._docker_unavailable(
+                "Another service or Docker tool operation is already running."
+            )
+            return False
+        observed_target = self._current_observed_docker_target_identity()
+        if observed_target is None:
+            self._docker_unavailable(
+                "Docker target context is not current. Wait for Docker status to "
+                "refresh, then try again."
+            )
+            return False
+
+        def controller_factory(target: ComposeTarget) -> ManagedDockerToolController:
+            # Factory execution occurs only after the worker owns its QThread.
+            runner = DockerCommandRunner()
+            return ManagedDockerToolController(
+                target,
+                ComposeInspector(runner),
+                runner,
+                policy=DockerControlPolicy.MANAGED,
+                expected_target_identity=observed_target,
+            )
+
+        token = object()
+        worker = DockerToolWorker(
+            self._docker_lifecycle_target_factory(),
+            controller_factory,
+            docker_action,
+            policy=DockerControlPolicy.MANAGED,
+            request_token=token,
+        )
+        self._docker_tool_token = token
+        self._docker_tool_generation = getattr(self, "_monitor_generation", 0)
+        self._docker_tool_target = self._docker_target_identity()
+        self._docker_tool_observed_target = observed_target
+        self._docker_tool_action = docker_action
+        self._docker_tool_request = (tool.definition.id, action.id)
+        self._begin_lifecycle_worker(worker, self._on_docker_tool_completed)
+        return True
+
+    @pyqtSlot(object)
+    def _on_docker_tool_completed(self, result: object) -> None:
+        """Apply only the exact current operation's private-safe semantic result."""
+        current = (
+            isinstance(result, DockerToolResult)
+            and result.request_token is getattr(self, "_docker_tool_token", None)
+            and result.action is getattr(self, "_docker_tool_action", None)
+            and self._docker_tool_generation == getattr(self, "_monitor_generation", 0)
+            and self._docker_tool_target == self._docker_target_identity()
+            and self._docker_tool_observed_target is not None
+            and self._docker_tool_observed_target
+            == self._current_observed_docker_target_identity()
+            and result.target_identity == self._docker_tool_observed_target
+            and self._docker_managed()
+            and not getattr(self, "_close_in_progress", False)
+        )
+        request = getattr(self, "_docker_tool_request", None)
+        if current and request is not None:
+            tool_id, action_id = request
+            self._tools_page.set_launch_result(
+                tool_id,
+                action_id,
+                success=result.succeeded,
+                message=result.message if result.succeeded else result.error,
+                completed=True,
+            )
+            if not result.succeeded:
+                QMessageBox.critical(
+                    self,
+                    "Docker Tool Operation Failed",
+                    result.error or "Docker tool operation failed.",
+                )
+            self._docker_observe_requested.emit()
+
+        self._docker_tool_token = None
+        self._docker_tool_generation = None
+        self._docker_tool_target = None
+        self._docker_tool_observed_target = None
+        self._docker_tool_action = None
+        self._docker_tool_request = None
+        self._lifecycle_result_received = True
+        self._finish_lifecycle_if_complete()
+
+    # ── Server control ─────────────────────────────────────────────────
+
+    def _docker_mode(self) -> bool:
+        return self._cfg.get("runtime_backend") == "docker_compose"
+
+    def _docker_monitor_settings_identity(self) -> str:
+        """Hash selected Docker target settings without exposing private paths."""
+        return docker_settings_identity(
+            str(self._cfg.get("evejs_root", "")),
+            str(self._cfg.get("docker_compose_file", "")),
+            str(self._cfg.get("docker_project_name", "")),
+        )
+
+    def _docker_control_reason(self) -> str:
+        if self._cfg.get("docker_control_policy") == "connect_only":
+            return "Connect-only Docker mode cannot change containers."
+        return "Docker controls require Managed Docker mode."
+
+    def _docker_managed(self) -> bool:
+        return self._docker_mode() and self._cfg.get("docker_control_policy") == "managed"
+
+    def _docker_unavailable(self, message: str) -> None:
+        QMessageBox.information(self, "Docker Compose", message)
+
+    def _docker_lifecycle_target_factory(self) -> Callable[[], ComposeTarget]:
+        return self._docker_log_target_factory()
+
+    def _docker_setup_draft(self) -> DockerSetupDraft:
+        """Capture the selected target once before worker-thread validation."""
+        return DockerSetupDraft(
+            evejs_root=str(self._cfg.get("evejs_root", "")),
+            compose_file=str(self._cfg.get("docker_compose_file", "")),
+            project_name=str(self._cfg.get("docker_project_name", "")),
+            control_policy=str(
+                self._cfg.get("docker_control_policy", "connect_only")
+            ),
+            keep_running_on_exit=bool(
+                self._cfg.get("docker_keep_running_on_exit", True)
+            ),
+            client_path=str(self._cfg.get("client_path", "")),
+        )
+
+    def _docker_target_identity(self) -> tuple[object, ...]:
+        """Return the exact settings identity that produced a lifecycle worker."""
+        return (
+            self._cfg.get("runtime_backend"),
+            self._cfg.get("docker_control_policy"),
+            self._cfg.get("evejs_root"),
+            self._cfg.get("docker_compose_file"),
+            self._cfg.get("docker_project_name"),
+        )
+
+    def _begin_docker_lifecycle(self, action: DockerLifecycleAction) -> bool:
+        if not self._docker_managed():
+            self._docker_unavailable(self._docker_control_reason())
+            return False
+        if self._lifecycle_active():
+            return False
+        def controller_factory(target: ComposeTarget) -> ManagedComposeController:
+            # This factory runs only after DockerLifecycleWorker has moved to
+            # its worker thread. Inspector and controller intentionally share
+            # one runner, keeping discovery and CLI use off the GUI thread.
+            runner = DockerCommandRunner()
+            return ManagedComposeController(
+                target, ComposeInspector(runner), runner,
+                policy=DockerControlPolicy.MANAGED,
+            )
+
+        worker = DockerLifecycleWorker(
+            self._docker_lifecycle_target_factory(),
+            controller_factory,
+            action,
+            policy=DockerControlPolicy.MANAGED,
+        )
+        # A Docker lifecycle snapshot must never retain Native process
+        # identity, including the rollback copy used for no-record failures.
+        snapshot = replace(
+            self._docker_cached_snapshot(),
+            game_pid=None,
+            market_pid=None,
+            game_owned=False,
+            market_owned=False,
+        )
+        self._docker_lifecycle_snapshot = snapshot
+        self._docker_lifecycle_generation = getattr(self, "_monitor_generation", 0)
+        self._docker_lifecycle_target = self._docker_target_identity()
+        self._docker_lifecycle_action = action
+        game = ServiceState.STARTING if action in {
+            DockerLifecycleAction.START_GAME,
+            DockerLifecycleAction.START_STACK,
+            DockerLifecycleAction.RESTART_GAME,
+            DockerLifecycleAction.RECREATE_GAME,
+        } else snapshot.game
+        market = (ServiceState.STARTING
+                  if action in {DockerLifecycleAction.START_MARKET, DockerLifecycleAction.START_GAME, DockerLifecycleAction.START_STACK}
+                  and snapshot.market is not ServiceState.ONLINE else snapshot.market)
+        game = ServiceState.STOPPING if action in {DockerLifecycleAction.STOP_GAME, DockerLifecycleAction.STOP_ALL} else game
+        market = ServiceState.STOPPING if action in {DockerLifecycleAction.STOP_MARKET, DockerLifecycleAction.STOP_ALL} else market
+        self._runtime_snapshot = replace(snapshot, game=game, market=market)
+        self._apply_runtime_snapshot(self._runtime_snapshot)
+        self._begin_lifecycle_worker(worker, self._on_docker_lifecycle_completed)
+        return True
+
+    @pyqtSlot(object)
+    def _on_docker_lifecycle_completed(self, result: object) -> None:
+        from .core.runtime.docker_controller import DockerLifecycleResult
+        expected_action = getattr(self, "_docker_lifecycle_action", None)
+        current = (
+            isinstance(result, DockerLifecycleResult)
+            and result.action is expected_action
+            and self._docker_lifecycle_generation == getattr(self, "_monitor_generation", 0)
+            and self._docker_lifecycle_target == self._docker_target_identity()
+        )
+        close_stop_result = (
+            self._docker_close_pending and self._docker_close_stop_started
+        )
+        if isinstance(result, DockerLifecycleResult) and self._docker_managed() and current:
+            snapshot = self._docker_cached_snapshot()
+            records = result.records or {}
+            game_record, market_record = records.get("server"), records.get("market")
+            affected_game, affected_market = self._docker_lifecycle_scope(result.action)
+            if game_record is not None:
+                snapshot = replace(
+                    snapshot, game=self._docker_lifecycle_record_state(game_record),
+                    game_container=game_record.short_id, game_health=game_record.health,
+                    game_error=None if result.succeeded else (
+                        result.error if affected_game else snapshot.game_error
+                    ), game_pid=None, game_owned=False,
+                )
+            if market_record is not None:
+                snapshot = replace(
+                    snapshot, market=self._docker_lifecycle_record_state(market_record),
+                    market_container=market_record.short_id, market_health=market_record.health,
+                    market_error=None if result.succeeded else (
+                        result.error if affected_market else snapshot.market_error
+                    ), market_pid=None, market_owned=False,
+                )
+            if not records and not result.succeeded and self._docker_lifecycle_snapshot is not None:
+                prior = self._docker_lifecycle_snapshot
+                game_error = result.error if affected_game else prior.game_error
+                market_error = result.error if affected_market else prior.market_error
+                snapshot = replace(prior, game_error=game_error, market_error=market_error)
+            self._runtime_snapshot = snapshot
+            self._apply_runtime_snapshot(snapshot)
+            if not result.succeeded and not close_stop_result:
+                QMessageBox.critical(self, "Docker Lifecycle Failed", result.error or "Docker lifecycle operation failed.")
+            self._docker_observe_requested.emit()
+        if close_stop_result:
+            self._docker_close_stop_succeeded = bool(
+                isinstance(result, DockerLifecycleResult) and current and result.succeeded
+            )
+            if not self._docker_close_stop_succeeded:
+                self._docker_close_pending = False
+                self._docker_close_stop_started = False
+                self._close_in_progress = False
+                QMessageBox.critical(
+                    self,
+                    "Docker Shutdown Failed",
+                    "Docker shutdown could not be confirmed. The launcher remains open; check Docker status and retry.",
+                )
+        self._docker_lifecycle_snapshot = None
+        self._docker_lifecycle_generation = None
+        self._docker_lifecycle_target = None
+        self._docker_lifecycle_action = None
+        self._lifecycle_result_received = True
+        self._finish_lifecycle_if_complete()
+
+    @staticmethod
+    def _docker_lifecycle_record_state(record: object) -> ServiceState:
+        """Never render a running container Online without health evidence."""
+        if (
+            getattr(record, "raw_state", None) == "running"
+            and getattr(record, "health", None) is None
+        ):
+            return ServiceState.STARTING
+        return getattr(record, "state", ServiceState.UNKNOWN)
+
+    @staticmethod
+    def _docker_lifecycle_scope(action: DockerLifecycleAction) -> tuple[bool, bool]:
+        """Return the services an action may change or report as failed."""
+        return {
+            DockerLifecycleAction.START_MARKET: (False, True),
+            DockerLifecycleAction.START_GAME: (True, True),
+            DockerLifecycleAction.START_STACK: (True, True),
+            DockerLifecycleAction.STOP_GAME: (True, False),
+            DockerLifecycleAction.STOP_MARKET: (False, True),
+            DockerLifecycleAction.STOP_ALL: (True, True),
+            DockerLifecycleAction.RESTART_GAME: (True, False),
+            DockerLifecycleAction.RECREATE_GAME: (True, False),
+        }[action]
+
     # ── Server control ─────────────────────────────────────────────────
 
     @staticmethod
@@ -450,6 +1001,9 @@ class MainWindow(QMainWindow):
 
     def _effective_server_mode_label(self) -> str:
         """Return the private-safe mode that the next start would resolve to."""
+        if self._docker_mode():
+            policy = str(self._cfg.get("docker_control_policy", "connect_only"))
+            return f"DOCKER • {policy.replace('_', ' ').upper()}"
         evejs_root = str(self._cfg.get("evejs_root", ""))
         scripts = discover_server_scripts(evejs_root)
         if len(scripts) == 1:
@@ -537,12 +1091,28 @@ class MainWindow(QMainWindow):
         return mode, selected
 
     def _on_server_toggle(self) -> None:
+        if self._docker_mode():
+            if not self._docker_managed():
+                self._docker_unavailable(self._docker_control_reason())
+            elif self._docker_cached_snapshot().game is ServiceState.ONLINE:
+                self._stop_server()
+            else:
+                self._start_server()
+            return
         if is_server_running(port=int(Ports.GAME_TCP)):
             self._stop_server()
         else:
             self._start_server()
 
     def _on_market_toggle(self) -> None:
+        if self._docker_mode():
+            if not self._docker_managed():
+                self._docker_unavailable(self._docker_control_reason())
+            elif self._docker_cached_snapshot().market is ServiceState.ONLINE:
+                self._stop_market()
+            else:
+                self._start_market()
+            return
         if self._is_market_running():
             self._stop_market()
         else:
@@ -558,11 +1128,103 @@ class MainWindow(QMainWindow):
 
     def _publish_cached_runtime(self) -> None:
         """Render already-known service state without doing GUI-thread socket I/O."""
+        if self._docker_mode():
+            snapshot = self._docker_cached_snapshot()
+            self._runtime_snapshot = snapshot
+            self._apply_runtime_snapshot(snapshot)
+            return
         snapshot = self._build_runtime_snapshot()
         self._runtime_snapshot = snapshot
         self._apply_runtime_snapshot(snapshot)
         if getattr(self, "_service_monitor", None) is not None:
             self._service_probe_requested.emit()
+
+    def _docker_unknown_snapshot(self) -> RuntimeSnapshot:
+        """Return a clean Docker bootstrap without prior target identity."""
+        return RuntimeSnapshot(
+            ServiceState.UNKNOWN,
+            ServiceState.UNKNOWN,
+            self._tracker.running_count,
+            backend=RuntimeBackend.DOCKER_COMPOSE,
+            docker_control_policy=DockerControlPolicy(
+                self._cfg.get("docker_control_policy", "connect_only")
+            ),
+            settings_identity=self._docker_monitor_settings_identity(),
+            monitor_generation=getattr(self, "_monitor_generation", 0),
+        )
+
+    def _docker_cached_snapshot(self) -> RuntimeSnapshot:
+        """Return Docker state cached for the current observer target."""
+        snapshot = self._runtime_snapshot
+        if snapshot.backend is not RuntimeBackend.DOCKER_COMPOSE:
+            return self._docker_unknown_snapshot()
+        return replace(
+            snapshot,
+            running_clients=self._tracker.running_count,
+            docker_control_policy=DockerControlPolicy(
+                self._cfg.get("docker_control_policy", "connect_only")
+            ),
+        )
+
+    @pyqtSlot(object)
+    def _begin_docker_preflight(self, request: object) -> None:
+        """Own one read-only setup worker until result delivery and teardown."""
+        if not isinstance(request, DockerPreflightRequest):
+            return
+        if self._docker_preflight_thread is not None:
+            return
+
+        factory = getattr(self, "_docker_preflight_worker_factory", None)
+        worker = (
+            factory(request)
+            if callable(factory)
+            else DockerPreflightWorker(request)
+        )
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.completed.connect(self._on_docker_preflight_completed)
+        worker.cleanup.connect(
+            worker.deleteLater,
+            Qt.ConnectionType.DirectConnection,
+        )
+        worker.destroyed.connect(thread.quit)
+        thread.finished.connect(
+            self._on_docker_preflight_thread_finished,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self._docker_preflight_thread = thread
+        self._docker_preflight_worker = worker
+        self._docker_preflight_result_received = False
+        self._docker_preflight_thread_finished = False
+        thread.start()
+
+    @pyqtSlot(object)
+    def _on_docker_preflight_completed(self, result: object) -> None:
+        self._settings_page.apply_docker_preflight_result(result)
+        self._docker_preflight_result_received = True
+        self._finish_docker_preflight_if_complete()
+
+    @pyqtSlot()
+    def _on_docker_preflight_thread_finished(self) -> None:
+        self._docker_preflight_thread_finished = True
+        self._finish_docker_preflight_if_complete()
+
+    def _finish_docker_preflight_if_complete(self) -> None:
+        if not (
+            self._docker_preflight_result_received
+            and self._docker_preflight_thread_finished
+        ):
+            return
+        thread = self._docker_preflight_thread
+        self._docker_preflight_thread = None
+        self._docker_preflight_worker = None
+        self._docker_preflight_result_received = False
+        self._docker_preflight_thread_finished = False
+        if thread is not None:
+            thread.deleteLater()
+        if self._close_in_progress:
+            QTimer.singleShot(0, self.close)
 
     def _begin_lifecycle_worker(
         self,
@@ -574,8 +1236,15 @@ class MainWindow(QMainWindow):
         worker.moveToThread(thread)
         thread.started.connect(worker.run)  # type: ignore[attr-defined]
         worker.completed.connect(completed_handler)  # type: ignore[attr-defined]
-        worker.completed.connect(thread.quit)  # type: ignore[attr-defined]
-        thread.finished.connect(worker.deleteLater)
+        if isinstance(worker, (DockerLifecycleWorker, DockerToolWorker)):
+            # QObject deletion must be delivered in its owning worker thread.
+            # Deletion then tears down the dedicated event loop; connecting
+            # thread.finished -> worker.deleteLater is too late and leaks.
+            worker.cleanup.connect(worker.deleteLater, Qt.ConnectionType.DirectConnection)
+            worker.destroyed.connect(thread.quit)
+        else:
+            worker.completed.connect(thread.quit)  # type: ignore[attr-defined]
+            thread.finished.connect(worker.deleteLater)
         thread.finished.connect(
             self._on_lifecycle_thread_finished,
             Qt.ConnectionType.QueuedConnection,
@@ -611,6 +1280,14 @@ class MainWindow(QMainWindow):
             thread.deleteLater()
         if callback is not None:
             callback()
+        if (
+            getattr(self, "_docker_close_pending", False)
+            and getattr(self, "_docker_close_stop_started", False)
+        ):
+            if getattr(self, "_docker_close_stop_succeeded", False):
+                QTimer.singleShot(0, self.close)
+        elif getattr(self, "_close_in_progress", False) and self._docker_mode():
+            QTimer.singleShot(0, self.close)
 
     def _start_service_sequence(
         self,
@@ -622,6 +1299,9 @@ class MainWindow(QMainWindow):
         error_title: str,
     ) -> bool:
         """Start requested services in a worker, waiting Market → Game readiness."""
+        if self._docker_mode():
+            self._docker_unavailable(self._docker_control_reason())
+            return False
         if self._lifecycle_active():
             log.info("Ignored service start while another lifecycle operation is active")
             return False
@@ -719,6 +1399,9 @@ class MainWindow(QMainWindow):
         on_complete: Callable[[], None] | None,
     ) -> bool:
         """Stop launcher-owned Game then Market processes in a worker."""
+        if self._docker_mode():
+            self._docker_unavailable(self._docker_control_reason())
+            return False
         if self._lifecycle_active():
             log.info("Ignored service stop while another lifecycle operation is active")
             return False
@@ -814,6 +1497,12 @@ class MainWindow(QMainWindow):
         self._finish_lifecycle_if_complete()
 
     def _start_server(self) -> None:
+        if self._docker_mode():
+            if self._docker_managed():
+                self._begin_docker_lifecycle(DockerLifecycleAction.START_GAME)
+            else:
+                self._docker_unavailable(self._docker_control_reason())
+            return
         evejs_root = self._cfg.get("evejs_root", "")
         if not evejs_root:
             QMessageBox.warning(self, "Not Configured", "Set up EveJS root in Settings first.")
@@ -837,6 +1526,12 @@ class MainWindow(QMainWindow):
         )
 
     def _stop_server(self) -> None:
+        if self._docker_mode():
+            if self._docker_managed():
+                self._begin_docker_lifecycle(DockerLifecycleAction.STOP_GAME)
+            else:
+                self._docker_unavailable(self._docker_control_reason())
+            return
         proc = self._server_proc
         if proc is None or proc.poll() is not None:
             if is_server_running(port=int(Ports.GAME_TCP)):
@@ -859,8 +1554,65 @@ class MainWindow(QMainWindow):
             on_complete=None,
         )
 
+    def _on_mods_apply_restart(self) -> None:
+        """Apply the selected backend's truthful mod activation contract."""
+        if not self._docker_mode():
+            self._restart_server()
+            return
+        if not self._docker_managed():
+            self._docker_unavailable(
+                "Connect-only Docker mode cannot change mod or Compose state."
+            )
+            return
+        if self._lifecycle_active():
+            self._docker_unavailable(
+                "Another service or Docker tool operation is already running."
+            )
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Apply Docker Mods",
+            "Apply the selected mod preload chain and recreate the server "
+            "container?\n\nConnected clients will be disconnected.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            result = apply_docker_mod_override(
+                str(self._cfg.get("evejs_root", "")),
+                self._mods_page.selected_mod_names(),
+                policy=DockerControlPolicy.MANAGED,
+            )
+        except (DockerModBridgeError, OSError):
+            QMessageBox.critical(
+                self,
+                "Docker Mods Failed",
+                "The Docker mod preload configuration could not be updated safely.",
+            )
+            return
+
+        if not result.requires_recreation:
+            QMessageBox.information(
+                self,
+                "Docker Mods",
+                "Docker mod preload configuration is already current.",
+            )
+            return
+        self._restart_docker_monitor_for_compose_change()
+        self._begin_docker_lifecycle(DockerLifecycleAction.RECREATE_GAME)
+
     def _restart_server(self) -> None:
         """Resolve the launch mode before stopping, then restart the server."""
+        if self._docker_mode():
+            if self._docker_managed():
+                self._begin_docker_lifecycle(DockerLifecycleAction.RESTART_GAME)
+            else:
+                self._docker_unavailable(self._docker_control_reason())
+            return
         evejs_root = self._cfg.get("evejs_root", "")
         if not evejs_root:
             QMessageBox.warning(self, "Not Configured", "Set up EveJS root in Settings first.")
@@ -899,6 +1651,12 @@ class MainWindow(QMainWindow):
         start_after_stop()
 
     def _start_market(self) -> None:
+        if self._docker_mode():
+            if self._docker_managed():
+                self._begin_docker_lifecycle(DockerLifecycleAction.START_MARKET)
+            else:
+                self._docker_unavailable(self._docker_control_reason())
+            return
         evejs_root = self._cfg.get("evejs_root", "")
         if not evejs_root:
             QMessageBox.warning(self, "Not Configured", "Set up EveJS root in Settings first.")
@@ -916,6 +1674,12 @@ class MainWindow(QMainWindow):
         )
 
     def _stop_market(self) -> None:
+        if self._docker_mode():
+            if self._docker_managed():
+                self._begin_docker_lifecycle(DockerLifecycleAction.STOP_MARKET)
+            else:
+                self._docker_unavailable(self._docker_control_reason())
+            return
         if self._market_proc is not None and self._market_proc.poll() is None:
             self._run_stop_sequence(
                 stop_game=False,
@@ -947,6 +1711,12 @@ class MainWindow(QMainWindow):
 
     def _start_all_servers(self) -> None:
         """Start Market then Game server (both auto-discover each other)."""
+        if self._docker_mode():
+            if self._docker_managed():
+                self._begin_docker_lifecycle(DockerLifecycleAction.START_STACK)
+            else:
+                self._docker_unavailable(self._docker_control_reason())
+            return
         evejs_root = self._cfg.get("evejs_root", "")
         if not evejs_root:
             QMessageBox.warning(self, "Not Configured", "Set up EveJS first.")
@@ -978,6 +1748,12 @@ class MainWindow(QMainWindow):
 
     def _stop_all_servers(self) -> None:
         """Stop launcher-owned Game then Market in one ordered worker sequence."""
+        if self._docker_mode():
+            if self._docker_managed():
+                self._begin_docker_lifecycle(DockerLifecycleAction.STOP_ALL)
+            else:
+                self._docker_unavailable(self._docker_control_reason())
+            return
         self._run_stop_sequence(
             stop_game=True,
             stop_market=True,
@@ -986,8 +1762,97 @@ class MainWindow(QMainWindow):
 
     # ── Auto-start hook used before client launches ───────────────────
 
+    def _resolve_client_launch_context(
+        self,
+        snapshot: RuntimeSnapshot | None = None,
+    ) -> tuple[ClientLaunchContext | None, str]:
+        """Resolve one authoritative client context without mutating profiles."""
+        if not self._docker_mode():
+            try:
+                return (
+                    ClientLaunchContext.native(
+                        game_port=int(self._cfg.get("game_port", 26000)),
+                        proxy_url=str(
+                            self._cfg.get(
+                                "proxy_url",
+                                "http://127.0.0.1:26002",
+                            )
+                        ),
+                    ),
+                    "",
+                )
+            except (TypeError, ValueError):
+                return None, "The configured Native client endpoints are invalid."
+
+        observed = snapshot or getattr(self, "_runtime_snapshot", None)
+        if (
+            observed is None
+            or observed.backend is not RuntimeBackend.DOCKER_COMPOSE
+        ):
+            return None, "Docker client endpoints have not been observed yet."
+        if (
+            observed.target_identity is None
+            or observed.settings_identity != self._docker_monitor_settings_identity()
+            or observed.monitor_generation
+            != getattr(self, "_monitor_generation", 0)
+        ):
+            return (
+                None,
+                "Docker endpoint context is not current for the selected target. "
+                "Wait for Docker status to refresh, then try again.",
+            )
+        if observed.game is not ServiceState.ONLINE:
+            if self._docker_managed():
+                return (
+                    None,
+                    "The Docker server is not ready. Start Server, wait for it to be "
+                    "online, then try again.",
+                )
+            return (
+                None,
+                "The Docker server is not ready. Start it externally, wait for it "
+                "to be online, then try again.",
+            )
+        try:
+            return (
+                ClientLaunchContext.from_docker(
+                    observed.endpoints,
+                    target_identity=observed.target_identity,
+                    settings_identity=observed.settings_identity,
+                    monitor_generation=observed.monitor_generation,
+                ),
+                "",
+            )
+        except (AttributeError, TypeError, ValueError):
+            return (
+                None,
+                "Docker client endpoints are incomplete or unavailable. Wait for "
+                "Docker status to refresh, then try again.",
+            )
+
+    def _docker_launch_capability(
+        self,
+        snapshot: RuntimeSnapshot | None = None,
+    ) -> tuple[bool, str]:
+        """Return whether the selected Docker target can launch host clients now."""
+        context, reason = self._resolve_client_launch_context(snapshot)
+        if context is None:
+            return False, reason
+        if not str(self._cfg.get("evejs_root", "")) or not str(
+            self._cfg.get("client_path", "")
+        ):
+            return False, "Configure the Docker project root and EVE client path first."
+        return True, ""
+
     def _ensure_server_if_needed(self, on_ready: Callable[[], None]) -> bool:
         """Invoke ``on_ready`` only after configured service auto-starts are ready."""
+        if self._docker_mode():
+            context, reason = self._resolve_client_launch_context()
+            if context is None:
+                self._docker_unavailable(reason)
+                return False
+            on_ready()
+            return True
         evejs_root = self._cfg.get("evejs_root", "")
         if not evejs_root:
             on_ready()
@@ -1022,14 +1887,31 @@ class MainWindow(QMainWindow):
 
     # ── Character launching ───────────────────────────────────────────
 
-    def _launch_account(
+    def _make_client_launch_request(
         self,
         username: str,
         character_name: str,
         *,
         show_errors: bool = False,
-    ) -> bool:
-        """Launch one account through the shared single/bulk-launch path."""
+        launch_context: ClientLaunchContext | None = None,
+    ) -> ClientLaunchRequest | None:
+        """Validate current GUI state and capture immutable launch inputs."""
+        current_context, context_error = self._resolve_client_launch_context()
+        if current_context is None or (
+            launch_context is not None and launch_context != current_context
+        ):
+            if current_context is not None:
+                context_error = (
+                    "Docker endpoint context is not current for the selected target. "
+                    "Wait for Docker status to refresh, then try again."
+                )
+            if show_errors:
+                if self._docker_mode():
+                    self._docker_unavailable(context_error)
+                else:
+                    QMessageBox.warning(self, "Invalid Configuration", context_error)
+            return None
+        launch_context = current_context
         evejs_root = str(self._cfg.get("evejs_root", ""))
         client_path = str(self._cfg.get("client_path", ""))
         if not evejs_root or not client_path:
@@ -1039,56 +1921,235 @@ class MainWindow(QMainWindow):
                     "Not Configured",
                     "EveJS root or client path not set.",
                 )
-            return False
+            return None
         if self._tracker.is_account_running(username):
-            return False
+            return None
+        if username in getattr(self, "_pending_client_launches", set()):
+            return None
 
-        if not profile_exists(username):
-            try:
-                create_profile(username, client_path)
-            except RuntimeError as exc:
-                if show_errors:
-                    QMessageBox.critical(self, "Profile Error", str(exc))
-                else:
-                    log.error("Profile creation failed for %s: %s", username, exc)
-                return False
+        return ClientLaunchRequest(
+            username=username,
+            character_name=character_name,
+            evejs_root=evejs_root,
+            client_path=client_path,
+            profiles_root=Path(PROFILES_ROOT),
+            launch_context=launch_context,
+        )
 
-        profile_path = Path(PROFILES_ROOT) / username / "tq"
-        if not profile_path.exists():
-            message = "Profile junction not found."
-            if show_errors:
-                QMessageBox.critical(self, "Launch Error", message)
-            else:
-                log.error("Client launch skipped for %s: %s", username, message)
-            return False
-
-        # Pre-fill immediately before every client launch so each profile gets
-        # the correct account username rather than a stale cached value.
-        prefill_username(username)
-        try:
-            proc = launch_client(
-                evejs_root=evejs_root,
-                profile_tq_path=profile_path,
-                proxy_url=str(self._cfg.get("proxy_url", "http://127.0.0.1:26002")),
-                client_path=client_path,
-            )
-        except Exception as exc:  # noqa: BLE001 - subprocess errors vary by OS
-            if show_errors:
-                QMessageBox.critical(self, "Launch Error", str(exc))
-            else:
-                log.exception("Launch failed for %s", username)
-            return False
-
-        self._tracker.add(username, character_name, proc)
-        log.info("Launched client for %s as %s (pid=%s)", username, character_name, proc.pid)
+    def _finalize_client_launch(
+        self,
+        result: ClientLaunchResult,
+    ) -> None:
+        """Track a successfully created process and start its window restorer."""
+        request = result.request
+        self._tracker.add(
+            request.username,
+            request.character_name,
+            result.process,
+        )
+        log.info(
+            "Launched client for %s as %s (pid=%s)",
+            request.username,
+            request.character_name,
+            result.process.pid,
+        )
         threading.Thread(
             target=_restore_eve_window,
             args=("EVE",),
             daemon=True,
         ).start()
+
+    def _launch_account(
+        self,
+        username: str,
+        character_name: str,
+        *,
+        show_errors: bool = False,
+        launch_context: ClientLaunchContext | None = None,
+    ) -> bool:
+        """Synchronous compatibility seam; production UI uses the worker path."""
+        request = self._make_client_launch_request(
+            username,
+            character_name,
+            show_errors=show_errors,
+            launch_context=launch_context,
+        )
+        if request is None:
+            return False
+        try:
+            process = _perform_client_launch(request)
+        except Exception as exc:  # noqa: BLE001 - subprocess errors vary by OS
+            log.exception("Launch failed for %s", username)
+            if show_errors:
+                QMessageBox.critical(self, "Launch Error", str(exc))
+            return False
+        self._finalize_client_launch(ClientLaunchResult(request, process))
         return True
 
+    def _set_client_launch_pending(
+        self,
+        request: ClientLaunchRequest,
+        pending: bool,
+    ) -> None:
+        pending_accounts = getattr(self, "_pending_client_launches", None)
+        if pending_accounts is None:
+            pending_accounts = set()
+            self._pending_client_launches = pending_accounts
+        if pending:
+            pending_accounts.add(request.username)
+        else:
+            pending_accounts.discard(request.username)
+        page = getattr(self, "_characters_page", None)
+        setter = getattr(page, "set_account_launching", None)
+        if callable(setter):
+            setter(request.username, request.character_name, pending)
+
+    def _start_client_launch(
+        self,
+        username: str,
+        character_name: str,
+        *,
+        show_errors: bool = False,
+        launch_context: ClientLaunchContext | None = None,
+        from_queue: bool = False,
+    ) -> bool:
+        """Start one non-blocking profile preparation and client spawn."""
+        if getattr(self, "_client_launch_thread", None) is not None:
+            log.info(
+                "Ignored duplicate client launch while another launch is active (%s)",
+                username,
+            )
+            return False
+        request = self._make_client_launch_request(
+            username,
+            character_name,
+            show_errors=show_errors,
+            launch_context=launch_context,
+        )
+        if request is None:
+            return False
+
+        worker_factory = getattr(self, "_client_launch_worker_factory", None)
+        worker = (
+            worker_factory(request)
+            if callable(worker_factory)
+            else ClientLaunchWorker(request, _perform_client_launch)
+        )
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.completed.connect(self._on_client_launch_completed)
+        worker.failed.connect(self._on_client_launch_failed)
+        worker.cleanup.connect(
+            worker.deleteLater,
+            Qt.ConnectionType.DirectConnection,
+        )
+        worker.destroyed.connect(thread.quit)
+        thread.finished.connect(
+            self._on_client_launch_thread_finished,
+            Qt.ConnectionType.QueuedConnection,
+        )
+
+        self._client_launch_thread = thread
+        self._client_launch_worker = worker
+        self._client_launch_request = request
+        self._client_launch_show_errors = show_errors
+        self._client_launch_from_queue = from_queue
+        self._client_launch_result_received = False
+        self._client_launch_thread_finished = False
+        self._client_launch_succeeded = False
+        self._set_client_launch_pending(request, True)
+        log.info(
+            "Queued client launch for %s as %s",
+            request.username,
+            request.character_name,
+        )
+        thread.start()
+        return True
+
+    @pyqtSlot(object)
+    def _on_client_launch_completed(self, result: ClientLaunchResult) -> None:
+        request = self._client_launch_request
+        if request is None or result.request != request:
+            return
+        self._client_launch_result_received = True
+        self._client_launch_succeeded = True
+        self._set_client_launch_pending(request, False)
+        self._finalize_client_launch(result)
+        self._refresh_character_views()
+        self._update_status_bar()
+        self._finish_client_launch_if_complete()
+
+    @pyqtSlot(object)
+    def _on_client_launch_failed(self, failure: ClientLaunchFailure) -> None:
+        request = self._client_launch_request
+        if request is None or failure.request != request:
+            return
+        self._client_launch_result_received = True
+        self._client_launch_succeeded = False
+        self._set_client_launch_pending(request, False)
+        log.error(
+            "Client launch failed for %s (%s): %s",
+            request.username,
+            failure.error_type,
+            failure.message,
+        )
+        if self._client_launch_show_errors and not self._close_in_progress:
+            QMessageBox.critical(self, "Launch Error", failure.message)
+        self._refresh_character_views()
+        self._update_status_bar()
+        self._finish_client_launch_if_complete()
+
+    @pyqtSlot()
+    def _on_client_launch_thread_finished(self) -> None:
+        thread = self.sender()
+        if thread is not self._client_launch_thread:
+            return
+        self._client_launch_thread_finished = True
+        self._finish_client_launch_if_complete()
+
+    def _finish_client_launch_if_complete(self) -> None:
+        """Release worker ownership after both result delivery and teardown."""
+        if not (
+            self._client_launch_result_received
+            and self._client_launch_thread_finished
+        ):
+            return
+        thread = self._client_launch_thread
+        from_queue = self._client_launch_from_queue
+        succeeded = self._client_launch_succeeded
+
+        self._client_launch_thread = None
+        self._client_launch_worker = None
+        self._client_launch_request = None
+        self._client_launch_show_errors = False
+        self._client_launch_from_queue = False
+        self._client_launch_result_received = False
+        self._client_launch_thread_finished = False
+        self._client_launch_succeeded = False
+        if isinstance(thread, QThread):
+            thread.deleteLater()
+
+        queue = getattr(self, "_launch_queue", None)
+        if from_queue and queue is not None:
+            queue.item_finished(succeeded)
+        if self._close_in_progress:
+            QTimer.singleShot(0, self.close)
+
     def _on_character_launch(self, username: str, character_name: str) -> None:
+        if username in getattr(self, "_pending_client_launches", set()):
+            log.info("Ignored duplicate client launch click for %s", username)
+            return
+        if (
+            getattr(self, "_launch_queue", None) is not None
+            or getattr(self, "_client_launch_thread", None) is not None
+        ):
+            QMessageBox.information(
+                self,
+                "Launch In Progress",
+                "Another client is currently being prepared. Please wait.",
+            )
+            return
         if self._tracker.is_account_running(username):
             running_character = self._tracker.get_running_character(username)
             QMessageBox.warning(
@@ -1108,13 +2169,14 @@ class MainWindow(QMainWindow):
         character_name: str,
     ) -> None:
         """Launch one client only after its configured service gate is ready."""
-        if self._launch_account(username, character_name, show_errors=True):
-            self._refresh_characters()
-            self._update_status_bar()
+        self._start_client_launch(username, character_name, show_errors=True)
 
     def _launch_all(self) -> None:
         """Queue every visible, non-banned, non-running account serially."""
-        if getattr(self, "_launch_queue", None) is not None:
+        if (
+            getattr(self, "_launch_queue", None) is not None
+            or getattr(self, "_client_launch_thread", None) is not None
+        ):
             return
         evejs_root = self._cfg.get("evejs_root", "")
         client_path = self._cfg.get("client_path", "")
@@ -1130,7 +2192,11 @@ class MainWindow(QMainWindow):
             if account.username in seen_accounts:
                 continue
             seen_accounts.add(account.username)
-            if not self._tracker.is_account_running(account.username):
+            if (
+                not self._tracker.is_account_running(account.username)
+                and account.username
+                not in getattr(self, "_pending_client_launches", set())
+            ):
                 candidates.append((account, character))
         if not candidates:
             self._refresh_character_views()
@@ -1147,12 +2213,21 @@ class MainWindow(QMainWindow):
         """Create the serial Qt launch queue after required services are ready."""
         if self._launch_queue is not None:
             return
+        launch_context, context_error = self._resolve_client_launch_context()
+        if launch_context is None:
+            if self._docker_mode():
+                self._docker_unavailable(context_error)
+            else:
+                QMessageBox.warning(self, "Invalid Configuration", context_error)
+            return
         stagger_seconds = max(0, int(self._cfg.get("stagger_delay_sec", 3)))
-        queue = ClientLaunchQueue(
+        queue = AsyncClientLaunchQueue(
             candidates,
-            lambda candidate: self._launch_account(
+            lambda candidate: self._start_client_launch(
                 candidate[0].username,
                 candidate[1].name,
+                launch_context=launch_context,
+                from_queue=True,
             ),
             stagger_ms=stagger_seconds * 1_000,
             parent=self,
@@ -1189,6 +2264,8 @@ class MainWindow(QMainWindow):
         self._home_page.finish_launch_progress(attempted, succeeded, cancelled)
         self._refresh_character_views()
         self._update_status_bar()
+        if self._close_in_progress:
+            return
         if cancelled:
             message = (
                 f"Launched {succeeded} client(s); remaining queued launches were cancelled."
@@ -1254,17 +2331,376 @@ class MainWindow(QMainWindow):
         return hidden
 
     def _refresh_characters(self) -> None:
-        """Reload account data, then refresh the views from the new snapshot."""
-        evejs_root = self._cfg.get("evejs_root", "")
+        """Schedule one serialized account refresh outside the GUI thread."""
+        if self._close_in_progress:
+            return
+
+        evejs_root = str(self._cfg.get("evejs_root", ""))
         if not evejs_root:
+            self._account_request_token = None
+            self._pending_account_request = None
+            self._account_start_scheduled = False
+            if self._account_worker is not None:
+                self._account_worker.request_cancel()
+            self._cancel_detail_load()
+            self._data_selection = None
             self._accounts = []
-        else:
-            try:
-                self._accounts = load_accounts(evejs_root)
-            except Exception:
-                log.exception("Failed to load accounts")
-                self._accounts = []
+            self._refresh_character_views()
+            return
+
+        self._cancel_detail_load()
+        token = self._new_data_token(
+            target_identity=self._current_observed_docker_target_identity()
+        )
+        self._account_request_token = token
+        self._pending_account_request = (
+            token,
+            self._make_data_selection_factory(),
+        )
+        if self._account_worker is not None:
+            self._account_worker.request_cancel()
+            return
+        self._schedule_account_load()
+
+    def _data_settings_identity(self) -> tuple[object, ...]:
+        """Return the exact settings tuple that authorizes one data result."""
+        return (
+            self._cfg.get("runtime_backend"),
+            self._cfg.get("evejs_root"),
+            self._cfg.get("docker_compose_file"),
+            self._cfg.get("docker_project_name"),
+            self._cfg.get("docker_control_policy"),
+        )
+
+    def _new_data_token(
+        self,
+        *,
+        target_identity: str | None = None,
+        username: str | None = None,
+        character_id: int | None = None,
+    ) -> _DataRequestToken:
+        self._data_request_sequence += 1
+        return _DataRequestToken(
+            self._data_request_sequence,
+            self._settings_generation,
+            self._data_settings_identity(),
+            target_identity,
+            username,
+            character_id,
+        )
+
+    def _make_data_selection_factory(
+        self,
+    ) -> Callable[[], RuntimeDataSelection]:
+        """Capture raw settings while deferring path/CLI work to the worker."""
+        root = str(self._cfg.get("evejs_root", ""))
+        if not self._docker_mode():
+            accounts_loader = load_accounts
+            detail_loader = get_character_detail
+            return lambda: native_data_selection(
+                root,
+                accounts_loader=accounts_loader,
+                detail_loader=detail_loader,
+            )
+
+        target_factory = self._docker_log_target_factory()
+        policy = DockerControlPolicy(
+            self._cfg.get("docker_control_policy", "connect_only")
+        )
+        settings_identity = self._docker_monitor_settings_identity()
+        monitor_generation = getattr(self, "_monitor_generation", 0)
+        return lambda: inspect_docker_data_source(
+            target_factory(),
+            control_policy=policy,
+            settings_identity=settings_identity,
+            monitor_generation=monitor_generation,
+        )
+
+    def _docker_data_selection_is_current(
+        self,
+        selection: RuntimeDataSelection,
+    ) -> bool:
+        """Reject Docker data attributed to another target selection generation."""
+        if not self._docker_mode():
+            return True
+        observed_target = self._current_observed_docker_target_identity()
+        return (
+            observed_target is not None
+            and selection.target_identity == observed_target
+            and selection.settings_identity
+            == self._docker_monitor_settings_identity()
+            and selection.monitor_generation
+            == getattr(self, "_monitor_generation", 0)
+        )
+
+    def _current_observed_docker_target_identity(self) -> str | None:
+        """Return target authority only from the current attributed observation."""
+        if not self._docker_mode():
+            return None
+        snapshot = getattr(self, "_runtime_snapshot", None)
+        if (
+            snapshot is None
+            or snapshot.backend is not RuntimeBackend.DOCKER_COMPOSE
+            or snapshot.settings_identity != self._docker_monitor_settings_identity()
+            or snapshot.monitor_generation
+            != getattr(self, "_monitor_generation", 0)
+        ):
+            return None
+        return snapshot.target_identity
+
+    def _schedule_account_load(self) -> None:
+        if (
+            self._account_start_scheduled
+            or self._account_thread is not None
+            or self._pending_account_request is None
+            or self._close_in_progress
+        ):
+            return
+        self._account_start_scheduled = True
+        QTimer.singleShot(0, self._start_pending_account_load)
+
+    @pyqtSlot()
+    def _start_pending_account_load(self) -> None:
+        if not self._account_start_scheduled:
+            return
+        self._account_start_scheduled = False
+        if self._close_in_progress or self._account_thread is not None:
+            return
+        request = self._pending_account_request
+        self._pending_account_request = None
+        if request is None:
+            return
+        token, selection_factory = request
+        if token is not self._account_request_token:
+            return
+
+        thread = QThread(self)
+        worker = AccountLoader(selection_factory, token=token)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.completed.connect(self._on_account_load_completed)
+        worker.failed.connect(self._on_account_load_failed)
+        worker.cleanup.connect(
+            worker.deleteLater,
+            Qt.ConnectionType.DirectConnection,
+        )
+        worker.destroyed.connect(thread.quit)
+        thread.finished.connect(
+            self._on_account_thread_finished,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self._account_thread = thread
+        self._account_worker = worker
+        thread.start()
+
+    def _data_token_is_current(self, token: object | None) -> bool:
+        return (
+            isinstance(token, _DataRequestToken)
+            and token.settings_generation == self._settings_generation
+            and token.settings_identity == self._data_settings_identity()
+        )
+
+    @pyqtSlot(object)
+    def _on_account_load_completed(self, result: AccountLoadResult) -> None:
+        token = result.token
+        if (
+            self._close_in_progress
+            or token is not self._account_request_token
+            or not self._data_token_is_current(token)
+            or not self._docker_data_selection_is_current(result.selection)
+        ):
+            return
+        if self._docker_mode() and (
+            token.target_identity is None
+            or result.selection.target_identity != token.target_identity
+        ):
+            return
+        self._data_selection = result.selection
+        self._accounts = list(result.accounts)
         self._refresh_character_views()
+
+    @pyqtSlot(object)
+    def _on_account_load_failed(self, failure: DataLoadFailure) -> None:
+        if (
+            self._close_in_progress
+            or failure.token is not self._account_request_token
+            or not self._data_token_is_current(failure.token)
+        ):
+            return
+        log.warning("Character account load failed (%s)", failure.code)
+        self._data_selection = None
+        self._accounts = []
+        self._refresh_character_views()
+
+    @pyqtSlot()
+    def _on_account_thread_finished(self) -> None:
+        thread = self.sender()
+        if thread is not self._account_thread:
+            return
+        self._account_worker = None
+        self._account_thread = None
+        if isinstance(thread, QThread):
+            thread.deleteLater()
+        if self._close_in_progress:
+            self._resume_close_after_data()
+        elif self._pending_account_request is not None:
+            self._schedule_account_load()
+
+    def _on_character_selected(
+        self,
+        username: str,
+        _character_name: str,
+        character_id: int,
+    ) -> None:
+        """Load selected-character detail through the current runtime source."""
+        selection = self._data_selection
+        if self._close_in_progress or selection is None:
+            return
+        token = self._new_data_token(
+            target_identity=selection.target_identity,
+            username=username,
+            character_id=character_id,
+        )
+        self._detail_request_token = token
+        self._pending_detail_request = (
+            token,
+            self._make_data_selection_factory(),
+        )
+        if self._detail_worker is not None:
+            self._detail_worker.request_cancel()
+            return
+        self._schedule_detail_load()
+
+    def _schedule_detail_load(self) -> None:
+        if (
+            self._detail_start_scheduled
+            or self._detail_thread is not None
+            or self._pending_detail_request is None
+            or self._close_in_progress
+        ):
+            return
+        self._detail_start_scheduled = True
+        QTimer.singleShot(0, self._start_pending_detail_load)
+
+    @pyqtSlot()
+    def _start_pending_detail_load(self) -> None:
+        if not self._detail_start_scheduled:
+            return
+        self._detail_start_scheduled = False
+        if self._close_in_progress or self._detail_thread is not None:
+            return
+        request = self._pending_detail_request
+        self._pending_detail_request = None
+        if request is None:
+            return
+        token, selection_factory = request
+        if token is not self._detail_request_token or token.character_id is None:
+            return
+
+        thread = QThread(self)
+        worker = CharacterDetailLoader(
+            selection_factory,
+            token.character_id,
+            token=token,
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.completed.connect(self._on_character_detail_completed)
+        worker.failed.connect(self._on_character_detail_failed)
+        worker.cleanup.connect(
+            worker.deleteLater,
+            Qt.ConnectionType.DirectConnection,
+        )
+        worker.destroyed.connect(thread.quit)
+        thread.finished.connect(
+            self._on_detail_thread_finished,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self._detail_thread = thread
+        self._detail_worker = worker
+        thread.start()
+
+    @pyqtSlot(object)
+    def _on_character_detail_completed(
+        self,
+        result: CharacterDetailResult,
+    ) -> None:
+        token = result.token
+        selection = self._data_selection
+        if (
+            self._close_in_progress
+            or token is not self._detail_request_token
+            or not self._data_token_is_current(token)
+            or selection is None
+            or token.target_identity != selection.target_identity
+            or result.selection.target_identity != selection.target_identity
+            or not self._docker_data_selection_is_current(selection)
+            or not self._docker_data_selection_is_current(result.selection)
+            or result.selection.settings_identity != selection.settings_identity
+            or result.selection.monitor_generation != selection.monitor_generation
+            or token.character_id != result.character_id
+            or token.username is None
+            or result.detail is None
+        ):
+            return
+        self._characters_page.apply_character_detail(
+            token.username,
+            result.character_id,
+            result.detail,
+        )
+
+    @pyqtSlot(object)
+    def _on_character_detail_failed(self, failure: DataLoadFailure) -> None:
+        if (
+            failure.token is self._detail_request_token
+            and self._data_token_is_current(failure.token)
+            and not self._close_in_progress
+        ):
+            log.warning("Character detail load failed (%s)", failure.code)
+
+    @pyqtSlot()
+    def _on_detail_thread_finished(self) -> None:
+        thread = self.sender()
+        if thread is not self._detail_thread:
+            return
+        self._detail_worker = None
+        self._detail_thread = None
+        if isinstance(thread, QThread):
+            thread.deleteLater()
+        if self._close_in_progress:
+            self._resume_close_after_data()
+        elif self._pending_detail_request is not None:
+            self._schedule_detail_load()
+
+    def _cancel_detail_load(self) -> None:
+        self._detail_request_token = None
+        self._pending_detail_request = None
+        self._detail_start_scheduled = False
+        if self._detail_worker is not None:
+            self._detail_worker.request_cancel()
+
+    def _cancel_data_loads(self) -> None:
+        """Invalidate queued delivery and request non-blocking worker cancellation."""
+        self._account_request_token = None
+        self._pending_account_request = None
+        self._account_start_scheduled = False
+        if self._account_worker is not None:
+            self._account_worker.request_cancel()
+        self._cancel_detail_load()
+
+    def _data_load_active(self) -> bool:
+        return any(
+            (
+                self._account_thread is not None,
+                self._detail_thread is not None,
+                self._account_start_scheduled,
+                self._detail_start_scheduled,
+            )
+        )
+
+    def _resume_close_after_data(self) -> None:
+        if self._close_in_progress and not self._background_data_active():
+            QTimer.singleShot(0, self.close)
 
     def _refresh_character_views(self) -> None:
         """Refresh cards and dashboard metrics without another database read."""
@@ -1278,7 +2714,8 @@ class MainWindow(QMainWindow):
                 self._accounts,
                 sorted(hidden),
                 self._tracker,
-                evejs_root,
+                "" if self._docker_mode() else evejs_root,
+                portrait_target=self._current_portrait_target(),
             )
         except Exception:
             log.exception("Characters page refresh failed")
@@ -1291,9 +2728,29 @@ class MainWindow(QMainWindow):
         eligible_usernames = {
             username
             for username in visible_usernames
-            if not self._tracker.is_account_running(username)
+            if (
+                not self._tracker.is_account_running(username)
+                and username
+                not in getattr(self, "_pending_client_launches", set())
+            )
         }
-        if not evejs_root or not self._cfg.get("client_path", ""):
+        if self._docker_mode():
+            launch_available, launch_reason = self._docker_launch_capability()
+            if not launch_available:
+                self._home_page.set_launch_available(False, launch_reason)
+            elif not visible_usernames:
+                self._home_page.set_launch_available(
+                    False,
+                    "No visible accounts available",
+                )
+            elif not eligible_usernames:
+                self._home_page.set_launch_available(
+                    False,
+                    "All visible accounts are already running",
+                )
+            else:
+                self._home_page.set_launch_available(True)
+        elif not evejs_root or not self._cfg.get("client_path", ""):
             self._home_page.set_launch_available(
                 False,
                 "Configure the EveJS root and EVE client path first",
@@ -1310,6 +2767,48 @@ class MainWindow(QMainWindow):
             )
         else:
             self._home_page.set_launch_available(True)
+
+    def _current_portrait_target(self) -> PortraitTarget | None:
+        selection = self._data_selection
+        if selection is None:
+            return None
+        if self._docker_mode():
+            snapshot = getattr(self, "_runtime_snapshot", None)
+            if (
+                not self._docker_data_selection_is_current(selection)
+                or snapshot is None
+                or snapshot.backend is not RuntimeBackend.DOCKER_COMPOSE
+                or snapshot.target_identity != selection.target_identity
+                or snapshot.settings_identity != selection.settings_identity
+                or snapshot.monitor_generation != selection.monitor_generation
+                or snapshot.endpoints is None
+                or snapshot.endpoints.image is None
+            ):
+                return None
+            return PortraitTarget(
+                target_identity=selection.target_identity,
+                image_endpoint=snapshot.endpoints.image,
+                settings_identity=selection.settings_identity,
+                monitor_generation=selection.monitor_generation,
+            )
+        root = str(self._cfg.get("evejs_root", ""))
+        if not root:
+            return None
+        return PortraitTarget(
+            target_identity=selection.target_identity,
+            native_root=Path(root),
+        )
+
+    def _background_data_active(self) -> bool:
+        portrait_checker = getattr(
+            getattr(self, "_characters_page", None),
+            "portrait_loads_active",
+            None,
+        )
+        portrait_active = bool(
+            callable(portrait_checker) and portrait_checker()
+        )
+        return self._data_load_active() or portrait_active
 
     def _prune_and_update(self) -> None:
         if self._tracker.prune_dead() > 0:
@@ -1357,12 +2856,116 @@ class MainWindow(QMainWindow):
             market_error=market_error,
         )
 
+    @pyqtSlot(object)
+    def _on_docker_observation(
+        self, observation: DockerObservation, generation: int | None = None
+    ) -> None:
+        """Adapt read-only container state into the existing snapshot fan-out."""
+        current_generation = getattr(self, "_monitor_generation", 0)
+        if (
+            self._close_in_progress
+            or not self._docker_mode()
+            or (generation is not None and generation != current_generation)
+            or observation.monitor_generation != current_generation
+            or observation.settings_identity
+            != self._docker_monitor_settings_identity()
+        ):
+            return
+        previous_snapshot = getattr(self, "_runtime_snapshot", None)
+        target_changed = (
+            previous_snapshot is not None
+            and previous_snapshot.backend is RuntimeBackend.DOCKER_COMPOSE
+            and previous_snapshot.target_identity != observation.target_identity
+        )
+        previous_image = (
+            previous_snapshot.endpoints.image
+            if previous_snapshot is not None
+            and previous_snapshot.endpoints is not None
+            else None
+        )
+        current_image = (
+            observation.endpoints.image
+            if observation.endpoints is not None
+            else None
+        )
+        portrait_context_changed = (
+            previous_snapshot is not None
+            and previous_snapshot.backend is RuntimeBackend.DOCKER_COMPOSE
+            and (
+                previous_snapshot.target_identity,
+                previous_snapshot.settings_identity,
+                previous_snapshot.monitor_generation,
+                previous_image,
+            )
+            != (
+                observation.target_identity,
+                observation.settings_identity,
+                observation.monitor_generation,
+                current_image,
+            )
+        )
+        if target_changed:
+            self._docker_tool_token = None
+            self._cancel_launch_queue()
+            if hasattr(self, "_account_thread"):
+                self._cancel_data_loads()
+            self._data_selection = None
+            self._accounts = []
+            portrait_invalidate = getattr(
+                getattr(self, "_characters_page", None),
+                "invalidate_portrait_target",
+                None,
+            )
+            if callable(portrait_invalidate):
+                portrait_invalidate()
+            self._stop_docker_log_stream()
+        policy = DockerControlPolicy(self._cfg.get("docker_control_policy", "connect_only"))
+        snapshot = RuntimeSnapshot(
+            game=observation.game, market=observation.market,
+            running_clients=self._tracker.running_count,
+            game_error=observation.game_error, market_error=observation.market_error,
+            backend=RuntimeBackend.DOCKER_COMPOSE, docker_control_policy=policy,
+            game_container=observation.game_identity, market_container=observation.market_identity,
+            game_health=observation.game_health, market_health=observation.market_health,
+            endpoints=observation.endpoints,
+            target_identity=observation.target_identity,
+            settings_identity=observation.settings_identity,
+            monitor_generation=observation.monitor_generation,
+        )
+        self._runtime_snapshot = snapshot
+        if portrait_context_changed:
+            self._refresh_character_views()
+        self._apply_runtime_snapshot(snapshot)
+        if target_changed:
+            self._refresh_characters()
+
     @staticmethod
     def _service_action_text(
         service: str,
         state: ServiceState,
         owned: bool,
+        backend: RuntimeBackend = RuntimeBackend.NATIVE,
+        policy: DockerControlPolicy | None = None,
     ) -> str:
+        if backend is RuntimeBackend.DOCKER_COMPOSE:
+            if policy is DockerControlPolicy.MANAGED:
+                return {
+                    ServiceState.OFFLINE: f"▶ Start {service}",
+                    ServiceState.STARTING: f"⏳ Starting {service}…",
+                    ServiceState.ONLINE: f"■ Stop {service}",
+                    ServiceState.STOPPING: f"⏳ Stopping {service}…",
+                    ServiceState.FAILED: f"↻ Retry {service}",
+                    ServiceState.UNKNOWN: f"{service}: Docker unavailable",
+                }[state]
+            labels = {
+                ServiceState.OFFLINE: f"{service}: Offline",
+                ServiceState.STARTING: f"{service}: Starting…",
+                ServiceState.ONLINE: f"{service}: Online",
+                ServiceState.STOPPING: f"{service}: Stopping…",
+                ServiceState.FAILED: f"{service}: Failed",
+                ServiceState.UNKNOWN: f"{service}: Docker unavailable",
+            }
+            return labels[state]
         if state is ServiceState.ONLINE and not owned:
             return f"{service}: External"
         labels = {
@@ -1371,19 +2974,43 @@ class MainWindow(QMainWindow):
             ServiceState.ONLINE: f"■ Stop {service}",
             ServiceState.STOPPING: f"⏳ Stopping {service}…",
             ServiceState.FAILED: f"↻ Retry {service}",
+            ServiceState.UNKNOWN: f"{service}: Docker unavailable",
         }
         return labels[state]
 
     @staticmethod
-    def _service_action_enabled(state: ServiceState, owned: bool) -> bool:
+    def _service_action_enabled(
+        state: ServiceState,
+        owned: bool,
+        backend: RuntimeBackend = RuntimeBackend.NATIVE,
+        policy: DockerControlPolicy | None = None,
+    ) -> bool:
         """Keep launcher controls inactive for external or transitional services."""
+        if backend is RuntimeBackend.DOCKER_COMPOSE:
+            return policy is DockerControlPolicy.MANAGED and state not in {
+                ServiceState.STARTING, ServiceState.STOPPING, ServiceState.UNKNOWN,
+            }
         if state in {ServiceState.STARTING, ServiceState.STOPPING}:
             return False
         return state is not ServiceState.ONLINE or owned
 
     @staticmethod
-    def _service_action_tooltip(service: str, state: ServiceState, owned: bool) -> str:
+    def _service_action_tooltip(
+        service: str,
+        state: ServiceState,
+        owned: bool,
+        backend: RuntimeBackend = RuntimeBackend.NATIVE,
+        policy: DockerControlPolicy | None = None,
+    ) -> str:
         """Explain why a service action is unavailable without exposing paths."""
+        if backend is RuntimeBackend.DOCKER_COMPOSE:
+            if policy is DockerControlPolicy.CONNECT_ONLY:
+                return "Connect-only Docker mode cannot change containers."
+            if state in {ServiceState.STARTING, ServiceState.STOPPING}:
+                return f"{service} is changing state"
+            if state is ServiceState.UNKNOWN:
+                return "Docker state is unavailable"
+            return ""
         if state is ServiceState.ONLINE and not owned:
             return (
                 f"{service} was started outside this launcher and must be stopped "
@@ -1395,10 +3022,83 @@ class MainWindow(QMainWindow):
             return f"{service} is stopping"
         return ""
 
+    def _set_runtime_page_roots(self, root: str) -> None:
+        """Update both root-dependent pages, tolerating isolated test doubles."""
+        mods_page = getattr(self, "_mods_page", None)
+        set_mods_root = getattr(mods_page, "set_evejs_root", None)
+        if callable(set_mods_root):
+            set_mods_root(root)
+        else:
+            refresh_mods = getattr(mods_page, "refresh_mods", None)
+            if callable(refresh_mods):
+                refresh_mods()
+        set_tools_root = getattr(
+            getattr(self, "_tools_page", None),
+            "set_evejs_root",
+            None,
+        )
+        if callable(set_tools_root):
+            set_tools_root(root)
+
+    def _sync_runtime_pages(self, snapshot: RuntimeSnapshot) -> None:
+        """Push one cached root/backend capability context into Mods and Tools."""
+        cfg = getattr(self, "_cfg", None)
+        if not isinstance(cfg, dict):
+            return
+        root = str(cfg.get("evejs_root", ""))
+        compose_file = str(cfg.get("docker_compose_file", ""))
+        current_context = (
+            root,
+            snapshot.backend,
+            snapshot.docker_control_policy,
+            compose_file,
+        )
+        previous_context = getattr(self, "_runtime_page_context", None)
+        if previous_context == current_context:
+            return
+
+        root_changed = previous_context is None or previous_context[0] != root
+        mods_context_changed = (
+            previous_context is None
+            or previous_context[1:3] != current_context[1:3]
+        )
+        tools_context_changed = (
+            previous_context is None
+            or previous_context[1:4] != current_context[1:4]
+        )
+        mods_page = getattr(self, "_mods_page", None)
+        tools_page = getattr(self, "_tools_page", None)
+
+        if root_changed:
+            self._set_runtime_page_roots(root)
+        if mods_context_changed:
+            set_mods_context = getattr(mods_page, "set_runtime_context", None)
+            if callable(set_mods_context):
+                set_mods_context(
+                    snapshot.backend,
+                    snapshot.docker_control_policy,
+                )
+        if tools_context_changed:
+            set_tools_context = getattr(tools_page, "set_runtime_context", None)
+            if callable(set_tools_context):
+                set_tools_context(
+                    snapshot.backend,
+                    snapshot.docker_control_policy,
+                    compose_file=compose_file,
+                )
+        self._runtime_page_context = current_context
+
     def _apply_runtime_snapshot(self, snapshot: RuntimeSnapshot) -> None:
         """Fan one snapshot out to footer, navigation, and Home."""
-        self._status_bar.set_server_state(snapshot.game, pid=snapshot.game_pid)
-        self._status_bar.set_market_state(snapshot.market, pid=snapshot.market_pid)
+        self._sync_runtime_pages(snapshot)
+        self._status_bar.set_server_state(
+            snapshot.game, pid=snapshot.game_pid, container=snapshot.game_container,
+            error=snapshot.game_error
+        )
+        self._status_bar.set_market_state(
+            snapshot.market, pid=snapshot.market_pid, container=snapshot.market_container,
+            error=snapshot.market_error
+        )
         self._status_bar.set_client_count(snapshot.running_clients)
 
         self._nav.btn_server.setText(
@@ -1406,6 +3106,8 @@ class MainWindow(QMainWindow):
                 "Server",
                 snapshot.game,
                 snapshot.game_owned,
+                snapshot.backend,
+                snapshot.docker_control_policy,
             )
         )
         self._nav.btn_market.setText(
@@ -1413,19 +3115,29 @@ class MainWindow(QMainWindow):
                 "Market",
                 snapshot.market,
                 snapshot.market_owned,
+                snapshot.backend,
+                snapshot.docker_control_policy,
             )
         )
         self._nav.btn_server.setEnabled(
-            self._service_action_enabled(snapshot.game, snapshot.game_owned)
+            self._service_action_enabled(
+                snapshot.game, snapshot.game_owned, snapshot.backend,
+                snapshot.docker_control_policy,
+            )
         )
         self._nav.btn_market.setEnabled(
-            self._service_action_enabled(snapshot.market, snapshot.market_owned)
+            self._service_action_enabled(
+                snapshot.market, snapshot.market_owned, snapshot.backend,
+                snapshot.docker_control_policy,
+            )
         )
         self._nav.btn_server.setToolTip(
             self._service_action_tooltip(
                 "Server",
                 snapshot.game,
                 snapshot.game_owned,
+                snapshot.backend,
+                snapshot.docker_control_policy,
             )
         )
         self._nav.btn_market.setToolTip(
@@ -1433,6 +3145,8 @@ class MainWindow(QMainWindow):
                 "Market",
                 snapshot.market,
                 snapshot.market_owned,
+                snapshot.backend,
+                snapshot.docker_control_policy,
             )
         )
         self._nav.set_badge_count(
@@ -1446,9 +3160,69 @@ class MainWindow(QMainWindow):
             else "No EVE clients are running"
         )
         self._home_page.apply_runtime_snapshot(snapshot)
+        docker = snapshot.backend is RuntimeBackend.DOCKER_COMPOSE
+        if docker:
+            managed = snapshot.docker_control_policy is DockerControlPolicy.MANAGED
+            transitional = {ServiceState.STARTING, ServiceState.STOPPING, ServiceState.UNKNOWN}
+            game_busy = snapshot.game in transitional
+            market_busy = snapshot.market in transitional
+            game_enabled = managed and not game_busy
+            market_blocked = snapshot.game in {
+                ServiceState.ONLINE, ServiceState.STARTING, ServiceState.STOPPING,
+                ServiceState.FAILED, ServiceState.UNKNOWN,
+            }
+            market_enabled = managed and not market_busy and not market_blocked
+            self._nav.btn_server.setEnabled(game_enabled)
+            self._nav.btn_market.setEnabled(market_enabled)
+            if not managed:
+                reason = "Connect-only Docker mode cannot change containers."
+                self._nav.btn_server.setToolTip(reason)
+                self._nav.btn_market.setToolTip(reason)
+                self._home_page.btn_start_servers.setEnabled(False)
+                self._home_page.btn_start_servers.setToolTip(reason)
+            elif market_blocked:
+                self._nav.btn_market.setToolTip("Stop Server first")
+            self._nav.btn_characters.setEnabled(True)
+            self._nav.btn_characters.setToolTip("")
+            set_character_launch = getattr(
+                getattr(self, "_characters_page", None),
+                "set_launch_available",
+                None,
+            )
+            if callable(set_character_launch):
+                launch_available, launch_reason = self._docker_launch_capability(
+                    snapshot
+                )
+                set_character_launch(launch_available, launch_reason)
+            self._nav.btn_mods.setEnabled(True)
+            self._nav.btn_mods.setToolTip("")
+            self._nav.btn_tools.setEnabled(True)
+            self._nav.btn_tools.setToolTip("")
+        else:
+            self._nav.btn_characters.setEnabled(True)
+            self._nav.btn_characters.setToolTip("")
+            set_character_launch = getattr(
+                getattr(self, "_characters_page", None),
+                "set_launch_available",
+                None,
+            )
+            if callable(set_character_launch):
+                set_character_launch(True)
+            self._nav.btn_mods.setEnabled(True)
+            self._nav.btn_mods.setToolTip("")
+            self._nav.btn_tools.setEnabled(True)
+            self._nav.btn_tools.setToolTip("")
 
-    def _on_service_probe(self, probe: ServiceProbe) -> None:
+    def _on_service_probe(
+        self, probe: ServiceProbe, generation: int | None = None
+    ) -> None:
         """Receive one worker observation and fan it out without re-probing."""
+        if (
+            self._close_in_progress
+            or self._docker_mode()
+            or (generation is not None and generation != getattr(self, "_monitor_generation", 0))
+        ):
+            return
         self._service_reachability = (
             probe.game_reachable,
             probe.market_reachable,
@@ -1492,25 +3266,68 @@ class MainWindow(QMainWindow):
         if self._service_thread is not None:
             return
         thread = QThread(self)
-        monitor = ServiceMonitor(interval_ms=5_000)
+        generation = getattr(self, "_monitor_generation", 0)
+        if self._docker_mode():
+            draft = self._docker_setup_draft()
+
+            def target_factory() -> ComposeTarget:
+                return build_compose_target(draft)
+
+            monitor = DockerMonitor(
+                target_factory,
+                inspector_factory=lambda: ComposeInspector(DockerCommandRunner()),
+                interval_ms=5_000,
+                monitor_generation=generation,
+                settings_identity=self._docker_monitor_settings_identity(),
+            )
+        else:
+            monitor = ServiceMonitor(interval_ms=5_000)
         monitor.moveToThread(thread)
         thread.started.connect(monitor.start)
-        monitor.probe_changed.connect(self._on_service_probe)
-        self._service_probe_requested.connect(monitor.probe_now)
+        if isinstance(monitor, DockerMonitor):
+            monitor.observation_changed.connect(
+                lambda observation, generation=generation: self._on_docker_observation(
+                    observation, generation
+                )
+            )
+            self._docker_observe_requested.connect(monitor.observe_now)
+        else:
+            monitor.probe_changed.connect(
+                lambda probe, generation=generation: self._on_service_probe(probe, generation)
+            )
+            self._service_probe_requested.connect(monitor.probe_now)
         self._service_monitor_stop_requested.connect(monitor.stop)
         thread.finished.connect(monitor.deleteLater)
         thread.finished.connect(
-            self._on_service_monitor_thread_finished,
+            lambda monitored_thread=thread: self._on_service_monitor_thread_finished(monitored_thread),
             Qt.ConnectionType.QueuedConnection,
         )
         self._service_thread = thread
         self._service_monitor = monitor
+        if self._docker_mode():
+            snapshot = self._docker_unknown_snapshot()
+            self._runtime_snapshot = snapshot
+            self._apply_runtime_snapshot(snapshot)
         thread.start()
 
-    @pyqtSlot()
-    def _on_service_monitor_thread_finished(self) -> None:
+    def _on_service_monitor_thread_finished(self, finished_thread: QThread | None = None) -> None:
         """Retry a deferred window close once the retained worker has stopped."""
+        thread = self._service_thread
+        if finished_thread is not None and finished_thread is not thread:
+            return
+        self._service_monitor = None
+        self._service_thread = None
+        if thread is not None:
+            thread.deleteLater()
+        if self._service_monitor_restart_pending:
+            self._service_monitor_restart_pending = False
+            if not self._close_in_progress:
+                self._schedule_service_monitor_start()
+        elif self._service_monitor_start_pending and not self._close_in_progress:
+            self._schedule_service_monitor_start()
         if self._close_in_progress and self._service_thread is not None:
+            QTimer.singleShot(0, self.close)
+        elif self._close_in_progress:
             QTimer.singleShot(0, self.close)
 
     def _stop_service_monitor(self) -> bool:
@@ -1525,6 +3342,10 @@ class MainWindow(QMainWindow):
         thread.requestInterruption()
         self._service_monitor_stop_requested.emit()
         thread.quit()
+        if isinstance(monitor, DockerMonitor):
+            # Docker CLI may still be returning.  Its shutdown is intentionally
+            # asynchronous; finished callback owns reference release/restart.
+            return False
         if not thread.wait(2_000):
             log.warning("Service monitor thread did not stop within 2 seconds")
             thread.requestInterruption()
@@ -1539,6 +3360,11 @@ class MainWindow(QMainWindow):
     def _update_status_bar(self) -> None:
         # Before show() there is no worker yet; perform one deterministic
         # bootstrap/test probe.  Once shown, all socket I/O stays in the worker.
+        if self._docker_mode():
+            snapshot = self._docker_cached_snapshot()
+            self._runtime_snapshot = snapshot
+            self._apply_runtime_snapshot(snapshot)
+            return
         if self._service_monitor is None:
             self._service_reachability = (
                 is_server_running(port=int(Ports.GAME_TCP)),
@@ -1552,14 +3378,130 @@ class MainWindow(QMainWindow):
 
     # ── Console panel toggle ──────────────────────────────────────────
 
+    def _docker_log_target_factory(self) -> Callable[[], ComposeTarget]:
+        """Capture raw settings; worker-thread factory validates and resolves them."""
+        draft = self._docker_setup_draft()
+
+        def target_factory() -> ComposeTarget:
+            return attach_docker_mod_override(
+                build_compose_target(draft)
+            )
+
+        return target_factory
+
+    def _restart_docker_monitor_for_compose_change(self) -> None:
+        """Replace a monitor whose captured Compose file chain is now stale."""
+        self._service_monitor_restart_pending = True
+        if self._stop_service_monitor():
+            self._service_monitor_restart_pending = False
+            if not self._close_in_progress:
+                self._schedule_service_monitor_start()
+
+    def _start_docker_log_stream(self, service: str) -> None:
+        """Start exactly one read-only local CLI follower for the selected service."""
+        active = getattr(self, "_docker_log_thread", None)
+        if active is not None:
+            self._pending_docker_log_service = service
+            self._stop_docker_log_stream(clear_pending=False)
+            return
+        self._log_generation += 1
+        self._console_panel.begin_stream(f"Docker Compose — {service.title()} logs")
+        thread = QThread(self)
+        token = object()
+        worker = DockerLogWorker(self._docker_log_target_factory(), service=service, token=token)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.line.connect(self._on_docker_log_line)
+        worker.diagnostic.connect(self._on_docker_log_diagnostic)
+        worker.terminal.connect(worker.deleteLater, Qt.ConnectionType.DirectConnection)
+        worker.terminal.connect(thread.quit, Qt.ConnectionType.DirectConnection)
+        thread.finished.connect(self._on_docker_log_thread_finished)
+        self._docker_log_thread = thread
+        self._docker_log_worker = worker
+        self._docker_log_service = service
+        self._docker_log_token = token
+        thread.start()
+
+    def _stop_docker_log_stream(self, *, clear_pending: bool = True) -> bool:
+        """Request follower cancellation without waiting on the GUI thread."""
+        self._log_generation = getattr(self, "_log_generation", 0) + 1
+        if clear_pending:
+            self._pending_docker_log_service = None
+        # Queued cross-thread line/diagnostic delivery must be invalid before
+        # cancellation returns; worker/thread ownership remains retained until
+        # their exact QThread finalizer runs.
+        self._docker_log_token = None
+        worker = getattr(self, "_docker_log_worker", None)
+        thread = getattr(self, "_docker_log_thread", None)
+        if worker is None or thread is None:
+            return True
+        worker.request_cancel()
+        return False
+
+    def _on_console_panel_closed(self) -> None:
+        if self._docker_mode():
+            self._stop_docker_log_stream()
+
+    @pyqtSlot(object, str)
+    def _on_docker_log_line(self, token: object, line: str) -> None:
+        if (token is self._docker_log_token and self._docker_log_worker is not None
+                and self._docker_mode() and not self._close_in_progress):
+            self._console_panel.append_stream_line(line)
+
+    @pyqtSlot(object, str)
+    def _on_docker_log_diagnostic(self, token: object, message: str) -> None:
+        if (token is self._docker_log_token and self._docker_log_worker is not None
+                and self._docker_mode() and not self._close_in_progress):
+            self._console_panel.finish_stream(message)
+
+    @pyqtSlot()
+    def _on_docker_log_thread_finished(self) -> None:
+        """GUI-affine finalizer: release every exact session, then replace once."""
+        thread = self.sender()
+        if not isinstance(thread, QThread):
+            return
+        current = thread is self._docker_log_thread
+        if current:
+            self._docker_log_worker = None
+            self._docker_log_thread = None
+            self._docker_log_service = None
+            self._docker_log_token = None
+        # Stale retained threads still receive exact cleanup; never early-return.
+        thread.deleteLater()
+        if current:
+            pending = self._pending_docker_log_service
+            self._pending_docker_log_service = None
+            if pending and self._docker_mode() and not self._close_in_progress:
+                self._pending_docker_log_service = pending
+                QTimer.singleShot(0, self._start_pending_docker_log_stream)
+        if self._close_in_progress:
+            QTimer.singleShot(0, self.close)
+
+    @pyqtSlot()
+    def _start_pending_docker_log_stream(self) -> None:
+        """Start the one serialized replacement after its exact predecessor ends."""
+        pending = self._pending_docker_log_service
+        self._pending_docker_log_service = None
+        if pending and self._docker_mode() and not self._close_in_progress:
+            self._start_docker_log_stream(pending)
+
     def _on_console_toggled(self, name: str) -> None:
         """StatusBar section click → show/hide console panel for that service."""
-        if self._console_panel.isVisible():
-            self._console_panel.stop()
+        if self._docker_mode():
+            if not hasattr(self, "_docker_log_worker"):
+                self._docker_unavailable("Docker console logs are not available in this version.")
+            elif (self._console_panel.isVisible() and self._docker_log_worker is not None
+                  and name == self._docker_log_service
+                  and self._pending_docker_log_service is None):
+                self._console_panel.stop()
+            elif name in {"server", "market"}:
+                self._start_docker_log_stream(name)
             return
-
         evejs_root = self._cfg.get("evejs_root", "")
         if not evejs_root:
+            return
+        if self._console_panel.isVisible():
+            self._console_panel.stop()
             return
 
         if name == "server":
@@ -1840,13 +3782,55 @@ class MainWindow(QMainWindow):
     def _on_settings_saved(self, cfg: dict) -> None:
         """Refresh in-memory config and character grid after settings save."""
         previous_root = str(self._cfg.get("evejs_root", ""))
+        previous_monitor = (
+            self._cfg.get("runtime_backend"), self._cfg.get("docker_compose_file"),
+            self._cfg.get("docker_project_name"), previous_root,
+        )
         self._cfg.update(cfg)
+        self._settings_generation = getattr(self, "_settings_generation", 0) + 1
         current_root = str(self._cfg.get("evejs_root", ""))
+        current_monitor = (
+            self._cfg.get("runtime_backend"), self._cfg.get("docker_compose_file"),
+            self._cfg.get("docker_project_name"), current_root,
+        )
+        if current_monitor != previous_monitor:
+            self._cancel_launch_queue()
+            if hasattr(self, "_account_thread"):
+                self._cancel_data_loads()
+            self._data_selection = None
+            self._accounts = []
+            portrait_invalidate = getattr(
+                getattr(self, "_characters_page", None),
+                "invalidate_portrait_target",
+                None,
+            )
+            if callable(portrait_invalidate):
+                portrait_invalidate()
+            self._stop_docker_log_stream()
+            self._monitor_generation = getattr(self, "_monitor_generation", 0) + 1
+            self._service_monitor_restart_pending = True
+            if self._docker_mode():
+                snapshot = self._docker_unknown_snapshot()
+                self._runtime_snapshot = snapshot
+                self._apply_runtime_snapshot(snapshot)
+            elif hasattr(self, "_runtime_snapshot"):
+                self._publish_cached_runtime()
+            if self._stop_service_monitor():
+                self._service_monitor_restart_pending = False
+                if not self._close_in_progress:
+                    self._schedule_service_monitor_start()
         if current_root != previous_root:
             clear_solar_system_name_cache()
             PortraitCache.clear()
-            self._mods_page.refresh_mods()
-            self._tools_page.set_evejs_root(current_root)
+            runtime_page_context = getattr(self, "_runtime_page_context", None)
+            if runtime_page_context is None or runtime_page_context[0] != current_root:
+                snapshot = getattr(self, "_runtime_snapshot", None)
+                if isinstance(snapshot, RuntimeSnapshot):
+                    self._sync_runtime_pages(snapshot)
+                else:
+                    self._set_runtime_page_roots(current_root)
+        if self._docker_mode() and current_monitor == previous_monitor:
+            self._publish_cached_runtime()
         self._apply_runtime_settings()
         self._home_page.set_server_mode(self._effective_server_mode_label())
         self._refresh_characters()
@@ -1888,8 +3872,89 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self.close)
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        launch_queue = getattr(self, "_launch_queue", None)
+        if launch_queue is not None:
+            self._close_in_progress = True
+            launch_queue.cancel()
+        if getattr(self, "_client_launch_thread", None) is not None:
+            self._close_in_progress = True
+            event.ignore()
+            return
+        if getattr(self, "_docker_preflight_thread", None) is not None:
+            self._close_in_progress = True
+            event.ignore()
+            return
         if self._update_install_worker is not None:
             event.ignore()
+            return
+        if getattr(self, "_docker_log_thread", None) is not None:
+            self._close_in_progress = True
+            self._stop_docker_log_stream()
+            event.ignore()
+            return
+        running = self._tracker.running_count
+        if running > 0:
+            reply = QMessageBox.question(
+                self,
+                "Clients Running",
+                f"{running} client(s) still running.\nKill them and exit?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._tracker.kill_all()
+            else:
+                self._close_in_progress = False
+                event.ignore()
+                return
+        if hasattr(self, "_account_thread"):
+            self._cancel_data_loads()
+            portrait_cancel = getattr(
+                getattr(self, "_characters_page", None),
+                "cancel_portrait_loads",
+                None,
+            )
+            if callable(portrait_cancel):
+                portrait_cancel(invalidate=True)
+            if self._background_data_active():
+                self._close_in_progress = True
+                event.ignore()
+                return
+        # Client handling must precede the Docker policy branch: after a
+        # confirmed Kill+Exit, managed stop-on-exit is re-evaluated below.
+        if self._docker_mode():
+            self._close_in_progress = True
+            # Connect-only is observational; it never constructs a lifecycle
+            # worker. Managed policy may deliberately leave Compose running.
+            managed_stop = self._docker_managed() and not bool(
+                self._cfg.get("docker_keep_running_on_exit", True)
+            )
+            if self._lifecycle_active():
+                self._docker_close_pending = managed_stop
+                event.ignore()
+                return
+            if managed_stop and not self._docker_close_stop_started:
+                self._docker_close_pending = True
+                self._docker_close_stop_started = True
+                self._docker_close_stop_succeeded = False
+                if self._begin_docker_lifecycle(DockerLifecycleAction.STOP_ALL):
+                    event.ignore()
+                    return
+                self._docker_close_pending = False
+                self._docker_close_stop_started = False
+                self._close_in_progress = False
+                event.ignore()
+                return
+            if managed_stop and not self._docker_close_stop_succeeded:
+                event.ignore()
+                return
+            if not self._stop_service_monitor():
+                event.ignore()
+                return
+            if self._has_running_update_checker():
+                event.ignore()
+                return
+            event.accept()
             return
         if getattr(self, "_close_after_lifecycle", False):
             self._close_in_progress = True
@@ -1904,21 +3969,6 @@ class MainWindow(QMainWindow):
                 return
             event.accept()
             return
-
-        running = self._tracker.running_count
-        if running > 0:
-            reply = QMessageBox.question(
-                self,
-                "Clients Running",
-                f"{running} client(s) still running.\nKill them and exit?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                self._tracker.kill_all()
-            else:
-                event.ignore()
-                return
 
         if self._lifecycle_active():
             log.info("Ignored close while a lifecycle operation is still active")

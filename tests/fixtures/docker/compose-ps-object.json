@@ -1,0 +1,11 @@
+{
+  "Service": "server",
+  "Name": "fixture-evejs-server-1",
+  "ID": "c3d4e5f6a1b2",
+  "State": "running",
+  "Health": "starting",
+  "ExitCode": 0,
+  "Publishers": [
+    {"URL": "127.0.0.1:32600->26000/tcp"}
+  ]
+}

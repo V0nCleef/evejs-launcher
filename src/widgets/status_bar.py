@@ -97,7 +97,8 @@ class StatusSection(QFrame):
             }}
         """)
 
-    def set_state(self, state: ServiceState, pid: int | None = None) -> None:
+    def set_state(self, state: ServiceState, pid: int | None = None, container: str | None = None,
+                  error: str | None = None) -> None:
         self._state = state
         if state == ServiceState.ONLINE:
             self._pulse.stop()
@@ -106,6 +107,8 @@ class StatusSection(QFrame):
             txt = f"{self.section_name}: Online"
             if pid:
                 txt += f" (PID {pid})"
+            elif container:
+                txt += f" (Container {container})"
             self._set_label_text(txt)
         elif state == ServiceState.STARTING:
             self.dot.setStyleSheet(f"background-color: {COLORS['gold']}; border-radius: 5px;")
@@ -120,6 +123,13 @@ class StatusSection(QFrame):
             self._opacity_effect.setOpacity(1.0)
             self.dot.setStyleSheet(f"background-color: {COLORS['red']}; border-radius: 5px;")
             self._set_label_text(f"{self.section_name}: Failed")
+            if error:
+                self.label.setToolTip(error)
+        elif state == ServiceState.UNKNOWN:
+            self._pulse.stop()
+            self._opacity_effect.setOpacity(1.0)
+            self.dot.setStyleSheet(f"background-color: {COLORS['gold']}; border-radius: 5px;")
+            self._set_label_text(f"{self.section_name}: Unknown" + (f" — {error}" if error else ""))
         else:
             self._pulse.stop()
             self._opacity_effect.setOpacity(1.0)
@@ -219,11 +229,13 @@ class StatusBar(QFrame):
                         return True
         return super().eventFilter(obj, event)
 
-    def set_server_state(self, state: ServiceState, pid: int | None = None) -> None:
-        self.server_section.set_state(state, pid=pid)
+    def set_server_state(self, state: ServiceState, pid: int | None = None, container: str | None = None,
+                         error: str | None = None) -> None:
+        self.server_section.set_state(state, pid=pid, container=container, error=error)
 
-    def set_market_state(self, state: ServiceState, pid: int | None = None) -> None:
-        self.market_section.set_state(state, pid=pid)
+    def set_market_state(self, state: ServiceState, pid: int | None = None, container: str | None = None,
+                         error: str | None = None) -> None:
+        self.market_section.set_state(state, pid=pid, container=container, error=error)
 
     def set_client_count(self, count: int) -> None:
         self.clients_section.set_count(count)

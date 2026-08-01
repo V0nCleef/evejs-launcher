@@ -1,0 +1,22 @@
+[
+  {
+    "Service": "init",
+    "Name": "fixture-evejs-init-1",
+    "ID": "a1b2c3d4e5f6",
+    "State": "exited",
+    "Health": "",
+    "ExitCode": 0,
+    "Publishers": []
+  },
+  {
+    "Service": "market",
+    "Name": "fixture-evejs-market-1",
+    "ID": "b2c3d4e5f6a1",
+    "State": "running",
+    "Health": "healthy",
+    "ExitCode": 0,
+    "Publishers": [
+      {"URL": "127.0.0.1:40110->40110/tcp"}
+    ]
+  }
+]

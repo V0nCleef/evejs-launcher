@@ -16,6 +16,67 @@ from typing import Callable
 
 # ── Native Win32 API handles (loaded once at module level) ────────────────
 user32 = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
+ntdll = ctypes.windll.ntdll
+
+_CREATE_SUSPENDED = 0x00000004
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9
+
+
+class _IoCounters(ctypes.Structure):
+    _fields_ = [
+        ("ReadOperationCount", ctypes.c_ulonglong),
+        ("WriteOperationCount", ctypes.c_ulonglong),
+        ("OtherOperationCount", ctypes.c_ulonglong),
+        ("ReadTransferCount", ctypes.c_ulonglong),
+        ("WriteTransferCount", ctypes.c_ulonglong),
+        ("OtherTransferCount", ctypes.c_ulonglong),
+    ]
+
+
+class _BasicLimitInformation(ctypes.Structure):
+    _fields_ = [
+        ("PerProcessUserTimeLimit", ctypes.c_longlong),
+        ("PerJobUserTimeLimit", ctypes.c_longlong),
+        ("LimitFlags", wintypes.DWORD),
+        ("MinimumWorkingSetSize", ctypes.c_size_t),
+        ("MaximumWorkingSetSize", ctypes.c_size_t),
+        ("ActiveProcessLimit", wintypes.DWORD),
+        ("Affinity", ctypes.c_size_t),
+        ("PriorityClass", wintypes.DWORD),
+        ("SchedulingClass", wintypes.DWORD),
+    ]
+
+
+class _ExtendedLimitInformation(ctypes.Structure):
+    _fields_ = [
+        ("BasicLimitInformation", _BasicLimitInformation),
+        ("IoInfo", _IoCounters),
+        ("ProcessMemoryLimit", ctypes.c_size_t),
+        ("JobMemoryLimit", ctypes.c_size_t),
+        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+        ("PeakJobMemoryUsed", ctypes.c_size_t),
+    ]
+
+
+kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+kernel32.SetInformationJobObject.argtypes = [
+    wintypes.HANDLE,
+    ctypes.c_int,
+    ctypes.c_void_p,
+    wintypes.DWORD,
+]
+kernel32.SetInformationJobObject.restype = wintypes.BOOL
+kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+kernel32.TerminateJobObject.restype = wintypes.BOOL
+kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+kernel32.CloseHandle.restype = wintypes.BOOL
+ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
+ntdll.NtResumeProcess.restype = wintypes.LONG
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -43,6 +104,83 @@ def launch_eve_client(exe_path: Path, env: dict[str, str], cwd: Path) -> subproc
 def get_hidden_process_flags() -> dict[str, int]:
     """Popen kwargs for background server processes (no console window)."""
     return {"creationflags": subprocess.CREATE_NO_WINDOW}
+
+
+def get_suspended_hidden_process_flags() -> dict[str, int]:
+    """Popen kwargs for assigning a hidden child to a Job before it runs."""
+    return {"creationflags": subprocess.CREATE_NO_WINDOW | _CREATE_SUSPENDED}
+
+
+def create_kill_on_close_job(process_handle: int) -> int | None:
+    """Assign one suspended process to a Job inherited by all descendants."""
+    if not isinstance(process_handle, int) or isinstance(process_handle, bool) or process_handle <= 0:
+        raise ValueError("Job assignment requires a valid process handle.")
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        return None
+    info = _ExtendedLimitInformation()
+    info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    configured = kernel32.SetInformationJobObject(
+        job,
+        _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
+        ctypes.byref(info),
+        ctypes.sizeof(info),
+    )
+    assigned = configured and kernel32.AssignProcessToJobObject(
+        job,
+        wintypes.HANDLE(process_handle),
+    )
+    if not assigned:
+        kernel32.CloseHandle(job)
+        return None
+    return int(job)
+
+
+def resume_process(process_handle: int) -> bool:
+    """Resume a process created with ``CREATE_SUSPENDED``."""
+    if not isinstance(process_handle, int) or isinstance(process_handle, bool) or process_handle <= 0:
+        raise ValueError("Process resume requires a valid process handle.")
+    return ntdll.NtResumeProcess(wintypes.HANDLE(process_handle)) >= 0
+
+
+def terminate_job(job_handle: int) -> bool:
+    """Terminate every process owned by one launcher-created Job Object."""
+    if not isinstance(job_handle, int) or isinstance(job_handle, bool) or job_handle <= 0:
+        raise ValueError("Job termination requires a valid handle.")
+    return bool(kernel32.TerminateJobObject(wintypes.HANDLE(job_handle), 1))
+
+
+def close_job(job_handle: int) -> None:
+    """Close one launcher-owned Job handle (also enforcing kill-on-close)."""
+    if not isinstance(job_handle, int) or isinstance(job_handle, bool) or job_handle <= 0:
+        raise ValueError("Job close requires a valid handle.")
+    kernel32.CloseHandle(wintypes.HANDLE(job_handle))
+
+
+def terminate_process_tree(pid: int) -> bool:
+    """Force-stop one retained Windows process tree by exact root PID."""
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        raise ValueError("Process-tree termination requires a positive PID.")
+    system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+    try:
+        result = subprocess.run(
+            [
+                str(system_root / "System32" / "taskkill.exe"),
+                "/F",
+                "/T",
+                "/PID",
+                str(pid),
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=5,
+            **get_hidden_process_flags(),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
 
 
 _SAFE_TOOL_ARGUMENT = re.compile(r"[A-Za-z0-9_./:=+\-]+\Z")

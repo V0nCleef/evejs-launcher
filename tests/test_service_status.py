@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timezone
 
 import pytest
 
@@ -30,6 +31,18 @@ def test_external_reachable_service_is_online_without_owned_pid() -> None:
     state, pid, error = derive_service_state(reachable=True, process=None)
 
     assert state is ServiceState.ONLINE
+    assert pid is None
+    assert error is None
+
+
+def test_queued_start_is_starting_before_process_handle_arrives() -> None:
+    state, pid, error = derive_service_state(
+        reachable=False,
+        process=None,
+        intent=ServiceState.STARTING,
+    )
+
+    assert state is ServiceState.STARTING
     assert pid is None
     assert error is None
 
@@ -83,6 +96,29 @@ def test_stopping_intent_takes_precedence_while_owned_process_is_alive() -> None
     assert error is None
 
 
+def test_stopping_intent_takes_precedence_over_reachable_service() -> None:
+    state, pid, error = derive_service_state(
+        reachable=True,
+        process=FakeProcess(1234),
+        intent=ServiceState.STOPPING,
+    )
+
+    assert state is ServiceState.STOPPING
+    assert pid == 1234
+    assert error is None
+
+
+def test_dead_service_without_intent_or_error_is_offline() -> None:
+    state, pid, error = derive_service_state(
+        reachable=False,
+        process=FakeProcess(1234, return_code=0),
+    )
+
+    assert state is ServiceState.OFFLINE
+    assert pid is None
+    assert error is None
+
+
 def test_runtime_snapshot_tracks_game_and_market_independently() -> None:
     snapshot = RuntimeSnapshot(
         game=ServiceState.ONLINE,
@@ -96,3 +132,32 @@ def test_runtime_snapshot_tracks_game_and_market_independently() -> None:
     assert snapshot.market is ServiceState.OFFLINE
     assert snapshot.running_clients == 2
     assert replace(snapshot, market=ServiceState.STARTING).game is ServiceState.ONLINE
+
+
+def test_runtime_snapshot_replace_retains_independent_native_metadata() -> None:
+    checked_at = datetime(2026, 7, 29, tzinfo=timezone.utc)
+    snapshot = RuntimeSnapshot(
+        game=ServiceState.ONLINE,
+        market=ServiceState.FAILED,
+        running_clients=3,
+        game_pid=1200,
+        market_pid=1300,
+        game_owned=True,
+        market_owned=False,
+        game_error=None,
+        market_error="Market exited before readiness",
+        checked_at=checked_at,
+    )
+
+    replaced = replace(snapshot, market=ServiceState.OFFLINE)
+
+    assert replaced.game is ServiceState.ONLINE
+    assert replaced.market is ServiceState.OFFLINE
+    assert replaced.game_pid == 1200
+    assert replaced.market_pid == 1300
+    assert replaced.game_owned is True
+    assert replaced.market_owned is False
+    assert replaced.game_error is None
+    assert replaced.market_error == "Market exited before readiness"
+    assert replaced.checked_at is checked_at
+    assert replaced.running_clients == 3

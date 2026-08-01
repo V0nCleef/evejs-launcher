@@ -4,7 +4,10 @@ Each account gets a junction pointing to the real EVE client install.
 This gives each account a unique path → unique settings folder on first launch.
 """
 import re
+import ipaddress
+import os
 from pathlib import Path
+import tempfile
 
 from ..config import CONFIG_DIR
 from .platform import create_directory_link, get_eve_settings_path, remove_directory_link
@@ -30,10 +33,8 @@ def get_settings_key(client_path: str) -> str:
 def create_profile(username: str, real_client_path: str) -> Path:
     """Create a junction profile for the given account.
 
-    Copies ALL EVE settings from the real client on first creation so the
-    EVE client can render its window immediately (proven essential — template
-    files alone cause silent crashes for some accounts when other clients
-    are already running).
+    Bootstraps only safe text settings. Binary account caches and browser state
+    remain isolated to the account that created them.
 
     Args:
         username: Account username (used as profile folder name).
@@ -59,12 +60,7 @@ def create_profile(username: str, real_client_path: str) -> Path:
 
 
 def _bootstrap_settings(username: str, real_client_path: str = "") -> None:
-    """Copy EVE settings from the real client to the new profile.
-
-    Copies ALL files (not just template) because the EVE client needs the
-    full set of .dat files to initialize when other clients are running.
-    Falls back to shipped template files if real client settings don't exist.
-    """
+    """Bootstrap safe settings without copying account-private cache state."""
     import shutil
 
     try:
@@ -74,19 +70,16 @@ def _bootstrap_settings(username: str, real_client_path: str = "") -> None:
 
     dst_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── Try to copy from the real client's settings first ────────────
+    # prefs.ini contains renderer/bootstrap settings but no account cache.
     if real_client_path:
         real_settings = get_eve_settings_path(real_client_path)
         if real_settings.exists():
-            for src in real_settings.iterdir():
-                dst = dst_dir / src.name
-                if src.is_file() and not dst.exists():
-                    shutil.copy2(src, dst)
-                elif src.is_dir() and src.name == "Browser" and not dst.exists():
-                    shutil.copytree(src, dst)
-            return  # real client copy succeeded — done
+            src = real_settings / "prefs.ini"
+            dst = dst_dir / "prefs.ini"
+            if src.is_file() and not dst.exists():
+                shutil.copy2(src, dst)
 
-    # ── Fallback: template files shipped with the launcher ───────────
+    # Fill anything still missing from generic launcher-owned templates.
     template_dir = Path(__file__).resolve().parent / "template_settings"
     if not template_dir.exists():
         return
@@ -191,6 +184,161 @@ def prefill_username(username: str) -> None:
             text,
         )
         yaml_path.write_text(text, encoding="utf-8")
+
+
+def configure_profile_game_endpoint(
+    username: str,
+    profile_tq_path: Path,
+    *,
+    host: str,
+    port: int,
+) -> None:
+    """Atomically apply one validated game endpoint immediately before launch."""
+    _validate_game_endpoint(host, port)
+    start_path = Path(profile_tq_path) / "start.ini"
+    if not start_path.is_file():
+        raise FileNotFoundError("EVE client start.ini is missing.")
+    settings_dir = get_profile_settings_path(username)
+    settings_dir.mkdir(parents=True, exist_ok=True)
+    prefs_path = settings_dir / "prefs.ini"
+
+    start_text = _read_preserving_newlines(start_path)
+    prefs_text = _read_preserving_newlines(prefs_path) if prefs_path.exists() else ""
+    updated_start = _patch_start_ini(start_text, host=host, port=port)
+    updated_prefs = _patch_flat_key(prefs_text, "port", str(port))
+
+    _atomic_write_text(start_path, updated_start)
+    _atomic_write_text(prefs_path, updated_prefs)
+
+
+def _validate_game_endpoint(host: str, port: int) -> None:
+    if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+        raise ValueError("Game endpoint port is invalid.")
+    if not isinstance(host, str) or not host or any(char in host for char in "\r\n\x00"):
+        raise ValueError("Game endpoint host is invalid.")
+    if host.casefold() == "localhost":
+        return
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError as exc:
+        raise ValueError("Game endpoint must use a loopback host.") from exc
+    if not address.is_loopback:
+        raise ValueError("Game endpoint must use a loopback host.")
+
+
+def _read_preserving_newlines(path: Path) -> str:
+    with path.open("r", encoding="utf-8", errors="replace", newline="") as handle:
+        return handle.read()
+
+
+def _newline_for(text: str) -> str:
+    return "\r\n" if "\r\n" in text else "\n"
+
+
+def _patch_start_ini(text: str, *, host: str, port: int) -> str:
+    newline = _newline_for(text)
+    had_final_newline = text.endswith(("\n", "\r"))
+    lines = text.splitlines()
+    main_start = next(
+        (index for index, line in enumerate(lines) if line.strip().casefold() == "[main]"),
+        None,
+    )
+    if main_start is None:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.extend(("[main]", f"server={host}", f"port={port}"))
+        return newline.join(lines) + newline
+
+    main_end = next(
+        (
+            index
+            for index in range(main_start + 1, len(lines))
+            if lines[index].strip().startswith("[") and lines[index].strip().endswith("]")
+        ),
+        len(lines),
+    )
+    values = {"server": host, "port": str(port)}
+    seen: set[str] = set()
+    patched: list[str] = []
+    for index, line in enumerate(lines):
+        if main_start < index < main_end and "=" in line:
+            raw_key = line.split("=", 1)[0]
+            key = raw_key.strip().casefold()
+            if key in values:
+                if key in seen:
+                    continue
+                leading = raw_key[: len(raw_key) - len(raw_key.lstrip())]
+                patched.append(f"{leading}{raw_key.strip()}={values[key]}")
+                seen.add(key)
+                continue
+        patched.append(line)
+
+    insertion = main_end - sum(
+        1
+        for line in lines[main_start + 1 : main_end]
+        if "=" in line and line.split("=", 1)[0].strip().casefold() in values
+        and line.split("=", 1)[0].strip().casefold() in seen
+    ) + len(seen)
+    missing = [f"{key}={values[key]}" for key in ("server", "port") if key not in seen]
+    if missing:
+        # Find the next section again after duplicate removal.
+        insertion = next(
+            (
+                index
+                for index in range(main_start + 1, len(patched))
+                if patched[index].strip().startswith("[") and patched[index].strip().endswith("]")
+            ),
+            len(patched),
+        )
+        patched[insertion:insertion] = missing
+    suffix = newline if had_final_newline or not text else ""
+    return newline.join(patched) + suffix
+
+
+def _patch_flat_key(text: str, key: str, value: str) -> str:
+    newline = _newline_for(text)
+    had_final_newline = text.endswith(("\n", "\r"))
+    lines = text.splitlines()
+    seen = False
+    patched: list[str] = []
+    for line in lines:
+        if "=" in line and line.split("=", 1)[0].strip().casefold() == key.casefold():
+            if seen:
+                continue
+            raw_key = line.split("=", 1)[0]
+            leading = raw_key[: len(raw_key) - len(raw_key.lstrip())]
+            patched.append(f"{leading}{raw_key.strip()}={value}")
+            seen = True
+        else:
+            patched.append(line)
+    if not seen:
+        patched.append(f"{key}={value}")
+    suffix = newline if had_final_newline or not text else ""
+    return newline.join(patched) + suffix
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def list_profiles() -> list[str]:

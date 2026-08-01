@@ -84,6 +84,9 @@ class DetailPanel(QFrame):
         self._char_name: str = ""
         self._char_id: int = 0
         self._portrait_pixmap: Optional[QPixmap] = None
+        self._launch_available = True
+        self._launch_unavailable_reason = ""
+        self._launch_pending = False
 
         self._setup_ui()
         self.show_empty()
@@ -278,8 +281,37 @@ class DetailPanel(QFrame):
         for key, (_, val_label) in self._stat_rows.items():
             val_label.setText(detail_dict.get(key, "—"))
 
+        self._apply_launch_button_state()
         self._stack.setCurrentIndex(1)
 
     def get_character(self) -> tuple[str, str, int]:
         """Return current character info."""
         return self._username, self._char_name, self._char_id
+
+    def set_portrait(self, pixmap: Optional[QPixmap]) -> None:
+        """Update only the portrait for the currently displayed character."""
+        self._portrait_pixmap = pixmap
+        self._portrait.set_portrait(pixmap)
+
+    def set_launch_available(self, enabled: bool, reason: str = "") -> None:
+        """Enable launch or clearly present the detail panel as view-only."""
+        self._launch_available = bool(enabled)
+        self._launch_unavailable_reason = "" if enabled else reason
+        self._apply_launch_button_state()
+
+    def set_launch_pending(self, pending: bool) -> None:
+        """Show an immediate, non-clickable state while this client is prepared."""
+        self._launch_pending = bool(pending)
+        self._apply_launch_button_state()
+
+    def _apply_launch_button_state(self) -> None:
+        if self._launch_pending:
+            self._launch_btn.setEnabled(False)
+            self._launch_btn.setText("LAUNCHING...")
+            self._launch_btn.setToolTip("Preparing the profile and starting EVE")
+            return
+        self._launch_btn.setEnabled(self._launch_available)
+        self._launch_btn.setText("LAUNCH" if self._launch_available else "VIEW ONLY")
+        self._launch_btn.setToolTip(
+            "" if self._launch_available else self._launch_unavailable_reason
+        )

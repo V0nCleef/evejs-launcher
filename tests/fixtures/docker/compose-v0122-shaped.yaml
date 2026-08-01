@@ -1,0 +1,20 @@
+name: fixture-evejs
+services:
+  market:
+    image: example.invalid/evejs-server:0.12.3-fixture
+    ports:
+      - "127.0.0.1:40110:40110"
+    volumes:
+      - fixture-evejs-data:/var/lib/evejs
+  server:
+    image: example.invalid/evejs-server:0.12.3-fixture
+    depends_on:
+      - market
+    ports:
+      - "127.0.0.1:32600:26000"
+    volumes:
+      - fixture-evejs-data:/var/lib/evejs
+      - "C:/Fixture Space/EveJS/_local/gameStore:/var/lib/evejs/gameStore"
+volumes:
+  fixture-evejs-data:
+    name: fixture-evejs-data

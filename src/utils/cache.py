@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from PyQt6.QtGui import QPixmap, QPixmapCache
 
+from src.core.runtime.portraits import PortraitRequest, portrait_cache_key
+
 _DEFAULT_LIMIT_MB = 32
 
 
@@ -11,6 +13,11 @@ class PortraitCache:
 
     All methods are static; the cache is global to the QApplication.
     """
+
+    @staticmethod
+    def key(request: PortraitRequest) -> str:
+        """Return the canonical target-aware key for one portrait request."""
+        return portrait_cache_key(request)
 
     @staticmethod
     def get(key: str) -> QPixmap | None:

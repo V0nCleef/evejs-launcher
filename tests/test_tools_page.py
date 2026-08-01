@@ -6,7 +6,15 @@ from pathlib import Path
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QPushButton
 
-from src.core.tool_catalog import TOOL_CATEGORIES, supported_tool_definitions
+from src.core.runtime.docker_tools import DockerToolAction
+from src.core.service_status import DockerControlPolicy, RuntimeBackend
+from src.core.tool_catalog import (
+    TOOL_CATEGORIES,
+    ResolvedToolAction,
+    ToolAction,
+    ToolDispatchKind,
+    supported_tool_definitions,
+)
 from src.pages.tools_page import ToolCard, ToolsPage
 
 
@@ -353,5 +361,165 @@ def test_search_filters_refresh_and_actions_have_accessible_keyboard_contracts(
                 assert button.focusPolicy() != Qt.FocusPolicy.NoFocus
                 assert button.accessibleName()
                 assert button.accessibleDescription()
+    finally:
+        _close_page(page)
+
+
+def test_managed_docker_cards_render_resolved_semantic_actions_and_reasons(
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    _install_all_wrappers(tmp_path)
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services: {}\n", encoding="utf-8")
+    page = ToolsPage(
+        str(tmp_path),
+        backend=RuntimeBackend.DOCKER_COMPOSE,
+        docker_policy=DockerControlPolicy.MANAGED,
+        compose_file=compose,
+    )
+    requests: list[tuple[ToolDispatchKind, DockerToolAction | None]] = []
+    page.launch_requested.connect(
+        lambda _tool, action: requests.append(
+            (action.dispatch_kind, action.docker_action)
+        )
+    )
+    _show_page(qapp, page)
+
+    try:
+        database = page.card_for("local-database-creator")
+        market = page.card_for("market-seed-builder")
+        reset = page.card_for("reset-local-databases")
+
+        assert tuple(database.action_buttons) == ("initialize",)
+        assert tuple(market.action_buttons) == (
+            "status",
+            "doctor",
+            "backup",
+            "backups",
+            "presets",
+            "rebuild-v1-jita",
+            "rebuild-v1-full-universe",
+            "restore-latest",
+        )
+        assert reset.status_label.text()
+        assert all(not button.isEnabled() for button in reset.action_buttons.values())
+
+        database.action_buttons["initialize"].click()
+        qapp.processEvents()
+        assert requests == [
+            (ToolDispatchKind.DOCKER_COMPOSE, DockerToolAction.INITIALIZE_DATABASE)
+        ]
+    finally:
+        _close_page(page)
+
+
+def test_connect_only_direct_action_invocation_fails_closed_for_mutation_cards(
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    _install_all_wrappers(tmp_path)
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services: {}\n", encoding="utf-8")
+    page = ToolsPage(
+        str(tmp_path),
+        backend=RuntimeBackend.DOCKER_COMPOSE,
+        docker_policy=DockerControlPolicy.CONNECT_ONLY,
+        compose_file=compose,
+    )
+    requests: list[str] = []
+    page.launch_requested.connect(
+        lambda tool, _action: requests.append(tool.definition.id)
+    )
+    _show_page(qapp, page)
+
+    try:
+        safe_client = page.card_for("client-setup-wizard")
+        reset = page.card_for("reset-local-databases")
+        forged = ResolvedToolAction(
+            ToolAction(id="reset", label="Forged reset"),
+            ToolDispatchKind.NATIVE_WRAPPER,
+        )
+
+        safe_client.action_buttons["launch"].click()
+        page._on_action_requested(reset.tool, forged)
+        qapp.processEvents()
+
+        assert requests == ["client-setup-wizard"]
+        assert not reset.tool.available
+        assert all(
+            action.dispatch_kind is ToolDispatchKind.UNAVAILABLE
+            and action.docker_action is None
+            for action in reset.tool.actions
+        )
+        assert "Connect-only" in reset.status_label.text()
+    finally:
+        _close_page(page)
+
+
+def test_stale_managed_action_is_revalidated_against_current_page_capability(
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    _install_all_wrappers(tmp_path)
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services: {}\n", encoding="utf-8")
+    page = ToolsPage(
+        str(tmp_path),
+        backend=RuntimeBackend.DOCKER_COMPOSE,
+        docker_policy=DockerControlPolicy.MANAGED,
+        compose_file=compose,
+    )
+    requests: list[DockerToolAction | None] = []
+    page.launch_requested.connect(
+        lambda _tool, action: requests.append(action.docker_action)
+    )
+    _show_page(qapp, page)
+
+    try:
+        stale_tool = page.card_for("local-database-creator").tool
+        stale_action = stale_tool.actions[0]
+        page.set_runtime_context(
+            RuntimeBackend.DOCKER_COMPOSE,
+            DockerControlPolicy.CONNECT_ONLY,
+            compose_file=compose,
+        )
+
+        page._on_action_requested(stale_tool, stale_action)
+        qapp.processEvents()
+
+        assert requests == []
+        current = page.card_for("local-database-creator").tool
+        assert not current.available
+        assert current.actions[0].dispatch_kind is ToolDispatchKind.UNAVAILABLE
+    finally:
+        _close_page(page)
+
+
+def test_managed_docker_action_grid_stays_inside_card_at_two_column_width(
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    _install_all_wrappers(tmp_path)
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services: {}\n", encoding="utf-8")
+    page = ToolsPage(
+        str(tmp_path),
+        backend=RuntimeBackend.DOCKER_COMPOSE,
+        docker_policy=DockerControlPolicy.MANAGED,
+        compose_file=compose,
+    )
+    _show_page(qapp, page, width=756)
+
+    try:
+        card = page.card_for("market-seed-builder")
+        buttons = tuple(card.action_buttons.values())
+
+        assert page.scroll_area.horizontalScrollBar().maximum() == 0
+        assert len({button.y() for button in buttons}) > 1
+        assert all(
+            button.geometry().right() <= card.contentsRect().right()
+            for button in buttons
+        )
     finally:
         _close_page(page)

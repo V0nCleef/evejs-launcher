@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Protocol
 
+from src.core.runtime.endpoints import RuntimeEndpoints
+
 
 class ServiceState(Enum):
     """Lifecycle state for a reachable launcher service."""
@@ -15,6 +17,21 @@ class ServiceState(Enum):
     ONLINE = "online"
     STOPPING = "stopping"
     FAILED = "failed"
+    UNKNOWN = "unknown"
+
+
+class RuntimeBackend(Enum):
+    """Persisted runtime implementation selected by the user."""
+
+    NATIVE = "native"
+    DOCKER_COMPOSE = "docker_compose"
+
+
+class DockerControlPolicy(Enum):
+    """Docker control capability selected by the user."""
+
+    CONNECT_ONLY = "connect_only"
+    MANAGED = "managed"
 
 
 class ProcessLike(Protocol):
@@ -38,6 +55,16 @@ class RuntimeSnapshot:
     market_owned: bool = False
     game_error: str | None = None
     market_error: str | None = None
+    backend: RuntimeBackend = RuntimeBackend.NATIVE
+    docker_control_policy: DockerControlPolicy | None = None
+    game_container: str | None = None
+    market_container: str | None = None
+    game_health: str | None = None
+    market_health: str | None = None
+    endpoints: RuntimeEndpoints | None = None
+    target_identity: str | None = None
+    settings_identity: str | None = None
+    monitor_generation: int | None = None
     checked_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -51,7 +78,8 @@ def derive_service_state(
     """Derive state, owned PID, and diagnostic from one service observation.
 
     Reachability remains authoritative for services started outside the launcher.
-    An owned live process that is not reachable is still starting.  If that
+    A queued start remains starting while its worker owns the process handle, and
+    an owned live process that is not reachable is also still starting.  If that
     process exits before readiness, the failed state is retained for diagnosis.
     """
 
@@ -75,4 +103,6 @@ def derive_service_state(
     if process is not None and intent is ServiceState.STARTING:
         diagnostic = last_error or f"Process exited before readiness (code {return_code})"
         return ServiceState.FAILED, None, diagnostic
+    if intent is ServiceState.STARTING:
+        return ServiceState.STARTING, None, None
     return ServiceState.OFFLINE, None, None

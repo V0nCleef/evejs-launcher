@@ -29,7 +29,12 @@ from PyQt6.QtWidgets import (
 )
 
 from src.constants import COLORS
-from src.core.service_status import RuntimeSnapshot, ServiceState
+from src.core.service_status import (
+    DockerControlPolicy,
+    RuntimeBackend,
+    RuntimeSnapshot,
+    ServiceState,
+)
 from src.widgets.hero_banner import HeroBanner
 
 DISCORD_INVITE_URL = "https://discord.gg/HVTfKeqX3t"
@@ -150,6 +155,8 @@ class ServiceRow(QFrame):
         state: ServiceState,
         *,
         pid: int | None = None,
+        container: str | None = None,
+        health: str | None = None,
         error: str | None = None,
     ) -> None:
         """Render a service lifecycle state and optional owned-process detail."""
@@ -159,11 +166,14 @@ class ServiceRow(QFrame):
             ServiceState.ONLINE: ("Online", COLORS["green"]),
             ServiceState.STOPPING: ("Stopping…", COLORS["gold"]),
             ServiceState.FAILED: ("Failed", COLORS["red"]),
+            ServiceState.UNKNOWN: ("Unknown", COLORS["gold"]),
         }
         self._state_text, color = labels[state]
-        self._detail_text = error if state is ServiceState.FAILED and error else ""
+        self._detail_text = error if state in {ServiceState.FAILED, ServiceState.UNKNOWN} and error else ""
         if not self._detail_text and pid is not None:
             self._detail_text = f"PID {pid}"
+        if not self._detail_text and container:
+            self._detail_text = f"Container {container}" + (f" ({health})" if health else "")
 
         self._dot.setStyleSheet(f"color: {color}; font-size: 14px;")
         self._state_label.setText(self._state_text)
@@ -235,11 +245,15 @@ class ServicesCard(QFrame):
         self.game_row.set_state(
             snapshot.game,
             pid=snapshot.game_pid,
+            container=snapshot.game_container,
+            health=snapshot.game_health,
             error=snapshot.game_error,
         )
         self.market_row.set_state(
             snapshot.market,
             pid=snapshot.market_pid,
+            container=snapshot.market_container,
+            health=snapshot.market_health,
             error=snapshot.market_error,
         )
 
@@ -546,6 +560,34 @@ class HomePage(QWidget):
 
     def _update_stack_action(self, snapshot: RuntimeSnapshot) -> None:
         """Describe the next safe stack operation from the shared snapshot."""
+        if snapshot.backend is RuntimeBackend.DOCKER_COMPOSE:
+            states = {snapshot.game, snapshot.market}
+            if snapshot.docker_control_policy is DockerControlPolicy.CONNECT_ONLY:
+                label, enabled, tooltip = (
+                    "Docker Stack (observing)", False,
+                    "Connect-only Docker mode cannot change containers.",
+                )
+            elif ServiceState.STARTING in states:
+                label, enabled, tooltip = "Starting…", False, "Services are starting"
+            elif ServiceState.STOPPING in states:
+                label, enabled, tooltip = "Stopping…", False, "Services are stopping"
+            elif ServiceState.UNKNOWN in states:
+                label, enabled, tooltip = "Docker unavailable", False, "Docker state is unavailable"
+            elif ServiceState.ONLINE in states:
+                label, enabled, tooltip = "Stop Stack", True, "Stop all Docker Compose services"
+                self._stack_action = "stop"
+            elif ServiceState.FAILED in states:
+                label, enabled, tooltip = "Retry Stack", True, "Retry failed services"
+                self._stack_action = "start"
+            else:
+                label, enabled, tooltip = "Start Stack", True, "Start the Docker Compose stack"
+                self._stack_action = "start"
+            if not enabled:
+                self._stack_action = "none"
+            self.btn_start_servers.setText(label)
+            self.btn_start_servers.setEnabled(enabled)
+            self.btn_start_servers.setToolTip(tooltip)
+            return
         services = (
             (snapshot.game, snapshot.game_owned),
             (snapshot.market, snapshot.market_owned),

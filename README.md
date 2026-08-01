@@ -1,6 +1,6 @@
 # EveJS Launcher
 
-EveJS Launcher is a Windows desktop control panel for a local EveJS installation. It brings the game server, market server, EVE clients, character profiles, mods, maintenance tools, and launcher updates into one application.
+EveJS Launcher is a Windows desktop control panel for a local EveJS installation. It brings the game server, market server, EVE clients, character profiles, mods, maintenance tools, and launcher updates into one application, with an explicit choice between Native processes and Docker Compose.
 
 [Download the latest release](https://github.com/V0nCleef/evejs-launcher/releases/latest) · [Read the release notes](https://github.com/V0nCleef/evejs-launcher/releases) · [Join the EveJS Discord](https://discord.gg/HVTfKeqX3t)
 
@@ -13,8 +13,19 @@ The Home page is the operational view: current service state, account and charac
 ### What you need
 
 - Windows 10 or Windows 11
-- An existing EveJS installation
+- An existing EveJS checkout or Compose project
 - An EVE client prepared for use with EveJS
+- For Native runtime: Node.js and npm, plus Rust/Cargo or an already-built Market Server binary
+- For Docker runtime: Docker Desktop in Linux-container mode with Docker Compose v2
+
+### Native or Docker?
+
+| Choose | What it does | Best for |
+|---|---|---|
+| **Native** | Runs the EveJS Game and Market services directly on Windows from the selected EveJS folder. Docker Desktop is not required. | A traditional EveJS installation already run from Windows. |
+| **Docker Compose** | Uses an existing EveJS Compose project through Docker Desktop in Linux-container mode. | An EveJS project that already includes `compose.yaml` and Docker support. |
+
+Changing runtime does not move characters, market data, or server data between Native and Docker. Choose the setup your EveJS project already uses. The launcher never switches the runtime automatically.
 
 ### Install the launcher
 
@@ -22,22 +33,42 @@ The Home page is the operational view: current service state, account and charac
 2. Download `EveJS-Launcher-V1.zip`.
 3. Extract the complete `EveJS-Launcher-V1` folder.
 4. Run `EveJS-Launcher-V1.exe` from inside that folder.
-5. On first launch, select the root folder of your EveJS installation.
+5. On first launch, select the root folder and explicitly choose **Native** or **Docker Compose**.
 
 Keep the `_internal` folder beside the executable. The release is a portable application folder, not a single standalone executable. Python is not required when using a release build.
 
 ### First launch
 
-The setup wizard validates the EveJS root, attempts to locate the EVE client, saves the configuration, and then loads the character list. After setup:
+The setup wizard explains both runtimes and validates the selected backend before it writes configuration. Native keeps the existing installation checks. Docker accepts a pristine Compose project before generated certificates or databases exist, then runs a read-only check of Docker Desktop, Compose, required services, loopback endpoints, current containers, and initialization state.
 
-1. Use **Start Stack** on Home to start Market followed by Game.
-2. Wait for both services to report **Online**.
-3. Open **Characters** and launch the account you want to use.
-4. Enter the password in the EVE client. The launcher does not store or type passwords.
+1. Choose **Native** or **Docker Compose** in the wizard. The launcher may recommend Docker when a Compose file is present, but never switches the selection automatically.
+2. Select the EveJS Root folder.
+3. For Native, select the supported vanilla/modded start indicator or keep **Always ask**.
+4. For Docker:
+   - Normally leave **Compose File** blank; the launcher automatically uses `<EveJS Root>\compose.yaml`.
+   - Normally leave **Compose Project Name** blank. The advanced field is only for an existing custom name, a stable name after moving the folder, or multiple separate stacks.
+   - Choose **Managed** when the launcher should control the stack, or **Connect only** when another tool already controls it.
+   - Use **Test Docker setup**. **Next** remains unavailable until the exact current fields pass.
+5. Finish setup, then use **Start Stack** on Home to start Market followed by Game.
+6. Wait for both services to report **Online**.
+7. Open **Characters** and launch the account you want to use.
+8. Enter the password in the EVE client. The launcher does not store or type passwords.
+
+#### Native setup example
+
+![Setup wizard with Native selected](screenshots/wizard-runtime-native.png)
+
+Native runs Game and Market directly on Windows. Select the EveJS project and EVE client folders; Docker Desktop is not required.
+
+#### Docker Compose setup example
+
+![Setup wizard with Docker Compose selected](screenshots/wizard-runtime-docker.png)
+
+Docker uses an existing EveJS Compose project. The normal setup leaves **Compose File** and **Compose Project Name** blank, selects the desired control policy, and runs the read-only setup test before continuing.
 
 ## Interface tour
 
-The launcher has five navigation pages. The screenshots below were captured from v1.0.34. Character and account names are intentionally blurred, and local paths use generic examples.
+The launcher has five navigation pages. Existing Home, Characters, Mods, and Tools captures use v1.0.34; the setup-wizard and Settings captures use v1.0.35. Character and account names are blurred, and local paths use generic examples.
 
 ### Home
 
@@ -69,16 +100,28 @@ The launcher does not recursively expose arbitrary scripts. It resolves only kno
 
 ### Settings
 
-![Settings page with generic example paths](screenshots/settings.png)
+#### Native runtime
 
-Settings covers the EveJS root, EVE client path, proxy address, launch timing, service auto-start, animation preferences, update checks, server-mode selection, hidden characters, and local-data cleanup.
+![Native settings with generic example paths](screenshots/native-settings.png)
+
+*v1.0.35 Native Runtime settings. Game and Market run directly on Windows, and Docker Desktop is not required.*
+
+#### Docker Compose runtime
+
+![Docker Compose settings with generic example paths](screenshots/docker-settings.png)
+
+*v1.0.35 Docker Runtime settings. Compose File is blank so `<EveJS Root>\compose.yaml` is selected automatically; the advanced Project Name is also optional and blank.*
+
+Settings covers the EveJS root, EVE client path, proxy address, Native/Docker runtime selection, Compose target and control policy, launch timing, service auto-start, animation preferences, update checks, server-mode selection, hidden characters, and local-data cleanup.
 
 ## What the launcher manages
 
 | Area | Behaviour |
 |---|---|
+| Runtime backend | Persists Native, Managed Docker Compose, or read-only Connect-only Docker operation without silent switching. |
 | Game service | Starts Node.js directly in vanilla or modded mode and reports lifecycle state. |
 | Market service | Starts the market service before Game when the complete stack is requested. |
+| Docker target | Resolves effective services, health, endpoints, mounts, data sources, and capabilities from one selected Compose project. |
 | EVE clients | Creates account-specific profiles, launches clients through the local proxy, and tracks running state. |
 | Bulk launch | Launches eligible accounts serially with a configurable delay; remaining queued launches can be cancelled. |
 | Characters | Reads account and character data, loads generated portraits asynchronously, and supports search and hiding. |
@@ -101,18 +144,70 @@ When **Start Stack** is used, Market is started first and Game waits for the req
 
 If an already-running Game or Market endpoint is detected, it is shown as externally managed. The launcher can use that service but will not claim ownership or terminate it.
 
+### Docker Compose runtime
+
+![Managed Docker Compose runtime](screenshots/docker-home.png)
+
+*Documentation capture using generic account totals and a simulated healthy service observation. The controls and status presentation are the production UI.*
+
+Docker is a persisted runtime backend, not an automatic fallback. The launcher never silently switches a Native installation to Docker or changes an unselected Compose project.
+
+Configure it under **Settings → Runtime**:
+
+1. Set **How should EveJS run?** to **Docker Compose**.
+2. Set **EveJS Root** to the absolute Compose project directory.
+3. **Leave Compose File blank in the normal setup.** The launcher automatically uses `<EveJS Root>\compose.yaml`. Select an absolute file only when it has a different name or location.
+4. Choose **Managed** when the launcher should start, stop, restart, and maintain the stack. Choose **Connect only** to observe an existing stack without changing it.
+5. **Leave Compose Project Name blank in the normal setup.** Docker Compose will choose it automatically. The advanced override is useful only to match a stack created with a custom `-p` name, keep a stable name if the folder moves, or separate multiple stacks. A different name may target or create a different stack.
+6. In Managed mode, choose whether the stack should remain running when the launcher exits.
+7. Select **Test Docker setup**. Testing never saves, starts containers, or initializes data. Selecting **Save** with an untested or edited Docker draft runs the same read-only preflight first and writes only after that exact draft succeeds.
+
+The preflight requires Docker Desktop in Linux-container mode, the Compose v2 plugin, and effective `server` and `market` services. All published EveJS endpoints must bind to loopback (`127.0.0.1` or `::1`). Optional `init` and tools-profile `market-tools` services enable the matching Tool Deck actions when present.
+
+A valid pristine project is reported separately from runtime readiness and data initialization. Preflight never builds, starts, initializes, or seeds anything. Game-data initialization and Market seeding/rebuild are separate Managed actions with separate confirmation; no seed preset is chosen automatically. Connect-only mode explains what must be performed externally and remains observational.
+
+| Policy | Observation | Lifecycle and tools | Window close |
+|---|---|---|---|
+| **Connect only** | Services, health, effective endpoints, mounts, data sources, and logs | All container, mod, and Docker Tool Deck mutations are disabled | Never stops the Compose stack |
+| **Managed** | Same read-only observation | Start, stop, restart, force-recreate, supported mod activation, and reviewed Docker Tool Deck actions | Honors **Keep Stack Running on Exit**; otherwise stops Game before Market |
+
+Managed lifecycle work, Compose inspection, log streaming, setup preflight, and container-side tools run on workers rather than the Qt GUI thread. Status is based on Compose state and health: a healthy running service is Online, an unhealthy service is Failed, and an intentionally exited service is Offline with its exit code retained for diagnostics. When a required service has no health check, Game becomes Online only after its effective Game TCP endpoint and Proxy `/health` respond; Market requires its effective `/health` endpoint.
+
+#### Docker endpoints
+
+The launcher reads effective host publications from Compose and carries the complete endpoint set through monitoring, portraits, data access, and client launch. Remapped host ports are supported; the client does not fall back to Native defaults when Docker endpoint authority is unavailable.
+
+| Endpoint | Typical host port | Compose container target |
+|---|---:|---:|
+| Assets | 443 | 26003 |
+| XMPP | 5222 | 5222 |
+| Game | 26000 | 26000 |
+| Images | 26001 | 26001 |
+| Proxy | 26002 | 26002 |
+| Market HTTP and health | 40110 | 40110 |
+
+Market RPC `40111` is used by Native status checks and normally remains private inside the Docker network.
+
+#### Docker mods and Tool Deck
+
+In Managed mode, applying mods creates a deterministic launcher-owned Compose override. It mounts the reviewed mod directory and preloads selected `mods/*/loader.js` files in visible order through `NODE_OPTIONS`. Connect-only mode can inspect the selected project but cannot change its mod or Compose state.
+
+When the effective project provides the required services, the Docker Tool Deck exposes only reviewed semantic actions: database initialization; Market status, doctor, backup inventory, backups, preset inventory, snapshot information, fixed v1 rebuild presets, v2 rebuild, and latest-backup restore. Actions revalidate the selected target immediately before execution. Operations that change Market data require both Game and Market to be stopped, and arbitrary container commands are never accepted from the UI.
+
 <details>
 <summary>Service ports and readiness checks</summary>
 
 | Port | Purpose |
 |---:|---|
+| `443` | Typical Docker host publication for assets |
+| `5222` | XMPP |
 | `26000` | Game TCP endpoint used by EVE clients |
-| `26001` | Game server's internal market proxy |
+| `26001` | Image service in EveJS v0.12.3; legacy layouts may differ |
 | `26002` | Local HTTP proxy used by launched clients |
 | `40110` | Market HTTP administration endpoint |
-| `40111` | Market RPC endpoint used for Market readiness detection |
+| `40111` | Market RPC used for Native readiness; normally private in Docker |
 
-Market readiness is checked against port `40111`, not `26001`. Port `26001` can be reachable while only the game server is running, so treating it as the Market service would produce a false Online state.
+Native Market readiness is checked against port `40111`, not `26001`. Port `26001` is the image service in EveJS v0.12.3 and can be reachable while Market is offline. Docker uses Compose health plus host HTTP `40110`; it does not require host publication of `40111`.
 
 </details>
 
@@ -135,6 +230,8 @@ Passwords are not stored by the launcher. Password entry remains inside the EVE 
 A mod is discovered from the configured EveJS `mods` directory. Its active state is derived from its loader file. Toggling a row changes that loader state on disk; it does not hot-reload the running game server.
 
 Use **Apply & Restart Server** when the new mod state should take effect. The restart uses the same saved or prompted vanilla/modded selection as Home, client-triggered auto-start, and the navigation controls.
+
+In Managed Docker mode, Apply & Restart instead regenerates the launcher-owned Compose override from the visible ordered selection and recreates Game with those preloads. Connect-only mode never changes loader or Compose state.
 
 ## Tool Deck catalogue
 
@@ -190,6 +287,11 @@ Configuration is stored in:
 | EveJS Root | Installation containing the server, mods, tools, and game data | Not set |
 | EVE Client Path | `exefile.exe` used for launched clients | Detected during setup when possible |
 | Proxy URL | Local client-traffic proxy | `http://127.0.0.1:26002` |
+| Runtime Backend | Native processes or Docker Compose | Native |
+| Docker Compose File | Absolute primary Compose file | Not set |
+| Docker Control Policy | Read-only observation or launcher-managed lifecycle | Connect only |
+| Docker Project Name | Optional explicit Compose project identity | Empty |
+| Keep Stack Running on Exit | Leaves a Managed Compose stack running when the launcher closes | On |
 | Stagger Delay | Delay between queued client launches | `3 seconds` |
 | Auto-Start Server | Starts Game when a client requires it | Off |
 | Auto-Start Market | Starts Market when required | Off |
@@ -208,6 +310,15 @@ Settings are written atomically. If the stored configuration is malformed, the l
 <summary>Why does a service say it is managed externally?</summary>
 
 The endpoint is reachable, but the process was not started by this launcher instance. The launcher reports the service and can continue using it, but it will not terminate a process it does not own. Stop it from the console or application that originally started it.
+
+</details>
+
+<details>
+<summary>Why are Docker controls disabled or the project unavailable?</summary>
+
+Use **Test Docker setup** for an actionable result. If the Docker CLI is missing, install Docker Desktop or add `docker.exe` to `PATH`. If the CLI exists but the engine is unavailable, start Docker Desktop and wait for its Linux-container engine. A separate result identifies a missing Compose plugin, invalid Compose configuration, or missing required `server` and `market` services. Required host endpoints must publish on loopback only; wildcard or LAN-facing bindings are rejected.
+
+Connect-only mode deliberately disables all container, mod, and Docker Tool Deck mutations. Select **Managed** only when this launcher should control the chosen project. An unhealthy service remains running but reports Failed; inspect its launcher console and Compose health check before deciding whether to restart or recreate it.
 
 </details>
 

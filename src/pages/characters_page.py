@@ -22,14 +22,19 @@ Behaviour
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from PyQt6.QtCore import (
     QEasingCurve,
     QParallelAnimationGroup,
     QPropertyAnimation,
     QRect,
+    QThread,
     Qt,
     pyqtSignal,
+    pyqtSlot,
 )
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QGridLayout,
@@ -45,10 +50,17 @@ from src.constants import Status
 from src.core.dashboard import visible_character_rows
 from src.core.db import Account, Character, _fmt_isk, _fmt_sp
 from src.core.process_tracker import ProcessTracker
+from src.core.runtime.data import native_data_selection
+from src.core.runtime.portraits import (
+    PortraitImageResult,
+    PortraitRequest,
+    PortraitTarget,
+)
+from src.utils.cache import PortraitCache
 from src.widgets.character_card import CharacterCard
 from src.widgets.detail_panel import DetailPanel
 from src.widgets.skeleton_card import SkeletonCard
-from src.workers.portrait_worker import PortraitLoader
+from src.workers.portrait_worker import PortraitLoadFailure, PortraitLoader
 
 GRID_COLUMNS = 3
 GRID_SPACING = 12
@@ -61,6 +73,7 @@ class CharactersPage(QWidget):
     launch_character = pyqtSignal(str, str)  # username, char_name
     character_selected = pyqtSignal(str, str, int)  # username, char_name, char_id
     hide_character = pyqtSignal(str)  # character_name
+    portrait_loads_idle = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -75,8 +88,17 @@ class CharactersPage(QWidget):
         self._transition_group: QParallelAnimationGroup | None = None
 
 
-        self._portrait_loaders: list[PortraitLoader] = []
+        self._portrait_threads: dict[
+            QThread,
+            tuple[PortraitLoader, PortraitRequest],
+        ] = {}
+        self._portrait_tokens: dict[tuple[str, int], object] = {}
+        self._portrait_target: PortraitTarget | None = None
+        self._portrait_generation = 0
         self._evejs_root: str = ""
+        self._launch_available = True
+        self._launch_unavailable_reason = ""
+        self._launching_accounts: dict[str, str] = {}
 
         self._build_ui()
         self.show_skeletons()
@@ -141,6 +163,7 @@ class CharactersPage(QWidget):
     # ── Loading placeholders ─────────────────────────────────────────────────
     def show_skeletons(self, count: int = _SKELETON_COUNT) -> None:
         """Replace the grid with skeleton placeholder cards."""
+        self.cancel_portrait_loads(invalidate=True)
         self._clear_grid()
         self._cards.clear()
         for i in range(count):
@@ -164,6 +187,7 @@ class CharactersPage(QWidget):
         hidden_characters: list[str],
         tracker: ProcessTracker,
         evejs_root: str = "",
+        portrait_target: PortraitTarget | None = None,
     ) -> None:
         """Rebuild the card grid from *accounts*.
 
@@ -176,6 +200,18 @@ class CharactersPage(QWidget):
         self._cancel_transition()
         self._tracker = tracker
         self._evejs_root = evejs_root
+        if portrait_target is None and evejs_root:
+            portrait_target = PortraitTarget(
+                target_identity=native_data_selection(evejs_root).target_identity,
+                native_root=Path(evejs_root),
+            )
+        target_changed = portrait_target != self._portrait_target
+        if target_changed:
+            self.cancel_portrait_loads(invalidate=True)
+            self._portrait_target = portrait_target
+            for card in self._cards.values():
+                card.set_portrait(None)
+                card.set_skeleton()
         hidden = set(hidden_characters)
 
         # Use the same pure visible-character view as Home and Launch All.
@@ -193,6 +229,7 @@ class CharactersPage(QWidget):
         for key in list(self._cards):
             if key not in desired_keys:
                 card = self._cards.pop(key)
+                self._portrait_tokens.pop(key, None)
                 self._grid.removeWidget(card)
                 card.deleteLater()
                 if self._selected_key == key:
@@ -218,9 +255,17 @@ class CharactersPage(QWidget):
                 card.selected.connect(self._on_card_selected)
                 card.hide_requested.connect(self._on_card_hide_requested)
                 self._cards[key] = card
-                # Load portrait asynchronously
-                self._load_portrait_for_card(card)
             card.set_status(self._status_for(username, char))
+            card.set_launch_available(
+                self._launch_available,
+                self._launch_unavailable_reason,
+            )
+            if (
+                self._portrait_target is not None
+                and (target_changed or card._portrait_pixmap is None)
+                and key not in self._portrait_tokens
+            ):
+                self._load_portrait_for_card(card)
 
         self._rotation_pool = desired
         self._relayout_grid()
@@ -250,6 +295,11 @@ class CharactersPage(QWidget):
 
     def _status_for(self, username: str, char: Character) -> Status:
         """Compute the display status for a character card."""
+        pending_character = self._launching_accounts.get(username)
+        if pending_character == char.name:
+            return Status.LAUNCHING
+        if pending_character is not None:
+            return Status.SAME_ACCOUNT_ONLINE
         if self._tracker is None:
             return Status.READY
         running_char = self._tracker.get_running_character(username)
@@ -273,26 +323,157 @@ class CharactersPage(QWidget):
 
     def _load_portrait_for_card(self, card: CharacterCard) -> None:
         """Start an async portrait load for a character card."""
-        if not self._evejs_root:
+        target = self._portrait_target
+        if target is None:
             return
-        loader = PortraitLoader(
-            self._evejs_root, card.char_id, size=128, hex_mask=True, parent=self
+        key = (card.username, card.char_id)
+        token = object()
+        request = PortraitRequest(
+            target_identity=target.target_identity,
+            character_id=card.char_id,
+            size=128,
+            generation=self._portrait_generation,
+            token=token,
+            settings_identity=target.settings_identity,
+            monitor_generation=target.monitor_generation,
         )
-        loader.loaded.connect(self._on_portrait_loaded)
-        loader.finished.connect(loader.deleteLater)
-        self._portrait_loaders.append(loader)
-        loader.start()
+        cache_key = PortraitCache.key(request)
+        cached = PortraitCache.get(cache_key)
+        self._portrait_tokens[key] = token
+        if cached is not None:
+            self._apply_portrait_result(key, request, cached)
+            return
 
-    def _on_portrait_loaded(self, char_id: int, pixmap) -> None:
-        """Handle async portrait load completion."""
-        for (username, cid), card in self._cards.items():
-            if cid == char_id:
-                card.set_portrait(pixmap)
-                break
-        # Clean up finished loaders
-        self._portrait_loaders = [
-            l for l in self._portrait_loaders if l.isRunning()
-        ]
+        thread = QThread(self)
+        loader = PortraitLoader(target, request)
+        loader.moveToThread(thread)
+        thread.started.connect(loader.run)
+        loader.loaded.connect(self._on_portrait_loaded)
+        loader.failed.connect(self._on_portrait_failed)
+        loader.cleanup.connect(
+            loader.deleteLater,
+            Qt.ConnectionType.DirectConnection,
+        )
+        loader.destroyed.connect(thread.quit)
+        thread.finished.connect(
+            self._on_portrait_thread_finished,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self._portrait_threads[thread] = (loader, request)
+        thread.start()
+
+    @pyqtSlot(object)
+    def _on_portrait_loaded(self, result: PortraitImageResult) -> None:
+        """Convert validated QImage to QPixmap only on the GUI thread."""
+        request = result.request
+        key = self._portrait_key_for_token(request.token)
+        if (
+            key is None
+            or self._portrait_target is None
+            or request.generation != self._portrait_generation
+            or request.target_identity != self._portrait_target.target_identity
+            or request.settings_identity != self._portrait_target.settings_identity
+            or request.monitor_generation != self._portrait_target.monitor_generation
+            or self._portrait_tokens.get(key) is not request.token
+            or key not in self._cards
+        ):
+            return
+        pixmap = QPixmap.fromImage(result.image)
+        if pixmap.isNull():
+            return
+        PortraitCache.put(PortraitCache.key(request), pixmap)
+        self._apply_portrait_result(key, request, pixmap)
+
+    @pyqtSlot(object)
+    def _on_portrait_failed(self, failure: PortraitLoadFailure) -> None:
+        key = self._portrait_key_for_token(failure.request.token)
+        if key is not None and self._portrait_tokens.get(key) is failure.request.token:
+            self._portrait_tokens.pop(key, None)
+
+    def _apply_portrait_result(
+        self,
+        key: tuple[str, int],
+        request: PortraitRequest,
+        pixmap: QPixmap,
+    ) -> None:
+        if self._portrait_tokens.get(key) is not request.token:
+            return
+        self._portrait_tokens.pop(key, None)
+        card = self._cards.get(key)
+        if card is None:
+            return
+        card.set_portrait(pixmap)
+        if self._selected_key == key:
+            self.detail_panel.set_portrait(pixmap)
+
+    def _portrait_key_for_token(self, token: object) -> tuple[str, int] | None:
+        for key, current in self._portrait_tokens.items():
+            if current is token:
+                return key
+        return None
+
+    @pyqtSlot()
+    def _on_portrait_thread_finished(self) -> None:
+        thread = self.sender()
+        if not isinstance(thread, QThread) or thread not in self._portrait_threads:
+            return
+        self._portrait_threads.pop(thread, None)
+        thread.deleteLater()
+        if not self._portrait_threads:
+            self.portrait_loads_idle.emit()
+
+    def cancel_portrait_loads(self, *, invalidate: bool = False) -> None:
+        """Cancel delivery without waiting for bounded I/O to return."""
+        if invalidate:
+            self._portrait_generation += 1
+            self._portrait_tokens.clear()
+        for loader, _request in self._portrait_threads.values():
+            loader.request_cancel()
+
+    def portrait_loads_active(self) -> bool:
+        return bool(self._portrait_threads)
+
+    def invalidate_portrait_target(self) -> None:
+        """Immediately remove images attributed to a superseded runtime."""
+        self.cancel_portrait_loads(invalidate=True)
+        self._portrait_target = None
+        for card in self._cards.values():
+            card.set_portrait(None)
+            card.set_skeleton()
+        self.detail_panel.set_portrait(None)
+
+    def set_launch_available(self, enabled: bool, reason: str = "") -> None:
+        """Apply backend launch capability without disabling character browsing."""
+        self._launch_available = bool(enabled)
+        self._launch_unavailable_reason = "" if enabled else reason
+        for card in self._cards.values():
+            card.set_launch_available(enabled, reason)
+        self.detail_panel.set_launch_available(enabled, reason)
+
+    def set_account_launching(
+        self,
+        username: str,
+        character_name: str,
+        launching: bool,
+    ) -> None:
+        """Apply launch-pending state immediately and preserve it across refreshes."""
+        if launching:
+            self._launching_accounts[username] = character_name
+        elif self._launching_accounts.get(username) == character_name:
+            self._launching_accounts.pop(username, None)
+
+        for (card_username, _char_id), card in self._cards.items():
+            if card_username == username:
+                char = self._find_character(card_username, card.char_id)
+                if char is not None:
+                    card.set_status(self._status_for(card_username, char))
+
+        selected_username, selected_character, _char_id = (
+            self.detail_panel.get_character()
+        )
+        self.detail_panel.set_launch_pending(
+            self._launching_accounts.get(selected_username) == selected_character
+        )
 
     # ── Grid transition animation ─────────────────────────────────────────────
 
@@ -487,6 +668,58 @@ class CharactersPage(QWidget):
                 "Sec Status": card.sec_status if card is not None else "—",
             },
         )
+        self.detail_panel.set_launch_pending(
+            self._launching_accounts.get(username) == char.name
+        )
+
+    def apply_character_detail(
+        self,
+        username: str,
+        char_id: int,
+        detail: dict,
+    ) -> bool:
+        """Apply a current worker result only to the still-selected character."""
+        key = (username, char_id)
+        if self._selected_key != key:
+            return False
+        char = self._find_character(username, char_id)
+        card = self._cards.get(key)
+        if char is None or card is None:
+            return False
+
+        balance = detail.get("balance")
+        skill_points = detail.get("skillPoints")
+        security_status = detail.get("securityStatus")
+        ship_name = detail.get("shipName")
+        location = detail.get("solarSystemName")
+        stats = {
+            "ISK": _fmt_isk(int(balance))
+            if isinstance(balance, (int, float)) and not isinstance(balance, bool)
+            else card.isk,
+            "SP": _fmt_sp(int(skill_points))
+            if isinstance(skill_points, (int, float))
+            and not isinstance(skill_points, bool)
+            else card.sp,
+            "Ship": ship_name if isinstance(ship_name, str) and ship_name else card.ship,
+            "Location": location
+            if isinstance(location, str) and location
+            else card.location,
+            "Sec Status": f"{float(security_status):.1f}"
+            if isinstance(security_status, (int, float))
+            and not isinstance(security_status, bool)
+            else card.sec_status,
+        }
+        self.detail_panel.show_character(
+            username,
+            char.name,
+            char.char_id,
+            card._portrait_pixmap,
+            stats,
+        )
+        self.detail_panel.set_launch_pending(
+            self._launching_accounts.get(username) == char.name
+        )
+        return True
 
     def _find_character(self, username: str, char_id: int) -> Character | None:
         for u, char in self._rotation_pool:

@@ -1,38 +1,55 @@
 """Account and character discovery from EveJS SQLite database."""
 import json
 import sqlite3
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 
 # ── Solar system name cache ────────────────────────────────────────────────
-_SOLAR_SYSTEM_NAMES: dict[int, str] | None = None
+_SOLAR_SYSTEM_NAMES: dict[str, dict[int, str]] | None = {}
+_SOLAR_SYSTEM_NAMES_LOCK = threading.Lock()
 
 
 def clear_solar_system_name_cache() -> None:
     """Discard location names cached for the previously configured EveJS root."""
     global _SOLAR_SYSTEM_NAMES
-    _SOLAR_SYSTEM_NAMES = None
+    with _SOLAR_SYSTEM_NAMES_LOCK:
+        _SOLAR_SYSTEM_NAMES = {}
 
 
 def _load_solar_system_names(evejs_root: str) -> dict[int, str]:
     """Build a solarSystemID → name lookup from EveJS static data."""
     global _SOLAR_SYSTEM_NAMES
-    if _SOLAR_SYSTEM_NAMES is not None:
-        return _SOLAR_SYSTEM_NAMES
-    try:
-        path = Path(evejs_root) / "_local" / "gameStore" / "data" / "solarSystems" / "data.json"
-        if path.exists():
-            data = json.loads(path.read_text(encoding="utf-8"))
-            _SOLAR_SYSTEM_NAMES = {
-                s["solarSystemID"]: s["solarSystemName"]
-                for s in data.get("solarSystems", [])
-            }
-        else:
+    cache_key = str(Path(evejs_root).resolve())
+    with _SOLAR_SYSTEM_NAMES_LOCK:
+        if _SOLAR_SYSTEM_NAMES is None:
             _SOLAR_SYSTEM_NAMES = {}
-    except Exception:
-        _SOLAR_SYSTEM_NAMES = {}
-    return _SOLAR_SYSTEM_NAMES
+        cached = _SOLAR_SYSTEM_NAMES.get(cache_key)
+        if cached is not None:
+            return cached
+        try:
+            path = (
+                Path(evejs_root)
+                / "_local"
+                / "gameStore"
+                / "data"
+                / "solarSystems"
+                / "data.json"
+            )
+            if path.exists():
+                data = json.loads(path.read_text(encoding="utf-8"))
+                names = {
+                    system["solarSystemID"]: system["solarSystemName"]
+                    for system in data.get("solarSystems", [])
+                }
+            else:
+                names = {}
+        except Exception:
+            names = {}
+        _SOLAR_SYSTEM_NAMES[cache_key] = names
+        return names
 
 
 def _resolve_location(solar_system_id: int, evejs_root: str) -> str:
@@ -98,7 +115,44 @@ def load_accounts(evejs_root: str) -> list[Account]:
     Returns:
         List of Account objects, sorted by username.
     """
-    db_path = Path(evejs_root) / "_local" / "gameStore" / "gamestore.sqlite"
+    game_store_path = Path(evejs_root) / "_local" / "gameStore"
+    return _load_accounts_from_database(
+        game_store_path / "gamestore.sqlite",
+        lambda solar_system_id: _resolve_location(solar_system_id, evejs_root),
+    )
+
+
+def load_accounts_from_game_store(game_store_path: Path) -> list[Account]:
+    """Load accounts from an exact, already-verified gameStore directory."""
+    game_store_path = Path(game_store_path)
+    names = _load_game_store_solar_system_names(game_store_path)
+    return _load_accounts_from_database(
+        game_store_path / "gamestore.sqlite",
+        lambda solar_system_id: names.get(
+            solar_system_id,
+            "—" if not solar_system_id else f"System {solar_system_id}",
+        ),
+    )
+
+
+def _load_game_store_solar_system_names(game_store_path: Path) -> dict[int, str]:
+    """Read location names from one authoritative gameStore without global cache."""
+    path = game_store_path / "data" / "solarSystems" / "data.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return {
+            system["solarSystemID"]: system["solarSystemName"]
+            for system in data.get("solarSystems", [])
+        }
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        return {}
+
+
+def _load_accounts_from_database(
+    db_path: Path,
+    resolve_location: Callable[[int], str],
+) -> list[Account]:
+    """Map one exact read-only SQLite database into launcher domain models."""
     if not db_path.exists():
         return []
 
@@ -135,9 +189,7 @@ def load_accounts(evejs_root: str) -> list[Account]:
                         ship_name=data.get("shipName", "—"),
                         ship_type_id=data.get("shipTypeID", 0),
                         security_status=data.get("securityStatus", 0.0),
-                        location=_resolve_location(
-                            data.get("solarSystemID", 0), evejs_root,
-                        ),
+                        location=resolve_location(data.get("solarSystemID", 0)),
                     ))
                     break
 
@@ -158,8 +210,26 @@ def get_character_detail(evejs_root: str, char_id: int) -> dict | None:
 
     Returns a dict with all character fields, or None if not found.
     """
-    import json, sqlite3
     db_path = Path(evejs_root) / "_local" / "gameStore" / "gamestore.sqlite"
+    return _get_character_detail_from_database(db_path, char_id)
+
+
+def get_character_detail_from_game_store(
+    game_store_path: Path,
+    char_id: int,
+) -> dict | None:
+    """Load one character from an exact, already-verified gameStore directory."""
+    return _get_character_detail_from_database(
+        Path(game_store_path) / "gamestore.sqlite",
+        char_id,
+    )
+
+
+def _get_character_detail_from_database(
+    db_path: Path,
+    char_id: int,
+) -> dict | None:
+    """Load one character JSON object from an exact read-only SQLite file."""
     if not db_path.exists():
         return None
 

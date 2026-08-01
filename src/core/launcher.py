@@ -1,10 +1,70 @@
 """Client launcher — spawns the EVE client with correct environment."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os
 from pathlib import Path
 
 from .platform import get_client_exe_path, launch_eve_client
+from .runtime.endpoints import RuntimeEndpoints
+
+
+def _http_url(host: str, port: int) -> str:
+    rendered_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    return f"http://{rendered_host}:{port}"
+
+
+@dataclass(frozen=True)
+class ClientLaunchContext:
+    """Endpoint values captured once before any per-profile launch mutation."""
+
+    game_host: str
+    game_port: int
+    proxy_url: str
+    image_url: str | None = None
+    target_identity: str | None = None
+    settings_identity: str | None = None
+    monitor_generation: int | None = None
+
+    @classmethod
+    def native(
+        cls,
+        *,
+        game_port: int = 26000,
+        proxy_url: str = "http://127.0.0.1:26002",
+    ) -> "ClientLaunchContext":
+        return cls("127.0.0.1", int(game_port), proxy_url)
+
+    @classmethod
+    def from_docker(
+        cls,
+        endpoints: RuntimeEndpoints | None,
+        *,
+        target_identity: str,
+        settings_identity: str,
+        monitor_generation: int,
+    ) -> "ClientLaunchContext":
+        if endpoints is None:
+            raise ValueError("Docker endpoints are unavailable.")
+        if endpoints.game is None or endpoints.image is None or endpoints.proxy is None:
+            raise ValueError("Docker client endpoints are incomplete.")
+        if (
+            not target_identity
+            or not settings_identity
+            or isinstance(monitor_generation, bool)
+            or not isinstance(monitor_generation, int)
+            or monitor_generation < 0
+        ):
+            raise ValueError("Docker launch identity is incomplete.")
+        return cls(
+            game_host=endpoints.game.host,
+            game_port=endpoints.game.port,
+            proxy_url=_http_url(endpoints.proxy.host, endpoints.proxy.port),
+            image_url=_http_url(endpoints.image.host, endpoints.image.port),
+            target_identity=target_identity,
+            settings_identity=settings_identity,
+            monitor_generation=monitor_generation,
+        )
 
 
 def build_env(evejs_root: str, proxy_url: str = "http://127.0.0.1:26002") -> dict[str, str]:
@@ -64,6 +124,8 @@ def launch_client(
     profile_tq_path: Path,
     proxy_url: str = "http://127.0.0.1:26002",
     client_path: str = "",
+    *,
+    launch_context: ClientLaunchContext | None = None,
 ) -> subprocess.Popen:
     """Launch the EVE client executable from a profile junction.
 
@@ -81,7 +143,8 @@ def launch_client(
     if not exe.exists():
         raise FileNotFoundError(f"Client executable not found: {exe}")
 
-    env = build_env(evejs_root, proxy_url)
+    effective_proxy = launch_context.proxy_url if launch_context is not None else proxy_url
+    env = build_env(evejs_root, effective_proxy)
 
     # ── ResFiles: derive from the configured client path, NOT the junction ──
     # Play.bat resolves EVEJS_CLIENT_PATH\\..\\ResFiles — the ResFiles that

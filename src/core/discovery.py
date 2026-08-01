@@ -34,6 +34,34 @@ def validate_evejs_root(path: str) -> tuple[bool, str]:
     return True, ""
 
 
+def validate_docker_evejs_root(
+    path: str,
+    compose_file: str = "",
+) -> tuple[bool, str]:
+    """Validate only the local files required before Docker preflight.
+
+    A pristine Compose project intentionally has no generated certificates or
+    databases yet. Runtime, service, endpoint, and initialization checks belong
+    to the read-only Docker preflight worker.
+    """
+    root = Path(path)
+    if not root.is_absolute():
+        return False, "Docker project root must be an absolute path."
+    if not root.exists():
+        return False, f"Docker project root does not exist: {path}"
+    if not root.is_dir():
+        return False, f"Docker project root is not a directory: {path}"
+
+    compose = Path(compose_file) if compose_file else root / "compose.yaml"
+    if not compose.is_absolute():
+        return False, "Docker Compose file must be an absolute path."
+    if not compose.exists():
+        return False, f"Docker Compose file does not exist: {compose}"
+    if not compose.is_file():
+        return False, f"Docker Compose path is not a file: {compose}"
+    return True, ""
+
+
 def find_client_path(evejs_root: str) -> str | None:
     """Extract EVE client path from EvEJSConfig.bat."""
     cfg = Path(evejs_root) / "tools" / "ClientSETUP" / "scripts" / "EvEJSConfig.bat"

@@ -1,0 +1,12 @@
+{
+  "project": "fixture-evejs",
+  "service": "server",
+  "publishers": [
+    {"hostIp": "127.0.0.1", "published": 32600, "target": 26000, "protocol": "tcp"},
+    {"hostIp": "127.0.0.1", "published": 32601, "target": 26001, "protocol": "tcp"},
+    {"hostIp": "127.0.0.1", "published": 32602, "target": 26002, "protocol": "tcp"},
+    {"hostIp": "127.0.0.1", "published": 34443, "target": 26003, "protocol": "tcp"},
+    {"hostIp": "127.0.0.1", "published": 35222, "target": 5222, "protocol": "tcp"},
+    {"hostIp": "127.0.0.1", "published": 40110, "target": 40110, "protocol": "tcp"}
+  ]
+}

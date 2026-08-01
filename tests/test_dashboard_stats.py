@@ -2,14 +2,27 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import time
 
 import pytest
+from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 
 from src import app as app_module
 from src import config
 from src.app import MainWindow
 from src.core.db import Account, Character
+
+
+def _wait_for_data(qapp: QApplication, window: MainWindow) -> None:
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        qapp.processEvents()
+        if not window._data_load_active():
+            qapp.processEvents()
+            return
+        QTest.qWait(5)
+    assert not window._data_load_active()
 
 
 def _character(char_id: int, name: str) -> Character:
@@ -90,9 +103,12 @@ def test_home_counts_only_visible_non_banned_characters(
     try:
         window._status_timer.stop()
         window._prune_timer.stop()
+        _wait_for_data(qapp, window)
         assert window._home_page.accounts_card.value_label.text() == str(expected_accounts)
         assert window._home_page.characters_card.value_label.text() == str(expected_characters)
     finally:
+        window.close()
+        _wait_for_data(qapp, window)
         window.deleteLater()
 
 
@@ -121,12 +137,16 @@ def test_launch_all_requires_visible_account_and_complete_paths(
     try:
         window._status_timer.stop()
         window._prune_timer.stop()
+        _wait_for_data(qapp, window)
         assert window._home_page.btn_launch_all.isEnabled() is True
 
         window._cfg["client_path"] = ""
         window._refresh_characters()
+        _wait_for_data(qapp, window)
 
         assert window._home_page.btn_launch_all.isEnabled() is False
         assert "Configure" in window._home_page.btn_launch_all.toolTip()
     finally:
+        window.close()
+        _wait_for_data(qapp, window)
         window.deleteLater()

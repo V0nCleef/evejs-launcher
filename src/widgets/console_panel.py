@@ -43,6 +43,7 @@ class ConsolePanel(QFrame):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
         self._log_path: Path | None = None
+        self._streaming: bool = False
         self._log_offset: int = 0
         self._drag_start_y: int = 0
         self._drag_start_height: int = 0
@@ -264,6 +265,8 @@ class ConsolePanel(QFrame):
     def tail(self, log_path: str | Path) -> None:
         """Start tailing *log_path* and show the panel."""
         self.stop_tailing()
+        self._streaming = False
+        self._notepad_btn.setEnabled(True)
         self._log_path = Path(log_path)
         self._log.clear()
         self._log_offset = 0
@@ -297,6 +300,29 @@ class ConsolePanel(QFrame):
         self.stop_tailing()
         self.hide()
         self.closed.emit()
+
+    def begin_stream(self, title: str) -> None:
+        """Present a non-file stream while preserving the existing ring buffer."""
+        self.stop_tailing()
+        self._streaming = True
+        self._log_path = None
+        self._log.clear()
+        self._log_offset = 0
+        self._title_label.setText(title)
+        self._notepad_btn.setEnabled(False)
+        self._reposition()
+        self.show()
+        self.raise_()
+
+    def append_stream_line(self, line: str) -> None:
+        """Append an already-sanitized follower line only in stream mode."""
+        if self._streaming:
+            self._append_lines([line])
+
+    def finish_stream(self, message: str | None = None) -> None:
+        """Keep completed stream output visible, optionally with a safe notice."""
+        if self._streaming and message:
+            self._append_lines([message])
 
     def clear_content(self) -> None:
         """Clear the log text area without affecting tailing state."""
@@ -345,7 +371,7 @@ class ConsolePanel(QFrame):
         QApplication.clipboard().setText(self._log.toPlainText())
 
     def _open_in_notepad(self) -> None:
-        if self._log_path and self._log_path.exists():
+        if not self._streaming and self._log_path and self._log_path.exists():
             from src.core.platform import open_text_editor
             open_text_editor(self._log_path)
 

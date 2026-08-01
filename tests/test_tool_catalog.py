@@ -5,10 +5,13 @@ from pathlib import Path, PurePath
 
 from src.core.tool_catalog import (
     TOOL_CATEGORIES,
+    ToolDispatchKind,
     filter_tools,
     resolve_tools,
     supported_tool_definitions,
 )
+from src.core.runtime.docker_tools import DockerToolAction
+from src.core.service_status import DockerControlPolicy, RuntimeBackend
 
 
 EXPECTED_TOOL_IDS = (
@@ -231,3 +234,168 @@ def test_filtering_is_case_insensitive_and_matches_all_presented_metadata(
         "new-eden-store-editor",
     )
     assert filter_tools(tools, "does-not-exist", None) == ()
+
+
+def test_native_capabilities_preserve_every_existing_wrapper_action(
+    tmp_path: Path,
+) -> None:
+    _install_wrappers(tmp_path)
+
+    resolved = resolve_tools(
+        tmp_path,
+        backend=RuntimeBackend.NATIVE,
+        docker_policy=DockerControlPolicy.CONNECT_ONLY,
+    )
+
+    assert all(tool.available for tool in resolved)
+    for tool in resolved:
+        assert tuple(action.action for action in tool.actions) == tool.definition.actions
+        assert all(
+            action.dispatch_kind is ToolDispatchKind.NATIVE_WRAPPER
+            for action in tool.actions
+        )
+
+
+def test_managed_docker_maps_container_operations_and_disables_unsupported_items(
+    tmp_path: Path,
+) -> None:
+    _install_wrappers(tmp_path)
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services: {}\n", encoding="utf-8")
+
+    by_id = {
+        tool.definition.id: tool
+        for tool in resolve_tools(
+            tmp_path,
+            backend=RuntimeBackend.DOCKER_COMPOSE,
+            docker_policy=DockerControlPolicy.MANAGED,
+            compose_file=compose,
+        )
+    }
+
+    for tool_id in (
+        "client-setup-wizard",
+        "blue-dll-patcher",
+        "client-code-grabber",
+        "server-config-editor",
+    ):
+        assert by_id[tool_id].actions[0].dispatch_kind is ToolDispatchKind.NATIVE_WRAPPER
+        assert by_id[tool_id].actions[0].available
+
+    database = by_id["local-database-creator"].actions
+    assert tuple(action.docker_action for action in database) == (
+        DockerToolAction.INITIALIZE_DATABASE,
+    )
+    market_actions = tuple(
+        action.docker_action for action in by_id["market-seed-builder"].actions
+    )
+    assert market_actions == (
+        DockerToolAction.MARKET_STATUS,
+        DockerToolAction.MARKET_DOCTOR,
+        DockerToolAction.MARKET_BACKUP,
+        DockerToolAction.MARKET_BACKUPS,
+        DockerToolAction.MARKET_PRESETS,
+        DockerToolAction.MARKET_REBUILD_V1_JITA,
+        DockerToolAction.MARKET_REBUILD_V1_FULL_UNIVERSE,
+        DockerToolAction.MARKET_RESTORE_LATEST,
+    )
+    snapshot_actions = {
+        action.docker_action
+        for action in by_id["tq-market-snapshot-seeder-v2"].actions
+    }
+    assert snapshot_actions == {
+        DockerToolAction.MARKET_SNAPSHOT_INFO,
+        DockerToolAction.MARKET_REBUILD_V2,
+    }
+    mapped_actions = [
+        action.docker_action
+        for tool in by_id.values()
+        for action in tool.actions
+        if action.dispatch_kind is ToolDispatchKind.DOCKER_COMPOSE
+    ]
+    assert len(mapped_actions) == len(DockerToolAction)
+    assert set(mapped_actions) == set(DockerToolAction)
+
+    for tool_id in (
+        "reset-local-databases",
+        "new-eden-store-editor",
+        "market-seed-builder-gui",
+        "rust-msvc-market-setup",
+    ):
+        tool = by_id[tool_id]
+        assert not tool.available
+        assert tool.unavailable_reason
+        assert all(
+            action.dispatch_kind is ToolDispatchKind.UNAVAILABLE
+            for action in tool.actions
+        )
+
+
+def test_connect_only_docker_preserves_host_client_tools_but_maps_no_container_action(
+    tmp_path: Path,
+) -> None:
+    _install_wrappers(tmp_path)
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services: {}\n", encoding="utf-8")
+
+    tools = resolve_tools(
+        tmp_path,
+        backend=RuntimeBackend.DOCKER_COMPOSE,
+        docker_policy=DockerControlPolicy.CONNECT_ONLY,
+        compose_file=compose,
+    )
+    by_id = {tool.definition.id: tool for tool in tools}
+
+    for tool_id in (
+        "client-setup-wizard",
+        "blue-dll-patcher",
+        "client-code-grabber",
+    ):
+        assert by_id[tool_id].available
+        assert all(
+            action.dispatch_kind is ToolDispatchKind.NATIVE_WRAPPER
+            for action in by_id[tool_id].actions
+        )
+    for tool_id in set(EXPECTED_TOOL_IDS) - {
+        "client-setup-wizard",
+        "blue-dll-patcher",
+        "client-code-grabber",
+    }:
+        assert not by_id[tool_id].available
+        assert by_id[tool_id].unavailable_reason
+
+    assert all(
+        action.dispatch_kind is not ToolDispatchKind.DOCKER_COMPOSE
+        and action.docker_action is None
+        for tool in tools
+        for action in tool.actions
+    )
+
+
+def test_every_backend_tool_action_is_mapped_or_explicitly_unavailable(
+    tmp_path: Path,
+) -> None:
+    _install_wrappers(tmp_path)
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services: {}\n", encoding="utf-8")
+
+    for backend, policy in (
+        (RuntimeBackend.NATIVE, DockerControlPolicy.CONNECT_ONLY),
+        (RuntimeBackend.DOCKER_COMPOSE, DockerControlPolicy.MANAGED),
+        (RuntimeBackend.DOCKER_COMPOSE, DockerControlPolicy.CONNECT_ONLY),
+    ):
+        tools = resolve_tools(
+            tmp_path,
+            backend=backend,
+            docker_policy=policy,
+            compose_file=compose,
+        )
+        assert len(tools) == len(EXPECTED_TOOL_IDS)
+        for tool in tools:
+            assert tool.actions
+            for action in tool.actions:
+                assert action.dispatch_kind in ToolDispatchKind
+                if action.dispatch_kind is ToolDispatchKind.UNAVAILABLE:
+                    assert action.unavailable_reason
+                else:
+                    assert action.available

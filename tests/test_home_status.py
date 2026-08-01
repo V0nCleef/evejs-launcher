@@ -11,6 +11,7 @@ from src import config
 from src import app as app_module
 from src.app import MainWindow
 from src.constants import COLORS, Ports
+from src.core.service_status import ServiceState
 from src.workers.server_worker import ServiceProbe, ServiceStartResult
 
 
@@ -79,6 +80,33 @@ def test_external_game_service_is_not_advertised_as_stoppable(
     assert window._home_page.btn_start_servers.text() == "Start Managed Services"
 
 
+def test_owned_game_and_external_market_remain_independently_represented(
+    status_window: tuple[MainWindow, dict[str, bool]],
+) -> None:
+    window, probes = status_window
+    probes["game"] = True
+    probes["market"] = True
+
+    class AliveProcess:
+        pid = 4321
+
+        @staticmethod
+        def poll() -> None:
+            return None
+
+    window._server_proc = AliveProcess()
+    window._update_status_bar()
+
+    assert window._runtime_snapshot.game_owned is True
+    assert window._runtime_snapshot.market_owned is False
+    assert window._nav.btn_server.text() == "■ Stop Server"
+    assert window._nav.btn_market.text() == "Market: External"
+    assert window._nav.btn_market.isEnabled() is False
+    assert window._home_page.services_card.game_row.detail_text == "PID 4321"
+    assert window._home_page.services_card.market_row.detail_text == ""
+    assert window._home_page.btn_start_servers.text() == "Stop Managed Services"
+
+
 def test_offline_game_probe_updates_footer_and_home(
     status_window: tuple[MainWindow, dict[str, bool]],
 ) -> None:
@@ -113,6 +141,39 @@ def test_owned_live_process_reports_starting_everywhere(
     assert window._status_bar.server_section.label.text() == "Server: Starting..."
     assert window._home_page.server_card._state_label.text() == "Starting…"
     assert COLORS["gold"] in window._home_page.server_card._dot.styleSheet()
+
+
+def test_native_start_immediately_reports_starting_before_worker_returns(
+    status_window: tuple[MainWindow, dict[str, bool]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window, _probes = status_window
+    window._cfg["evejs_root"] = "C:/Games/EveJS"
+    workers: list[object] = []
+    monkeypatch.setattr(
+        window,
+        "_begin_lifecycle_worker",
+        lambda worker, _completed_handler: workers.append(worker),
+    )
+
+    started = window._start_service_sequence(
+        start_market=False,
+        start_game=True,
+        mode="vanilla",
+        on_ready=None,
+        error_title="Game Server Error",
+    )
+
+    assert started is True
+    assert len(workers) == 1
+    assert window._runtime_snapshot.game is ServiceState.STARTING
+    assert window._runtime_snapshot.game_pid is None
+    assert window._status_bar.server_section.label.text() == "Server: Starting..."
+    assert window._nav.btn_server.text() == "⏳ Starting Server…"
+    assert window._nav.btn_server.isEnabled() is False
+    assert window._home_page.server_card._state_label.text() == "Starting…"
+    assert window._home_page.btn_start_servers.text() == "Starting…"
+    assert window._home_page.btn_start_servers.isEnabled() is False
 
 
 def test_service_probe_fans_out_game_and_market_without_another_socket_probe(

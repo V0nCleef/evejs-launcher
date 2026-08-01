@@ -2,6 +2,18 @@
 
 ## Changelog
 
+## v1.0.35 — 2026-08-01
+
+### Added
+- **Docker Compose support** — choose Docker during setup or in Settings, test the project before saving, and use either read-only Connect-only mode or launcher-controlled Managed mode.
+- **Docker-aware launcher features** — service status, logs, client endpoints, characters, portraits, mods, and supported Tool Deck actions now follow the selected Compose project.
+
+### Fixed
+- **Safer Docker startup** — setup failures are clearer, services wait for real readiness checks, and timed-out Docker commands clean up their process trees.
+- **Native startup status** — Native start actions now show Starting immediately instead of briefly returning to Offline.
+- **Clearer setup** — Native and Docker choices and their optional settings are now explained in plain language.
+- **Responsive client launch** — character buttons now show Launching immediately and the launcher stays usable while EVE starts.
+
 ## v1.0.34 — 2026-07-29
 
 ### Added

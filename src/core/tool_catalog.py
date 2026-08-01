@@ -6,8 +6,12 @@ recursively promotes arbitrary files from ``<evejs_root>/tools`` into actions.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Iterable
+
+from src.core.runtime.docker_tools import DockerToolAction
+from src.core.service_status import DockerControlPolicy, RuntimeBackend
 
 
 TOOL_CATEGORIES = (
@@ -16,6 +20,14 @@ TOOL_CATEGORIES = (
     "Data & Content",
     "Market",
 )
+
+
+class ToolDispatchKind(Enum):
+    """Reviewed dispatch boundary selected for one resolved action."""
+
+    NATIVE_WRAPPER = "native_wrapper"
+    DOCKER_COMPOSE = "docker_compose"
+    UNAVAILABLE = "unavailable"
 
 
 @dataclass(frozen=True)
@@ -47,6 +59,41 @@ class ToolDefinition:
 
 
 @dataclass(frozen=True)
+class ResolvedToolAction:
+    """One backend-resolved action with an explicit dispatch capability."""
+
+    action: ToolAction
+    dispatch_kind: ToolDispatchKind
+    docker_action: DockerToolAction | None = None
+    available: bool = True
+    unavailable_reason: str = ""
+
+    @property
+    def id(self) -> str:
+        return self.action.id
+
+    @property
+    def label(self) -> str:
+        return self.action.label
+
+    @property
+    def arguments(self) -> tuple[str, ...]:
+        return self.action.arguments
+
+    @property
+    def risk_level(self) -> str:
+        return self.action.risk_level
+
+    @property
+    def confirmation_title(self) -> str:
+        return self.action.confirmation_title
+
+    @property
+    def confirmation_body(self) -> str:
+        return self.action.confirmation_body
+
+
+@dataclass(frozen=True)
 class ResolvedTool:
     """A catalog definition resolved against the configured EveJS root."""
 
@@ -54,6 +101,7 @@ class ResolvedTool:
     absolute_entrypoint: Path | None
     available: bool
     unavailable_reason: str = ""
+    actions: tuple[ResolvedToolAction, ...] = ()
 
 
 # ── Catalog definitions ──────────────────────────────────────────────────────
@@ -225,6 +273,159 @@ _SUPPORTED_TOOLS = (
 )
 
 
+_MANAGED_DOCKER_HOST_WRAPPERS = frozenset(
+    {
+        "client-setup-wizard",
+        "blue-dll-patcher",
+        "client-code-grabber",
+        "server-config-editor",
+    }
+)
+_CONNECT_ONLY_HOST_WRAPPERS = frozenset(
+    {
+        "client-setup-wizard",
+        "blue-dll-patcher",
+        "client-code-grabber",
+    }
+)
+_DOCKER_UNAVAILABLE_REASONS = {
+    "reset-local-databases": (
+        "Docker volume reset is not supported by the launcher."
+    ),
+    "new-eden-store-editor": (
+        "This host editor is not proven to target the selected Docker runtime."
+    ),
+    "market-seed-builder-gui": (
+        "The host market GUI does not target the selected Docker runtime."
+    ),
+    "rust-msvc-market-setup": (
+        "Docker owns its toolchain; host Rust and MSVC setup is not applicable."
+    ),
+}
+_CONNECT_ONLY_REASON = (
+    "Connect-only Docker mode cannot change container, configuration, or data state."
+)
+
+_DOCKER_ACTIONS: dict[
+    str,
+    tuple[tuple[ToolAction, DockerToolAction], ...],
+] = {
+    "local-database-creator": (
+        (
+            ToolAction(
+                id="initialize",
+                label="Initialize…",
+                risk_level="consequential",
+                confirmation_title="Initialize Docker game data?",
+                confirmation_body=(
+                    "This runs the selected Compose project's idempotent game-data "
+                    "initializer while Server and Market are stopped."
+                ),
+            ),
+            DockerToolAction.INITIALIZE_DATABASE,
+        ),
+    ),
+    "market-seed-builder": (
+        (
+            ToolAction(id="status", label="Status"),
+            DockerToolAction.MARKET_STATUS,
+        ),
+        (
+            ToolAction(
+                id="doctor",
+                label="Doctor…",
+                risk_level="consequential",
+                confirmation_title="Validate the Docker market database?",
+                confirmation_body=(
+                    "This runs the offline market doctor against the selected Compose "
+                    "project while Server and Market are stopped."
+                ),
+            ),
+            DockerToolAction.MARKET_DOCTOR,
+        ),
+        (
+            ToolAction(
+                id="backup",
+                label="Backup…",
+                risk_level="consequential",
+                confirmation_title="Back up the Docker market database?",
+                confirmation_body=(
+                    "This creates a retained market backup in the selected Compose "
+                    "project while Server and Market are stopped."
+                ),
+            ),
+            DockerToolAction.MARKET_BACKUP,
+        ),
+        (
+            ToolAction(id="backups", label="List Backups"),
+            DockerToolAction.MARKET_BACKUPS,
+        ),
+        (
+            ToolAction(id="presets", label="List Presets"),
+            DockerToolAction.MARKET_PRESETS,
+        ),
+        (
+            ToolAction(
+                id="rebuild-v1-jita",
+                label="Rebuild v1 — Jita…",
+                risk_level="destructive",
+                confirmation_title="Rebuild Docker market with the Jita preset?",
+                confirmation_body=(
+                    "This replaces seeded liquidity, player orders, events, and history "
+                    "using the explicit Jita + New Caldari preset."
+                ),
+            ),
+            DockerToolAction.MARKET_REBUILD_V1_JITA,
+        ),
+        (
+            ToolAction(
+                id="rebuild-v1-full-universe",
+                label="Rebuild v1 — Full Universe…",
+                risk_level="destructive",
+                confirmation_title="Rebuild the full Docker market?",
+                confirmation_body=(
+                    "This replaces seeded liquidity, player orders, events, and history "
+                    "using the explicit full-universe preset."
+                ),
+            ),
+            DockerToolAction.MARKET_REBUILD_V1_FULL_UNIVERSE,
+        ),
+        (
+            ToolAction(
+                id="restore-latest",
+                label="Restore Latest…",
+                risk_level="destructive",
+                confirmation_title="Restore the latest Docker market backup?",
+                confirmation_body=(
+                    "This replaces the active market database with the latest retained "
+                    "backup while Server and Market are stopped."
+                ),
+            ),
+            DockerToolAction.MARKET_RESTORE_LATEST,
+        ),
+    ),
+    "tq-market-snapshot-seeder-v2": (
+        (
+            ToolAction(id="snapshot-info", label="Snapshot Info"),
+            DockerToolAction.MARKET_SNAPSHOT_INFO,
+        ),
+        (
+            ToolAction(
+                id="rebuild-v2",
+                label="Rebuild v2…",
+                risk_level="destructive",
+                confirmation_title="Rebuild the Docker market from the v2 snapshot?",
+                confirmation_body=(
+                    "This replaces seeded liquidity, player orders, events, and history "
+                    "using the reviewed v2 snapshot importer."
+                ),
+            ),
+            DockerToolAction.MARKET_REBUILD_V2,
+        ),
+    ),
+}
+
+
 # ── Public catalog operations ────────────────────────────────────────────────
 
 
@@ -233,8 +434,14 @@ def supported_tool_definitions() -> tuple[ToolDefinition, ...]:
     return _SUPPORTED_TOOLS
 
 
-def resolve_tools(evejs_root: str | Path | None) -> tuple[ResolvedTool, ...]:
-    """Resolve every supported wrapper against *evejs_root* without raising."""
+def resolve_tools(
+    evejs_root: str | Path | None,
+    *,
+    backend: RuntimeBackend = RuntimeBackend.NATIVE,
+    docker_policy: DockerControlPolicy = DockerControlPolicy.CONNECT_ONLY,
+    compose_file: str | Path | None = None,
+) -> tuple[ResolvedTool, ...]:
+    """Resolve every reviewed action for the selected runtime without raising."""
     root_text = str(evejs_root or "").strip()
     if not root_text:
         return _unavailable_tools(None, "Set the EveJS root in Settings")
@@ -252,36 +459,55 @@ def resolve_tools(evejs_root: str | Path | None) -> tuple[ResolvedTool, ...]:
             tools_root,
             "Configured EveJS root was not found",
         )
-    if not tools_root.is_dir():
-        return _unavailable_tools(
-            tools_root,
-            "Supported tools folder was not found",
-        )
 
-    resolved: list[ResolvedTool] = []
+    wrappers: list[ResolvedTool] = []
+    tools_available = tools_root.is_dir()
     for definition in _SUPPORTED_TOOLS:
         candidate = _resolve_tool_candidate(tools_root, definition)
         if candidate is None:
-            resolved.append(
-                ResolvedTool(
-                    definition=definition,
-                    absolute_entrypoint=None,
+            wrappers.append(
+                _resolved_wrapper(
+                    definition,
+                    None,
                     available=False,
-                    unavailable_reason="Unsupported tool path",
+                    reason="Unsupported tool path",
                 )
             )
             continue
 
-        available = candidate.is_file()
-        resolved.append(
-            ResolvedTool(
-                definition=definition,
-                absolute_entrypoint=candidate,
+        available = tools_available and candidate.is_file()
+        reason = "" if available else (
+            "Not installed"
+            if tools_available
+            else "Supported tools folder was not found"
+        )
+        wrappers.append(
+            _resolved_wrapper(
+                definition,
+                candidate,
                 available=available,
-                unavailable_reason="" if available else "Not installed",
+                reason=reason,
             )
         )
-    return tuple(resolved)
+
+    if backend is RuntimeBackend.NATIVE:
+        return tuple(wrappers)
+    if backend is not RuntimeBackend.DOCKER_COMPOSE:
+        return _unavailable_tools(tools_root, "Unsupported runtime backend")
+
+    compose_available, compose_reason = _docker_compose_availability(
+        root,
+        compose_file,
+    )
+    return tuple(
+        _resolve_docker_tool(
+            wrapper,
+            policy=docker_policy,
+            compose_available=compose_available,
+            compose_reason=compose_reason,
+        )
+        for wrapper in wrappers
+    )
 
 
 def filter_tools(
@@ -317,6 +543,141 @@ def filter_tools(
 # ── Resolution helpers ───────────────────────────────────────────────────────
 
 
+def _resolved_wrapper(
+    definition: ToolDefinition,
+    candidate: Path | None,
+    *,
+    available: bool,
+    reason: str,
+) -> ResolvedTool:
+    dispatch_kind = (
+        ToolDispatchKind.NATIVE_WRAPPER
+        if available
+        else ToolDispatchKind.UNAVAILABLE
+    )
+    actions = tuple(
+        ResolvedToolAction(
+            action,
+            dispatch_kind,
+            available=available,
+            unavailable_reason="" if available else reason,
+        )
+        for action in definition.actions
+    )
+    return ResolvedTool(
+        definition,
+        candidate,
+        available,
+        "" if available else reason,
+        actions,
+    )
+
+
+def _resolve_docker_tool(
+    wrapper: ResolvedTool,
+    *,
+    policy: DockerControlPolicy,
+    compose_available: bool,
+    compose_reason: str,
+) -> ResolvedTool:
+    tool_id = wrapper.definition.id
+    host_wrappers = (
+        _MANAGED_DOCKER_HOST_WRAPPERS
+        if policy is DockerControlPolicy.MANAGED
+        else _CONNECT_ONLY_HOST_WRAPPERS
+    )
+    if tool_id in host_wrappers:
+        return wrapper
+
+    semantic_actions = _DOCKER_ACTIONS.get(tool_id)
+    if policy is not DockerControlPolicy.MANAGED:
+        actions = tuple(
+            ResolvedToolAction(
+                action,
+                ToolDispatchKind.UNAVAILABLE,
+                available=False,
+                unavailable_reason=_CONNECT_ONLY_REASON,
+            )
+            for action in (
+                tuple(item[0] for item in semantic_actions)
+                if semantic_actions is not None
+                else wrapper.definition.actions
+            )
+        )
+        return ResolvedTool(
+            wrapper.definition,
+            wrapper.absolute_entrypoint,
+            False,
+            _CONNECT_ONLY_REASON,
+            actions,
+        )
+
+    if semantic_actions is not None:
+        actions = tuple(
+            ResolvedToolAction(
+                action,
+                (
+                    ToolDispatchKind.DOCKER_COMPOSE
+                    if compose_available
+                    else ToolDispatchKind.UNAVAILABLE
+                ),
+                docker_action if compose_available else None,
+                available=compose_available,
+                unavailable_reason="" if compose_available else compose_reason,
+            )
+            for action, docker_action in semantic_actions
+        )
+        return ResolvedTool(
+            wrapper.definition,
+            wrapper.absolute_entrypoint,
+            compose_available,
+            "" if compose_available else compose_reason,
+            actions,
+        )
+
+    reason = _DOCKER_UNAVAILABLE_REASONS.get(
+        tool_id,
+        "This tool has no reviewed operation for Managed Docker.",
+    )
+    actions = tuple(
+        ResolvedToolAction(
+            action,
+            ToolDispatchKind.UNAVAILABLE,
+            available=False,
+            unavailable_reason=reason,
+        )
+        for action in wrapper.definition.actions
+    )
+    return ResolvedTool(
+        wrapper.definition,
+        wrapper.absolute_entrypoint,
+        False,
+        reason,
+        actions,
+    )
+
+
+def _docker_compose_availability(
+    root: Path,
+    compose_file: str | Path | None,
+) -> tuple[bool, str]:
+    compose_text = str(compose_file or "").strip()
+    try:
+        compose = (
+            Path(compose_text).expanduser()
+            if compose_text
+            else root / "compose.yaml"
+        )
+        if not compose.is_absolute():
+            return False, "Selected Compose file must be absolute"
+        compose = compose.resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        return False, "Selected Compose file was not found"
+    if not compose.is_file():
+        return False, "Selected Compose file was not found"
+    return True, ""
+
+
 def _resolve_tool_candidate(
     tools_root: Path,
     definition: ToolDefinition,
@@ -342,11 +703,11 @@ def _unavailable_tools(
             else None
         )
         resolved.append(
-            ResolvedTool(
-                definition=definition,
-                absolute_entrypoint=candidate,
+            _resolved_wrapper(
+                definition,
+                candidate,
                 available=False,
-                unavailable_reason=reason,
+                reason=reason,
             )
         )
     return tuple(resolved)

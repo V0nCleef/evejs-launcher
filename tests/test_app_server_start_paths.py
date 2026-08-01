@@ -587,8 +587,10 @@ def test_single_client_launch_waits_for_the_auto_start_continuation(
     )
     bare_window._tracker = IdleTracker()
     bare_window._ensure_server_if_needed = lambda on_ready: callbacks.append(on_ready) or True
-    bare_window._launch_account = lambda username, character, *, show_errors: (
-        launches.append((username, character, show_errors)) or True
+    bare_window._start_client_launch = (
+        lambda username, character, *, show_errors: (
+            launches.append((username, character, show_errors)) or True
+        )
     )
     bare_window._refresh_characters = lambda: None
     bare_window._update_status_bar = lambda: None
@@ -601,6 +603,89 @@ def test_single_client_launch_waits_for_the_auto_start_continuation(
     assert callable(callback)
     callback()
     assert launches == [("account", "character", True)]
+
+
+def test_native_client_launch_preserves_configured_endpoint_context(
+    bare_window: MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple[object, ...]] = []
+    profile_root = tmp_path / "profiles" / "fixture-account"
+    (profile_root / "tq").mkdir(parents=True)
+    bare_window._cfg.update(
+        {
+            "runtime_backend": "native",
+            "evejs_root": str(tmp_path / "evejs"),
+            "client_path": str(tmp_path / "client" / "tq"),
+            "game_port": 27555,
+            "proxy_url": "http://127.0.0.1:27557",
+        }
+    )
+
+    class Tracker:
+        @staticmethod
+        def is_account_running(_username: str) -> bool:
+            return False
+
+        def add(self, username, character, process) -> None:
+            events.append(("track", username, character, process.pid))
+
+    class Process:
+        pid = 4242
+
+    class Thread:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def start(self) -> None:
+            pass
+
+    bare_window._tracker = Tracker()
+    monkeypatch.setattr(app_module, "PROFILES_ROOT", tmp_path / "profiles")
+    monkeypatch.setattr(app_module, "profile_exists", lambda _username: True)
+    monkeypatch.setattr(
+        app_module,
+        "prefill_username",
+        lambda username: events.append(("prefill", username)),
+    )
+    def configure_profile(
+        username: str,
+        profile_tq_path: Path,
+        *,
+        host: str,
+        port: int,
+    ) -> None:
+        events.append(
+            ("configure", username, profile_tq_path, host, port)
+        )
+
+    monkeypatch.setattr(
+        app_module,
+        "configure_profile_game_endpoint",
+        configure_profile,
+    )
+
+    def launch_client(**kwargs):
+        events.append(("launch", kwargs["launch_context"]))
+        return Process()
+
+    monkeypatch.setattr(app_module, "launch_client", launch_client)
+    monkeypatch.setattr(app_module.threading, "Thread", Thread)
+
+    assert bare_window._launch_account("fixture-account", "Fixture Character") is True
+
+    context = next(event[1] for event in events if event[0] == "launch")
+    assert (context.game_host, context.game_port) == ("127.0.0.1", 27555)
+    assert context.proxy_url == "http://127.0.0.1:27557"
+    configured = next(event for event in events if event[0] == "configure")
+    assert configured == (
+        "configure",
+        "fixture-account",
+        profile_root / "tq",
+        context.game_host,
+        context.game_port,
+    )
 
 
 def test_launch_all_aborts_when_auto_start_is_cancelled(
@@ -806,6 +891,56 @@ def test_close_defers_window_acceptance_until_owned_service_stop_completes(
     assert stop_requests[0]["stop_game"] is True
     assert stop_requests[0]["stop_market"] is True
     assert callable(stop_requests[0]["on_complete"])
+
+
+def test_close_stops_only_owned_game_when_market_is_externally_reachable(
+    bare_window: MainWindow,
+) -> None:
+    class LiveProcess:
+        pid = 1234
+
+        @staticmethod
+        def poll() -> None:
+            return None
+
+    class IdleTracker:
+        running_count = 0
+
+    class CloseEvent:
+        accepted = False
+        ignored = False
+
+        def accept(self) -> None:
+            self.accepted = True
+
+        def ignore(self) -> None:
+            self.ignored = True
+
+    event = CloseEvent()
+    stop_requests: list[dict[str, object]] = []
+    bare_window._tracker = IdleTracker()
+    bare_window._server_proc = LiveProcess()
+    bare_window._market_proc = None
+    bare_window._service_reachability = (True, True)
+    bare_window._service_thread = None
+    bare_window._stop_service_monitor = lambda: True
+    bare_window._run_stop_sequence = lambda **kwargs: stop_requests.append(kwargs) or True
+
+    snapshot = bare_window._build_runtime_snapshot()
+    bare_window.closeEvent(event)
+
+    assert snapshot.game_owned is True
+    assert snapshot.market_owned is False
+    assert event.ignored is True
+    assert event.accepted is False
+    assert stop_requests == [
+        {
+            "stop_game": True,
+            "stop_market": True,
+            "on_complete": bare_window._complete_deferred_close,
+        }
+    ]
+    assert bare_window._market_proc is None
 
 
 def test_failed_deferred_shutdown_keeps_the_window_open(

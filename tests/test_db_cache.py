@@ -39,3 +39,18 @@ def test_clear_solar_system_name_cache_allows_a_new_root_to_load(
     db.clear_solar_system_name_cache()
 
     assert db._load_solar_system_names(str(second_root))[30000001] == "Second System"
+
+
+def test_solar_system_cache_isolated_by_root_without_global_clear(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    _write_solar_system_data(first_root, "First System")
+    _write_solar_system_data(second_root, "Second System")
+    monkeypatch.setattr(db, "_SOLAR_SYSTEM_NAMES", None)
+
+    assert db._load_solar_system_names(str(first_root))[30000001] == "First System"
+    assert db._load_solar_system_names(str(second_root))[30000001] == "Second System"
+    assert db._load_solar_system_names(str(first_root))[30000001] == "First System"

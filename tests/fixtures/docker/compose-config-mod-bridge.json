@@ -1,0 +1,18 @@
+{
+  "name": "fixture-evejs",
+  "services": {
+    "server": {
+      "environment": {
+        "NODE_OPTIONS": "--require \"/app/mods/alpha/loader.js\" --require \"/app/mods/Zeta Mod/loader.js\""
+      },
+      "volumes": [
+        {
+          "type": "bind",
+          "source": "C:/Fixture Space/EveJS/mods",
+          "target": "/app/mods",
+          "read_only": false
+        }
+      ]
+    }
+  }
+}

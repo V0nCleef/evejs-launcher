@@ -1,0 +1,8 @@
+{
+  "project": "fixture-evejs",
+  "service": "server",
+  "mounts": [
+    {"type": "bind", "source": "C:/Fixture Space/EveJS/_local/gameStore", "target": "/var/lib/evejs/gameStore"},
+    {"type": "volume", "source": "fixture-evejs-data", "target": "/var/lib/evejs/gameStore"}
+  ]
+}

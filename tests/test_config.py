@@ -95,6 +95,39 @@ def test_valid_primary_preference_wins_over_legacy_script(
     assert config.load()["server_start_preference"] == "StartServer.bat"
 
 
+def test_legacy_native_config_without_backend_preserves_native_fields_and_migration(
+    isolated_config: Path,
+) -> None:
+    isolated_config.write_text(
+        json.dumps(
+            {
+                "evejs_root": "C:/Fixture/EveJS",
+                "client_path": "C:/Fixture/EVE.exe",
+                "proxy_url": "http://127.0.0.1:32602",
+                "game_port": 32600,
+                "auto_start_server": True,
+                "auto_start_market": True,
+                "server_mode": "vanilla",
+                "server_start_script": "C:/Fixture/EveJS/StartServer.bat",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = config.load()
+
+    assert loaded["runtime_backend"] == "native"
+    assert loaded["evejs_root"] == "C:/Fixture/EveJS"
+    assert loaded["client_path"] == "C:/Fixture/EVE.exe"
+    assert loaded["proxy_url"] == "http://127.0.0.1:32602"
+    assert loaded["game_port"] == 32600
+    assert loaded["auto_start_server"] is True
+    assert loaded["auto_start_market"] is True
+    assert loaded["server_mode"] == "vanilla"
+    assert loaded["server_start_preference"] == "StartServer.bat"
+    assert "server_start_script" not in loaded
+
+
 def test_invalid_absolute_primary_preference_falls_back_to_ask(
     isolated_config: Path,
 ) -> None:

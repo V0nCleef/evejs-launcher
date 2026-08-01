@@ -233,6 +233,8 @@ class CharacterCard(QFrame):
         self.sec_status = sec_status
         self._status = status
         self._portrait_pixmap: Optional[QPixmap] = None
+        self._launch_available = True
+        self._launch_unavailable_reason = ""
 
         self.setFixedSize(220, 280)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -397,8 +399,14 @@ class CharacterCard(QFrame):
         self._status_bar.setStyleSheet(
             f"background-color: {cfg['bar_color']}; border: none;"
         )
-        self._launch_btn.setText(cfg["btn_text"])
-        self._launch_btn.setEnabled(cfg["btn_enabled"])
+        if self._launch_available:
+            self._launch_btn.setText(cfg["btn_text"])
+            self._launch_btn.setEnabled(cfg["btn_enabled"])
+            self._launch_btn.setToolTip("")
+        else:
+            self._launch_btn.setText("VIEW ONLY")
+            self._launch_btn.setEnabled(False)
+            self._launch_btn.setToolTip(self._launch_unavailable_reason)
         self._launch_btn.setStyleSheet(
             f"""
             QPushButton {{
@@ -422,6 +430,12 @@ class CharacterCard(QFrame):
     def set_status(self, status: Status) -> None:
         """Update card status."""
         self._apply_status(status)
+
+    def set_launch_available(self, enabled: bool, reason: str = "") -> None:
+        """Enable Native launch controls or present a read-only card."""
+        self._launch_available = bool(enabled)
+        self._launch_unavailable_reason = "" if enabled else reason
+        self._apply_status(self._status)
 
     def set_portrait(self, pixmap: Optional[QPixmap]) -> None:
         """Set portrait pixmap (called from async loader)."""

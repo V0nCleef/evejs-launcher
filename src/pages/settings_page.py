@@ -20,6 +20,7 @@ from pathlib import Path
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QWheelEvent
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QFormLayout,
@@ -60,7 +61,48 @@ from src.core.server_selection import (
     discover_server_scripts,
     mode_for_script,
 )
+from src.core.runtime.docker_setup import (
+    DockerPreflightRequest,
+    DockerPreflightResult,
+    DockerSetupDraft,
+    create_preflight_request,
+    docker_draft_fingerprint,
+)
 from src.widgets.toggle_switch import ToggleSwitch
+
+
+NATIVE_RUNTIME_HELP = (
+    "Runs the EveJS Game and Market services directly on Windows from the "
+    "selected EveJS folder. Docker Desktop is not required."
+)
+DOCKER_RUNTIME_HELP = (
+    "Uses an existing EveJS Compose project through Docker Desktop in "
+    "Linux-container mode."
+)
+RUNTIME_DATA_NOTICE = (
+    "Changing runtime does not move characters, market data, or server data."
+)
+COMPOSE_FILE_HELP = (
+    "Recommended: leave this blank. The launcher automatically uses compose.yaml "
+    "from EveJS Root. Select a file only when it has a different name or location."
+)
+PROJECT_NAME_HELP = (
+    "Most users should leave this blank. Set a project name only to reconnect to "
+    "a stack created with a custom -p name, keep a stable name after moving the "
+    "folder, or separate multiple stacks. Changing it may target a different "
+    "Docker stack."
+)
+CONNECT_ONLY_HELP = (
+    "Connect only: the launcher shows status and logs but never starts, stops, "
+    "or changes the Docker stack."
+)
+MANAGED_HELP = (
+    "Managed: the launcher can start, stop, restart, and maintain this Docker stack."
+)
+DOCKER_TEST_HELP = (
+    "Testing is read-only. It checks Docker and the Compose project without "
+    "starting containers or initializing data."
+)
 
 
 class SettingsPage(QWidget):
@@ -68,10 +110,15 @@ class SettingsPage(QWidget):
 
     settings_saved = pyqtSignal(dict)
     settings_update_check = pyqtSignal()
+    docker_preflight_requested = pyqtSignal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._stale_server_preference = ""
+        self._docker_preflight_token = 0
+        self._pending_docker_request: DockerPreflightRequest | None = None
+        self._validated_docker_fingerprint: str | None = None
+        self._save_after_docker_preflight = False
         self._build_ui()
         self.load_settings()
 
@@ -123,6 +170,142 @@ class SettingsPage(QWidget):
         general_form.addRow("Proxy URL:", self.proxy_url_edit)
 
         root.addWidget(general_box)
+
+        # ── Runtime ─────────────────────────────────────────────────────────
+        self.runtime_box = QGroupBox("Runtime")
+        runtime_form = QFormLayout(self.runtime_box)
+        runtime_form.setSpacing(8)
+        self.runtime_backend_combo = QComboBox()
+        self.runtime_backend_combo.addItem(
+            "Native — run directly on Windows",
+            "native",
+        )
+        self.runtime_backend_combo.addItem(
+            "Docker Compose — use Docker Desktop",
+            "docker_compose",
+        )
+        self.runtime_backend_combo.currentIndexChanged.connect(self._update_runtime_visibility)
+        runtime_form.addRow("How should EveJS run?", self.runtime_backend_combo)
+        self.runtime_backend_help_label = self._make_help_label("")
+        self.runtime_backend_help_label.setObjectName("runtimeBackendHelp")
+        runtime_form.addRow("", self.runtime_backend_help_label)
+        self.runtime_data_notice_label = self._make_help_label(
+            RUNTIME_DATA_NOTICE,
+            color=COLORS["gold"],
+        )
+        self.runtime_data_notice_label.setObjectName("runtimeDataNotice")
+        runtime_form.addRow("", self.runtime_data_notice_label)
+
+        self.docker_fields = QWidget()
+        docker_form = QFormLayout(self.docker_fields)
+        docker_form.setContentsMargins(0, 0, 0, 0)
+        docker_form.setSpacing(8)
+
+        self.docker_compose_edit = QLineEdit()
+        self.docker_compose_edit.setPlaceholderText(
+            "Optional — leave blank to use <EveJS Root>\\compose.yaml"
+        )
+        self.docker_compose_edit.setToolTip(COMPOSE_FILE_HELP)
+        self.docker_compose_edit.setAccessibleDescription(COMPOSE_FILE_HELP)
+        docker_form.addRow(
+            "Compose File (optional):",
+            self._with_browse(
+                self.docker_compose_edit,
+                directory=False,
+                compose=True,
+            ),
+        )
+        self.docker_compose_help_label = self._make_help_label(COMPOSE_FILE_HELP)
+        self.docker_compose_help_label.setObjectName("dockerComposeHelp")
+        docker_form.addRow("", self.docker_compose_help_label)
+        self.docker_compose_resolved_label = self._make_help_label("")
+        self.docker_compose_resolved_label.setObjectName("dockerComposeResolved")
+        docker_form.addRow("", self.docker_compose_resolved_label)
+
+        self.docker_policy_combo = QComboBox()
+        self.docker_policy_combo.addItem(
+            "Connect only — observe an existing stack",
+            "connect_only",
+        )
+        self.docker_policy_combo.addItem(
+            "Managed — launcher controls the stack (recommended)",
+            "managed",
+        )
+        self.docker_policy_combo.currentIndexChanged.connect(self._update_runtime_visibility)
+        docker_form.addRow("Control Policy:", self.docker_policy_combo)
+        self.docker_policy_help_label = self._make_help_label("")
+        self.docker_policy_help_label.setObjectName("dockerPolicyHelp")
+        docker_form.addRow("", self.docker_policy_help_label)
+
+        self.docker_keep_running_toggle = ToggleSwitch()
+        docker_form.addRow("Keep Stack Running on Exit:", self.docker_keep_running_toggle)
+
+        self.docker_advanced_toggle = QCheckBox(
+            "Show advanced Docker options"
+        )
+        self.docker_advanced_toggle.setObjectName("dockerAdvancedToggle")
+        self.docker_advanced_toggle.toggled.connect(
+            lambda _checked: self._update_docker_guidance()
+        )
+        docker_form.addRow("", self.docker_advanced_toggle)
+
+        self.docker_advanced_fields = QWidget()
+        advanced_form = QFormLayout(self.docker_advanced_fields)
+        advanced_form.setContentsMargins(0, 0, 0, 0)
+        advanced_form.setSpacing(8)
+        self.docker_project_edit = QLineEdit()
+        self.docker_project_edit.setPlaceholderText(
+            "Optional — example: evejs-local"
+        )
+        self.docker_project_edit.setToolTip(PROJECT_NAME_HELP)
+        self.docker_project_edit.setAccessibleDescription(PROJECT_NAME_HELP)
+        advanced_form.addRow(
+            "Compose Project Name (optional):",
+            self.docker_project_edit,
+        )
+        self.docker_project_help_label = self._make_help_label(
+            PROJECT_NAME_HELP
+        )
+        self.docker_project_help_label.setObjectName("dockerProjectHelp")
+        advanced_form.addRow("", self.docker_project_help_label)
+        docker_form.addRow("", self.docker_advanced_fields)
+
+        self.test_docker_setup_btn = QPushButton("Test Docker setup")
+        self.test_docker_setup_btn.setObjectName("testDockerSetupButton")
+        self.test_docker_setup_btn.clicked.connect(self.test_docker_setup)
+        docker_form.addRow("", self.test_docker_setup_btn)
+        self.docker_test_help_label = self._make_help_label(DOCKER_TEST_HELP)
+        self.docker_test_help_label.setObjectName("dockerTestHelp")
+        docker_form.addRow("", self.docker_test_help_label)
+        self.docker_preflight_result_label = QLabel("")
+        self.docker_preflight_result_label.setWordWrap(True)
+        self.docker_preflight_result_label.hide()
+        docker_form.addRow("Setup Status:", self.docker_preflight_result_label)
+        runtime_form.addRow("", self.docker_fields)
+        root.addWidget(self.runtime_box)
+
+        for edit in (
+            self.evejs_root_edit,
+            self.client_path_edit,
+            self.docker_compose_edit,
+            self.docker_project_edit,
+        ):
+            edit.textChanged.connect(self._invalidate_docker_preflight)
+        self.runtime_backend_combo.currentIndexChanged.connect(
+            self._invalidate_docker_preflight
+        )
+        self.docker_policy_combo.currentIndexChanged.connect(
+            self._invalidate_docker_preflight
+        )
+        self.docker_keep_running_toggle.toggled.connect(
+            self._invalidate_docker_preflight
+        )
+        self.evejs_root_edit.textChanged.connect(
+            lambda _text: self._update_docker_guidance()
+        )
+        self.docker_compose_edit.textChanged.connect(
+            lambda _text: self._update_docker_guidance()
+        )
 
         # ── Launch ───────────────────────────────────────────────────────────
         launch_box = QGroupBox("Launch")
@@ -195,6 +378,7 @@ class SettingsPage(QWidget):
 
         # ── Server Start Scripts ─────────────────────────────────────────────
         scripts_box = QGroupBox("Server Start Scripts")
+        self.scripts_box = scripts_box
         scripts_box.setToolTip(
             "Select which server mode to use when starting the game server.\n"
             "The launcher detects StartServer*.bat files to determine the mode.\n"
@@ -307,7 +491,22 @@ class SettingsPage(QWidget):
         root.addLayout(buttons)
         root.addStretch()
 
-    def _with_browse(self, line_edit: QLineEdit, directory: bool) -> QWidget:
+    @staticmethod
+    def _make_help_label(
+        text: str,
+        *,
+        color: str | None = None,
+    ) -> QLabel:
+        """Create one consistent, readable inline explanation label."""
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setStyleSheet(
+            f"color: {color or COLORS['grey']}; font-size: 11px;"
+        )
+        label.setAccessibleDescription(text)
+        return label
+
+    def _with_browse(self, line_edit: QLineEdit, directory: bool, compose: bool = False) -> QWidget:
         """Wrap a QLineEdit with a Browse button in an HBox."""
         wrapper = QWidget()
         row = QHBoxLayout(wrapper)
@@ -321,7 +520,7 @@ class SettingsPage(QWidget):
         if directory:
             browse.clicked.connect(lambda: self._browse_directory(line_edit))
         else:
-            browse.clicked.connect(lambda: self._browse_file(line_edit))
+            browse.clicked.connect(lambda: self._browse_file(line_edit, compose=compose))
         row.addWidget(browse)
         return wrapper
 
@@ -333,11 +532,14 @@ class SettingsPage(QWidget):
             if target is self.evejs_root_edit:
                 self._on_evejs_root_edited()
 
-    def _browse_file(self, target: QLineEdit) -> None:
-        from src.core.platform import get_exe_file_filter
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select File", target.text(), get_exe_file_filter()
-        )
+    def _browse_file(self, target: QLineEdit, *, compose: bool = False) -> None:
+        """Select an executable or Compose YAML file as appropriate."""
+        if compose:
+            file_filter = "Compose files (*.yaml *.yml);;YAML files (*.yaml *.yml);;All Files (*)"
+        else:
+            from src.core.platform import get_exe_file_filter
+            file_filter = get_exe_file_filter()
+        path, _ = QFileDialog.getOpenFileName(self, "Select File", target.text(), file_filter)
         if path:
             target.setText(path)
 
@@ -370,9 +572,35 @@ class SettingsPage(QWidget):
         self._populate_server_scripts(
             str(cfg.get("server_start_preference", ASK_EVERY_TIME))
         )
+        self._set_combo_data(self.runtime_backend_combo, cfg.get("runtime_backend", "native"))
+        self.docker_compose_edit.setText(str(cfg.get("docker_compose_file", "")))
+        self._set_combo_data(self.docker_policy_combo, cfg.get("docker_control_policy", "connect_only"))
+        self.docker_project_edit.setText(str(cfg.get("docker_project_name", "")))
+        self.docker_advanced_toggle.setChecked(
+            bool(self.docker_project_edit.text().strip())
+        )
+        self.docker_keep_running_toggle.setChecked(bool(cfg.get("docker_keep_running_on_exit", True)))
+        self._pending_docker_request = None
+        self._validated_docker_fingerprint = None
+        self._save_after_docker_preflight = False
+        self._update_runtime_visibility()
 
     def save_settings(self) -> None:
-        """Persist the form values to config."""
+        """Persist Native immediately or preflight the exact Docker draft."""
+        if self.runtime_backend_combo.currentData() == "docker_compose":
+            draft = self._collect_docker_draft()
+            if (
+                self._validated_docker_fingerprint
+                == docker_draft_fingerprint(draft)
+            ):
+                self._persist_settings(self._collect_settings())
+            else:
+                self._request_docker_preflight(save_after=True)
+            return
+        self._persist_settings(self._collect_settings())
+
+    def _collect_settings(self) -> dict:
+        """Return a complete settings draft without writing configuration."""
         cfg = config.load()
         cfg.update(
             {
@@ -393,8 +621,17 @@ class SettingsPage(QWidget):
                 "server_start_preference": (
                     self.server_script_combo.currentData() or ASK_EVERY_TIME
                 ),
+                "runtime_backend": self.runtime_backend_combo.currentData() or "native",
+                "docker_compose_file": self.docker_compose_edit.text().strip(),
+                "docker_control_policy": self.docker_policy_combo.currentData() or "connect_only",
+                "docker_project_name": self.docker_project_edit.text().strip(),
+                "docker_keep_running_on_exit": self.docker_keep_running_toggle.isChecked(),
             }
         )
+        return cfg
+
+    def _persist_settings(self, cfg: dict) -> None:
+        """Write one already-validated settings draft exactly once."""
         try:
             config.save(cfg)
         except OSError:
@@ -405,6 +642,181 @@ class SettingsPage(QWidget):
         self._update_script_info()
         self._show_save_feedback("Saved ✓", success=True)
         self.settings_saved.emit(cfg)
+
+    def _collect_docker_draft(self) -> DockerSetupDraft:
+        return DockerSetupDraft(
+            evejs_root=self.evejs_root_edit.text(),
+            compose_file=self.docker_compose_edit.text(),
+            project_name=self.docker_project_edit.text(),
+            control_policy=(
+                self.docker_policy_combo.currentData() or "connect_only"
+            ),
+            keep_running_on_exit=self.docker_keep_running_toggle.isChecked(),
+            client_path=self.client_path_edit.text(),
+        )
+
+    def test_docker_setup(self) -> None:
+        """Request read-only preflight without persisting any field."""
+        self._request_docker_preflight(save_after=False)
+
+    def _request_docker_preflight(self, *, save_after: bool) -> None:
+        self._docker_preflight_token += 1
+        request = create_preflight_request(
+            self._collect_docker_draft(),
+            token=self._docker_preflight_token,
+        )
+        self._pending_docker_request = request
+        self._save_after_docker_preflight = save_after
+        self.save_btn.setEnabled(False)
+        self.test_docker_setup_btn.setEnabled(False)
+        self.docker_preflight_result_label.setText(
+            "Checking Docker CLI, engine, Compose, services, endpoints, and data state..."
+        )
+        self.docker_preflight_result_label.show()
+        self.docker_preflight_requested.emit(request)
+
+    def apply_docker_preflight_result(
+        self,
+        result: DockerPreflightResult,
+    ) -> None:
+        """Accept only the active result for the exact current draft."""
+        pending = self._pending_docker_request
+        if (
+            pending is None
+            or not isinstance(result, DockerPreflightResult)
+            or result.request_token != pending.token
+            or result.draft_fingerprint != pending.draft_fingerprint
+        ):
+            return
+
+        self._pending_docker_request = None
+        self.save_btn.setEnabled(True)
+        self.test_docker_setup_btn.setEnabled(True)
+        current_fingerprint = docker_draft_fingerprint(
+            self._collect_docker_draft()
+        )
+        if current_fingerprint != result.draft_fingerprint:
+            self._save_after_docker_preflight = False
+            self._show_docker_preflight_message(
+                "Docker setup fields changed during validation. Test the current values again.",
+                success=False,
+            )
+            return
+
+        if not result.report.ok:
+            self._validated_docker_fingerprint = None
+            self._save_after_docker_preflight = False
+            diagnostic = (
+                result.report.diagnostics[0]
+                if result.report.diagnostics
+                else "Docker setup validation failed."
+            )
+            self._show_docker_preflight_message(diagnostic, success=False)
+            return
+
+        self._validated_docker_fingerprint = result.draft_fingerprint
+        self._show_docker_preflight_message(
+            self._format_docker_preflight_success(result),
+            success=True,
+        )
+        save_after = self._save_after_docker_preflight
+        self._save_after_docker_preflight = False
+        if save_after:
+            self._persist_settings(self._collect_settings())
+
+    def _invalidate_docker_preflight(self, *_args: object) -> None:
+        self._validated_docker_fingerprint = None
+
+    def _show_docker_preflight_message(
+        self,
+        message: str,
+        *,
+        success: bool,
+    ) -> None:
+        color = COLORS["green"] if success else COLORS["red"]
+        self.docker_preflight_result_label.setStyleSheet(
+            f"color: {color}; font-size: 12px;"
+        )
+        self.docker_preflight_result_label.setText(message)
+        self.docker_preflight_result_label.show()
+
+    @staticmethod
+    def _format_docker_preflight_success(
+        result: DockerPreflightResult,
+    ) -> str:
+        report = result.report
+        if report.config is None or report.records is None:
+            return "Docker setup is valid."
+        records = report.records
+        initialized = bool(
+            records.get("init")
+            and records["init"].exists
+            and records["init"].exit_code == 0
+        )
+        running = any(
+            record.exists and record.raw_state == "running"
+            for record in records.values()
+        )
+        return "\n".join(
+            (
+                "Docker CLI / Engine / Compose: Ready",
+                "Required services and loopback endpoints: Valid",
+                f"Data initialization: {'Initialized' if initialized else 'Not initialized yet'}",
+                f"Runtime readiness: {'Containers observed' if running else 'Valid but stopped/pristine'}",
+            )
+        )
+
+    @staticmethod
+    def _set_combo_data(combo: QComboBox, value: object) -> None:
+        index = combo.findData(value)
+        combo.setCurrentIndex(index if index >= 0 else 0)
+
+    def _update_runtime_visibility(self) -> None:
+        """Keep Native controls intact but unavailable while Docker is selected."""
+        docker = self.runtime_backend_combo.currentData() == "docker_compose"
+        self.docker_fields.setVisible(docker)
+        self.scripts_box.setVisible(not docker)
+        self.runtime_backend_help_label.setText(
+            DOCKER_RUNTIME_HELP if docker else NATIVE_RUNTIME_HELP
+        )
+        self.runtime_backend_combo.setToolTip(
+            DOCKER_RUNTIME_HELP if docker else NATIVE_RUNTIME_HELP
+        )
+        self.runtime_backend_combo.setAccessibleDescription(
+            DOCKER_RUNTIME_HELP if docker else NATIVE_RUNTIME_HELP
+        )
+        self._update_docker_guidance()
+
+    def _update_docker_guidance(self) -> None:
+        """Explain the selected Docker target without changing its saved values."""
+        docker = self.runtime_backend_combo.currentData() == "docker_compose"
+        managed = docker and self.docker_policy_combo.currentData() == "managed"
+        self.docker_keep_running_toggle.setEnabled(managed)
+        self.docker_keep_running_toggle.setToolTip(
+            "Leave managed Compose services running when the launcher closes."
+            if managed else "Available only for Docker Compose with Managed control."
+        )
+        policy_help = MANAGED_HELP if managed else CONNECT_ONLY_HELP
+        self.docker_policy_help_label.setText(policy_help)
+        self.docker_policy_combo.setToolTip(policy_help)
+        self.docker_policy_combo.setAccessibleDescription(policy_help)
+        self.docker_advanced_fields.setVisible(
+            docker and self.docker_advanced_toggle.isChecked()
+        )
+
+        explicit = self.docker_compose_edit.text().strip()
+        root = self.evejs_root_edit.text().strip()
+        if explicit:
+            resolved = f"Using: {explicit}"
+        elif root:
+            resolved = f"Using: {Path(root) / 'compose.yaml'} (automatic)"
+        else:
+            resolved = (
+                "Using: <EveJS Root>\\compose.yaml after a root is selected "
+                "(automatic)"
+            )
+        self.docker_compose_resolved_label.setText(resolved)
+        self.docker_compose_resolved_label.setToolTip(resolved)
 
     def _show_save_feedback(self, message: str, *, success: bool) -> None:
         """Render a truthful inline result without interrupting form editing."""

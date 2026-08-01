@@ -1,0 +1,49 @@
+name: fixture-evejs
+services:
+  init:
+    image: example.invalid/evejs-server:0.12.3-fixture
+    command: ["true"]
+    volumes:
+      - fixture-evejs-data:/var/lib/evejs
+  market:
+    image: example.invalid/evejs-server:0.12.3-fixture
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    ports:
+      - "127.0.0.1:40110:40110"
+    volumes:
+      - fixture-evejs-data:/var/lib/evejs
+  market-tools:
+    image: example.invalid/evejs-server:0.12.3-fixture
+    profiles: [tools]
+    command: ["true"]
+    volumes:
+      - fixture-evejs-data:/var/lib/evejs
+  server:
+    image: example.invalid/evejs-server:0.12.3-fixture
+    depends_on:
+      market:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    ports:
+      - "127.0.0.1:32600:26000"
+      - "127.0.0.1:32601:26001"
+      - "127.0.0.1:32602:26002"
+      - "127.0.0.1:34443:26003"
+      - "127.0.0.1:35222:5222"
+    volumes:
+      - fixture-evejs-data:/var/lib/evejs
+      - "C:/Fixture Space/EveJS/_local/gameStore:/var/lib/evejs/gameStore"
+volumes:
+  fixture-evejs-data:
+    name: fixture-evejs-data

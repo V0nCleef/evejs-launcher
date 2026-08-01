@@ -1,0 +1,7 @@
+{
+  "project": "fixture-evejs",
+  "service": "server",
+  "publishers": [
+    {"hostIp": "0.0.0.0", "published": 32600, "target": 26000, "protocol": "tcp"}
+  ]
+}

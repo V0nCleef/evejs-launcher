@@ -20,6 +20,11 @@ DEFAULT_CONFIG = {
     "game_port": 26000,
     "auto_start_server": False,
     "auto_start_market": False,
+    "runtime_backend": "native",
+    "docker_compose_file": "",
+    "docker_control_policy": "connect_only",
+    "docker_project_name": "",
+    "docker_keep_running_on_exit": True,
     "server_mode": "modded",  # legacy fallback when no StartServer*.bat exists
     "server_start_preference": "ask",  # "ask" or a filename relative to the EveJS root
     "stagger_delay_sec": 3,
@@ -69,6 +74,13 @@ def _migrate(stored: dict) -> dict:
         preference = _legacy_script_filename(migrated.get("server_start_script")) or "ask"
 
     migrated["server_start_preference"] = preference
+    migrated["runtime_backend"] = _runtime_backend(migrated.get("runtime_backend"))
+    migrated["docker_compose_file"] = _string_setting(migrated.get("docker_compose_file"))
+    migrated["docker_control_policy"] = _control_policy(migrated.get("docker_control_policy"))
+    migrated["docker_project_name"] = _string_setting(migrated.get("docker_project_name"))
+    migrated["docker_keep_running_on_exit"] = _bool_setting(
+        migrated.get("docker_keep_running_on_exit"), default=True
+    )
     for legacy_key in (
         "server_start_script",
         "server_start_scripts",
@@ -76,6 +88,22 @@ def _migrate(stored: dict) -> dict:
     ):
         migrated.pop(legacy_key, None)
     return migrated
+
+
+def _runtime_backend(value: object) -> str:
+    return value if value in {"native", "docker_compose"} else "native"
+
+
+def _control_policy(value: object) -> str:
+    return value if value in {"connect_only", "managed"} else "connect_only"
+
+
+def _string_setting(value: object) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _bool_setting(value: object, *, default: bool) -> bool:
+    return value if isinstance(value, bool) else default
 
 
 def load() -> dict:

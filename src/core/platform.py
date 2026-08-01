@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from .platform_win import (  # noqa: F401 — re-exported below
     build_tool_batch_command,
+    close_job,
+    create_kill_on_close_job,
     create_directory_link,
     find_and_focus_eve_window,
     find_eve_window,
@@ -17,19 +19,25 @@ from .platform_win import (  # noqa: F401 — re-exported below
     get_eve_settings_path,
     get_exe_file_filter,
     get_hidden_process_flags,
+    get_suspended_hidden_process_flags,
     get_market_binary_name,
     hard_exit,
     launch_eve_client,
     launch_tool_wrapper,
     open_text_editor,
     remove_directory_link,
+    resume_process,
     run_updater,
+    terminate_job,
+    terminate_process_tree,
 )
 
 
 # Re-export everything so callers do ``from .platform import create_directory_link``.
 __all__ = [
     "build_tool_batch_command",
+    "close_job",
+    "create_kill_on_close_job",
     "create_directory_link",
     "find_and_focus_eve_window",
     "find_eve_window",
@@ -39,11 +47,15 @@ __all__ = [
     "get_eve_settings_path",
     "get_exe_file_filter",
     "get_hidden_process_flags",
+    "get_suspended_hidden_process_flags",
     "get_market_binary_name",
     "hard_exit",
     "launch_eve_client",
     "launch_tool_wrapper",
     "open_text_editor",
     "remove_directory_link",
+    "resume_process",
     "run_updater",
+    "terminate_job",
+    "terminate_process_tree",
 ]
