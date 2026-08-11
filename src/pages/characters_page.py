@@ -37,10 +37,12 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
+    QComboBox,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -49,6 +51,7 @@ from PyQt6.QtWidgets import (
 from src.constants import Status
 from src.core.dashboard import visible_character_rows
 from src.core.db import Account, Character, _fmt_isk, _fmt_sp
+from src.core.groups import TargetGroupState
 from src.core.process_tracker import ProcessTracker
 from src.core.runtime.data import native_data_selection
 from src.core.runtime.portraits import (
@@ -59,6 +62,7 @@ from src.core.runtime.portraits import (
 from src.utils.cache import PortraitCache
 from src.widgets.character_card import CharacterCard
 from src.widgets.detail_panel import DetailPanel
+from src.widgets.new_character_card import NewCharacterCard
 from src.widgets.skeleton_card import SkeletonCard
 from src.workers.portrait_worker import PortraitLoadFailure, PortraitLoader
 
@@ -70,9 +74,16 @@ _SKELETON_COUNT = 6
 class CharactersPage(QWidget):
     """Character grid with search and detail panel."""
 
-    launch_character = pyqtSignal(str, str)  # username, char_name
+    launch_character = pyqtSignal(str, str, int)  # username, char_name, char_id
     character_selected = pyqtSignal(str, str, int)  # username, char_name, char_id
     hide_character = pyqtSignal(str)  # character_name
+    delete_character_requested = pyqtSignal(str, str, int)
+    delete_account_requested = pyqtSignal(str, str, int)
+    new_character_requested = pyqtSignal()
+    group_selection_changed = pyqtSignal(object)  # group ID or None for All Visible
+    launch_group_requested = pyqtSignal()
+    cancel_group_launches_requested = pyqtSignal()
+    manage_groups_requested = pyqtSignal(object)  # optional focused character ID
     portrait_loads_idle = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -80,6 +91,7 @@ class CharactersPage(QWidget):
 
         # Keyed by (username, char_id) — survives re-sorting and filtering.
         self._cards: dict[tuple[str, int], CharacterCard] = {}
+        self._new_character_card: NewCharacterCard | None = None
         # Flat list of (username, Character) for layout.
         self._rotation_pool: list[tuple[str, Character]] = []
         self._selected_key: tuple[str, int] | None = None
@@ -99,8 +111,16 @@ class CharactersPage(QWidget):
         self._launch_available = True
         self._launch_unavailable_reason = ""
         self._launching_accounts: dict[str, str] = {}
+        self._character_creation_available = True
+        self._character_creation_reason = ""
+        self._group_state = TargetGroupState()
+        self._group_launch_available = False
+        self._group_launch_reason = "No visible accounts available"
+        self._group_launch_ready_count = 0
+        self._group_launch_in_progress = False
 
         self._build_ui()
+        self.set_group_state(TargetGroupState())
         self.show_skeletons()
 
     # ── UI construction ──────────────────────────────────────────────────────
@@ -131,6 +151,36 @@ class CharactersPage(QWidget):
         header.addWidget(self.search_edit)
 
         root.addLayout(header)
+
+        # Group view / bulk-launch toolbar. The built-in All Visible entry
+        # preserves the launcher's existing Launch All behavior.
+        group_bar = QHBoxLayout()
+        group_bar.setSpacing(10)
+        group_label = QLabel("LAUNCH GROUP")
+        group_label.setProperty("class", "muted")
+        group_bar.addWidget(group_label)
+
+        self.group_combo = QComboBox()
+        self.group_combo.setMinimumWidth(220)
+        self.group_combo.setMaximumWidth(320)
+        self.group_combo.currentIndexChanged.connect(self._on_group_combo_changed)
+        group_bar.addWidget(self.group_combo)
+
+        self.launch_group_button = QPushButton("LAUNCH ALL")
+        self.launch_group_button.setProperty("class", "primary")
+        self.launch_group_button.setFixedHeight(36)
+        self.launch_group_button.clicked.connect(self._emit_group_launch_action)
+        group_bar.addWidget(self.launch_group_button)
+
+        self.manage_groups_button = QPushButton("MANAGE GROUPS")
+        self.manage_groups_button.setProperty("class", "secondary")
+        self.manage_groups_button.setFixedHeight(36)
+        self.manage_groups_button.clicked.connect(
+            lambda: self.manage_groups_requested.emit(None)
+        )
+        group_bar.addWidget(self.manage_groups_button)
+        group_bar.addStretch()
+        root.addLayout(group_bar)
 
         # Content row: grid (left) + detail panel (right)
         content = QHBoxLayout()
@@ -178,6 +228,8 @@ class CharactersPage(QWidget):
             if widget is not None:
                 if isinstance(widget, SkeletonCard):
                     widget.stop_pulsing()
+                if widget is self._new_character_card:
+                    self._new_character_card = None
                 widget.deleteLater()
 
     # ── Refresh (diff-smart) ─────────────────────────────────────────────────
@@ -224,6 +276,7 @@ class CharactersPage(QWidget):
 
         # First refresh after skeletons: clear any placeholder widgets.
         self._remove_skeletons()
+        self._ensure_new_character_card()
 
         # Remove cards that no longer exist.
         for key in list(self._cards):
@@ -254,6 +307,17 @@ class CharactersPage(QWidget):
                 card.launched.connect(self.launch_character.emit)
                 card.selected.connect(self._on_card_selected)
                 card.hide_requested.connect(self._on_card_hide_requested)
+                card.manage_groups_requested.connect(
+                    lambda _username, _name, character_id: (
+                        self.manage_groups_requested.emit(character_id)
+                    )
+                )
+                card.delete_character_requested.connect(
+                    self.delete_character_requested.emit
+                )
+                card.delete_account_requested.connect(
+                    self.delete_account_requested.emit
+                )
                 self._cards[key] = card
             card.set_status(self._status_for(username, char))
             card.set_launch_available(
@@ -270,9 +334,6 @@ class CharactersPage(QWidget):
         self._rotation_pool = desired
         self._relayout_grid()
         self._apply_filter(self.search_edit.text())
-
-        total = len(desired)
-        self.count_label.setText(f"({total})")
 
         # Show/hide the detail panel based on selection state.
         if self._selected_key is None:
@@ -292,6 +353,17 @@ class CharactersPage(QWidget):
                 self._grid.removeWidget(widget)
                 widget.stop_pulsing()
                 widget.deleteLater()
+
+    def _ensure_new_character_card(self) -> None:
+        if self._new_character_card is not None:
+            return
+        card = NewCharacterCard(self._grid_container)
+        card.requested.connect(self.new_character_requested.emit)
+        card.set_available(
+            self._character_creation_available,
+            self._character_creation_reason,
+        )
+        self._new_character_card = card
 
     def _status_for(self, username: str, char: Character) -> Status:
         """Compute the display status for a character card."""
@@ -314,9 +386,15 @@ class CharactersPage(QWidget):
 
     def _relayout_grid(self) -> None:
         """Re-position all cards in row-major order."""
+        if self._new_character_card is not None:
+            self._grid.removeWidget(self._new_character_card)
         for card in self._cards.values():
             self._grid.removeWidget(card)
-        for i, (username, char) in enumerate(self._rotation_pool):
+        offset = 0
+        if self._new_character_card is not None:
+            self._grid.addWidget(self._new_character_card, 0, 0)
+            offset = 1
+        for i, (username, char) in enumerate(self._rotation_pool, start=offset):
             card = self._cards.get((username, char.char_id))
             if card is not None:
                 self._grid.addWidget(card, i // GRID_COLUMNS, i % GRID_COLUMNS)
@@ -449,6 +527,121 @@ class CharactersPage(QWidget):
         for card in self._cards.values():
             card.set_launch_available(enabled, reason)
         self.detail_panel.set_launch_available(enabled, reason)
+
+    def set_group_state(self, state: TargetGroupState) -> None:
+        """Synchronize the group selector and current grid filter."""
+        self._group_state = state
+        self.group_combo.blockSignals(True)
+        self.group_combo.clear()
+        self.group_combo.addItem("All Visible Characters", None)
+        selected_index = 0
+        for index, group in enumerate(state.groups, start=1):
+            self.group_combo.addItem(
+                f"{group.name} ({len(group.members)})",
+                group.group_id,
+            )
+            if group.group_id == state.selected_group_id:
+                selected_index = index
+        self.group_combo.setCurrentIndex(selected_index)
+        self.group_combo.blockSignals(False)
+        self._update_group_launch_button()
+        self._apply_filter(self.search_edit.text())
+
+    def set_group_management_available(
+        self,
+        enabled: bool,
+        reason: str = "",
+    ) -> None:
+        """Enable group editing only when an attributed data source is loaded."""
+        self.manage_groups_button.setEnabled(enabled)
+        self.manage_groups_button.setToolTip("" if enabled else reason)
+
+    def set_group_launch_available(
+        self,
+        enabled: bool,
+        ready_count: int = 0,
+        reason: str = "",
+    ) -> None:
+        """Apply shared batch-launch eligibility to the Characters toolbar."""
+        if self._group_launch_in_progress:
+            return
+        self._group_launch_available = bool(enabled)
+        self._group_launch_ready_count = max(0, int(ready_count))
+        self._group_launch_reason = "" if enabled else reason
+        self._update_group_launch_button()
+
+    def set_group_launch_progress(
+        self,
+        attempted: int,
+        total: int,
+        succeeded: int,
+        group_name: str | None = None,
+    ) -> None:
+        """Turn the bulk action into a queue cancellation control."""
+        self._group_launch_in_progress = True
+        self.group_combo.setEnabled(False)
+        label = f" {group_name.upper()}" if group_name else ""
+        self.launch_group_button.setText(
+            f"LAUNCHING{label} {attempted} OF {total}…"
+        )
+        self.launch_group_button.setEnabled(True)
+        self.launch_group_button.setToolTip(
+            "Cancel remaining queued launches; clients already started will continue"
+        )
+
+    def finish_group_launch_progress(self) -> None:
+        """Restore group controls after the serial queue completes."""
+        self._group_launch_in_progress = False
+        self.group_combo.setEnabled(True)
+        self._update_group_launch_button()
+
+    def _selected_group(self):
+        return self._group_state.selected_group
+
+    def _selected_group_member_ids(self) -> set[int] | None:
+        group = self._selected_group()
+        if group is None:
+            return None
+        return {member.character_id for member in group.members}
+
+    def _update_group_launch_button(self) -> None:
+        if self._group_launch_in_progress:
+            return
+        group = self._selected_group()
+        target = group.name.upper() if group is not None else "ALL"
+        count = self._group_launch_ready_count
+        self.launch_group_button.setText(f"LAUNCH {target} ({count})")
+        self.launch_group_button.setEnabled(self._group_launch_available)
+        self.launch_group_button.setToolTip(
+            "Launch every ready character in this group"
+            if self._group_launch_available and group is not None
+            else (
+                "Launch every eligible visible account"
+                if self._group_launch_available
+                else self._group_launch_reason
+            )
+        )
+
+    def _on_group_combo_changed(self, index: int) -> None:
+        group_id = self.group_combo.itemData(index)
+        self.group_selection_changed.emit(group_id)
+
+    def _emit_group_launch_action(self) -> None:
+        if self._group_launch_in_progress:
+            self.cancel_group_launches_requested.emit()
+        else:
+            self.launch_group_requested.emit()
+
+    def set_character_creation_available(
+        self,
+        enabled: bool,
+        reason: str = "",
+    ) -> None:
+        """Enable the Native-only new-character tile independently of launch."""
+        self._character_creation_available = bool(enabled)
+        self._character_creation_reason = "" if enabled else reason
+        if self._new_character_card is not None:
+            self._new_character_card.set_available(enabled, reason)
 
     def set_account_launching(
         self,
@@ -594,24 +787,49 @@ class CharactersPage(QWidget):
     # ── Filtering ────────────────────────────────────────────────────────────
     def _apply_filter(self, text: str) -> None:
         needle = text.strip().lower()
+        group_member_ids = self._selected_group_member_ids()
+        if self._new_character_card is not None:
+            self._new_character_card.setVisible(
+                not needle
+                or any(
+                    needle in value
+                    for value in ("new character", "create character", "new account")
+                )
+            )
         visible = 0
         for (username, _char_id), card in self._cards.items():
+            in_group = (
+                group_member_ids is None or card.char_id in group_member_ids
+            )
             if not needle:
-                match = True
+                match = in_group
             else:
                 haystacks = (
                     username.lower(),
                     card.char_name.lower(),
                     (card.ship or "").lower(),
                 )
-                match = any(needle in h for h in haystacks)
+                match = in_group and any(needle in h for h in haystacks)
             card.setVisible(match)
             if match:
                 visible += 1
         total = len(self._cards)
-        self.count_label.setText(
-            f"({visible} / {total})" if needle else f"({total})"
+        group_total = (
+            total
+            if group_member_ids is None
+            else sum(card.char_id in group_member_ids for card in self._cards.values())
         )
+        if needle:
+            self.count_label.setText(f"({visible} / {group_total})")
+        elif group_member_ids is not None:
+            self.count_label.setText(f"({group_total} of {total})")
+        else:
+            self.count_label.setText(f"({total})")
+
+        if self._selected_key is not None:
+            selected_card = self._cards.get(self._selected_key)
+            if selected_card is not None and selected_card.isHidden():
+                self.clear_selection()
 
     # ── Selection ─────────────────────────────────────────────────────
     def _on_card_selected(self, username: str, char_name: str, char_id: int) -> None:
@@ -645,9 +863,9 @@ class CharactersPage(QWidget):
         self.character_selected.emit(username, char_name, char_id)
 
     def _on_detail_launch(self) -> None:
-        username, char_name, _char_id = self.detail_panel.get_character()
-        if username and char_name:
-            self.launch_character.emit(username, char_name)
+        username, char_name, char_id = self.detail_panel.get_character()
+        if username and char_name and char_id > 0:
+            self.launch_character.emit(username, char_name, char_id)
 
     def _show_in_detail(self, username: str, char_id: int) -> None:
         char = self._find_character(username, char_id)
@@ -758,7 +976,7 @@ class CharactersPage(QWidget):
                     return False
                 # Walk up to see if the clicked widget is inside a CharacterCard
                 while child is not None:
-                    if isinstance(child, CharacterCard):
+                    if isinstance(child, (CharacterCard, NewCharacterCard)):
                         return False  # Let the card handle it
                     child = child.parentWidget()
                 # Clicked on empty space — deselect

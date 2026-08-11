@@ -1,5 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller build spec for EveJS Launcher V2 — onedir mode (AV-friendly)."""
+"""PyInstaller build spec for EveJS Launcher V2 — onedir mode."""
+
+from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
 
@@ -74,8 +76,12 @@ a = Analysis(
         ('assets/*.png', 'assets'),
         ('assets/*.ico', 'assets'),
         ('CHANGELOG.md', '.'),
+        ('LICENSE', '.'),
+        ('THIRD_PARTY_NOTICES.md', '.'),
         ('VERSION', '.'),
+        ('licenses/*', 'licenses'),
         ('src/core/template_settings/*', 'src/core/template_settings'),
+        ('src/core/helpers/*', 'src/core/helpers'),
     ],
     hiddenimports=[
         'PyQt6.QtWidgets', 'PyQt6.QtCore', 'PyQt6.QtGui',
@@ -86,19 +92,24 @@ a = Analysis(
         'src.core.db', 'src.core.discovery', 'src.core.launcher',
         'src.core.server_launcher', 'src.core.process_tracker',
         'src.core.profiles', 'src.core.mod_manager',
+        'src.core.character_creation', 'src.core.character_deletion',
+        'src.core.overview_patch', 'src.core.overview_state',
         'src.core.groups',
         'src.core.platform', 'src.core.platform_win',
         'src.workers.db_worker', 'src.workers.portrait_worker', 'src.workers.server_worker',
+        'src.workers.character_creation_worker', 'src.workers.character_deletion_worker',
+        'src.workers.overview_patch_worker',
         'src.widgets.title_bar', 'src.widgets.nav_panel', 'src.widgets.status_bar',
         'src.widgets.character_card', 'src.widgets.detail_panel', 'src.widgets.console_panel',
         'src.widgets.hero_banner', 'src.widgets.skeleton_card', 'src.widgets.toggle_switch',
         'src.widgets.update_button',
+        'src.widgets.new_character_card', 'src.widgets.new_character_dialog',
         'src.pages.home_page', 'src.pages.characters_page', 'src.pages.mods_page',
         'src.pages.settings_page',
         'src.updater.github', 'src.updater.checker', 'src.updater.dialog', 'src.updater.installer',
         'src.updater.progress_dialog', 'src.updater.handoff',
         'src.utils.logger', 'src.utils.cache',
-    ],
+    ] + collect_submodules('uncompyle6') + collect_submodules('xdis') + collect_submodules('spark_parser'),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

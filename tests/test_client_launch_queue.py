@@ -239,10 +239,15 @@ def test_launch_all_uses_shared_queue_and_cancellation_preserves_started_clients
         )
         window._refresh_characters = lambda: None
         window._update_status_bar = lambda: None
-        shared_launches: list[tuple[str, str, object]] = []
+        shared_launches: list[tuple[str, str, object, object]] = []
         window._start_client_launch = lambda username, character, **kwargs: (
             shared_launches.append(
-                (username, character, kwargs.get("launch_context"))
+                (
+                    username,
+                    character,
+                    kwargs.get("launch_context"),
+                    kwargs.get("character_id"),
+                )
             )
             or True
         )
@@ -257,6 +262,7 @@ def test_launch_all_uses_shared_queue_and_cancellation_preserves_started_clients
         assert len(shared_launches) == 1
         assert shared_launches[0][:2] == ("account-a", "Pilot One")
         assert isinstance(shared_launches[0][2], ClientLaunchContext)
+        assert shared_launches[0][3] == 101
 
         window._cancel_launch_queue()
         assert window._launch_queue is not None

@@ -84,6 +84,22 @@ def test_main_window_constructs_without_legacy_settings_prompt(
         window.deleteLater()
 
 
+def test_launcher_created_character_is_exempt_from_automatic_hiding(
+    bare_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bare_window._cfg["hidden_characters"] = ["Created Pilot", "Other Pilot"]
+    bare_window._cfg["never_hide_characters"] = []
+    saved: list[dict] = []
+    monkeypatch.setattr(config, "save", lambda cfg: saved.append(deepcopy(cfg)))
+
+    bare_window._keep_created_character_visible("Created Pilot")
+
+    assert bare_window._cfg["hidden_characters"] == ["Other Pilot"]
+    assert bare_window._cfg["never_hide_characters"] == ["Created Pilot"]
+    assert len(saved) == 1
+
+
 def test_main_window_connects_mods_apply_to_central_restart(
     qapp: QApplication,
     monkeypatch: pytest.MonkeyPatch,
@@ -578,7 +594,7 @@ def test_single_client_launch_waits_for_the_auto_start_continuation(
             return False
 
     callbacks: list[object] = []
-    launches: list[tuple[str, str, bool]] = []
+    launches: list[tuple[str, str, int | None, bool]] = []
     bare_window._cfg.update(
         {
             "evejs_root": str(tmp_path),
@@ -588,21 +604,21 @@ def test_single_client_launch_waits_for_the_auto_start_continuation(
     bare_window._tracker = IdleTracker()
     bare_window._ensure_server_if_needed = lambda on_ready: callbacks.append(on_ready) or True
     bare_window._start_client_launch = (
-        lambda username, character, *, show_errors: (
-            launches.append((username, character, show_errors)) or True
+        lambda username, character, character_id=None, *, show_errors: (
+            launches.append((username, character, character_id, show_errors)) or True
         )
     )
     bare_window._refresh_characters = lambda: None
     bare_window._update_status_bar = lambda: None
 
-    bare_window._on_character_launch("account", "character")
+    bare_window._on_character_launch("account", "character", 101)
 
     assert launches == []
     assert len(callbacks) == 1
     callback = callbacks[0]
     assert callable(callback)
     callback()
-    assert launches == [("account", "character", True)]
+    assert launches == [("account", "character", 101, True)]
 
 
 def test_native_client_launch_preserves_configured_endpoint_context(

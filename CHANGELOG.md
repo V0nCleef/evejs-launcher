@@ -2,6 +2,33 @@
 
 ## Changelog
 
+## v1.0.36 — 2026-08-11
+
+### Added
+- **Optional local auto-login** — compatible Native installations can opt in per launcher configuration. The launcher uses EveJS's fixed local development credential and never stores a real account password.
+- **Character and account creation** — the Characters page now includes a New Character tile with account name, character name, optional GM status, and optional overview-copy source.
+- **Verified overview-copy bridge** — the launcher can apply or remove a backup-first EVE client patch for the exact supported client build 3396210, allowing a new character to receive another character's overview settings on first launch.
+- **Character groups** — create, rename, delete, and fully configure groups, assign characters, select a group from Home or Characters, and launch its eligible accounts through the existing serial queue.
+- **Backup-first deletion** — Native users can delete a character or its complete account from the character menu after typed confirmation. The launcher verifies the result and restores the scoped backup if the operation fails.
+
+### Changed
+- **Account-aware group launching** — group launches preserve the existing one-character-per-account rule, skip ineligible clients, and expose the same cancellation and stagger controls as Launch All.
+- **Immediate character refresh** — newly created characters remain visible and the creation dialog updates its patch state as soon as patching completes.
+
+### Fixed
+- **Safe overview patching** — patch version 3 preserves the original CCP method bodies instead of relying on damaged decompiler output, preventing obstructed menus and black-screen undocking.
+- **Automatic login launch path** — supported auto-login launches no longer leave a visible CCP command window behind.
+- **Current EveJS portraits** — portrait discovery now checks the active EveJS v0.12.4 game-store image directory before legacy locations, restoring character profile pictures.
+
+### Safety and compatibility
+- Character creation, deletion, and overview patch changes require a Native runtime with Game, Market, and EVE clients offline.
+- The overview bridge and auto-login are enabled only after exact build, archive-entry, hash, and local server-configuration checks. Unsupported clients remain unmodified.
+- Every overview patch and destructive database operation creates a scoped backup and verifies the final state.
+
+### Verification
+- **780 automated tests passed**, including character lifecycle, overview patching, auto-login, portrait discovery, group configuration, group launch, and existing Native/Docker regressions.
+- Source compilation, dependency checks, the Foundation smoke suite, and isolated packaged onedir startup were verified before publication.
+
 ## v1.0.35 — 2026-08-01
 
 ### Added

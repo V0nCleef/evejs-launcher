@@ -24,6 +24,19 @@ _MAX_PIXELS = 4_194_304
 _ALLOWED_SIZES = frozenset({64, 128, 256, 512})
 
 _PORTRAIT_SEARCH_PATHS = (
+    # EveJS v0.12.4 writes generated portraits beside the active game store.
+    # Keep this authoritative runtime location ahead of the legacy source-tree
+    # path so migrated/stale files cannot shadow the currently selected store.
+    "_local/gameStore/images/Character/{character_id}_{size}.jpg",
+    "_local/gameStore/images/Character/{character_id}_{size}.png",
+    "_local/gameStore/images/Character/{character_id}_256.jpg",
+    "_local/gameStore/images/Character/{character_id}_256.png",
+    "_local/gameStore/images/Character/{character_id}_128.jpg",
+    "_local/gameStore/images/Character/{character_id}_128.png",
+    "_local/gameStore/images/Character/{character_id}_512.jpg",
+    "_local/gameStore/images/Character/{character_id}_512.png",
+    "_local/gameStore/images/Character/{character_id}_64.jpg",
+    "_local/gameStore/images/Character/{character_id}_64.png",
     "server/src/_secondary/image/generated/Character/{character_id}_{size}.jpg",
     "server/src/_secondary/image/generated/Character/{character_id}_{size}.png",
     "server/src/_secondary/image/generated/Character/{character_id}_256.jpg",
@@ -83,7 +96,9 @@ class PortraitImageResult:
 def portrait_cache_key(request: PortraitRequest) -> str:
     """Return the canonical process and disk cache identity."""
     return (
-        f"portrait:v2:{request.target_identity}:{request.settings_identity}:"
+        # v3 invalidates v2 entries that could contain the generic legacy
+        # fallback for characters whose real v0.12.4 image was overlooked.
+        f"portrait:v3:{request.target_identity}:{request.settings_identity}:"
         f"{request.monitor_generation}:{request.generation}:"
         f"{request.character_id}:{request.size}"
     )

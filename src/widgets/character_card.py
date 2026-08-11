@@ -205,9 +205,12 @@ class HamburgerButton(QPushButton):
 class CharacterCard(QFrame):
     """220×280px character card widget."""
 
-    launched = pyqtSignal(str, str)  # username, char_name
+    launched = pyqtSignal(str, str, int)  # username, char_name, char_id
     selected = pyqtSignal(str, str, int)  # username, char_name, char_id
     hide_requested = pyqtSignal(str)  # character_name
+    manage_groups_requested = pyqtSignal(str, str, int)
+    delete_character_requested = pyqtSignal(str, str, int)
+    delete_account_requested = pyqtSignal(str, str, int)
 
     def __init__(
         self,
@@ -447,7 +450,7 @@ class CharacterCard(QFrame):
         self._portrait.set_skeleton()
 
     def _on_launch_clicked(self) -> None:
-        self.launched.emit(self.username, self.char_name)
+        self.launched.emit(self.username, self.char_name, self.char_id)
 
     def _on_overflow_clicked(self) -> None:
         menu = QMenu(self)
@@ -464,8 +467,33 @@ class CharacterCard(QFrame):
             """
         )
         menu.addAction("View Details", self._on_view_details)
+        menu.addAction(
+            "Manage Groups...",
+            lambda: self.manage_groups_requested.emit(
+                self.username,
+                self.char_name,
+                self.char_id,
+            ),
+        )
         menu.addAction("Hide Character", lambda: self.hide_requested.emit(self.char_name))
         menu.addAction("View Log", lambda: None)
+        menu.addSeparator()
+        menu.addAction(
+            "Delete Character...",
+            lambda: self.delete_character_requested.emit(
+                self.username,
+                self.char_name,
+                self.char_id,
+            ),
+        )
+        menu.addAction(
+            "Delete Account...",
+            lambda: self.delete_account_requested.emit(
+                self.username,
+                self.char_name,
+                self.char_id,
+            ),
+        )
         menu.exec(self._overflow_btn.mapToGlobal(self._overflow_btn.rect().bottomLeft()))
 
     def _on_view_details(self) -> None:

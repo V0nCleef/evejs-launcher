@@ -28,6 +28,7 @@ DEFAULT_CONFIG = {
     "server_mode": "modded",  # legacy fallback when no StartServer*.bat exists
     "server_start_preference": "ask",  # "ask" or a filename relative to the EveJS root
     "stagger_delay_sec": 3,
+    "auto_login_enabled": False,
     "theme": "dark",
     "hidden_characters": [],  # list of character names hidden from UI
     "hide_test_characters": True,  # auto-hide characters belonging to test/GM accounts
@@ -80,6 +81,9 @@ def _migrate(stored: dict) -> dict:
     migrated["docker_project_name"] = _string_setting(migrated.get("docker_project_name"))
     migrated["docker_keep_running_on_exit"] = _bool_setting(
         migrated.get("docker_keep_running_on_exit"), default=True
+    )
+    migrated["auto_login_enabled"] = _bool_setting(
+        migrated.get("auto_login_enabled"), default=False
     )
     for legacy_key in (
         "server_start_script",

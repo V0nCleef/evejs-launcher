@@ -5,6 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 from PyQt6.QtCore import QThread, QTimer, Qt
@@ -38,6 +39,39 @@ def _request(tmp_path: Path) -> ClientLaunchRequest:
         profiles_root=tmp_path / "profiles",
         launch_context=ClientLaunchContext.native(),
     )
+
+
+def test_docker_request_ignores_stale_native_auto_login_setting() -> None:
+    context = ClientLaunchContext(
+        game_host="127.0.0.1",
+        game_port=26000,
+        proxy_url="http://127.0.0.1:26002",
+        image_url="http://127.0.0.1:26003",
+        target_identity="docker-target",
+        settings_identity="docker-settings",
+        monitor_generation=1,
+    )
+    window = SimpleNamespace(
+        _cfg={
+            "evejs_root": "C:/Games/EveJS",
+            "client_path": "C:/Games/EVE/tq",
+            "auto_login_enabled": True,
+        },
+        _tracker=SimpleNamespace(is_account_running=lambda _username: False),
+        _pending_client_launches=set(),
+        _resolve_client_launch_context=lambda: (context, ""),
+        _docker_mode=lambda: True,
+    )
+
+    request = MainWindow._make_client_launch_request(
+        window,
+        "fixture-account",
+        "Fixture Character",
+        90000001,
+    )
+
+    assert request is not None
+    assert request.auto_login_enabled is False
 
 
 def _wait_for_launch_teardown(
@@ -247,3 +281,68 @@ def test_failed_async_launch_clears_pending_and_allows_retry(
         assert window._tracker.is_account_running("fixture-account")
     finally:
         window.deleteLater()
+
+
+def test_perform_launch_forwards_exact_character_as_typed_auto_login_intent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = ClientLaunchRequest(
+        username="fixture-account",
+        character_name="Fixture Character",
+        evejs_root=str(tmp_path / "evejs"),
+        client_path=str(tmp_path / "client" / "tq"),
+        profiles_root=tmp_path / "profiles",
+        launch_context=ClientLaunchContext.native(),
+        character_id=90000001,
+        auto_login_enabled=True,
+    )
+    (request.profiles_root / request.username / "tq").mkdir(parents=True)
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(app_module, "profile_exists", lambda _username: True)
+    monkeypatch.setattr(app_module, "prefill_username", lambda _username: None)
+    monkeypatch.setattr(
+        app_module,
+        "configure_profile_game_endpoint",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "launch_client",
+        lambda **kwargs: captured.update(kwargs) or _FakeProcess(),
+    )
+
+    process = app_module._perform_client_launch(request)
+
+    assert process.pid == 4242
+    intent = captured["auto_login"]
+    assert intent is not None
+    assert intent.username == "fixture-account"
+    assert intent.character_id == 90000001
+
+
+def test_perform_launch_keeps_manual_mode_argument_free(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path)
+    (request.profiles_root / request.username / "tq").mkdir(parents=True)
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(app_module, "profile_exists", lambda _username: True)
+    monkeypatch.setattr(app_module, "prefill_username", lambda _username: None)
+    monkeypatch.setattr(
+        app_module,
+        "configure_profile_game_endpoint",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "launch_client",
+        lambda **kwargs: captured.update(kwargs) or _FakeProcess(),
+    )
+
+    app_module._perform_client_launch(request)
+
+    assert captured["auto_login"] is None

@@ -10,6 +10,7 @@ from typing import Protocol
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
 from src.core.launcher import ClientLaunchContext
+from src.core.overview_state import OverviewBridgeLaunch
 
 
 log = logging.getLogger(__name__)
@@ -33,6 +34,9 @@ class ClientLaunchRequest:
     client_path: str
     profiles_root: Path
     launch_context: ClientLaunchContext
+    character_id: int | None = None
+    auto_login_enabled: bool = False
+    overview_bridge: OverviewBridgeLaunch | None = None
 
 
 @dataclass(frozen=True)

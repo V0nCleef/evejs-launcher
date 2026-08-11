@@ -4,7 +4,7 @@ EveJS Launcher is a Windows desktop control panel for a local EveJS installation
 
 [Download the latest release](https://github.com/V0nCleef/evejs-launcher/releases/latest) · [Read the release notes](https://github.com/V0nCleef/evejs-launcher/releases) · [Join the EveJS Discord](https://discord.gg/HVTfKeqX3t)
 
-![EveJS Launcher Home page with the Game and Market services online](screenshots/home.png)
+![EveJS Launcher Home page with group launch controls and service status](screenshots/home.png)
 
 The Home page is the operational view: current service state, account and character totals, running clients, stack controls, release notes, and direct access to both service consoles.
 
@@ -52,7 +52,7 @@ The setup wizard explains both runtimes and validates the selected backend befor
 5. Finish setup, then use **Start Stack** on Home to start Market followed by Game.
 6. Wait for both services to report **Online**.
 7. Open **Characters** and launch the account you want to use.
-8. Enter the password in the EVE client. The launcher does not store or type passwords.
+8. Either enter the password in the EVE client, or enable **Auto-Login Character** under Settings → Launch when the launcher reports that the selected Native client is compatible. Real account passwords are never stored.
 
 #### Native setup example
 
@@ -68,21 +68,29 @@ Docker uses an existing EveJS Compose project. The normal setup leaves **Compose
 
 ## Interface tour
 
-The launcher has five navigation pages. Existing Home, Characters, Mods, and Tools captures use v1.0.34; the setup-wizard and Settings captures use v1.0.35. Character and account names are blurred, and local paths use generic examples.
+The launcher has five navigation pages. The captures below show v1.0.36. Character and account names are obscured where real local data is shown, and setup fields use generic example paths.
 
 ### Home
 
 Home combines service controls and status in one place. Game and Market are tracked independently through Offline, Starting, Online, Stopping, and Failed states. A service started outside the launcher is detected as externally managed and is never force-stopped by the launcher.
 
-The screenshot at the top of this page uses a simulated healthy runtime state; no server processes were started to create it.
+The screenshot at the top of this page shows a live local offline state; no server processes were started to create it. The Docker example below uses a simulated healthy observation.
 
 ### Characters
 
-![Characters page with private character and account names blurred](screenshots/characters.png)
+![Characters page with portraits, launch-group controls, and private names obscured](screenshots/characters.png)
 
-Characters are read from the configured EveJS installation and grouped into account-aware cards. Each card shows the portrait, wallet balance, ship, launch state, and account state. Selecting a card opens the detail panel with skill points, location, security status, and launch controls.
+Characters are read from the configured EveJS installation and grouped into account-aware cards. Each card shows the portrait, wallet balance, ship, launch state, and account state. Selecting a card opens the detail panel with skill points, location, security status, and launch controls. The New Character tile starts the Native character-creation workflow.
 
-The launcher prevents two characters on the same account from being launched at the same time. Hidden and development accounts can be removed from the normal grid without deleting their game data.
+![Character group editor with configurable membership](screenshots/character-groups.png)
+
+Groups are completely user-configurable. Create and rename groups, add or remove any character, then select a group on Home or Characters to launch its eligible accounts. The launcher still prevents two characters on the same account from being launched at the same time.
+
+![New Character dialog with optional GM and overview-copy settings](screenshots/new-character.png)
+
+On a Native installation, New Character accepts an account name, character name, optional GM status, and an optional captured overview source. Overview transfer uses an opt-in, reversible bridge that is installed only for the exact supported EVE client build 3396210. When a source still needs capture, launch that source once through the launcher, then launch the new character to apply the queued copy.
+
+The character card menu can hide a character without touching game data, assign it to groups, or begin deletion. Character/account deletion is Native-only, requires Game, Market, and all EVE clients to be offline, creates a scoped backup, and requires typed confirmation before any database change.
 
 ### Mods
 
@@ -104,15 +112,17 @@ The launcher does not recursively expose arbitrary scripts. It resolves only kno
 
 ![Native settings with generic example paths](screenshots/native-settings.png)
 
-*v1.0.35 Native Runtime settings. Game and Market run directly on Windows, and Docker Desktop is not required.*
+*v1.0.36 Native Runtime settings. Game and Market run directly on Windows, and Docker Desktop is not required.*
 
 #### Docker Compose runtime
 
 ![Docker Compose settings with generic example paths](screenshots/docker-settings.png)
 
-*v1.0.35 Docker Runtime settings. Compose File is blank so `<EveJS Root>\compose.yaml` is selected automatically; the advanced Project Name is also optional and blank.*
+*v1.0.36 Docker Runtime settings. Compose File is blank so `<EveJS Root>\compose.yaml` is selected automatically; the advanced Project Name is also optional and blank.*
 
-Settings covers the EveJS root, EVE client path, proxy address, Native/Docker runtime selection, Compose target and control policy, launch timing, service auto-start, animation preferences, update checks, server-mode selection, hidden characters, and local-data cleanup.
+![Launch settings with the optional auto-login capability check](screenshots/launch-settings.png)
+
+Settings covers the EveJS root, EVE client path, proxy address, Native/Docker runtime selection, Compose target and control policy, launch timing, service auto-start, compatible local auto-login, animation preferences, update checks, server-mode selection, hidden characters, and local-data cleanup.
 
 ## What the launcher manages
 
@@ -122,9 +132,9 @@ Settings covers the EveJS root, EVE client path, proxy address, Native/Docker ru
 | Game service | Starts Node.js directly in vanilla or modded mode and reports lifecycle state. |
 | Market service | Starts the market service before Game when the complete stack is requested. |
 | Docker target | Resolves effective services, health, endpoints, mounts, data sources, and capabilities from one selected Compose project. |
-| EVE clients | Creates account-specific profiles, launches clients through the local proxy, and tracks running state. |
-| Bulk launch | Launches eligible accounts serially with a configurable delay; remaining queued launches can be cancelled. |
-| Characters | Reads account and character data, loads generated portraits asynchronously, and supports search and hiding. |
+| EVE clients | Creates account-specific profiles, launches clients through the local proxy, optionally performs verified local auto-login, and tracks running state. |
+| Bulk launch | Launches all visible characters or a selected user-defined group serially with a configurable delay; remaining queued launches can be cancelled. |
+| Characters | Reads character data and current portraits; supports search, hiding, grouping, Native creation with optional GM/overview copy, and backup-first deletion. |
 | Mods | Discovers mods, toggles their loader state, and restarts Game when requested. |
 | Tools | Resolves 11 reviewed external utility wrappers with prerequisite and risk information. |
 | Updates | Checks GitHub Releases, downloads the release ZIP, shows progress, stages replacement, restarts, and cleans validated update artifacts. |
@@ -221,9 +231,11 @@ Each account receives an isolated launcher profile under:
 
 On Windows these profiles use directory junctions rather than copying the complete EVE client. The launcher prepares the minimum settings required by the client, pre-fills the account username, points traffic at the configured local proxy, and launches the selected EVE executable.
 
-Passwords are not stored by the launcher. Password entry remains inside the EVE client.
+Real passwords are never stored or typed by the launcher. By default, password entry remains inside the EVE client.
 
-**Launch All** uses a serial queue instead of opening every client at once. The configured stagger delay is applied between accounts, the application stays responsive, and cancelling the queue stops only future launches. Clients that already started remain open.
+For the exact supported Native EVE client build 3396210, Settings can enable **Auto-Login Character** after the launcher verifies the required client code and EveJS local password-bypass configuration. This opt-in path sends a fixed development credential only to the configured loopback EveJS service; the fixed value may be visible in the local process command line, but it is not a real account password. Unsupported or changed clients keep normal manual login.
+
+**Launch All** and selected-group launch use a serial queue instead of opening every client at once. The configured stagger delay is applied between accounts, the application stays responsive, and cancelling the queue stops only future launches. Clients that already started remain open. Group membership is stored in launcher configuration by stable account/character identity.
 
 ## Mod handling
 
@@ -295,12 +307,14 @@ Configuration is stored in:
 | Stagger Delay | Delay between queued client launches | `3 seconds` |
 | Auto-Start Server | Starts Game when a client requires it | Off |
 | Auto-Start Market | Starts Market when required | Off |
+| Auto-Login Character | Uses the verified local auto-login path for a compatible Native client | Off |
 | Server Start Selection | Always ask or a detected vanilla/modded indicator | Always ask |
 | Animations | Hero rotation and page effects | On |
 | Hero Rotation Interval | Time between Home banner images | `6 seconds` |
 | Auto-Check for Updates | Periodic GitHub Release checks | On |
 | Update Check Interval | Time between automatic checks | `6 hours` |
 | Hidden Characters | Characters omitted from the normal grid | Empty |
+| Character Groups | User-defined launch groups and selected group | Empty / All Visible |
 
 Settings are written atomically. If the stored configuration is malformed, the launcher backs it up and recovers with defaults rather than continuing with a partially loaded file.
 
@@ -310,6 +324,20 @@ Settings are written atomically. If the stored configuration is malformed, the l
 <summary>Why does a service say it is managed externally?</summary>
 
 The endpoint is reachable, but the process was not started by this launcher instance. The launcher reports the service and can continue using it, but it will not terminate a process it does not own. Stop it from the console or application that originally started it.
+
+</details>
+
+<details>
+<summary>Why is Auto-Login Character unavailable?</summary>
+
+Auto-login is deliberately build-gated. It is available only for Native runtime when the selected EVE client is the exact supported build 3396210, the required code entries match their known hashes, the local proxy is loopback-only, and EveJS has local development password validation bypass enabled. Settings shows the failed capability check; unsupported clients are not modified.
+
+</details>
+
+<details>
+<summary>How does overview copy work for a new character?</summary>
+
+The optional overview bridge is installed from the New Character dialog only after exact client build and hash checks. It first preserves the original client archive entry and can be removed later. Select a source character whose overview has already been captured, or launch the source once through the launcher after creating the new character. The queued overview is imported when the new character next logs in through the launcher.
 
 </details>
 
@@ -376,14 +404,14 @@ python -m pytest
 main.py                     Application entry point
 src/app.py                  Main window and application wiring
 src/config.py               Atomic JSON configuration storage
-src/core/                    Service, client, profile, database, mod, and tool logic
+src/core/                    Service, client, character, group, overview, database, mod, and tool logic
 src/pages/home_page.py       Runtime dashboard
 src/pages/characters_page.py Character grid and detail panel
 src/pages/mods_page.py       Mod discovery and toggles
 src/pages/tools_page.py      Curated external Tool Deck
 src/pages/settings_page.py   Configuration and maintenance controls
 src/widgets/                 Shared PyQt6 controls and panels
-src/workers/                 Background database, portrait, and service work
+src/workers/                 Background character, patch, database, portrait, and service work
 src/updater/                 Release checks, progress UI, and staged replacement
 tests/                       Automated regression and layout coverage
 ```
@@ -397,5 +425,11 @@ The application is built with PyQt6 and packaged for Windows with PyInstaller in
 The launcher is Windows-only. Releases are published as portable ZIP archives on the [Releases page](https://github.com/V0nCleef/evejs-launcher/releases).
 
 Bug reports and focused pull requests are welcome. When reporting a service problem, include the launcher version, which service failed, whether it was started inside or outside the launcher, and the relevant console output. Do not include account names, character names, passwords, or tokens in public reports.
+
+## License
+
+EveJS Launcher is free and open-source software licensed under the [GNU General Public License version 3](LICENSE). You may use, copy, modify, and redistribute it, including commercially, under the GPLv3 terms. Distributed modified versions must keep the same freedoms and provide their corresponding source.
+
+Packaged dependency licenses and source links are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 EVE Online and EVE are registered trademarks of CCP hf. This project is not affiliated with CCP Games.

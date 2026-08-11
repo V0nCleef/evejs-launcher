@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from src.core import launcher
+from src.core.client_autologin import AutoLoginLaunch
 from src.core.launcher import ClientLaunchContext
 from src.core.runtime.endpoints import Endpoint, RuntimeEndpoints
 
@@ -182,3 +183,49 @@ def test_launch_client_resfiles_come_from_configured_client_not_profile_junction
     assert isinstance(env, dict)
     assert env["EO_REMOTEFILECACHEFOLDER"] == str(configured_resfiles)
     assert env["EO_REMOTEFILECACHEFOLDER"] != str(profile_resfiles)
+
+
+def test_launch_client_passes_only_verified_typed_auto_login_arguments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile_tq = tmp_path / "profiles" / "account" / "tq"
+    exe = profile_tq / "bin64" / "ExeFile.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(launcher, "get_client_exe_path", lambda _path: exe)
+    monkeypatch.setattr(
+        launcher,
+        "require_auto_login_arguments",
+        lambda intent, **kwargs: (
+            f"/login:{intent.username}:fixture-dummy",
+            f"/autoSelectCharacter:{intent.character_id}",
+        ),
+    )
+    monkeypatch.setattr(
+        launcher,
+        "launch_eve_client",
+        lambda executable, env, cwd, *, arguments: captured.update(
+            executable=executable,
+            env=env,
+            cwd=cwd,
+            arguments=arguments,
+        )
+        or object(),
+    )
+
+    result = launcher.launch_client(
+        evejs_root=str(tmp_path / "evejs"),
+        profile_tq_path=profile_tq,
+        client_path=str(tmp_path / "client" / "tq"),
+        launch_context=ClientLaunchContext.native(),
+        auto_login=AutoLoginLaunch("fixture-account", 90000001),
+    )
+
+    assert result is not None
+    assert captured["arguments"] == (
+        "/login:fixture-account:fixture-dummy",
+        "/autoSelectCharacter:90000001",
+    )

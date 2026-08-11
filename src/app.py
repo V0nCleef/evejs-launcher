@@ -37,6 +37,7 @@ from PyQt6.QtWidgets import (
     QInputDialog,
     QMainWindow,
     QMessageBox,
+    QProgressDialog,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -53,7 +54,41 @@ from .core.db import (
     get_character_detail,
     load_accounts,
 )
+from .core.client_autologin import AutoLoginLaunch
+from .core.groups import (
+    GroupValidationError,
+    TargetGroupState,
+    find_relink_candidates,
+    load_target_groups,
+    prune_deleted_characters,
+    resolve_group,
+    save_target_groups,
+    select_group,
+)
+from .core.character_creation import (
+    CharacterCreationRequest,
+    CharacterCreationResult,
+)
+from .core.character_deletion import (
+    CharacterDeletionRequest,
+    CharacterDeletionResult,
+    CharacterDeletionScope,
+)
 from .core.launcher import ClientLaunchContext, launch_client
+from .core.overview_patch import (
+    OverviewPatchState,
+    inspect_overview_patch,
+    is_eve_client_running,
+)
+from .core.overview_state import (
+    OverviewSnapshotRequired,
+    add_pending_overview_import,
+    load_overview_state,
+    pending_overview_source,
+    prepare_overview_launch,
+    process_overview_ack_files,
+    remove_characters_from_overview_state,
+)
 from .core.platform import hard_exit, launch_tool_wrapper
 from .core.process_tracker import ProcessTracker
 from .core.profiles import (
@@ -125,7 +160,9 @@ from .pages.tools_page import ToolsPage
 from .utils.cache import PortraitCache
 from .utils.logger import setup_logger
 from .widgets.console_panel import ConsolePanel
+from .widgets.character_groups_dialog import CharacterGroupsDialog
 from .widgets.nav_panel import NavPanel
+from .widgets.new_character_dialog import NewCharacterDialog, NewCharacterDraft
 from .widgets.status_bar import StatusBar
 from .widgets.title_bar import TitleBar
 from .workers.docker_lifecycle_worker import DockerLifecycleWorker
@@ -146,6 +183,20 @@ from .workers.client_launch_worker import (
     ClientLaunchResult,
     ClientLaunchWorker,
     LaunchedProcess,
+)
+from .workers.character_creation_worker import (
+    CharacterCreationFailure,
+    CharacterCreationWorker,
+)
+from .workers.character_deletion_worker import (
+    CharacterDeletionFailure,
+    CharacterDeletionWorker,
+)
+from .workers.overview_patch_worker import (
+    OverviewPatchAction,
+    OverviewPatchFailure,
+    OverviewPatchResult,
+    OverviewPatchWorker,
 )
 from .workers.server_worker import (
     ServiceMonitor,
@@ -209,12 +260,22 @@ def _perform_client_launch(request: ClientLaunchRequest) -> LaunchedProcess:
         host=request.launch_context.game_host,
         port=request.launch_context.game_port,
     )
+    auto_login = None
+    if request.auto_login_enabled:
+        if request.character_id is None:
+            raise ValueError("A character ID is required for automatic login.")
+        auto_login = AutoLoginLaunch(
+            username=request.username,
+            character_id=request.character_id,
+        )
     return launch_client(
         evejs_root=request.evejs_root,
         profile_tq_path=profile_path,
         proxy_url=request.launch_context.proxy_url,
         client_path=request.client_path,
         launch_context=request.launch_context,
+        auto_login=auto_login,
+        overview_bridge=request.overview_bridge,
     )
 
 
@@ -318,10 +379,43 @@ class MainWindow(QMainWindow):
         self._client_launch_thread_finished = False
         self._client_launch_succeeded = False
         self._pending_client_launches: set[str] = set()
+        self._new_character_dialog: NewCharacterDialog | None = None
+        self._character_creation_thread: QThread | None = None
+        self._character_creation_worker: CharacterCreationWorker | None = None
+        self._character_creation_request: CharacterCreationRequest | None = None
+        self._character_creation_outcome: (
+            CharacterCreationResult | CharacterCreationFailure | None
+        ) = None
+        self._character_creation_thread_finished = False
+        self._character_creation_restart_game = False
+        self._character_creation_restart_market = False
+        self._character_creation_restart_mode: str | None = None
+        self._character_deletion_thread: QThread | None = None
+        self._character_deletion_worker: CharacterDeletionWorker | None = None
+        self._character_deletion_request: CharacterDeletionRequest | None = None
+        self._character_deletion_outcome: (
+            CharacterDeletionResult | CharacterDeletionFailure | None
+        ) = None
+        self._character_deletion_thread_finished = False
+        self._character_deletion_restart_game = False
+        self._character_deletion_restart_market = False
+        self._character_deletion_restart_mode: str | None = None
+        self._character_deletion_progress: QProgressDialog | None = None
+        self._overview_patch_thread: QThread | None = None
+        self._overview_patch_worker: OverviewPatchWorker | None = None
+        self._overview_patch_outcome: (
+            OverviewPatchResult | OverviewPatchFailure | None
+        ) = None
+        self._overview_patch_thread_finished = False
         self._resizing = False
         self._cursor_override_active = False
         self._accounts: list[Account] = []
         self._data_selection: RuntimeDataSelection | None = None
+        self._group_target_identity: str | None = None
+        self._group_state = TargetGroupState()
+        self._launch_queue_group_name: str | None = None
+        self._launch_queue_skipped_running = 0
+        self._launch_queue_skipped_unavailable = 0
         self._settings_generation = 0
         self._data_request_sequence = 0
         self._account_thread: QThread | None = None
@@ -364,11 +458,34 @@ class MainWindow(QMainWindow):
 
         self._home_page.launch_all_clicked.connect(self._launch_all)
         self._home_page.cancel_launches_clicked.connect(self._cancel_launch_queue)
+        self._home_page.group_selection_changed.connect(
+            self._on_group_selection_changed
+        )
+        self._home_page.manage_groups_requested.connect(self._show_group_manager)
         self._home_page.start_servers_clicked.connect(self._start_all_servers)
         self._home_page.stop_servers_clicked.connect(self._stop_all_servers)
         self._home_page.kill_all_clicked.connect(self._kill_all_clients)
 
         self._characters_page.launch_character.connect(self._on_character_launch)
+        self._characters_page.group_selection_changed.connect(
+            self._on_group_selection_changed
+        )
+        self._characters_page.launch_group_requested.connect(self._launch_all)
+        self._characters_page.cancel_group_launches_requested.connect(
+            self._cancel_launch_queue
+        )
+        self._characters_page.manage_groups_requested.connect(
+            self._show_group_manager
+        )
+        self._characters_page.new_character_requested.connect(
+            self._show_new_character_dialog
+        )
+        self._characters_page.delete_character_requested.connect(
+            self._on_delete_character_requested
+        )
+        self._characters_page.delete_account_requested.connect(
+            self._on_delete_account_requested
+        )
         self._characters_page.character_selected.connect(self._on_character_selected)
         self._characters_page.hide_character.connect(self._on_hide_character)
         self._characters_page.portrait_loads_idle.connect(self._resume_close_after_data)
@@ -408,6 +525,10 @@ class MainWindow(QMainWindow):
         self._prune_timer = QTimer(self)
         self._prune_timer.timeout.connect(self._prune_and_update)
         self._prune_timer.start(3000)
+
+        self._overview_ack_timer = QTimer(self)
+        self._overview_ack_timer.timeout.connect(self._poll_overview_acks)
+        self._overview_ack_timer.start(1500)
 
         # Initial paint
         self._update_status_bar()
@@ -1492,6 +1613,28 @@ class MainWindow(QMainWindow):
                 "\n\n".join(diagnostics)
                 + "\n\nUse the Game Console or Market Console button on Home for details.",
             )
+            if getattr(self, "_character_creation_request", None) is not None:
+                self._character_creation_request = None
+                self._character_creation_restart_game = False
+                self._character_creation_restart_market = False
+                self._character_creation_restart_mode = None
+                dialog = self._new_character_dialog
+                if dialog is not None:
+                    dialog.set_busy(False)
+                    dialog.show_error(
+                        "Character creation was cancelled because an EveJS service "
+                        "could not be stopped safely. No database changes were made."
+                    )
+            if getattr(self, "_character_deletion_request", None) is not None:
+                self._character_deletion_request = None
+                self._character_deletion_restart_game = False
+                self._character_deletion_restart_market = False
+                self._character_deletion_restart_mode = None
+                progress = self._character_deletion_progress
+                self._character_deletion_progress = None
+                if progress is not None:
+                    progress.close()
+                    progress.deleteLater()
         self._publish_cached_runtime()
         self._lifecycle_result_received = True
         self._finish_lifecycle_if_complete()
@@ -1887,10 +2030,884 @@ class MainWindow(QMainWindow):
 
     # ── Character launching ───────────────────────────────────────────
 
+    def _snapshot_ready_ids(self) -> set[int]:
+        snapshots = load_overview_state().get("snapshots", {})
+        result: set[int] = set()
+        for key, value in snapshots.items():
+            try:
+                character_id = int(key)
+            except (TypeError, ValueError):
+                continue
+            if character_id > 0 and isinstance(value, dict):
+                result.add(character_id)
+        return result
+
+    def _poll_overview_acks(self) -> None:
+        try:
+            events = process_overview_ack_files()
+        except Exception:
+            log.exception("Unable to process overview bridge acknowledgements")
+            return
+        if not events:
+            return
+        dialog = self._new_character_dialog
+        if dialog is not None:
+            dialog.set_snapshot_ready_ids(self._snapshot_ready_ids())
+        for event in events:
+            if event.kind == "capture":
+                log.info("Captured overview snapshot for character ID %s", event.character_id)
+            elif event.kind == "apply":
+                log.info("Applied pending overview for character ID %s", event.character_id)
+            elif event.kind == "error":
+                log.warning(
+                    "Overview bridge failed for character ID %s: %s",
+                    event.character_id,
+                    event.message,
+                )
+            elif event.kind == "invalid":
+                log.warning("Discarded invalid overview acknowledgement %s", event.message)
+
+    def _show_new_character_dialog(self) -> None:
+        if self._docker_mode():
+            QMessageBox.information(
+                self,
+                "New Character",
+                "Launcher-managed character creation is currently available for "
+                "Native EveJS installations only.",
+            )
+            return
+        root = str(self._cfg.get("evejs_root", ""))
+        client_path = str(self._cfg.get("client_path", ""))
+        if not root or not client_path:
+            QMessageBox.warning(
+                self,
+                "Not Configured",
+                "Configure the EveJS root and copied EVE client path first.",
+            )
+            return
+        if self._new_character_dialog is not None:
+            self._new_character_dialog.raise_()
+            self._new_character_dialog.activateWindow()
+            return
+        dialog = NewCharacterDialog(
+            self._accounts,
+            inspect_overview_patch(client_path),
+            self._snapshot_ready_ids(),
+            parent=self,
+        )
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.create_requested.connect(self._on_new_character_create)
+        dialog.patch_requested.connect(
+            lambda: self._begin_overview_patch(OverviewPatchAction.PATCH)
+        )
+        dialog.restore_requested.connect(
+            lambda: self._begin_overview_patch(OverviewPatchAction.RESTORE)
+        )
+        dialog.finished.connect(self._on_new_character_dialog_finished)
+        self._new_character_dialog = dialog
+        dialog.show()
+
+    @pyqtSlot(int)
+    def _on_new_character_dialog_finished(self, _result: int) -> None:
+        if self.sender() is self._new_character_dialog:
+            self._new_character_dialog = None
+
+    def _begin_overview_patch(self, action: OverviewPatchAction) -> None:
+        dialog = self._new_character_dialog
+        if dialog is None or self._overview_patch_thread is not None:
+            return
+        if (
+            self._character_creation_thread is not None
+            or self._character_deletion_thread is not None
+            or self._client_launch_thread is not None
+            or self._lifecycle_active()
+        ):
+            dialog.show_error("Wait for the current launcher operation to finish.")
+            return
+        if self._tracker.running_count or is_eve_client_running():
+            dialog.show_error("Close every EVE client before changing code.ccp.")
+            return
+        client_path = str(self._cfg.get("client_path", ""))
+        status = inspect_overview_patch(client_path)
+        if action is OverviewPatchAction.PATCH and not status.can_patch:
+            dialog.set_patch_status(status)
+            return
+        if action is OverviewPatchAction.RESTORE and not status.can_restore:
+            dialog.set_patch_status(status)
+            return
+        verb = (
+            "install the optional overview bridge"
+            if action is OverviewPatchAction.PATCH
+            else "restore the original client archive"
+        )
+        reply = QMessageBox.question(
+            self,
+            "EVE Client Overview Patch",
+            f"{verb.capitalize()}?\n\n"
+            "The launcher verifies build 3396210, keeps the original beside "
+            "code.ccp, stages the replacement, and validates the completed archive.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        worker_factory = getattr(self, "_overview_patch_worker_factory", None)
+        worker = (
+            worker_factory(action, client_path)
+            if callable(worker_factory)
+            else OverviewPatchWorker(action, client_path)
+        )
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.completed.connect(self._on_overview_patch_completed)
+        worker.failed.connect(self._on_overview_patch_failed)
+        worker.cleanup.connect(worker.deleteLater, Qt.ConnectionType.DirectConnection)
+        worker.destroyed.connect(thread.quit)
+        thread.finished.connect(
+            self._on_overview_patch_thread_finished,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self._overview_patch_thread = thread
+        self._overview_patch_worker = worker
+        self._overview_patch_outcome = None
+        self._overview_patch_thread_finished = False
+        dialog.show_error("")
+        dialog.set_busy(
+            True,
+            "PATCHING CLIENT…"
+            if action is OverviewPatchAction.PATCH
+            else "RESTORING CLIENT…",
+        )
+        thread.start()
+
+    @pyqtSlot(object)
+    def _on_overview_patch_completed(self, result: OverviewPatchResult) -> None:
+        self._overview_patch_outcome = result
+        self._finish_overview_patch_if_complete()
+
+    @pyqtSlot(object)
+    def _on_overview_patch_failed(self, failure: OverviewPatchFailure) -> None:
+        self._overview_patch_outcome = failure
+        self._finish_overview_patch_if_complete()
+
+    @pyqtSlot()
+    def _on_overview_patch_thread_finished(self) -> None:
+        if self.sender() is not self._overview_patch_thread:
+            return
+        self._overview_patch_thread_finished = True
+        self._finish_overview_patch_if_complete()
+
+    def _finish_overview_patch_if_complete(self) -> None:
+        if self._overview_patch_outcome is None or not self._overview_patch_thread_finished:
+            return
+        outcome = self._overview_patch_outcome
+        thread = self._overview_patch_thread
+        self._overview_patch_thread = None
+        self._overview_patch_worker = None
+        self._overview_patch_outcome = None
+        self._overview_patch_thread_finished = False
+        if thread is not None:
+            thread.deleteLater()
+        dialog = self._new_character_dialog
+        if dialog is not None:
+            dialog.set_busy(False)
+            if isinstance(outcome, OverviewPatchResult):
+                dialog.set_patch_status(outcome.status)
+                dialog.set_snapshot_ready_ids(self._snapshot_ready_ids())
+                dialog.show_error("")
+            else:
+                dialog.set_patch_status(
+                    inspect_overview_patch(str(self._cfg.get("client_path", "")))
+                )
+                dialog.show_error(outcome.message)
+        if isinstance(outcome, OverviewPatchResult) and not self._close_in_progress:
+            message = (
+                "The overview bridge is installed.\n\nYou can create the character "
+                "now. If its source overview has not been captured yet, launch the "
+                "source character once afterwards, then launch the new character to "
+                "apply the queued copy."
+                if outcome.action is OverviewPatchAction.PATCH
+                else "The original EVE client archive has been restored."
+            )
+            QMessageBox.information(self, "EVE Client", message)
+        if self._close_in_progress:
+            QTimer.singleShot(0, self.close)
+
+    def _on_new_character_create(self, draft: NewCharacterDraft) -> None:
+        dialog = self._new_character_dialog
+        if dialog is None or not isinstance(draft, NewCharacterDraft):
+            return
+        if self._docker_mode():
+            dialog.show_error("Character creation is available in Native mode only.")
+            return
+        if any(
+            (
+                self._character_creation_thread is not None,
+                self._character_deletion_thread is not None,
+                self._overview_patch_thread is not None,
+                self._client_launch_thread is not None,
+                self._launch_queue is not None,
+                self._lifecycle_active(),
+            )
+        ):
+            dialog.show_error("Wait for the current launcher operation to finish.")
+            return
+        if self._tracker.running_count or is_eve_client_running():
+            dialog.show_error("Close every EVE client before creating a character.")
+            return
+
+        client_path = str(self._cfg.get("client_path", ""))
+        if draft.overview_source_character_id is not None:
+            patch_status = inspect_overview_patch(client_path)
+            if patch_status.state is not OverviewPatchState.PATCHED:
+                dialog.set_patch_status(patch_status)
+                dialog.show_error("Install the overview bridge before copying an overview.")
+                return
+
+        game_active = is_server_running(port=int(Ports.GAME_TCP))
+        market_active = self._is_market_running()
+        game_owned = self._server_process_alive()
+        market_owned = (
+            self._market_proc is not None and self._market_proc.poll() is None
+        )
+        if game_active and not game_owned:
+            dialog.show_error(
+                "The game server was started outside this launcher. Stop it from "
+                "its original console before creating a character."
+            )
+            return
+        if market_active and not market_owned:
+            dialog.show_error(
+                "The market server was started outside this launcher. Stop it "
+                "before creating a character."
+            )
+            return
+
+        restart_mode: str | None = None
+        if game_owned:
+            resolved = self._resolve_server_start()
+            if resolved is None:
+                return
+            restart_mode = resolved[0]
+        if game_owned or market_owned:
+            reply = QMessageBox.question(
+                self,
+                "Create Character Safely",
+                "The launcher will temporarily stop its EveJS services, back up "
+                "the affected game-store tables, create and verify the character, "
+                "then restore the previous service state. Continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        request = CharacterCreationRequest(
+            evejs_root=str(self._cfg.get("evejs_root", "")),
+            username=draft.username,
+            character_name=draft.character_name,
+            is_gm=draft.is_gm,
+            overview_source_character_id=draft.overview_source_character_id,
+        )
+        self._character_creation_request = request
+        self._character_creation_restart_game = game_owned
+        self._character_creation_restart_market = market_owned
+        self._character_creation_restart_mode = restart_mode
+        dialog.show_error("")
+        dialog.set_busy(True, "CREATING & VERIFYING…")
+        if not self._run_stop_sequence(
+            stop_game=game_owned,
+            stop_market=market_owned,
+            on_complete=self._begin_character_creation_worker,
+        ):
+            self._character_creation_request = None
+            dialog.set_busy(False)
+            dialog.show_error("The EveJS services could not be prepared for creation.")
+
+    def _begin_character_creation_worker(self) -> None:
+        request = self._character_creation_request
+        dialog = self._new_character_dialog
+        if request is None:
+            return
+        if is_server_running(port=int(Ports.GAME_TCP)) or is_server_running(
+            port=int(Ports.MARKET_RPC)
+        ):
+            if dialog is not None:
+                dialog.set_busy(False)
+                dialog.show_error(
+                    "An EveJS service is still running; no database changes were made."
+                )
+            self._character_creation_request = None
+            self._character_creation_restart_game = False
+            self._character_creation_restart_market = False
+            self._character_creation_restart_mode = None
+            return
+
+        worker_factory = getattr(self, "_character_creation_worker_factory", None)
+        worker = (
+            worker_factory(request)
+            if callable(worker_factory)
+            else CharacterCreationWorker(request)
+        )
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.completed.connect(self._on_character_creation_completed)
+        worker.failed.connect(self._on_character_creation_failed)
+        worker.cleanup.connect(worker.deleteLater, Qt.ConnectionType.DirectConnection)
+        worker.destroyed.connect(thread.quit)
+        thread.finished.connect(
+            self._on_character_creation_thread_finished,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self._character_creation_thread = thread
+        self._character_creation_worker = worker
+        self._character_creation_outcome = None
+        self._character_creation_thread_finished = False
+        thread.start()
+
+    @pyqtSlot(object)
+    def _on_character_creation_completed(self, result: CharacterCreationResult) -> None:
+        self._character_creation_outcome = result
+        self._finish_character_creation_if_complete()
+
+    @pyqtSlot(object)
+    def _on_character_creation_failed(self, failure: CharacterCreationFailure) -> None:
+        self._character_creation_outcome = failure
+        self._finish_character_creation_if_complete()
+
+    @pyqtSlot()
+    def _on_character_creation_thread_finished(self) -> None:
+        if self.sender() is not self._character_creation_thread:
+            return
+        self._character_creation_thread_finished = True
+        self._finish_character_creation_if_complete()
+
+    def _finish_character_creation_if_complete(self) -> None:
+        if (
+            self._character_creation_outcome is None
+            or not self._character_creation_thread_finished
+        ):
+            return
+        outcome = self._character_creation_outcome
+        thread = self._character_creation_thread
+        self._character_creation_thread = None
+        self._character_creation_worker = None
+        self._character_creation_request = None
+        self._character_creation_outcome = None
+        self._character_creation_thread_finished = False
+        if thread is not None:
+            thread.deleteLater()
+
+        if self._close_in_progress:
+            self._character_creation_restart_game = False
+            self._character_creation_restart_market = False
+            self._character_creation_restart_mode = None
+        else:
+            # Begin restoring the previous runtime state before showing a modal
+            # result dialog. QMessageBox runs a nested event loop, so readiness
+            # signals can continue to arrive while the user reads the result.
+            self._restart_services_after_character_creation()
+
+        dialog = self._new_character_dialog
+        if isinstance(outcome, CharacterCreationResult):
+            source_id = outcome.request.overview_source_character_id
+            overview_state_error = ""
+            if source_id is not None:
+                try:
+                    add_pending_overview_import(outcome.character_id, source_id)
+                except Exception as exc:
+                    log.exception("Unable to persist pending overview import")
+                    overview_state_error = str(exc) or type(exc).__name__
+            self._keep_created_character_visible(outcome.request.character_name)
+            self._refresh_characters()
+            if dialog is not None:
+                dialog.set_busy(False)
+                dialog.accept()
+            if not self._close_in_progress:
+                overview_note = ""
+                if source_id is not None:
+                    if source_id in self._snapshot_ready_ids():
+                        overview_note = (
+                            " Its copied overview will be applied on first launcher login."
+                        )
+                    else:
+                        source_name = next(
+                            (
+                                character.name
+                                for account in self._accounts
+                                for character in account.characters
+                                if character.char_id == source_id
+                            ),
+                            "the selected source character",
+                        )
+                        overview_note = (
+                            f" Next, launch '{source_name}' once through the launcher "
+                            "to capture its overview. Then launch the new character to "
+                            "apply the queued copy."
+                        )
+                created_message = (
+                    f"Created account '{outcome.request.username}' and character "
+                    f"'{outcome.request.character_name}'.{overview_note}"
+                )
+                if overview_state_error:
+                    QMessageBox.warning(
+                        self,
+                        "Character Created — Overview Not Queued",
+                        f"{created_message}\n\nThe pending overview import could not "
+                        f"be saved: {overview_state_error}",
+                    )
+                else:
+                    QMessageBox.information(
+                        self,
+                        "Character Created",
+                        created_message,
+                    )
+        else:
+            if dialog is not None:
+                dialog.set_busy(False)
+                dialog.show_error(outcome.message)
+
+        if self._close_in_progress:
+            QTimer.singleShot(0, self.close)
+
+    def _restart_services_after_character_creation(self) -> None:
+        restart_game = self._character_creation_restart_game
+        restart_market = self._character_creation_restart_market
+        restart_mode = self._character_creation_restart_mode
+        self._character_creation_restart_game = False
+        self._character_creation_restart_market = False
+        self._character_creation_restart_mode = None
+        if not restart_game and not restart_market:
+            return
+        if not self._start_service_sequence(
+            start_market=restart_market,
+            start_game=restart_game,
+            mode=restart_mode,
+            on_ready=None,
+            error_title="Service Restore Failed",
+        ):
+            QMessageBox.warning(
+                self,
+                "Service Restore",
+                "Character creation finished, but the prior EveJS services could "
+                "not be restarted automatically.",
+            )
+
+    def _on_delete_character_requested(
+        self,
+        username: str,
+        character_name: str,
+        character_id: int,
+    ) -> None:
+        self._request_character_deletion(
+            username,
+            character_name,
+            character_id,
+            CharacterDeletionScope.CHARACTER,
+        )
+
+    def _on_delete_account_requested(
+        self,
+        username: str,
+        character_name: str,
+        character_id: int,
+    ) -> None:
+        self._request_character_deletion(
+            username,
+            character_name,
+            character_id,
+            CharacterDeletionScope.ACCOUNT,
+        )
+
+    def _request_character_deletion(
+        self,
+        username: str,
+        character_name: str,
+        character_id: int,
+        scope: CharacterDeletionScope,
+    ) -> None:
+        """Confirm and coordinate one exact offline Native deletion."""
+        if self._docker_mode():
+            QMessageBox.information(
+                self,
+                "Delete Character or Account",
+                "Launcher-managed deletion is currently available for Native "
+                "EveJS installations only.",
+            )
+            return
+        if any(
+            (
+                self._character_creation_thread is not None,
+                self._character_deletion_thread is not None,
+                self._overview_patch_thread is not None,
+                self._client_launch_thread is not None,
+                self._launch_queue is not None,
+                self._lifecycle_active(),
+            )
+        ):
+            QMessageBox.information(
+                self,
+                "Launcher Busy",
+                "Wait for the current launcher operation to finish.",
+            )
+            return
+        if self._tracker.running_count or is_eve_client_running():
+            QMessageBox.warning(
+                self,
+                "EVE Clients Running",
+                "Close every EVE client before deleting a character or account.",
+            )
+            return
+
+        account = next(
+            (candidate for candidate in self._accounts if candidate.username == username),
+            None,
+        )
+        character = next(
+            (
+                candidate
+                for candidate in (account.characters if account is not None else [])
+                if candidate.char_id == character_id
+                and candidate.name == character_name
+            ),
+            None,
+        )
+        if account is None or character is None or account.account_id <= 0:
+            QMessageBox.warning(
+                self,
+                "Selection Changed",
+                "The selected account or character changed. Refresh and try again.",
+            )
+            self._refresh_characters()
+            return
+        if (
+            scope is CharacterDeletionScope.CHARACTER
+            and len(account.characters) <= 1
+        ):
+            QMessageBox.information(
+                self,
+                "Delete Account Instead",
+                f"'{character_name}' is the only character on '{username}'.\n\n"
+                "Use Delete Account so the empty account does not become inaccessible.",
+            )
+            return
+
+        game_active = is_server_running(port=int(Ports.GAME_TCP))
+        market_active = self._is_market_running()
+        game_owned = self._server_process_alive()
+        market_owned = (
+            self._market_proc is not None and self._market_proc.poll() is None
+        )
+        if game_active and not game_owned:
+            QMessageBox.warning(
+                self,
+                "External Game Server",
+                "The game server was started outside this launcher. Stop it from "
+                "its original console before deleting data.",
+            )
+            return
+        if market_active and not market_owned:
+            QMessageBox.warning(
+                self,
+                "External Market Server",
+                "The market server was started outside this launcher. Stop it "
+                "before deleting data.",
+            )
+            return
+
+        restart_mode: str | None = None
+        if game_owned:
+            resolved = self._resolve_server_start()
+            if resolved is None:
+                return
+            restart_mode = resolved[0]
+
+        if scope is CharacterDeletionScope.ACCOUNT:
+            names = ", ".join(candidate.name for candidate in account.characters)
+            subject = f"account '{username}' and {len(account.characters)} character(s)"
+            detail = f"Characters: {names}"
+            confirmation_target = username
+        else:
+            subject = f"character '{character_name}'"
+            detail = f"Account '{username}' will be retained."
+            confirmation_target = character_name
+        service_note = (
+            "\n\nLauncher-owned EveJS services will be stopped and restored."
+            if game_owned or market_owned
+            else ""
+        )
+        reply = QMessageBox.question(
+            self,
+            "Confirm EveJS Deletion",
+            f"Delete {subject}?\n\n{detail}\n\n"
+            "EveJS will run its native character cleanup. The launcher will keep "
+            "a recoverable backup of every affected table and portrait. Account "
+            f"profile/settings folders are preserved.{service_note}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        expected = f"DELETE {confirmation_target}"
+        typed, accepted = QInputDialog.getText(
+            self,
+            "Type to Confirm",
+            f"Type exactly:\n{expected}",
+        )
+        if not accepted:
+            return
+        if typed != expected:
+            QMessageBox.warning(
+                self,
+                "Deletion Cancelled",
+                "The confirmation text did not match. No data was changed.",
+            )
+            return
+
+        request = CharacterDeletionRequest(
+            evejs_root=str(self._cfg.get("evejs_root", "")),
+            username=username,
+            account_id=account.account_id,
+            character_id=character_id,
+            character_name=character_name,
+            scope=scope,
+        )
+        self._character_deletion_request = request
+        self._character_deletion_restart_game = game_owned
+        self._character_deletion_restart_market = market_owned
+        self._character_deletion_restart_mode = restart_mode
+        progress = QProgressDialog(self)
+        progress.setWindowTitle("EveJS Deletion")
+        progress.setLabelText("Preparing a recoverable backup...")
+        progress.setRange(0, 0)
+        progress.setCancelButton(None)
+        progress.setMinimumDuration(0)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setAutoClose(False)
+        progress.show()
+        self._character_deletion_progress = progress
+        if not self._run_stop_sequence(
+            stop_game=game_owned,
+            stop_market=market_owned,
+            on_complete=self._begin_character_deletion_worker,
+        ):
+            self._character_deletion_request = None
+            self._character_deletion_restart_game = False
+            self._character_deletion_restart_market = False
+            self._character_deletion_restart_mode = None
+            self._character_deletion_progress = None
+            progress.close()
+            progress.deleteLater()
+            QMessageBox.warning(
+                self,
+                "Deletion Cancelled",
+                "The EveJS services could not be prepared safely. No database "
+                "changes were made.",
+            )
+
+    def _begin_character_deletion_worker(self) -> None:
+        request = self._character_deletion_request
+        if request is None:
+            return
+        if is_server_running(port=int(Ports.GAME_TCP)) or is_server_running(
+            port=int(Ports.MARKET_RPC)
+        ):
+            progress = self._character_deletion_progress
+            self._character_deletion_progress = None
+            if progress is not None:
+                progress.close()
+                progress.deleteLater()
+            self._character_deletion_request = None
+            self._character_deletion_restart_game = False
+            self._character_deletion_restart_market = False
+            self._character_deletion_restart_mode = None
+            QMessageBox.warning(
+                self,
+                "Deletion Cancelled",
+                "An EveJS service is still running; no database changes were made.",
+            )
+            return
+        progress = self._character_deletion_progress
+        if progress is not None:
+            progress.setLabelText("Backing up, deleting, and verifying...")
+
+        worker_factory = getattr(self, "_character_deletion_worker_factory", None)
+        worker = (
+            worker_factory(request)
+            if callable(worker_factory)
+            else CharacterDeletionWorker(request)
+        )
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.completed.connect(self._on_character_deletion_completed)
+        worker.failed.connect(self._on_character_deletion_failed)
+        worker.cleanup.connect(worker.deleteLater, Qt.ConnectionType.DirectConnection)
+        worker.destroyed.connect(thread.quit)
+        thread.finished.connect(
+            self._on_character_deletion_thread_finished,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self._character_deletion_thread = thread
+        self._character_deletion_worker = worker
+        self._character_deletion_outcome = None
+        self._character_deletion_thread_finished = False
+        thread.start()
+
+    @pyqtSlot(object)
+    def _on_character_deletion_completed(self, result: CharacterDeletionResult) -> None:
+        self._character_deletion_outcome = result
+        self._finish_character_deletion_if_complete()
+
+    @pyqtSlot(object)
+    def _on_character_deletion_failed(self, failure: CharacterDeletionFailure) -> None:
+        self._character_deletion_outcome = failure
+        self._finish_character_deletion_if_complete()
+
+    @pyqtSlot()
+    def _on_character_deletion_thread_finished(self) -> None:
+        if self.sender() is not self._character_deletion_thread:
+            return
+        self._character_deletion_thread_finished = True
+        self._finish_character_deletion_if_complete()
+
+    def _finish_character_deletion_if_complete(self) -> None:
+        if (
+            self._character_deletion_outcome is None
+            or not self._character_deletion_thread_finished
+        ):
+            return
+        outcome = self._character_deletion_outcome
+        thread = self._character_deletion_thread
+        self._character_deletion_thread = None
+        self._character_deletion_worker = None
+        self._character_deletion_request = None
+        self._character_deletion_outcome = None
+        self._character_deletion_thread_finished = False
+        if thread is not None:
+            thread.deleteLater()
+        progress = self._character_deletion_progress
+        self._character_deletion_progress = None
+        if progress is not None:
+            progress.close()
+            progress.deleteLater()
+
+        if self._close_in_progress:
+            self._character_deletion_restart_game = False
+            self._character_deletion_restart_market = False
+            self._character_deletion_restart_mode = None
+        else:
+            self._restart_services_after_character_deletion()
+
+        if isinstance(outcome, CharacterDeletionResult):
+            try:
+                remove_characters_from_overview_state(
+                    list(outcome.deleted_character_ids)
+                )
+            except Exception:
+                log.exception("Unable to prune overview state after deletion")
+            group_cleanup_error = False
+            target_identity = getattr(self, "_group_target_identity", None)
+            if target_identity:
+                current_groups = getattr(self, "_group_state", TargetGroupState())
+                updated_groups = prune_deleted_characters(
+                    current_groups,
+                    outcome.deleted_character_ids,
+                )
+                if updated_groups != current_groups:
+                    try:
+                        save_target_groups(target_identity, updated_groups)
+                        self._group_state = updated_groups
+                    except (OSError, GroupValidationError):
+                        group_cleanup_error = True
+                        log.exception(
+                            "Unable to prune character groups after deletion"
+                        )
+            deleted_names = set(outcome.deleted_character_names)
+            hidden = [
+                name
+                for name in self._cfg.get("hidden_characters", [])
+                if name not in deleted_names
+            ]
+            never = [
+                name
+                for name in self._cfg.get("never_hide_characters", [])
+                if name not in deleted_names
+            ]
+            if (
+                hidden != self._cfg.get("hidden_characters", [])
+                or never != self._cfg.get("never_hide_characters", [])
+            ):
+                self._cfg["hidden_characters"] = hidden
+                self._cfg["never_hide_characters"] = never
+                config.save(self._cfg)
+            PortraitCache.clear()
+            self._refresh_characters()
+            if not self._close_in_progress:
+                if outcome.account_deleted:
+                    summary = (
+                        f"Deleted account '{outcome.request.username}' and "
+                        f"{len(outcome.deleted_character_ids)} character(s)."
+                    )
+                else:
+                    summary = (
+                        f"Deleted character '{outcome.request.character_name}'. "
+                        f"Account '{outcome.request.username}' was retained."
+                    )
+                QMessageBox.information(
+                    self,
+                    "Deletion Complete",
+                    f"{summary}\n\nAccount profile/settings folders were preserved. "
+                    f"A recovery backup is retained at:\n{outcome.backup_path}"
+                    + (
+                        "\n\nOne or more group memberships could not be saved; "
+                        "open Manage Groups to remove missing entries."
+                        if group_cleanup_error
+                        else ""
+                    ),
+                )
+        elif not self._close_in_progress:
+            QMessageBox.critical(
+                self,
+                "Deletion Failed",
+                f"{outcome.message}\n\nThe launcher attempted automatic rollback; "
+                "no unverified deletion was accepted.",
+            )
+
+        if self._close_in_progress:
+            QTimer.singleShot(0, self.close)
+
+    def _restart_services_after_character_deletion(self) -> None:
+        restart_game = self._character_deletion_restart_game
+        restart_market = self._character_deletion_restart_market
+        restart_mode = self._character_deletion_restart_mode
+        self._character_deletion_restart_game = False
+        self._character_deletion_restart_market = False
+        self._character_deletion_restart_mode = None
+        if not restart_game and not restart_market:
+            return
+        if not self._start_service_sequence(
+            start_market=restart_market,
+            start_game=restart_game,
+            mode=restart_mode,
+            on_ready=None,
+            error_title="Service Restore Failed",
+        ):
+            QMessageBox.warning(
+                self,
+                "Service Restore",
+                "Deletion finished, but the prior EveJS services could not be "
+                "restarted automatically.",
+            )
+
     def _make_client_launch_request(
         self,
         username: str,
         character_name: str,
+        character_id: int | None = None,
         *,
         show_errors: bool = False,
         launch_context: ClientLaunchContext | None = None,
@@ -1927,6 +2944,41 @@ class MainWindow(QMainWindow):
         if username in getattr(self, "_pending_client_launches", set()):
             return None
 
+        overview_bridge = None
+        if character_id is not None and not self._docker_mode():
+            source_id = pending_overview_source(character_id)
+            patch_status = inspect_overview_patch(client_path)
+            if patch_status.state is OverviewPatchState.PATCHED:
+                try:
+                    overview_bridge = prepare_overview_launch(character_id)
+                except OverviewSnapshotRequired as exc:
+                    source_id = exc.source_character_id or source_id
+                    source_name = next(
+                        (
+                            character.name
+                            for account in self._accounts
+                            for character in account.characters
+                            if character.char_id == source_id
+                        ),
+                        "the selected source character",
+                    )
+                    message = (
+                        f"Launch {source_name} once through the launcher first. "
+                        "Its overview snapshot has not been captured yet."
+                    )
+                    log.warning("Blocked pending overview import: %s", message)
+                    if show_errors:
+                        QMessageBox.information(self, "Overview Copy", message)
+                    return None
+            elif source_id is not None:
+                message = (
+                    "This character has a pending overview import. Install the "
+                    "overview client patch before its first login."
+                )
+                if show_errors:
+                    QMessageBox.information(self, "Overview Copy", message)
+                return None
+
         return ClientLaunchRequest(
             username=username,
             character_name=character_name,
@@ -1934,6 +2986,12 @@ class MainWindow(QMainWindow):
             client_path=client_path,
             profiles_root=Path(PROFILES_ROOT),
             launch_context=launch_context,
+            character_id=character_id,
+            auto_login_enabled=(
+                not self._docker_mode()
+                and bool(self._cfg.get("auto_login_enabled", False))
+            ),
+            overview_bridge=overview_bridge,
         )
 
     def _finalize_client_launch(
@@ -1948,10 +3006,12 @@ class MainWindow(QMainWindow):
             result.process,
         )
         log.info(
-            "Launched client for %s as %s (pid=%s)",
+            "Launched client for %s as %s (pid=%s auto_login=%s character_id=%s)",
             request.username,
             request.character_name,
             result.process.pid,
+            request.auto_login_enabled,
+            request.character_id,
         )
         threading.Thread(
             target=_restore_eve_window,
@@ -1963,6 +3023,7 @@ class MainWindow(QMainWindow):
         self,
         username: str,
         character_name: str,
+        character_id: int | None = None,
         *,
         show_errors: bool = False,
         launch_context: ClientLaunchContext | None = None,
@@ -1971,6 +3032,7 @@ class MainWindow(QMainWindow):
         request = self._make_client_launch_request(
             username,
             character_name,
+            character_id,
             show_errors=show_errors,
             launch_context=launch_context,
         )
@@ -2008,6 +3070,7 @@ class MainWindow(QMainWindow):
         self,
         username: str,
         character_name: str,
+        character_id: int | None = None,
         *,
         show_errors: bool = False,
         launch_context: ClientLaunchContext | None = None,
@@ -2023,6 +3086,7 @@ class MainWindow(QMainWindow):
         request = self._make_client_launch_request(
             username,
             character_name,
+            character_id,
             show_errors=show_errors,
             launch_context=launch_context,
         )
@@ -2136,7 +3200,12 @@ class MainWindow(QMainWindow):
         if self._close_in_progress:
             QTimer.singleShot(0, self.close)
 
-    def _on_character_launch(self, username: str, character_name: str) -> None:
+    def _on_character_launch(
+        self,
+        username: str,
+        character_name: str,
+        character_id: int | None = None,
+    ) -> None:
         if username in getattr(self, "_pending_client_launches", set()):
             log.info("Ignored duplicate client launch click for %s", username)
             return
@@ -2159,7 +3228,11 @@ class MainWindow(QMainWindow):
             )
             return
         if not self._ensure_server_if_needed(
-            lambda: self._launch_character_after_services(username, character_name)
+            lambda: self._launch_character_after_services(
+                username,
+                character_name,
+                character_id,
+            )
         ):
             return
 
@@ -2167,12 +3240,169 @@ class MainWindow(QMainWindow):
         self,
         username: str,
         character_name: str,
+        character_id: int | None = None,
     ) -> None:
         """Launch one client only after its configured service gate is ready."""
-        self._start_client_launch(username, character_name, show_errors=True)
+        if character_id is None:
+            self._start_client_launch(username, character_name, show_errors=True)
+            return
+        self._start_client_launch(
+            username,
+            character_name,
+            character_id,
+            show_errors=True,
+        )
+
+    def _sync_character_groups(self, target_identity: str) -> None:
+        """Load groups once when the authoritative runtime target changes."""
+        # Some attribution tests intentionally construct an uninitialized Qt
+        # wrapper; consult the instance dictionary so SIP does not route a
+        # missing attribute through QObject's uninitialized fallback.
+        if target_identity == self.__dict__.get("_group_target_identity"):
+            return
+        try:
+            state = load_target_groups(target_identity)
+        except (OSError, GroupValidationError):
+            log.exception("Unable to load character groups")
+            state = TargetGroupState()
+        self._group_target_identity = target_identity
+        self._group_state = state
+
+    def _on_group_selection_changed(self, group_id: object = None) -> None:
+        """Persist one shared Home/Characters launch-target selection."""
+        target_identity = getattr(self, "_group_target_identity", None)
+        if not target_identity:
+            return
+        normalized_id = group_id if isinstance(group_id, str) else None
+        current = getattr(self, "_group_state", TargetGroupState())
+        updated = select_group(current, normalized_id)
+        if updated == current:
+            return
+        try:
+            save_target_groups(target_identity, updated)
+        except (OSError, GroupValidationError) as exc:
+            log.exception("Unable to save selected character group")
+            QMessageBox.warning(
+                self,
+                "Groups Not Saved",
+                f"The selected group could not be saved: {exc}",
+            )
+            self._refresh_character_views()
+            return
+        self._group_state = updated
+        self._refresh_character_views()
+
+    def _show_group_manager(self, focus_character_id: object = None) -> None:
+        """Open one atomic editor for the current runtime target's groups."""
+        target_identity = getattr(self, "_group_target_identity", None)
+        if not target_identity or getattr(self, "_data_selection", None) is None:
+            QMessageBox.information(
+                self,
+                "Character Groups",
+                "Wait for the current EveJS character data to finish loading.",
+            )
+            return
+        if (
+            getattr(self, "_launch_queue", None) is not None
+            or getattr(self, "_client_launch_thread", None) is not None
+        ):
+            QMessageBox.information(
+                self,
+                "Launch In Progress",
+                "Wait for the current character launch queue to finish before "
+                "editing groups.",
+            )
+            return
+        character_id = (
+            focus_character_id
+            if isinstance(focus_character_id, int)
+            and not isinstance(focus_character_id, bool)
+            and focus_character_id > 0
+            else None
+        )
+        try:
+            relink_candidates = find_relink_candidates(
+                target_identity,
+                self._accounts,
+            )
+        except (OSError, GroupValidationError):
+            log.exception("Unable to inspect previous character groups")
+            relink_candidates = ()
+        dialog = CharacterGroupsDialog(
+            self._accounts,
+            self._effective_hidden_characters(),
+            getattr(self, "_group_state", TargetGroupState()),
+            focus_character_id=character_id,
+            relink_candidates=relink_candidates,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        current_selection = getattr(self, "_data_selection", None)
+        if (
+            current_selection is None
+            or current_selection.target_identity != target_identity
+        ):
+            QMessageBox.warning(
+                self,
+                "Data Source Changed",
+                "The active EveJS data source changed while groups were open. "
+                "Reopen Manage Groups and try again.",
+            )
+            return
+        updated = dialog.group_state
+        try:
+            save_target_groups(target_identity, updated)
+        except (OSError, GroupValidationError) as exc:
+            log.exception("Unable to save character groups")
+            QMessageBox.critical(
+                self,
+                "Groups Not Saved",
+                f"Character groups could not be saved: {exc}",
+            )
+            return
+        self._group_state = updated
+        self._refresh_character_views()
+
+    def _batch_launch_rows(
+        self,
+        hidden: set[str] | None = None,
+    ) -> tuple[list[tuple[Account, Character]], str | None]:
+        """Resolve All Visible or one exact group through shared visibility."""
+        if hidden is None:
+            hidden = self._effective_hidden_characters()
+        visible_rows = visible_character_rows(self._accounts, hidden)
+        group = getattr(self, "_group_state", TargetGroupState()).selected_group
+        if group is None:
+            rows: list[tuple[Account, Character]] = []
+            seen_accounts: set[str] = set()
+            for account, character in visible_rows:
+                if account.username not in seen_accounts:
+                    rows.append((account, character))
+                    seen_accounts.add(account.username)
+            return rows, None
+
+        resolution = resolve_group(group, self._accounts)
+        if resolution.conflicting_account_ids:
+            return [], (
+                f"'{group.name}' contains more than one character from the "
+                "same account. Open Manage Groups and keep one per account."
+            )
+        visible_keys = {
+            (account.account_id, character.char_id)
+            for account, character in visible_rows
+        }
+        return (
+            [
+                (account, character)
+                for account, character in resolution.rows
+                if (account.account_id, character.char_id) in visible_keys
+            ],
+            None,
+        )
 
     def _launch_all(self) -> None:
-        """Queue every visible, non-banned, non-running account serially."""
+        """Queue the selected group (or All Visible) serially."""
         if (
             getattr(self, "_launch_queue", None) is not None
             or getattr(self, "_client_launch_thread", None) is not None
@@ -2185,13 +3415,13 @@ class MainWindow(QMainWindow):
             return
 
         hidden = self._effective_hidden_characters()
-        visible_rows = visible_character_rows(self._accounts, hidden)
+        launch_rows, group_error = self._batch_launch_rows(hidden)
+        if group_error:
+            QMessageBox.warning(self, "Group Needs Attention", group_error)
+            self._refresh_character_views()
+            return
         candidates: list[tuple[Account, Character]] = []
-        seen_accounts: set[str] = set()
-        for account, character in visible_rows:
-            if account.username in seen_accounts:
-                continue
-            seen_accounts.add(account.username)
+        for account, character in launch_rows:
             if (
                 not self._tracker.is_account_running(account.username)
                 and account.username
@@ -2202,13 +3432,34 @@ class MainWindow(QMainWindow):
             self._refresh_character_views()
             return
 
+        selected_group = getattr(
+            self,
+            "_group_state",
+            TargetGroupState(),
+        ).selected_group
+        group_name = selected_group.name if selected_group is not None else None
+        skipped_running = max(0, len(launch_rows) - len(candidates))
+        skipped_unavailable = (
+            max(0, len(selected_group.members) - len(launch_rows))
+            if selected_group is not None
+            else 0
+        )
         self._ensure_server_if_needed(
-            lambda: self._begin_client_launch_queue(candidates)
+            lambda: self._begin_client_launch_queue(
+                candidates,
+                group_name=group_name,
+                skipped_running=skipped_running,
+                skipped_unavailable=skipped_unavailable,
+            )
         )
 
     def _begin_client_launch_queue(
         self,
         candidates: list[tuple[Account, Character]],
+        *,
+        group_name: str | None = None,
+        skipped_running: int = 0,
+        skipped_unavailable: int = 0,
     ) -> None:
         """Create the serial Qt launch queue after required services are ready."""
         if self._launch_queue is not None:
@@ -2226,6 +3477,7 @@ class MainWindow(QMainWindow):
             lambda candidate: self._start_client_launch(
                 candidate[0].username,
                 candidate[1].name,
+                character_id=candidate[1].char_id,
                 launch_context=launch_context,
                 from_queue=True,
             ),
@@ -2233,9 +3485,26 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         self._launch_queue = queue
+        self._launch_queue_group_name = group_name
+        self._launch_queue_skipped_running = max(0, int(skipped_running))
+        self._launch_queue_skipped_unavailable = max(
+            0,
+            int(skipped_unavailable),
+        )
         queue.progress.connect(self._on_launch_queue_progress)
         queue.finished.connect(self._on_launch_queue_finished)
-        self._home_page.set_launch_progress(0, len(candidates), 0)
+        self._home_page.set_launch_progress(
+            0,
+            len(candidates),
+            0,
+            group_name,
+        )
+        self._characters_page.set_group_launch_progress(
+            0,
+            len(candidates),
+            0,
+            group_name,
+        )
         queue.start()
 
     def _cancel_launch_queue(self) -> None:
@@ -2250,7 +3519,19 @@ class MainWindow(QMainWindow):
         total: int,
         succeeded: int,
     ) -> None:
-        self._home_page.set_launch_progress(attempted, total, succeeded)
+        group_name = getattr(self, "_launch_queue_group_name", None)
+        self._home_page.set_launch_progress(
+            attempted,
+            total,
+            succeeded,
+            group_name,
+        )
+        self._characters_page.set_group_launch_progress(
+            attempted,
+            total,
+            succeeded,
+            group_name,
+        )
         self._refresh_character_views()
         self._update_status_bar()
 
@@ -2260,8 +3541,18 @@ class MainWindow(QMainWindow):
         succeeded: int,
         cancelled: bool,
     ) -> None:
+        skipped_running = getattr(self, "_launch_queue_skipped_running", 0)
+        skipped_unavailable = getattr(
+            self,
+            "_launch_queue_skipped_unavailable",
+            0,
+        )
         self._launch_queue = None
         self._home_page.finish_launch_progress(attempted, succeeded, cancelled)
+        self._characters_page.finish_group_launch_progress()
+        self._launch_queue_group_name = None
+        self._launch_queue_skipped_running = 0
+        self._launch_queue_skipped_unavailable = 0
         self._refresh_character_views()
         self._update_status_bar()
         if self._close_in_progress:
@@ -2270,12 +3561,30 @@ class MainWindow(QMainWindow):
             message = (
                 f"Launched {succeeded} client(s); remaining queued launches were cancelled."
             )
+            if skipped_running:
+                message += f" Skipped {skipped_running} already-running account(s)."
+            if skipped_unavailable:
+                message += (
+                    f" Skipped {skipped_unavailable} hidden, banned, missing, "
+                    "or otherwise unavailable character(s)."
+                )
             QMessageBox.information(self, "Launch Cancelled", message)
         else:
+            failures = max(0, attempted - succeeded)
+            details: list[str] = []
+            if skipped_running:
+                details.append(f"{skipped_running} already running")
+            if skipped_unavailable:
+                details.append(
+                    f"{skipped_unavailable} hidden, banned, missing, or unavailable"
+                )
+            if failures:
+                details.append(f"{failures} failed")
+            suffix = f" Skipped: {', '.join(details)}." if details else ""
             QMessageBox.information(
                 self,
                 "Launch Complete",
-                f"Launched {succeeded} client(s).",
+                f"Launched {succeeded} client(s).{suffix}",
             )
 
     def _kill_all_clients(self) -> None:
@@ -2307,6 +3616,21 @@ class MainWindow(QMainWindow):
         self._refresh_characters()
 
     # ── Refresh + status ──────────────────────────────────────────────
+
+    def _keep_created_character_visible(self, character_name: str) -> None:
+        """Exempt a launcher-created character from automatic test/GM hiding."""
+        hidden = list(self._cfg.get("hidden_characters", []))
+        never_hide = list(self._cfg.get("never_hide_characters", []))
+        updated_hidden = [name for name in hidden if name != character_name]
+        changed = updated_hidden != hidden
+        if character_name not in never_hide:
+            never_hide.append(character_name)
+            changed = True
+        if not changed:
+            return
+        self._cfg["hidden_characters"] = updated_hidden
+        self._cfg["never_hide_characters"] = never_hide
+        config.save(self._cfg)
 
     def _effective_hidden_characters(self, *, persist: bool = False) -> set[str]:
         """Return the shared explicit + automatic hidden-character set."""
@@ -2345,6 +3669,8 @@ class MainWindow(QMainWindow):
             self._cancel_detail_load()
             self._data_selection = None
             self._accounts = []
+            self._group_target_identity = None
+            self._group_state = TargetGroupState()
             self._refresh_character_views()
             return
 
@@ -2517,6 +3843,7 @@ class MainWindow(QMainWindow):
             return
         self._data_selection = result.selection
         self._accounts = list(result.accounts)
+        self._sync_character_groups(result.selection.target_identity)
         self._refresh_character_views()
 
     @pyqtSlot(object)
@@ -2708,6 +4035,15 @@ class MainWindow(QMainWindow):
 
         hidden = self._effective_hidden_characters(persist=True)
         rows = visible_character_rows(self._accounts, hidden)
+        group_state = getattr(self, "_group_state", TargetGroupState())
+
+        for page in (
+            getattr(self, "_home_page", None),
+            getattr(self, "_characters_page", None),
+        ):
+            setter = getattr(page, "set_group_state", None)
+            if callable(setter):
+                setter(group_state)
 
         try:
             self._characters_page.refresh(
@@ -2720,53 +4056,137 @@ class MainWindow(QMainWindow):
         except Exception:
             log.exception("Characters page refresh failed")
 
+        creation_setter = getattr(
+            self._characters_page,
+            "set_character_creation_available",
+            None,
+        )
+        if callable(creation_setter):
+            if self._docker_mode():
+                creation_setter(
+                    False,
+                    "Character creation is available for Native EveJS installations only.",
+                )
+            elif not evejs_root or not self._cfg.get("client_path", ""):
+                creation_setter(
+                    False,
+                    "Configure the EveJS root and copied EVE client path first.",
+                )
+            else:
+                creation_setter(True)
+
+        management_setter = getattr(
+            self._characters_page,
+            "set_group_management_available",
+            None,
+        )
+        if callable(management_setter):
+            group_data_ready = (
+                self._data_selection is not None
+                and self._group_target_identity
+                == self._data_selection.target_identity
+            )
+            management_setter(
+                group_data_ready,
+                "Wait for current EveJS character data to finish loading.",
+            )
+
         self._home_page.set_character_stats(
             visible_account_count(rows),
             len(rows),
         )
-        visible_usernames = {account.username for account, _character in rows}
+        launch_rows, group_error = self._batch_launch_rows(hidden)
+        launch_usernames = {account.username for account, _character in launch_rows}
         eligible_usernames = {
             username
-            for username in visible_usernames
+            for username in launch_usernames
             if (
                 not self._tracker.is_account_running(username)
                 and username
                 not in getattr(self, "_pending_client_launches", set())
             )
         }
+        selected_group = group_state.selected_group
+        selected_name = selected_group.name if selected_group is not None else ""
+
+        def apply_launch_availability(available: bool, reason: str = "") -> None:
+            self._home_page.set_launch_available(
+                available,
+                reason,
+                len(eligible_usernames),
+            )
+            group_setter = getattr(
+                self._characters_page,
+                "set_group_launch_available",
+                None,
+            )
+            if callable(group_setter):
+                group_setter(
+                    available,
+                    len(eligible_usernames),
+                    reason,
+                )
+
+        if group_error:
+            apply_launch_availability(False, group_error)
+            return
         if self._docker_mode():
             launch_available, launch_reason = self._docker_launch_capability()
             if not launch_available:
-                self._home_page.set_launch_available(False, launch_reason)
-            elif not visible_usernames:
-                self._home_page.set_launch_available(
+                apply_launch_availability(False, launch_reason)
+            elif not launch_usernames:
+                apply_launch_availability(
                     False,
-                    "No visible accounts available",
+                    (
+                        f"No visible, non-banned characters in {selected_name}"
+                        if selected_group is not None and selected_group.members
+                        else (
+                            f"{selected_name} has no characters"
+                            if selected_group is not None
+                            else "No visible accounts available"
+                        )
+                    ),
                 )
             elif not eligible_usernames:
-                self._home_page.set_launch_available(
+                apply_launch_availability(
                     False,
-                    "All visible accounts are already running",
+                    (
+                        f"All ready characters in {selected_name} are already running"
+                        if selected_group is not None
+                        else "All visible accounts are already running"
+                    ),
                 )
             else:
-                self._home_page.set_launch_available(True)
+                apply_launch_availability(True)
         elif not evejs_root or not self._cfg.get("client_path", ""):
-            self._home_page.set_launch_available(
+            apply_launch_availability(
                 False,
                 "Configure the EveJS root and EVE client path first",
             )
-        elif not visible_usernames:
-            self._home_page.set_launch_available(
+        elif not launch_usernames:
+            apply_launch_availability(
                 False,
-                "No visible accounts available",
+                (
+                    f"No visible, non-banned characters in {selected_name}"
+                    if selected_group is not None and selected_group.members
+                    else (
+                        f"{selected_name} has no characters"
+                        if selected_group is not None
+                        else "No visible accounts available"
+                    )
+                ),
             )
         elif not eligible_usernames:
-            self._home_page.set_launch_available(
+            apply_launch_availability(
                 False,
-                "All visible accounts are already running",
+                (
+                    f"All ready characters in {selected_name} are already running"
+                    if selected_group is not None
+                    else "All visible accounts are already running"
+                ),
             )
         else:
-            self._home_page.set_launch_available(True)
+            apply_launch_availability(True)
 
     def _current_portrait_target(self) -> PortraitTarget | None:
         selection = self._data_selection
@@ -3799,6 +5219,8 @@ class MainWindow(QMainWindow):
                 self._cancel_data_loads()
             self._data_selection = None
             self._accounts = []
+            self._group_target_identity = None
+            self._group_state = TargetGroupState()
             portrait_invalidate = getattr(
                 getattr(self, "_characters_page", None),
                 "invalidate_portrait_target",
@@ -3877,6 +5299,16 @@ class MainWindow(QMainWindow):
             self._close_in_progress = True
             launch_queue.cancel()
         if getattr(self, "_client_launch_thread", None) is not None:
+            self._close_in_progress = True
+            event.ignore()
+            return
+        if (
+            getattr(self, "_character_creation_thread", None) is not None
+            or getattr(self, "_character_creation_request", None) is not None
+            or getattr(self, "_character_deletion_thread", None) is not None
+            or getattr(self, "_character_deletion_request", None) is not None
+            or getattr(self, "_overview_patch_thread", None) is not None
+        ):
             self._close_in_progress = True
             event.ignore()
             return

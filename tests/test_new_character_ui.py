@@ -1,0 +1,161 @@
+"""New-character tile and dialog interaction tests."""
+from __future__ import annotations
+
+from PyQt6.QtCore import Qt
+from PyQt6.QtTest import QSignalSpy, QTest
+from PyQt6.QtWidgets import QApplication, QMenu
+
+from src.core.db import Account, Character
+from src.core.overview_patch import OverviewPatchState, OverviewPatchStatus
+from src.core.process_tracker import ProcessTracker
+from src.pages.characters_page import CharactersPage
+from src.widgets.new_character_card import NewCharacterCard
+from src.widgets.new_character_dialog import NewCharacterDialog, NewCharacterDraft
+
+
+def _account() -> Account:
+    return Account(
+        username="fixture-account",
+        account_id=7,
+        role="0",
+        banned=False,
+        characters=[Character(char_id=140000007, name="Fixture Source")],
+    )
+
+
+def test_new_character_tile_is_first_and_emits_request(qapp: QApplication) -> None:
+    page = CharactersPage()
+    page.refresh([_account()], [], ProcessTracker())
+    spy = QSignalSpy(page.new_character_requested)
+
+    tile = page._grid.itemAtPosition(0, 0).widget()
+    assert isinstance(tile, NewCharacterCard)
+    QTest.mouseClick(tile._button, Qt.MouseButton.LeftButton)
+
+    assert len(spy) == 1
+    page.deleteLater()
+
+
+def test_character_overflow_exposes_character_and_account_deletion(
+    qapp: QApplication,
+    monkeypatch,
+) -> None:
+    page = CharactersPage()
+    page.refresh([_account()], [], ProcessTracker())
+    card = page._cards[("fixture-account", 140000007)]
+    character_spy = QSignalSpy(page.delete_character_requested)
+    account_spy = QSignalSpy(page.delete_account_requested)
+    group_spy = QSignalSpy(page.manage_groups_requested)
+    action_texts: list[str] = []
+
+    def fake_exec(menu: QMenu, *_args):
+        action_texts.extend(action.text() for action in menu.actions())
+        next(
+            action
+            for action in menu.actions()
+            if action.text() == "Manage Groups..."
+        ).trigger()
+        next(
+            action
+            for action in menu.actions()
+            if action.text() == "Delete Character..."
+        ).trigger()
+        next(
+            action
+            for action in menu.actions()
+            if action.text() == "Delete Account..."
+        ).trigger()
+
+    monkeypatch.setattr(QMenu, "exec", fake_exec)
+    card._on_overflow_clicked()
+
+    assert "Delete Character..." in action_texts
+    assert "Delete Account..." in action_texts
+    assert "Manage Groups..." in action_texts
+    assert group_spy[0][0] == 140000007
+    assert list(character_spy[0]) == ["fixture-account", "Fixture Source", 140000007]
+    assert list(account_spy[0]) == ["fixture-account", "Fixture Source", 140000007]
+    page.deleteLater()
+
+
+def test_dialog_requires_patched_ready_snapshot_for_overview_copy(
+    qapp: QApplication,
+) -> None:
+    status = OverviewPatchStatus(
+        OverviewPatchState.PATCHED,
+        "Overview copy bridge installed; original backup verified.",
+        3396210,
+    )
+    dialog = NewCharacterDialog([_account()], status, {140000007})
+    spy = QSignalSpy(dialog.create_requested)
+    dialog.account_edit.setText("fixture-new")
+    dialog.character_edit.setText("Fixture Pilot")
+    dialog.overview_combo.setCurrentIndex(1)
+
+    assert dialog.create_button.isEnabled()
+    QTest.mouseClick(dialog.create_button, Qt.MouseButton.LeftButton)
+
+    assert len(spy) == 1
+    draft = spy[0][0]
+    assert isinstance(draft, NewCharacterDraft)
+    assert draft.overview_source_character_id == 140000007
+    assert draft.is_gm is False
+    dialog.deleteLater()
+
+
+def test_dialog_allows_creation_with_an_uncaptured_overview_source(
+    qapp: QApplication,
+) -> None:
+    status = OverviewPatchStatus(
+        OverviewPatchState.PATCHED,
+        "Overview copy bridge installed; original backup verified.",
+        3396210,
+    )
+    dialog = NewCharacterDialog([_account()], status, set())
+    dialog.account_edit.setText("fixture-new")
+    dialog.character_edit.setText("Fixture Pilot")
+    dialog.overview_combo.setCurrentIndex(1)
+    spy = QSignalSpy(dialog.create_requested)
+
+    assert dialog.create_button.isEnabled()
+    assert dialog.create_button.text() == "CREATE CHARACTER"
+    assert "you can create the character now" in dialog.overview_hint.text().lower()
+    QTest.mouseClick(dialog.create_button, Qt.MouseButton.LeftButton)
+
+    assert len(spy) == 1
+    assert spy[0][0].overview_source_character_id == 140000007
+    dialog.deleteLater()
+
+
+def test_dialog_revalidates_first_time_source_after_patch_and_capture(
+    qapp: QApplication,
+) -> None:
+    ready = OverviewPatchStatus(
+        OverviewPatchState.READY,
+        "Supported client; ready to patch.",
+        3396210,
+    )
+    patched = OverviewPatchStatus(
+        OverviewPatchState.PATCHED,
+        "Overview bridge installed.",
+        3396210,
+    )
+    dialog = NewCharacterDialog([_account()], ready, set())
+    dialog.account_edit.setText("fixture-new")
+    dialog.character_edit.setText("Fixture Pilot")
+    dialog.overview_combo.setCurrentIndex(1)
+
+    dialog.set_busy(True, "PATCHING CLIENT…")
+    dialog.set_busy(False)
+    dialog.set_patch_status(patched)
+
+    assert dialog.create_button.isEnabled()
+    assert dialog.create_button.text() == "CREATE CHARACTER"
+    assert "you can create the character now" in dialog.overview_hint.text().lower()
+
+    dialog.set_snapshot_ready_ids({140000007})
+
+    assert dialog.create_button.isEnabled()
+    assert dialog.create_button.text() == "CREATE CHARACTER"
+    assert "will be imported" in dialog.overview_hint.text().lower()
+    dialog.deleteLater()

@@ -23,6 +23,7 @@ def test_fresh_config_uses_ask_preference(isolated_config: Path) -> None:
     loaded = config.load()
 
     assert loaded["server_start_preference"] == ASK_EVERY_TIME
+    assert loaded["auto_login_enabled"] is False
     assert "server_start_script" not in loaded
     assert "server_start_scripts" not in loaded
     assert "server_script_prompted" not in loaded
@@ -139,6 +140,22 @@ def test_invalid_absolute_primary_preference_falls_back_to_ask(
     )
 
     assert config.load()["server_start_preference"] == ASK_EVERY_TIME
+
+
+def test_auto_login_setting_accepts_only_a_real_boolean(
+    isolated_config: Path,
+) -> None:
+    isolated_config.write_text(
+        json.dumps({"auto_login_enabled": "yes"}),
+        encoding="utf-8",
+    )
+    assert config.load()["auto_login_enabled"] is False
+
+    isolated_config.write_text(
+        json.dumps({"auto_login_enabled": True}),
+        encoding="utf-8",
+    )
+    assert config.load()["auto_login_enabled"] is True
 
 
 def test_malformed_json_is_backed_up_and_defaults_are_loaded(

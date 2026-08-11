@@ -2,11 +2,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import os
 from pathlib import Path
 
+from .client_autologin import AutoLoginLaunch, require_auto_login_arguments
+from .overview_state import OverviewBridgeLaunch
 from .platform import get_client_exe_path, launch_eve_client
 from .runtime.endpoints import RuntimeEndpoints
+
+
+log = logging.getLogger(__name__)
 
 
 def _http_url(host: str, port: int) -> str:
@@ -126,6 +132,8 @@ def launch_client(
     client_path: str = "",
     *,
     launch_context: ClientLaunchContext | None = None,
+    auto_login: AutoLoginLaunch | None = None,
+    overview_bridge: OverviewBridgeLaunch | None = None,
 ) -> subprocess.Popen:
     """Launch the EVE client executable from a profile junction.
 
@@ -135,6 +143,12 @@ def launch_client(
         proxy_url: Proxy URL for EveJS.
         client_path: The user-configured EVE client tq folder.  Used to
             derive the ResFiles cache (mirrors Play.bat behaviour).
+        auto_login: Optional typed local-login intent.  When present, the
+        exact copied client and EveJS password-bypass configuration are
+            verified before the guarded login, character, and no-console
+            switches are added.
+        overview_bridge: Optional one-shot capture/apply command for a verified
+            launcher-patched client.
 
     Returns:
         subprocess.Popen for the launched process.
@@ -145,6 +159,9 @@ def launch_client(
 
     effective_proxy = launch_context.proxy_url if launch_context is not None else proxy_url
     env = build_env(evejs_root, effective_proxy)
+    if overview_bridge is not None:
+        env["EVEJS_OVERVIEW_BRIDGE"] = overview_bridge.command
+        env["EVEJS_OVERVIEW_ACK_PATH"] = str(overview_bridge.ack_path)
 
     # ── ResFiles: derive from the configured client path, NOT the junction ──
     # Play.bat resolves EVEJS_CLIENT_PATH\\..\\ResFiles — the ResFiles that
@@ -161,4 +178,27 @@ def launch_client(
     if resfiles.exists():
         env["EO_REMOTEFILECACHEFOLDER"] = str(resfiles)
 
+    arguments: tuple[str, ...] = ()
+    if auto_login is not None:
+        effective_context = launch_context or ClientLaunchContext.native(
+            proxy_url=effective_proxy,
+        )
+        arguments = require_auto_login_arguments(
+            auto_login,
+            evejs_root=evejs_root,
+            client_path=client_path or profile_tq_path.resolve(),
+            game_host=effective_context.game_host,
+        )
+
+    if arguments:
+        # Never log the rendered /login value: even though the supported Native
+        # path uses a fixed dummy password, keeping the diagnostic structural
+        # prevents future credentials from leaking into launcher logs.
+        log.info(
+            "Starting EVE with verified local auto-login "
+            "(account=%s character_id=%s switches=noconsole,login,autoSelectCharacter)",
+            auto_login.username,
+            auto_login.character_id,
+        )
+        return launch_eve_client(exe, env, exe.parent, arguments=arguments)
     return launch_eve_client(exe, env, exe.parent)

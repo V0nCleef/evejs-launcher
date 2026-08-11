@@ -91,10 +91,16 @@ def get_client_process_flags() -> dict[str, int]:
     }
 
 
-def launch_eve_client(exe_path: Path, env: dict[str, str], cwd: Path) -> subprocess.Popen:
+def launch_eve_client(
+    exe_path: Path,
+    env: dict[str, str],
+    cwd: Path,
+    *,
+    arguments: tuple[str, ...] = (),
+) -> subprocess.Popen:
     """Launch the EVE client executable directly (native Windows)."""
     return subprocess.Popen(
-        [str(exe_path)],
+        [str(exe_path), *arguments],
         env=env,
         cwd=str(cwd),
         **get_client_process_flags(),

@@ -15,6 +15,7 @@ from src.core.runtime.portraits import (
     PortraitProvider,
     PortraitRequest,
     PortraitTarget,
+    portrait_cache_key,
 )
 
 
@@ -119,6 +120,10 @@ def _request(
         settings_identity=settings_identity,
         monitor_generation=monitor_generation,
     )
+
+
+def test_portrait_cache_schema_invalidates_legacy_fallback_entries() -> None:
+    assert portrait_cache_key(_request()).startswith("portrait:v3:")
 
 
 def test_docker_portrait_uses_effective_remapped_endpoint_and_decodes_qimage(
@@ -414,3 +419,43 @@ def test_native_portrait_preserves_local_search_and_never_uses_http(
     assert result.source == "native"
     assert (result.image.width(), result.image.height()) == (64, 64)
     assert opener.calls == []
+
+
+def test_native_portrait_prefers_v0124_active_game_store_images(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "runtime"
+    active_path = (
+        root
+        / "_local"
+        / "gameStore"
+        / "images"
+        / "Character"
+        / "9001_64.jpg"
+    )
+    active_path.parent.mkdir(parents=True)
+    active_path.write_bytes(_image_bytes(width=96, height=64))
+    fallback_path = root / "server" / "src" / "_secondary" / "image" / "images" / "hi.jpg"
+    fallback_path.parent.mkdir(parents=True)
+    fallback = QImage(64, 64, QImage.Format.Format_RGB32)
+    fallback.fill(QColor("red"))
+    assert fallback.save(str(fallback_path), "JPEG")
+    target = PortraitTarget(
+        target_identity="native:v0124",
+        native_root=root,
+    )
+
+    result = PortraitProvider(
+        target,
+        cache_dir=tmp_path / "cache",
+    ).load(
+        _request(
+            "native:v0124",
+            settings_identity=None,
+            monitor_generation=None,
+        )
+    )
+
+    assert result.source == "native"
+    assert (result.image.width(), result.image.height()) == (64, 64)
+    assert result.image.pixelColor(32, 32).blue() > result.image.pixelColor(32, 32).red()

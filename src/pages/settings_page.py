@@ -56,6 +56,7 @@ class FocusWheelSpinBox(QSpinBox):
 
 from src import config
 from src.constants import COLORS, APP_VERSION
+from src.core.client_autologin import inspect_auto_login_capability
 from src.core.server_selection import (
     ASK_EVERY_TIME,
     discover_server_scripts,
@@ -102,6 +103,12 @@ MANAGED_HELP = (
 DOCKER_TEST_HELP = (
     "Testing is read-only. It checks Docker and the Compose project without "
     "starting containers or initializing data."
+)
+AUTO_LOGIN_HELP = (
+    "Uses the copied EVE.js client's built-in local-login switches to sign in "
+    "and enter the selected character. No client files are modified and no "
+    "real password is stored. The fixed dummy value can be visible in local "
+    "Windows process details."
 )
 
 
@@ -322,6 +329,28 @@ class SettingsPage(QWidget):
 
         self.auto_start_market_toggle = ToggleSwitch()
         launch_form.addRow("Auto-Start Market:", self.auto_start_market_toggle)
+
+        self.auto_login_toggle = ToggleSwitch()
+        self.auto_login_toggle.setToolTip(AUTO_LOGIN_HELP)
+        self.auto_login_toggle.setAccessibleDescription(AUTO_LOGIN_HELP)
+        launch_form.addRow("Auto-Login Character:", self.auto_login_toggle)
+        self.auto_login_help_label = self._make_help_label(AUTO_LOGIN_HELP)
+        self.auto_login_help_label.setObjectName("autoLoginHelp")
+        launch_form.addRow("", self.auto_login_help_label)
+        self.auto_login_status_label = QLabel("")
+        self.auto_login_status_label.setObjectName("autoLoginStatus")
+        self.auto_login_status_label.setWordWrap(True)
+        launch_form.addRow("Auto-Login Status:", self.auto_login_status_label)
+
+        self.evejs_root_edit.textChanged.connect(
+            lambda _text: self._update_auto_login_status()
+        )
+        self.client_path_edit.textChanged.connect(
+            lambda _text: self._update_auto_login_status()
+        )
+        self.runtime_backend_combo.currentIndexChanged.connect(
+            lambda _index: self._update_auto_login_status()
+        )
 
         root.addWidget(launch_box)
 
@@ -555,6 +584,7 @@ class SettingsPage(QWidget):
         self.stagger_delay_spin.setValue(int(cfg.get("stagger_delay_sec", 3)))
         self.auto_start_server_toggle.setChecked(bool(cfg.get("auto_start_server", False)))
         self.auto_start_market_toggle.setChecked(bool(cfg.get("auto_start_market", False)))
+        self.auto_login_toggle.setChecked(bool(cfg.get("auto_login_enabled", False)))
 
         self.animations_toggle.setChecked(bool(cfg.get("animations_enabled", True)))
         self.hero_interval_spin.setValue(int(cfg.get("hero_rotation_interval_sec", 6)))
@@ -584,6 +614,25 @@ class SettingsPage(QWidget):
         self._validated_docker_fingerprint = None
         self._save_after_docker_preflight = False
         self._update_runtime_visibility()
+        self._update_auto_login_status()
+
+    def _update_auto_login_status(self) -> None:
+        """Show whether the selected copied client can use local auto-login."""
+        if self.runtime_backend_combo.currentData() != "native":
+            supported = False
+            reason = "Automatic login is available for Native EveJS runtime only."
+        else:
+            capability = inspect_auto_login_capability(
+                self.evejs_root_edit.text().strip(),
+                self.client_path_edit.text().strip(),
+            )
+            supported = capability.supported
+            reason = capability.reason
+        self.auto_login_toggle.setEnabled(supported)
+        self.auto_login_status_label.setText(reason)
+        color = COLORS["green"] if supported else COLORS["gold"]
+        self.auto_login_status_label.setStyleSheet(f"color: {color};")
+        self.auto_login_status_label.setToolTip(reason)
 
     def save_settings(self) -> None:
         """Persist Native immediately or preflight the exact Docker draft."""
@@ -610,6 +659,10 @@ class SettingsPage(QWidget):
                 "stagger_delay_sec": self.stagger_delay_spin.value(),
                 "auto_start_server": self.auto_start_server_toggle.isChecked(),
                 "auto_start_market": self.auto_start_market_toggle.isChecked(),
+                "auto_login_enabled": (
+                    self.auto_login_toggle.isEnabled()
+                    and self.auto_login_toggle.isChecked()
+                ),
                 "animations_enabled": self.animations_toggle.isChecked(),
                 "hero_rotation_interval_sec": self.hero_interval_spin.value(),
                 "update_auto_check": self.update_auto_check_toggle.isChecked(),

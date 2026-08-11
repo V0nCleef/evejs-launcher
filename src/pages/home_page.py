@@ -19,6 +19,7 @@ from pathlib import Path
 from PyQt6.QtCore import Qt, pyqtSignal, QUrl
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -29,6 +30,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.constants import COLORS
+from src.core.groups import TargetGroupState
 from src.core.service_status import (
     DockerControlPolicy,
     RuntimeBackend,
@@ -369,6 +371,8 @@ class HomePage(QWidget):
 
     launch_all_clicked = pyqtSignal()
     cancel_launches_clicked = pyqtSignal()
+    group_selection_changed = pyqtSignal(object)  # group ID or None
+    manage_groups_requested = pyqtSignal()
     start_servers_clicked = pyqtSignal()
     stop_servers_clicked = pyqtSignal()
     kill_all_clicked = pyqtSignal()
@@ -378,7 +382,12 @@ class HomePage(QWidget):
         super().__init__(parent)
         self._stack_action = "start"
         self._launch_in_progress = False
+        self._group_state = TargetGroupState()
+        self._launch_available = True
+        self._launch_unavailable_reason = ""
+        self._launch_ready_count = 0
         self._build_ui()
+        self.set_group_state(TargetGroupState())
         self._load_latest_release()
 
     # ── UI construction ──────────────────────────────────────────────────────
@@ -415,6 +424,22 @@ class HomePage(QWidget):
         actions = QHBoxLayout()
         actions.setSpacing(12)
 
+        launch_box = QWidget()
+        launch_box.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        launch_layout = QHBoxLayout(launch_box)
+        launch_layout.setContentsMargins(0, 0, 0, 0)
+        launch_layout.setSpacing(6)
+
+        self.group_combo = QComboBox()
+        self.group_combo.setMinimumWidth(130)
+        self.group_combo.setMaximumWidth(190)
+        self.group_combo.setFixedHeight(48)
+        self.group_combo.currentIndexChanged.connect(self._on_group_combo_changed)
+        launch_layout.addWidget(self.group_combo)
+
         self.btn_launch_all = QPushButton("Launch All")
         self.btn_launch_all.setProperty("class", "primary")
         self.btn_launch_all.setFixedHeight(48)
@@ -423,7 +448,8 @@ class HomePage(QWidget):
         )
         self.btn_launch_all.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_launch_all.clicked.connect(self._emit_launch_action)
-        actions.addWidget(self.btn_launch_all)
+        launch_layout.addWidget(self.btn_launch_all, stretch=1)
+        actions.addWidget(launch_box)
 
         self.btn_start_servers = QPushButton("Start Stack")
         self.btn_start_servers.setProperty("class", "secondary")
@@ -510,19 +536,53 @@ class HomePage(QWidget):
         """Show the configured server-mode policy without exposing its path."""
         self.services_card.set_mode(label)
 
-    def set_launch_available(self, available: bool, reason: str = "") -> None:
+    def set_group_state(self, state: TargetGroupState) -> None:
+        """Synchronize the quick-launch selector with the Characters page."""
+        self._group_state = state
+        self.group_combo.blockSignals(True)
+        self.group_combo.clear()
+        self.group_combo.addItem("All Visible", None)
+        selected_index = 0
+        for index, group in enumerate(state.groups, start=1):
+            self.group_combo.addItem(
+                f"{group.name} ({len(group.members)})",
+                group.group_id,
+            )
+            if group.group_id == state.selected_group_id:
+                selected_index = index
+        self.group_combo.insertSeparator(self.group_combo.count())
+        self.group_combo.addItem("Manage Groups…", "__manage_groups__")
+        self.group_combo.setCurrentIndex(selected_index)
+        self.group_combo.blockSignals(False)
+        self._restore_launch_button()
+
+    def set_launch_available(
+        self,
+        available: bool,
+        reason: str = "",
+        ready_count: int | None = None,
+    ) -> None:
         """Enable Launch All only when at least one account can be launched."""
         if self._launch_in_progress:
             return
-        self.btn_launch_all.setEnabled(available)
-        self.btn_launch_all.setToolTip(
-            "Launch every eligible visible account" if available else reason
-        )
+        self._launch_available = bool(available)
+        self._launch_unavailable_reason = "" if available else reason
+        if ready_count is not None:
+            self._launch_ready_count = max(0, int(ready_count))
+        self._restore_launch_button()
 
-    def set_launch_progress(self, attempted: int, total: int, succeeded: int) -> None:
+    def set_launch_progress(
+        self,
+        attempted: int,
+        total: int,
+        succeeded: int,
+        group_name: str | None = None,
+    ) -> None:
         """Make Launch All a cancellation control while its serial queue runs."""
         self._launch_in_progress = True
-        self.btn_launch_all.setText(f"Launching {attempted} of {total}…")
+        self.group_combo.setEnabled(False)
+        prefix = f"Launching {group_name}" if group_name else "Launching"
+        self.btn_launch_all.setText(f"{prefix} {attempted} of {total}…")
         self.btn_launch_all.setEnabled(True)
         self.btn_launch_all.setToolTip(
             "Cancel remaining queued launches; clients already started will continue running"
@@ -536,14 +596,39 @@ class HomePage(QWidget):
     ) -> None:
         """Restore the primary action after its serial launch queue finishes."""
         self._launch_in_progress = False
-        self.btn_launch_all.setText("Launch All")
-        self.btn_launch_all.setEnabled(True)
+        self.group_combo.setEnabled(True)
+        self._restore_launch_button()
         if cancelled:
             self.btn_launch_all.setToolTip(
                 f"Cancelled after launching {succeeded} of {attempted} account(s)"
             )
+
+    def _restore_launch_button(self) -> None:
+        if self._launch_in_progress:
+            return
+        group = self._group_state.selected_group
+        if group is None:
+            self.btn_launch_all.setText("Launch All")
         else:
-            self.btn_launch_all.setToolTip("Launch every eligible visible account")
+            self.btn_launch_all.setText(
+                f"Launch {group.name} ({self._launch_ready_count})"
+            )
+        self.btn_launch_all.setEnabled(self._launch_available)
+        if not self._launch_available:
+            tooltip = self._launch_unavailable_reason
+        elif group is None:
+            tooltip = "Launch every eligible visible account"
+        else:
+            tooltip = f"Launch every ready character in {group.name}"
+        self.btn_launch_all.setToolTip(tooltip)
+
+    def _on_group_combo_changed(self, index: int) -> None:
+        value = self.group_combo.itemData(index)
+        if value == "__manage_groups__":
+            self.manage_groups_requested.emit()
+            self.set_group_state(self._group_state)
+            return
+        self.group_selection_changed.emit(value)
 
     def apply_runtime_snapshot(self, snapshot: RuntimeSnapshot) -> None:
         """Apply the authoritative runtime observation to Home."""
