@@ -2,6 +2,26 @@
 
 ## Changelog
 
+## v1.0.37 — 2026-08-12
+
+### Added
+- **Unsaved Settings protection** — leaving Settings or closing the launcher now offers Save, Discard, and Cancel. Failed saves and Docker validation failures keep the draft open instead of navigating away.
+
+### Changed
+- **Canonical EVE client selection** — setup and Settings now browse for the copied client folder and consistently store its `tq` root. Selecting `bin64` or `exefile.exe` is repaired automatically when the client layout can be verified.
+
+### Fixed
+- **EveJS v0.12.5 character maintenance** — character creation and character/account deletion now opt into the offline maintenance role, acquire the durable owner lease, and release it through the public shutdown path. This fixes the `reader may not flush __all_tables__` deletion failure and prevents a maintenance lease from delaying the restarted world server.
+- **Invalid client-path persistence** — newly entered paths must contain `start.ini` and `bin64/exefile.exe`, and every launch-time consumer receives the verified `tq` folder instead of a raw executable or `bin64` path.
+
+### Safety and compatibility
+- EveJS v0.12.4 retains its checked legacy flush/worker/SQLite shutdown path, while v0.12.5 uses the maintenance ownership API. Existing backup, rollback, offline-service, and post-operation verification boundaries remain in place.
+- An unchanged legacy client path on a temporarily unavailable drive remains editable in Settings, but unresolved paths are rejected before profile or client-launch mutation begins.
+
+### Verification
+- **811 automated tests passed**, including real-helper maintenance-role coverage, character rollback, client-path normalization, unsaved navigation and close handling, Docker validation continuations, and existing Native/Docker regressions.
+- Source compilation, dependency checks, the Foundation smoke suite, and an interactive source launch were verified before commit.
+
 ## v1.0.36 — 2026-08-11
 
 ### Added

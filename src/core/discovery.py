@@ -1,4 +1,6 @@
 """EveJS path discovery and validation."""
+import os
+import re
 from pathlib import Path
 
 from .server_selection import discover_server_scripts
@@ -62,21 +64,76 @@ def validate_docker_evejs_root(
     return True, ""
 
 
+def resolve_client_tq_path(
+    selection: str | Path,
+    evejs_root: str | Path = "",
+) -> Path | None:
+    """Resolve a copied-client selection to its canonical ``tq`` folder.
+
+    Older launcher UI copy asked for ``exefile.exe`` even though profiles,
+    overview support, and resource-cache lookup all consume the directory that
+    contains ``start.ini`` and ``bin64/exefile.exe``. Accept the common places
+    a user may select, but return only that directory contract.
+    """
+    raw = str(selection).strip().strip('"').strip("'")
+    if not raw:
+        return None
+
+    root = str(evejs_root).strip()
+    if root:
+        raw = re.sub(
+            r"%EVEJS_REPO_ROOT%",
+            lambda _match: root,
+            raw,
+            flags=re.IGNORECASE,
+        )
+        if os.sep == "/":
+            raw = raw.replace("\\", "/")
+
+    selected = Path(raw).expanduser()
+    if selected.is_file():
+        if selected.name.casefold() != "exefile.exe":
+            return None
+        selected = selected.parent
+
+    candidates: list[Path] = []
+
+    def add(candidate: Path) -> None:
+        if candidate not in candidates:
+            candidates.append(candidate)
+
+    if selected.name.casefold() in {"bin", "bin64"}:
+        add(selected.parent)
+    add(selected)
+    add(selected / "tq")
+    add(selected / "EVE" / "tq")
+    add(selected / "SharedCache" / "tq")
+
+    for candidate in candidates:
+        if (
+            candidate.is_dir()
+            and (candidate / "start.ini").is_file()
+            and (candidate / "bin64" / "exefile.exe").is_file()
+        ):
+            return candidate
+    return None
+
+
 def find_client_path(evejs_root: str) -> str | None:
-    """Extract EVE client path from EvEJSConfig.bat."""
+    """Extract and canonicalize the copied EVE client path from its batch config."""
     cfg = Path(evejs_root) / "tools" / "ClientSETUP" / "scripts" / "EvEJSConfig.bat"
     if not cfg.exists():
         return None
 
     for line in cfg.read_text(encoding="utf-8", errors="ignore").splitlines():
-        line = line.strip()
-        if line.startswith("set ") or line.startswith("SET "):
-            # Look for EVEJS_CLIENT_PATH=...
-            if "EVEJS_CLIENT_PATH=" in line:
-                # Extract: set "EVEJS_CLIENT_PATH=G:\..." or set EVEJS_CLIENT_PATH=G:\...
-                val = line.split("EVEJS_CLIENT_PATH=", 1)[1].strip()
-                val = val.strip('"').strip("'")
-                return val if val else None
+        match = re.match(
+            r'^\s*set\s+"?EVEJS_CLIENT_PATH\s*=\s*(.*?)"?\s*$',
+            line,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            resolved = resolve_client_tq_path(match.group(1), evejs_root)
+            return str(resolved) if resolved is not None else None
     return None
 
 

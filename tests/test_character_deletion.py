@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import sqlite3
+import subprocess
 
 import pytest
 
@@ -148,6 +150,73 @@ def test_deletion_request_validation_is_exact_and_typed(tmp_path: Path) -> None:
                 "Fixture One",
                 CharacterDeletionScope.CHARACTER,
             )
+        )
+
+
+def test_deletion_helper_runs_as_offline_maintenance_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, game_store = _store(tmp_path)
+    captured: dict[str, object] = {}
+    monkeypatch.setenv("EVEJS_GAMESTORE_OWNER_ROLE", "reader")
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["env"] = kwargs["env"]
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=(
+                'EVEJS_LAUNCHER_RESULT={"ok":true,"accountDeleted":true,'
+                '"deletedCharacters":[{"characterID":140000007,'
+                '"characterName":"Fixture One"}]}\n'
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(deletion.subprocess, "run", fake_run)
+
+    result = deletion._run_helper(
+        _request(root, scope=CharacterDeletionScope.ACCOUNT),
+        root,
+        game_store,
+    )
+
+    assert result["ok"] is True
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert env["EVEJS_GAMESTORE_OWNER_ROLE"] == "maintenance"
+    assert os.environ["EVEJS_GAMESTORE_OWNER_ROLE"] == "reader"
+
+
+def test_deletion_helper_reports_work_and_shutdown_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, game_store = _store(tmp_path)
+
+    def fake_run(command, **_kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout=(
+                'EVEJS_LAUNCHER_RESULT={"ok":false,"error":"WORK_FAILURE",'
+                '"shutdownError":"CLEANUP_FAILURE"}\n'
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(deletion.subprocess, "run", fake_run)
+
+    with pytest.raises(
+        CharacterDeletionError,
+        match="WORK_FAILURE; GameStore shutdown also failed: CLEANUP_FAILURE",
+    ):
+        deletion._run_helper(
+            _request(root, scope=CharacterDeletionScope.ACCOUNT),
+            root,
+            game_store,
         )
 
 

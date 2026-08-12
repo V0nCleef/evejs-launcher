@@ -638,6 +638,9 @@ def test_native_client_launch_preserves_configured_endpoint_context(
             "proxy_url": "http://127.0.0.1:27557",
         }
     )
+    bare_window._resolve_configured_client_path = (
+        lambda client_path, _evejs_root: Path(client_path)
+    )
 
     class Tracker:
         @staticmethod

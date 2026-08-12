@@ -47,6 +47,7 @@ from . import config
 from .constants import APP_TITLE, Page, Ports
 from .core.client_launch_queue import AsyncClientLaunchQueue
 from .core.dashboard import visible_account_count, visible_character_rows
+from .core.discovery import resolve_client_tq_path
 from .core.db import (
     Account,
     Character,
@@ -316,6 +317,12 @@ class MainWindow(QMainWindow):
 
         # ── State ──────────────────────────────────────────────────────
         self._cfg = config.load()
+        resolved_client_path = resolve_client_tq_path(
+            str(self._cfg.get("client_path", "")),
+            str(self._cfg.get("evejs_root", "")),
+        )
+        if resolved_client_path is not None:
+            self._cfg["client_path"] = str(resolved_client_path)
         self._tracker = ProcessTracker()
         self._server_proc: subprocess.Popen | None = None
         self._market_proc: subprocess.Popen | None = None
@@ -417,6 +424,7 @@ class MainWindow(QMainWindow):
         self._launch_queue_skipped_running = 0
         self._launch_queue_skipped_unavailable = 0
         self._settings_generation = 0
+        self._pending_settings_intent: tuple[str, int | None] | None = None
         self._data_request_sequence = 0
         self._account_thread: QThread | None = None
         self._account_worker: AccountLoader | None = None
@@ -504,6 +512,9 @@ class MainWindow(QMainWindow):
 
         self._settings_page.settings_update_check.connect(self._on_manual_update_check)
         self._settings_page.settings_saved.connect(self._on_settings_saved)
+        self._settings_page.save_finished.connect(
+            self._on_settings_save_finished
+        )
         self._settings_page.docker_preflight_requested.connect(
             self._begin_docker_preflight
         )
@@ -592,8 +603,68 @@ class MainWindow(QMainWindow):
         if self._stack.currentIndex() == index:
             return
 
+        if getattr(self, "_pending_settings_intent", None) is not None:
+            self._nav.set_active_page(self._stack.currentIndex())
+            return
+        if (
+            self._stack.currentIndex() == int(Page.SETTINGS)
+            and getattr(self, "_settings_page", None) is not None
+            and self._settings_page.is_dirty()
+        ):
+            # QButtonGroup checks the clicked destination before emitting.
+            # Restore Settings while the draft decision is unresolved.
+            self._nav.set_active_page(int(Page.SETTINGS))
+            answer = self._ask_unsaved_settings()
+            if answer == QMessageBox.StandardButton.Cancel:
+                return
+            if answer == QMessageBox.StandardButton.Discard:
+                self._settings_page.discard_changes()
+            elif answer == QMessageBox.StandardButton.Save:
+                self._pending_settings_intent = ("page", index)
+                self._settings_page.save_settings()
+                return
+            else:
+                return
+
+        self._switch_page_now(index)
+
+    def _switch_page_now(self, index: int) -> None:
+        """Perform one page switch after any Settings draft is resolved."""
+        if self._stack.currentIndex() == index:
+            self._nav.set_active_page(index)
+            return
+
         self._stack.setCurrentIndex(index)
         self._on_page_changed(index)
+
+    def _ask_unsaved_settings(self) -> QMessageBox.StandardButton:
+        """Ask how to resolve the visible Settings draft."""
+        return QMessageBox.question(
+            self,
+            "Unsaved Settings",
+            "You have unsaved Settings changes. Save them before leaving?",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+
+    @pyqtSlot(bool)
+    def _on_settings_save_finished(self, success: bool) -> None:
+        """Complete a deferred page change or close only after a real save."""
+        intent = getattr(self, "_pending_settings_intent", None)
+        if intent is None:
+            return
+        self._pending_settings_intent = None
+        if not success:
+            if hasattr(self, "_stack"):
+                self._nav.set_active_page(self._stack.currentIndex())
+            return
+        kind, target = intent
+        if kind == "page" and target is not None:
+            self._switch_page_now(target)
+        elif kind == "close":
+            QTimer.singleShot(0, self.close)
 
     def _on_page_changed(self, index: int) -> None:
         """Side effects when the active page changes."""
@@ -606,7 +677,7 @@ class MainWindow(QMainWindow):
         # so auto-hidden accounts (persisted by _refresh_characters after
         # startup) show up in the Hidden Accounts list.
         if index == int(Page.SETTINGS):
-            self._settings_page.load_settings()
+            self._settings_page.refresh_if_clean()
         elif index == int(Page.TOOLS):
             self._tools_page.refresh_tools(str(self._cfg.get("evejs_root", "")))
 
@@ -1293,6 +1364,10 @@ class MainWindow(QMainWindow):
         if not isinstance(request, DockerPreflightRequest):
             return
         if self._docker_preflight_thread is not None:
+            self._settings_page.reject_docker_preflight_request(
+                request,
+                "Another Docker setup check is still finishing. Try again in a moment.",
+            )
             return
 
         factory = getattr(self, "_docker_preflight_worker_factory", None)
@@ -2939,6 +3014,20 @@ class MainWindow(QMainWindow):
                     "EveJS root or client path not set.",
                 )
             return None
+        resolved_client_path = self._resolve_configured_client_path(
+            client_path,
+            evejs_root,
+        )
+        if resolved_client_path is None:
+            if show_errors:
+                QMessageBox.warning(
+                    self,
+                    "Invalid EVE Client Path",
+                    "Select the copied EVE client tq folder in Settings. It must "
+                    "contain start.ini and bin64\\exefile.exe.",
+                )
+            return None
+        client_path = str(resolved_client_path)
         if self._tracker.is_account_running(username):
             return None
         if username in getattr(self, "_pending_client_launches", set()):
@@ -2993,6 +3082,14 @@ class MainWindow(QMainWindow):
             ),
             overview_bridge=overview_bridge,
         )
+
+    @staticmethod
+    def _resolve_configured_client_path(
+        client_path: str,
+        evejs_root: str,
+    ) -> Path | None:
+        """Testable seam for the canonical copied-client path contract."""
+        return resolve_client_tq_path(client_path, evejs_root)
 
     def _finalize_client_launch(
         self,
@@ -5294,6 +5391,31 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self.close)
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        settings_page = getattr(self, "_settings_page", None)
+        stack = getattr(self, "_stack", None)
+        if (
+            settings_page is not None
+            and stack is not None
+            and stack.currentIndex() == int(Page.SETTINGS)
+            and settings_page.is_dirty()
+        ):
+            if getattr(self, "_pending_settings_intent", None) is not None:
+                event.ignore()
+                return
+            answer = self._ask_unsaved_settings()
+            if answer == QMessageBox.StandardButton.Cancel:
+                event.ignore()
+                return
+            if answer == QMessageBox.StandardButton.Save:
+                self._pending_settings_intent = ("close", None)
+                event.ignore()
+                settings_page.save_settings()
+                return
+            if answer == QMessageBox.StandardButton.Discard:
+                settings_page.discard_changes()
+            else:
+                event.ignore()
+                return
         launch_queue = getattr(self, "_launch_queue", None)
         if launch_queue is not None:
             self._close_in_progress = True

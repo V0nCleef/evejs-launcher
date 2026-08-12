@@ -246,6 +246,7 @@ def _run_helper(request: CharacterCreationRequest, root: Path, game_store: Path)
     env = os.environ.copy()
     env["EVEJS_GAMESTORE_SQLITE_PATH"] = str(game_store / "gamestore.sqlite")
     env["EVEJS_GAMESTORE_DATA_DIR"] = str(game_store / "data")
+    env["EVEJS_GAMESTORE_OWNER_ROLE"] = "maintenance"
     payload = json.dumps(
         {
             "username": request.username,
@@ -279,6 +280,13 @@ def _run_helper(request: CharacterCreationRequest, root: Path, game_store: Path)
     result = _parse_helper_result(completed.stdout)
     if completed.returncode != 0 or result.get("ok") is not True:
         message = str(result.get("error") or completed.stderr).strip()
+        shutdown_message = str(result.get("shutdownError") or "").strip()
+        if shutdown_message:
+            message = (
+                f"{message}; GameStore shutdown also failed: {shutdown_message}"
+                if message
+                else f"GameStore shutdown failed: {shutdown_message}"
+            )
         raise CharacterCreationError(message or "EveJS character creation failed.")
     return result
 

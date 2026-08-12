@@ -91,3 +91,32 @@ def test_close_event_is_deferred_while_preflight_thread_is_owned(qapp) -> None:
     assert window._close_in_progress is True
     window._docker_preflight_thread = None
     window.deleteLater()
+
+
+def test_busy_preflight_rejects_new_request_instead_of_silently_dropping_it(
+    qapp,
+    tmp_path: Path,
+) -> None:
+    window = MainWindow.__new__(MainWindow)
+    QMainWindow.__init__(window)
+    rejected: list[tuple[object, str]] = []
+    window._settings_page = type(
+        "SettingsSink",
+        (),
+        {
+            "reject_docker_preflight_request": (
+                lambda _self, request, message: rejected.append(
+                    (request, message)
+                )
+            )
+        },
+    )()
+    window._docker_preflight_thread = object()
+    request = _request(tmp_path)
+
+    window._begin_docker_preflight(request)
+
+    assert rejected and rejected[0][0] is request
+    assert "still finishing" in rejected[0][1]
+    window._docker_preflight_thread = None
+    window.deleteLater()

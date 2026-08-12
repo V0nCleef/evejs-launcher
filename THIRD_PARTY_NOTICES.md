@@ -4,7 +4,7 @@ EveJS Launcher is distributed under the GNU General Public License version 3. Se
 
 The Windows release includes or links the following third-party software. Copyright remains with the respective authors. The corresponding license texts are included in the release under `licenses/`, except where the project's main GPLv3 text in `LICENSE` is the applicable text.
 
-| Component | Version used for v1.0.36 | License | License text / source |
+| Component | Version used for v1.0.37 | License | License text / source |
 |---|---:|---|---|
 | Python | 3.11.15 | Python Software Foundation License 2.0 | [`licenses/PYTHON-3.11.txt`](licenses/PYTHON-3.11.txt) · [Source](https://github.com/python/cpython) |
 | PyQt6 | 6.11.0 | GPL v3 | [`LICENSE`](LICENSE) · [Source](https://www.riverbankcomputing.com/software/pyqt/) |

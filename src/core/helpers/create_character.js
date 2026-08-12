@@ -5,6 +5,11 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const {
+  failureResult,
+  requireSuccess,
+  runMaintenanceOperation,
+} = require("./game_store_maintenance");
 
 const RESULT_PREFIX = "EVEJS_LAUNCHER_RESULT=";
 
@@ -20,21 +25,15 @@ function emitResult(payload) {
   process.stdout.write(`${RESULT_PREFIX}${JSON.stringify(payload)}\n`);
 }
 
-async function closeDatabase(database) {
-  try {
-    database.flushAllSync();
-  } finally {
-    await database._shutdownPersistenceWorkerForTests();
-    database._closeSqliteForTests();
-  }
-}
-
 async function main() {
   const payload = readPayload();
   const root = process.cwd();
   const serverSource = path.join(root, "server", "src");
   const database = require(path.join(serverSource, "gameStore"));
-  try {
+  const result = await runMaintenanceOperation(
+    database,
+    "launcher-character-creation",
+    async () => {
     const username = String(payload.username || "").trim();
     const characterName = String(payload.characterName || "")
       .trim()
@@ -110,7 +109,10 @@ async function main() {
       [characterName, 1, 1, 1, null, null, 11, 1],
       { userid: accountId },
     );
-    database.flushAllSync();
+    requireSuccess(
+      database.flushAllSync(),
+      "Unable to flush the complete starter character",
+    );
 
     const storedCharacters = database.read("characters", "/").data || {};
     const storedCharacter = storedCharacters[String(characterId)];
@@ -126,19 +128,17 @@ async function main() {
       throw new Error("EveJS did not persist the complete starter character.");
     }
 
-    emitResult({
-      ok: true,
+    return {
       accountId,
       characterId: Number(characterId),
       isGM: account.isGM === true,
       rookieShipVerified,
-    });
-  } finally {
-    await closeDatabase(database);
-  }
+    };
+  });
+  emitResult({ ok: true, ...result });
 }
 
 main().catch((error) => {
-  emitResult({ ok: false, error: String(error && error.message ? error.message : error) });
+  emitResult(failureResult(error));
   process.exitCode = 1;
 });

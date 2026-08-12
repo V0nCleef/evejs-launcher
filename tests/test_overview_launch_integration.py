@@ -35,6 +35,9 @@ def test_native_launch_request_carries_verified_overview_command(
         }
     )
     window._cfg = cfg
+    window._resolve_configured_client_path = (
+        lambda client_path, _evejs_root: Path(client_path)
+    )
     window._tracker = _Tracker()
     window._pending_client_launches = set()
     window._accounts = []

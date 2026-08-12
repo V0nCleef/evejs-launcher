@@ -14,6 +14,7 @@ from .config import load, save
 from .constants import COLORS as C
 from .core.discovery import (
     find_client_path,
+    resolve_client_tq_path,
     validate_docker_evejs_root,
     validate_evejs_root,
 )
@@ -206,9 +207,12 @@ class SetupWizard(QDialog):
         client_row = QHBoxLayout()
         client_row.addWidget(QLabel("EVE Client:"))
         self._client_input = QLineEdit()
-        self._client_input.setPlaceholderText("Optional EVE client executable path")
+        self._client_input.setPlaceholderText("Optional copied EVE client tq folder")
         self._client_input.textChanged.connect(self._invalidate_docker_preflight)
         client_row.addWidget(self._client_input, 1)
+        client_browse = QPushButton("Browse…")
+        client_browse.clicked.connect(self._browse_client)
+        client_row.addWidget(client_browse)
         p1.content.addLayout(client_row)
 
         self._docker_fields = QWidget()
@@ -422,6 +426,19 @@ class SetupWizard(QDialog):
         if path:
             self._compose_input.setText(path)
 
+    def _browse_client(self) -> None:
+        """Browse for the copied client and display its canonical tq folder."""
+        start = self._client_input.text().strip()
+        path = QFileDialog.getExistingDirectory(
+            self,
+            "Select Copied EVE Client Folder",
+            start,
+        )
+        if not path:
+            return
+        resolved = resolve_client_tq_path(path, self._path_input.text().strip())
+        self._client_input.setText(str(resolved) if resolved else path)
+
     def _on_path_changed(self, text: str) -> None:
         self._update_docker_guidance()
         if self._docker_mode():
@@ -548,6 +565,7 @@ class SetupWizard(QDialog):
     def _start_docker_preflight(self) -> None:
         if not self._docker_mode() or self._docker_preflight_thread is not None:
             return
+        self._canonicalize_client_input()
         self._docker_preflight_token += 1
         request = create_preflight_request(
             self._collect_docker_draft(),
@@ -651,6 +669,7 @@ class SetupWizard(QDialog):
         cur = self._stack.currentIndex()
 
         if cur == 1:  # Path → Validation
+            self._canonicalize_client_input()
             if self._docker_mode():
                 fingerprint = docker_draft_fingerprint(
                     self._collect_docker_draft()
@@ -659,8 +678,25 @@ class SetupWizard(QDialog):
                     self._next_btn.setEnabled(False)
                     return
             self._evejs_root = self._path_input.text().strip()
-            detected = find_client_path(self._evejs_root) or ""
-            self._client_path = self._client_input.text().strip() or detected
+            selected_client = self._client_input.text().strip()
+            if selected_client:
+                resolved_client = resolve_client_tq_path(
+                    selected_client,
+                    self._evejs_root,
+                )
+                if resolved_client is None:
+                    self._path_status.setText(
+                        "✗ EVE Client must be the copied tq folder containing "
+                        "start.ini and bin64\\exefile.exe."
+                    )
+                    self._path_status.setStyleSheet(
+                        f"color: {C['red']}; font-size: 12px;"
+                    )
+                    return
+                self._client_path = str(resolved_client)
+                self._client_input.setText(self._client_path)
+            else:
+                self._client_path = ""
             if self._docker_mode():
                 explicit_compose = self._compose_input.text().strip()
                 compose_path = (
@@ -710,6 +746,18 @@ class SetupWizard(QDialog):
                 self._next_btn.setEnabled(True)
         else:
             self._save_and_accept()
+
+    def _canonicalize_client_input(self) -> None:
+        """Autofill and normalize the client before draft fingerprinting."""
+        evejs_root = self._path_input.text().strip()
+        selected = self._client_input.text().strip()
+        if not selected:
+            selected = find_client_path(evejs_root) or ""
+        if not selected:
+            return
+        resolved = resolve_client_tq_path(selected, evejs_root)
+        if resolved is not None and self._client_input.text() != str(resolved):
+            self._client_input.setText(str(resolved))
 
     def _save_and_accept(self) -> None:
         cfg = load()

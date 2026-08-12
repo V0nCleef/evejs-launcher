@@ -60,6 +60,9 @@ def test_docker_request_ignores_stale_native_auto_login_setting() -> None:
         _tracker=SimpleNamespace(is_account_running=lambda _username: False),
         _pending_client_launches=set(),
         _resolve_client_launch_context=lambda: (context, ""),
+        _resolve_configured_client_path=(
+            lambda _client_path, _evejs_root: Path("C:/Games/EVE/tq")
+        ),
         _docker_mode=lambda: True,
     )
 
@@ -185,6 +188,9 @@ def _bare_launch_window(qapp: QApplication, tmp_path: Path) -> MainWindow:
     window._client_launch_succeeded = False
     window._launch_queue = None
     window._close_in_progress = False
+    window._resolve_configured_client_path = (
+        lambda client_path, _evejs_root: Path(client_path)
+    )
     window._refresh_character_views = lambda: None
     window._update_status_bar = lambda: None
     return window

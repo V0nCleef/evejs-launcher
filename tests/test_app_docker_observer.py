@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 from PyQt6.QtCore import QCoreApplication, QEvent
@@ -757,6 +758,9 @@ def test_complete_connect_only_endpoints_use_one_context_for_profile_and_client(
             "proxy_url": "http://127.0.0.1:26002",
             "game_port": 26000,
         }
+    )
+    docker_window._resolve_configured_client_path = (
+        lambda client_path, _evejs_root: Path(client_path)
     )
     docker_window._runtime_snapshot = RuntimeSnapshot(
         ServiceState.ONLINE,

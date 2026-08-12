@@ -5,6 +5,10 @@
 // and post-operation verification. EveJS owns the actual character cleanup.
 const fs = require("fs");
 const path = require("path");
+const {
+  failureResult,
+  runMaintenanceOperation,
+} = require("./game_store_maintenance");
 
 const RESULT_PREFIX = "EVEJS_LAUNCHER_RESULT=";
 
@@ -27,21 +31,15 @@ function positiveInt(value) {
     : 0;
 }
 
-async function closeDatabase(database) {
-  try {
-    database.flushAllSync();
-  } finally {
-    await database._shutdownPersistenceWorkerForTests();
-    database._closeSqliteForTests();
-  }
-}
-
 async function main() {
   const payload = readPayload();
   const root = process.cwd();
   const serverSource = path.join(root, "server", "src");
   const database = require(path.join(serverSource, "gameStore"));
-  try {
+  const result = await runMaintenanceOperation(
+    database,
+    "launcher-character-deletion",
+    async () => {
     const scope = String(payload.scope || "");
     const username = String(payload.username || "");
     const expectedAccountID = positiveInt(payload.accountId);
@@ -158,23 +156,18 @@ async function main() {
       }
     }
 
-    emitResult({
-      ok: true,
+    return {
       scope,
       username,
       accountId: expectedAccountID,
       accountDeleted: scope === "account",
       deletedCharacters: targets,
-    });
-  } finally {
-    await closeDatabase(database);
-  }
+    };
+  });
+  emitResult({ ok: true, ...result });
 }
 
 main().catch((error) => {
-  emitResult({
-    ok: false,
-    error: String(error && error.message ? error.message : error),
-  });
+  emitResult(failureResult(error));
   process.exitCode = 1;
 });

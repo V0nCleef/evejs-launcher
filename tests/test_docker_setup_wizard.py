@@ -208,6 +208,29 @@ def test_wizard_compose_browse_uses_yaml_filter(
     assert "All Files" in captured[3]
 
 
+def test_wizard_client_browse_canonicalizes_bin64_to_tq(
+    qapp,
+    isolated_config: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tq = tmp_path / "SharedCache" / "tq"
+    bin64 = tq / "bin64"
+    bin64.mkdir(parents=True)
+    (tq / "start.ini").write_text("build=3396210\n", encoding="utf-8")
+    (bin64 / "exefile.exe").write_bytes(b"fixture")
+    wizard = SetupWizard()
+    monkeypatch.setattr(
+        QFileDialog,
+        "getExistingDirectory",
+        lambda *_args: str(bin64),
+    )
+
+    wizard._browse_client()
+
+    assert wizard._client_input.text() == str(tq)
+
+
 def test_wizard_review_calls_blank_compose_and_project_automatic(
     qapp,
     isolated_config: Path,
@@ -246,6 +269,16 @@ def test_wizard_docker_pristine_flow_preflights_then_persists_exact_draft(
     root.mkdir()
     compose = root / "compose.yaml"
     compose.write_text("services: {}\n", encoding="utf-8")
+    tq = tmp_path / "copied client" / "tq"
+    (tq / "bin64").mkdir(parents=True)
+    (tq / "start.ini").write_text("build=3396210\n", encoding="utf-8")
+    (tq / "bin64" / "exefile.exe").write_bytes(b"fixture")
+    client_config = root / "tools" / "ClientSETUP" / "scripts" / "EvEJSConfig.bat"
+    client_config.parent.mkdir(parents=True)
+    client_config.write_text(
+        f'set "EVEJS_CLIENT_PATH={tq}"\n',
+        encoding="utf-8",
+    )
     observed: list[QThread] = []
 
     class Inspector:
@@ -274,6 +307,7 @@ def test_wizard_docker_pristine_flow_preflights_then_persists_exact_draft(
 
     assert observed and observed[0] is not qapp.thread()
     assert wizard._next_btn.isEnabled() is True
+    assert wizard._client_input.text() == str(tq)
     wizard._go_next()
     wizard._go_next()
     wizard._go_next()
@@ -285,6 +319,7 @@ def test_wizard_docker_pristine_flow_preflights_then_persists_exact_draft(
     assert saved["docker_project_name"] == "wizard-fixture"
     assert saved["docker_control_policy"] == "managed"
     assert saved["docker_keep_running_on_exit"] is False
+    assert saved["client_path"] == str(tq)
     assert "separate" in wizard._results.text().casefold()
 
 

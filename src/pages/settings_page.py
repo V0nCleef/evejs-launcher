@@ -57,6 +57,7 @@ class FocusWheelSpinBox(QSpinBox):
 from src import config
 from src.constants import COLORS, APP_VERSION
 from src.core.client_autologin import inspect_auto_login_capability
+from src.core.discovery import resolve_client_tq_path
 from src.core.server_selection import (
     ASK_EVERY_TIME,
     discover_server_scripts,
@@ -116,6 +117,7 @@ class SettingsPage(QWidget):
     """Application settings form."""
 
     settings_saved = pyqtSignal(dict)
+    save_finished = pyqtSignal(bool)
     settings_update_check = pyqtSignal()
     docker_preflight_requested = pyqtSignal(object)
 
@@ -126,6 +128,7 @@ class SettingsPage(QWidget):
         self._pending_docker_request: DockerPreflightRequest | None = None
         self._validated_docker_fingerprint: str | None = None
         self._save_after_docker_preflight = False
+        self._settings_baseline: dict[str, object] | None = None
         self._build_ui()
         self.load_settings()
 
@@ -165,7 +168,15 @@ class SettingsPage(QWidget):
         general_form.addRow("EveJS Root:", self._with_browse(self.evejs_root_edit, directory=True))
 
         self.client_path_edit = QLineEdit()
-        general_form.addRow("EVE Client Path:", self._with_browse(self.client_path_edit, directory=False))
+        self.client_path_edit.setPlaceholderText("Copied EVE client tq folder")
+        general_form.addRow(
+            "EVE Client Path:",
+            self._with_browse(
+                self.client_path_edit,
+                directory=True,
+                client=True,
+            ),
+        )
 
         self.proxy_url_edit = QLineEdit()
         proxy_help = (
@@ -506,7 +517,7 @@ class SettingsPage(QWidget):
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setProperty("class", "ghost")
         cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_btn.clicked.connect(self.load_settings)
+        cancel_btn.clicked.connect(self.discard_changes)
         buttons.addWidget(cancel_btn)
 
         self.save_btn = QPushButton("Save")
@@ -535,7 +546,13 @@ class SettingsPage(QWidget):
         label.setAccessibleDescription(text)
         return label
 
-    def _with_browse(self, line_edit: QLineEdit, directory: bool, compose: bool = False) -> QWidget:
+    def _with_browse(
+        self,
+        line_edit: QLineEdit,
+        directory: bool,
+        compose: bool = False,
+        client: bool = False,
+    ) -> QWidget:
         """Wrap a QLineEdit with a Browse button in an HBox."""
         wrapper = QWidget()
         row = QHBoxLayout(wrapper)
@@ -546,7 +563,9 @@ class SettingsPage(QWidget):
         browse = QPushButton("Browse…")
         browse.setProperty("class", "ghost")
         browse.setCursor(Qt.CursorShape.PointingHandCursor)
-        if directory:
+        if client:
+            browse.clicked.connect(self._browse_client_directory)
+        elif directory:
             browse.clicked.connect(lambda: self._browse_directory(line_edit))
         else:
             browse.clicked.connect(lambda: self._browse_file(line_edit, compose=compose))
@@ -560,6 +579,33 @@ class SettingsPage(QWidget):
             target.setText(path)
             if target is self.evejs_root_edit:
                 self._on_evejs_root_edited()
+
+    def _browse_client_directory(self) -> None:
+        """Select any recognizable copied-client folder and store its tq root."""
+        start = self.client_path_edit.text().strip()
+        resolved_start = resolve_client_tq_path(
+            start,
+            self.evejs_root_edit.text().strip(),
+        )
+        if resolved_start is not None:
+            start = str(resolved_start)
+        path = QFileDialog.getExistingDirectory(
+            self,
+            "Select Copied EVE Client Folder",
+            start,
+        )
+        if not path:
+            return
+        resolved = resolve_client_tq_path(
+            path,
+            self.evejs_root_edit.text().strip(),
+        )
+        self.client_path_edit.setText(str(resolved) if resolved else path)
+        if resolved is None:
+            self._show_save_feedback(
+                "Select the copied EVE client tq folder (or its bin64 folder).",
+                success=False,
+            )
 
     def _browse_file(self, target: QLineEdit, *, compose: bool = False) -> None:
         """Select an executable or Compose YAML file as appropriate."""
@@ -578,7 +624,14 @@ class SettingsPage(QWidget):
         cfg = config.load()
 
         self.evejs_root_edit.setText(str(cfg.get("evejs_root", "")))
-        self.client_path_edit.setText(str(cfg.get("client_path", "")))
+        raw_client_path = str(cfg.get("client_path", ""))
+        resolved_client_path = resolve_client_tq_path(
+            raw_client_path,
+            str(cfg.get("evejs_root", "")),
+        )
+        self.client_path_edit.setText(
+            str(resolved_client_path) if resolved_client_path else raw_client_path
+        )
         self.proxy_url_edit.setText(str(cfg.get("proxy_url", "")))
 
         self.stagger_delay_spin.setValue(int(cfg.get("stagger_delay_sec", 3)))
@@ -615,6 +668,39 @@ class SettingsPage(QWidget):
         self._save_after_docker_preflight = False
         self._update_runtime_visibility()
         self._update_auto_login_status()
+        self.save_btn.setEnabled(True)
+        self.test_docker_setup_btn.setEnabled(True)
+        self._settings_baseline = self._form_state()
+
+    def refresh_if_clean(self) -> bool:
+        """Reload current config only when doing so cannot erase a draft."""
+        if self.is_dirty() or self._pending_docker_request is not None:
+            return False
+        self.load_settings()
+        return True
+
+    def discard_changes(self) -> bool:
+        """Abandon the current draft and any pending Docker-save intent."""
+        cancelled_save = (
+            self._pending_docker_request is not None
+            and self._save_after_docker_preflight
+        )
+        self._pending_docker_request = None
+        self._save_after_docker_preflight = False
+        self._validated_docker_fingerprint = None
+        self.save_btn.setEnabled(True)
+        self.test_docker_setup_btn.setEnabled(True)
+        self.load_settings()
+        if cancelled_save:
+            self.save_finished.emit(False)
+        return True
+
+    def is_dirty(self) -> bool:
+        """Return whether the visible form differs from its last clean baseline."""
+        return (
+            self._settings_baseline is not None
+            and self._form_state() != self._settings_baseline
+        )
 
     def _update_auto_login_status(self) -> None:
         """Show whether the selected copied client can use local auto-login."""
@@ -636,11 +722,26 @@ class SettingsPage(QWidget):
 
     def save_settings(self) -> None:
         """Persist Native immediately or preflight the exact Docker draft."""
+        if not self._normalize_client_path_for_save():
+            self.save_finished.emit(False)
+            return
         if self.runtime_backend_combo.currentData() == "docker_compose":
             draft = self._collect_docker_draft()
+            draft_fingerprint = docker_draft_fingerprint(draft)
+            pending = self._pending_docker_request
+            if pending is not None:
+                if pending.draft_fingerprint == draft_fingerprint:
+                    self._save_after_docker_preflight = True
+                else:
+                    self._show_save_feedback(
+                        "Docker setup is already being checked. Try Save again when it finishes.",
+                        success=False,
+                    )
+                    self.save_finished.emit(False)
+                return
             if (
                 self._validated_docker_fingerprint
-                == docker_draft_fingerprint(draft)
+                == draft_fingerprint
             ):
                 self._persist_settings(self._collect_settings())
             else:
@@ -648,39 +749,73 @@ class SettingsPage(QWidget):
             return
         self._persist_settings(self._collect_settings())
 
+    def _normalize_client_path_for_save(self) -> bool:
+        raw = self.client_path_edit.text().strip()
+        if not raw:
+            return True
+        resolved = resolve_client_tq_path(
+            raw,
+            self.evejs_root_edit.text().strip(),
+        )
+        baseline_client = (
+            str(self._settings_baseline.get("client_path", ""))
+            if self._settings_baseline is not None
+            else ""
+        )
+        if resolved is None:
+            # Keep unrelated settings editable when a legacy path is currently
+            # unavailable (for example, a disconnected external drive). New or
+            # changed invalid values are still rejected.
+            if raw == baseline_client:
+                return True
+            self._show_save_feedback(
+                "EVE Client Path must be the copied client's tq folder containing "
+                "start.ini and bin64\\exefile.exe.",
+                success=False,
+            )
+            return False
+        self.client_path_edit.setText(str(resolved))
+        return True
+
+    def _form_state(self) -> dict[str, object]:
+        """Project only persisted form values for dirty-state comparison."""
+        return {
+            "evejs_root": self.evejs_root_edit.text().strip(),
+            "client_path": self.client_path_edit.text().strip(),
+            "proxy_url": self.proxy_url_edit.text().strip(),
+            "stagger_delay_sec": self.stagger_delay_spin.value(),
+            "auto_start_server": self.auto_start_server_toggle.isChecked(),
+            "auto_start_market": self.auto_start_market_toggle.isChecked(),
+            "auto_login_enabled": (
+                self.auto_login_toggle.isEnabled()
+                and self.auto_login_toggle.isChecked()
+            ),
+            "animations_enabled": self.animations_toggle.isChecked(),
+            "hero_rotation_interval_sec": self.hero_interval_spin.value(),
+            "update_auto_check": self.update_auto_check_toggle.isChecked(),
+            "update_check_interval_hours": self.update_interval_spin.value(),
+            "hidden_characters": tuple(
+                self.hidden_list.item(i).text()
+                for i in range(self.hidden_list.count())
+            ),
+            "server_start_preference": (
+                self.server_script_combo.currentData() or ASK_EVERY_TIME
+            ),
+            "runtime_backend": self.runtime_backend_combo.currentData() or "native",
+            "docker_compose_file": self.docker_compose_edit.text().strip(),
+            "docker_control_policy": (
+                self.docker_policy_combo.currentData() or "connect_only"
+            ),
+            "docker_project_name": self.docker_project_edit.text().strip(),
+            "docker_keep_running_on_exit": self.docker_keep_running_toggle.isChecked(),
+        }
+
     def _collect_settings(self) -> dict:
         """Return a complete settings draft without writing configuration."""
         cfg = config.load()
-        cfg.update(
-            {
-                "evejs_root": self.evejs_root_edit.text().strip(),
-                "client_path": self.client_path_edit.text().strip(),
-                "proxy_url": self.proxy_url_edit.text().strip(),
-                "stagger_delay_sec": self.stagger_delay_spin.value(),
-                "auto_start_server": self.auto_start_server_toggle.isChecked(),
-                "auto_start_market": self.auto_start_market_toggle.isChecked(),
-                "auto_login_enabled": (
-                    self.auto_login_toggle.isEnabled()
-                    and self.auto_login_toggle.isChecked()
-                ),
-                "animations_enabled": self.animations_toggle.isChecked(),
-                "hero_rotation_interval_sec": self.hero_interval_spin.value(),
-                "update_auto_check": self.update_auto_check_toggle.isChecked(),
-                "update_check_interval_hours": self.update_interval_spin.value(),
-                "hidden_characters": [
-                    self.hidden_list.item(i).text()
-                    for i in range(self.hidden_list.count())
-                ],
-                "server_start_preference": (
-                    self.server_script_combo.currentData() or ASK_EVERY_TIME
-                ),
-                "runtime_backend": self.runtime_backend_combo.currentData() or "native",
-                "docker_compose_file": self.docker_compose_edit.text().strip(),
-                "docker_control_policy": self.docker_policy_combo.currentData() or "connect_only",
-                "docker_project_name": self.docker_project_edit.text().strip(),
-                "docker_keep_running_on_exit": self.docker_keep_running_toggle.isChecked(),
-            }
-        )
+        state = self._form_state()
+        state["hidden_characters"] = list(state["hidden_characters"])
+        cfg.update(state)
         return cfg
 
     def _persist_settings(self, cfg: dict) -> None:
@@ -689,12 +824,15 @@ class SettingsPage(QWidget):
             config.save(cfg)
         except OSError:
             self._show_save_feedback("Save failed — please try again.", success=False)
+            self.save_finished.emit(False)
             return
 
         self._stale_server_preference = ""
         self._update_script_info()
         self._show_save_feedback("Saved ✓", success=True)
+        self._settings_baseline = self._form_state()
         self.settings_saved.emit(cfg)
+        self.save_finished.emit(True)
 
     def _collect_docker_draft(self) -> DockerSetupDraft:
         return DockerSetupDraft(
@@ -728,6 +866,24 @@ class SettingsPage(QWidget):
         self.docker_preflight_result_label.show()
         self.docker_preflight_requested.emit(request)
 
+    def reject_docker_preflight_request(
+        self,
+        request: DockerPreflightRequest,
+        message: str,
+    ) -> None:
+        """Finish a request that the window could not start without hanging Save."""
+        pending = self._pending_docker_request
+        if pending is None or pending.token != request.token:
+            return
+        save_after = self._save_after_docker_preflight
+        self._pending_docker_request = None
+        self._save_after_docker_preflight = False
+        self.save_btn.setEnabled(True)
+        self.test_docker_setup_btn.setEnabled(True)
+        self._show_docker_preflight_message(message, success=False)
+        if save_after:
+            self.save_finished.emit(False)
+
     def apply_docker_preflight_result(
         self,
         result: DockerPreflightResult,
@@ -742,6 +898,7 @@ class SettingsPage(QWidget):
         ):
             return
 
+        save_after = self._save_after_docker_preflight
         self._pending_docker_request = None
         self.save_btn.setEnabled(True)
         self.test_docker_setup_btn.setEnabled(True)
@@ -754,6 +911,8 @@ class SettingsPage(QWidget):
                 "Docker setup fields changed during validation. Test the current values again.",
                 success=False,
             )
+            if save_after:
+                self.save_finished.emit(False)
             return
 
         if not result.report.ok:
@@ -765,6 +924,8 @@ class SettingsPage(QWidget):
                 else "Docker setup validation failed."
             )
             self._show_docker_preflight_message(diagnostic, success=False)
+            if save_after:
+                self.save_finished.emit(False)
             return
 
         self._validated_docker_fingerprint = result.draft_fingerprint
@@ -772,7 +933,6 @@ class SettingsPage(QWidget):
             self._format_docker_preflight_success(result),
             success=True,
         )
-        save_after = self._save_after_docker_preflight
         self._save_after_docker_preflight = False
         if save_after:
             self._persist_settings(self._collect_settings())

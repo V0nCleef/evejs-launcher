@@ -18,9 +18,10 @@ from .platform import get_hidden_process_flags
 
 _RESULT_PREFIX = "EVEJS_LAUNCHER_RESULT="
 
-# Exact union of EveJS v0.12.4 characterDeletionRuntime.FLUSH_TABLES plus the
-# account record removed by the launcher. The server's deletion routine owns
-# the cleanup semantics; this allowlist owns backup and rollback boundaries.
+# Exact union of EveJS v0.12.4-v0.12.5 characterDeletionRuntime.FLUSH_TABLES
+# plus the account record removed by the launcher. The server's deletion
+# routine owns the cleanup semantics; this allowlist owns backup and rollback
+# boundaries.
 _MUTATED_TABLES = (
     "accounts",
     "characters",
@@ -430,6 +431,7 @@ def _run_helper(
         game_store / "gamestore.sqlite"
     )
     environment["EVEJS_GAMESTORE_DATA_DIR"] = str(game_store / "data")
+    environment["EVEJS_GAMESTORE_OWNER_ROLE"] = "maintenance"
     payload = json.dumps(
         {
             "scope": request.scope.value,
@@ -464,6 +466,13 @@ def _run_helper(
     result = _parse_helper_result(completed.stdout)
     if completed.returncode != 0 or result.get("ok") is not True:
         message = str(result.get("error") or completed.stderr).strip()
+        shutdown_message = str(result.get("shutdownError") or "").strip()
+        if shutdown_message:
+            message = (
+                f"{message}; GameStore shutdown also failed: {shutdown_message}"
+                if message
+                else f"GameStore shutdown failed: {shutdown_message}"
+            )
         raise CharacterDeletionError(message or "EveJS character deletion failed.")
     return result
 

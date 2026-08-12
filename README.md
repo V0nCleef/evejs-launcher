@@ -297,7 +297,7 @@ Configuration is stored in:
 | Setting | Purpose | Default |
 |---|---|---|
 | EveJS Root | Installation containing the server, mods, tools, and game data | Not set |
-| EVE Client Path | `exefile.exe` used for launched clients | Detected during setup when possible |
+| EVE Client Path | Copied EVE client `tq` folder containing `start.ini` and `bin64/exefile.exe` | Detected during setup when possible |
 | Proxy URL | Local client-traffic proxy | `http://127.0.0.1:26002` |
 | Runtime Backend | Native processes or Docker Compose | Native |
 | Docker Compose File | Absolute primary Compose file | Not set |

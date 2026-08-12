@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import sqlite3
+import subprocess
 
 import pytest
 
@@ -60,6 +62,82 @@ def test_creation_request_validation_is_local_and_strict(tmp_path: Path) -> None
     with pytest.raises(CharacterCreationError, match="Account names"):
         normalize_creation_request(
             CharacterCreationRequest(str(root), "bad/account", "Fixture Pilot", False)
+        )
+
+
+def test_creation_helper_runs_as_offline_maintenance_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, game_store = _store(tmp_path)
+    captured: dict[str, object] = {}
+    monkeypatch.setenv("EVEJS_GAMESTORE_OWNER_ROLE", "reader")
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["env"] = kwargs["env"]
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=(
+                'EVEJS_LAUNCHER_RESULT={"ok":true,"accountId":7,'
+                '"characterId":140000007,"rookieShipVerified":true}\n'
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(creation.subprocess, "run", fake_run)
+
+    result = creation._run_helper(
+        CharacterCreationRequest(
+            str(root),
+            "fixture-account",
+            "Fixture Pilot",
+            False,
+        ),
+        root,
+        game_store,
+    )
+
+    assert result["ok"] is True
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert env["EVEJS_GAMESTORE_OWNER_ROLE"] == "maintenance"
+    assert os.environ["EVEJS_GAMESTORE_OWNER_ROLE"] == "reader"
+
+
+def test_creation_helper_reports_work_and_shutdown_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, game_store = _store(tmp_path)
+
+    def fake_run(command, **_kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout=(
+                'EVEJS_LAUNCHER_RESULT={"ok":false,"error":"WORK_FAILURE",'
+                '"shutdownError":"CLEANUP_FAILURE"}\n'
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(creation.subprocess, "run", fake_run)
+
+    with pytest.raises(
+        CharacterCreationError,
+        match="WORK_FAILURE; GameStore shutdown also failed: CLEANUP_FAILURE",
+    ):
+        creation._run_helper(
+            CharacterCreationRequest(
+                str(root),
+                "fixture-account",
+                "Fixture Pilot",
+                False,
+            ),
+            root,
+            game_store,
         )
 
 
