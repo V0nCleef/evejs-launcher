@@ -1,7 +1,8 @@
 """Interaction tests for the character-group manager."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+import pytest
+from PyQt6.QtCore import QCoreApplication, QEvent, Qt
 from PyQt6.QtTest import QTest
 from PyQt6.QtTest import QSignalSpy
 from PyQt6.QtWidgets import QApplication, QDialog, QMessageBox
@@ -12,6 +13,15 @@ from src.widgets.character_groups_dialog import CharacterGroupsDialog
 from src.pages.characters_page import CharactersPage
 from src.pages.home_page import HomePage
 from src.core.process_tracker import ProcessTracker
+
+
+@pytest.fixture(autouse=True)
+def _flush_deferred_qt_deletes(qapp: QApplication):
+    """Prevent page-owned timers from leaking into later UI regressions."""
+    yield
+    qapp.processEvents()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
 
 
 def _accounts() -> list[Account]:

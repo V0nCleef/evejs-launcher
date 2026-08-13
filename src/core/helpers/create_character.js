@@ -6,6 +6,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const {
+  assertOwnerCheckpoint,
   failureResult,
   requireSuccess,
   runMaintenanceOperation,
@@ -30,16 +31,17 @@ async function main() {
   const result = await runMaintenanceOperation(
     database,
     "launcher-character-creation",
+    () => assertOwnerCheckpoint(database, payload.ownerCheckpoint),
     async () => {
-    const username = String(payload.username || "").trim();
-    const characterName = String(payload.characterName || "")
-      .trim()
-      .replace(/\s+/g, " ");
-    const isGM = payload.isGM === true;
-    const password = String(payload.password || "");
-    if (!username || !characterName) {
-      throw new Error("Account and character names are required.");
-    }
+      const username = String(payload.username || "").trim();
+      const characterName = String(payload.characterName || "")
+        .trim()
+        .replace(/\s+/g, " ");
+      const isGM = payload.isGM === true;
+      const password = String(payload.password || "");
+      if (!username || !characterName) {
+        throw new Error("Account and character names are required.");
+      }
 
     const accountsResult = database.read("accounts", "/");
     const accounts = accountsResult.success && accountsResult.data
@@ -125,13 +127,14 @@ async function main() {
       throw new Error("EveJS did not persist the complete starter character.");
     }
 
-    return {
-      accountId,
-      characterId: Number(characterId),
-      isGM: account.isGM === true,
-      rookieShipVerified,
-    };
-  });
+      return {
+        accountId,
+        characterId: Number(characterId),
+        isGM: account.isGM === true,
+        rookieShipVerified,
+      };
+    },
+  );
   return { ok: true, ...result };
 }
 

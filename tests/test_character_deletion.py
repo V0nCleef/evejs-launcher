@@ -1,6 +1,7 @@
 """Safety, verification, and rollback tests for Native EveJS deletion."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,15 @@ from src.core.character_deletion import (
     delete_character_or_account,
     normalize_deletion_request,
 )
+
+
+@pytest.fixture(autouse=True)
+def _hold_test_maintenance_lease(monkeypatch: pytest.MonkeyPatch) -> None:
+    @contextmanager
+    def hold(_root: Path, _store: Path):
+        yield
+
+    monkeypatch.setattr(deletion, "hold_persistence_maintenance", hold)
 
 
 def _record(account_id: int, name: str, *, character_id: int) -> dict:
@@ -164,6 +174,7 @@ def test_deletion_helper_runs_as_offline_maintenance_owner(
     def fake_run(command, **kwargs):
         captured["command"] = command
         captured["env"] = kwargs["env"]
+        captured["payload"] = json.loads(kwargs["input"])
         return subprocess.CompletedProcess(
             command,
             0,
@@ -181,6 +192,7 @@ def test_deletion_helper_runs_as_offline_maintenance_owner(
         _request(root, scope=CharacterDeletionScope.ACCOUNT),
         root,
         game_store,
+        {"maintenance": 2, "scheduler": 7},
     )
 
     assert result["ok"] is True
@@ -188,6 +200,10 @@ def test_deletion_helper_runs_as_offline_maintenance_owner(
     assert isinstance(env, dict)
     assert env["EVEJS_GAMESTORE_OWNER_ROLE"] == "maintenance"
     assert os.environ["EVEJS_GAMESTORE_OWNER_ROLE"] == "reader"
+    assert captured["payload"]["ownerCheckpoint"] == {
+        "maintenance": 2,
+        "scheduler": 7,
+    }
 
 
 def test_deletion_helper_reports_work_and_shutdown_failures(
@@ -220,13 +236,98 @@ def test_deletion_helper_reports_work_and_shutdown_failures(
         )
 
 
+def test_deletion_helper_marks_owner_conflict_as_pre_operation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, game_store = _store(tmp_path)
+
+    def fake_run(command, **_kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout=(
+                'EVEJS_LAUNCHER_RESULT={"ok":false,"error":"OWNER_CONFLICT",'
+                '"code":"PERSISTENCE_OWNER_CONFLICT","operationStarted":false}\n'
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(deletion.subprocess, "run", fake_run)
+
+    with pytest.raises(CharacterDeletionError, match="OWNER_CONFLICT") as captured:
+        deletion._run_helper(
+            _request(root, scope=CharacterDeletionScope.ACCOUNT),
+            root,
+            game_store,
+        )
+
+    assert captured.value.rollback_required is False
+
+
+def test_pre_operation_helper_failure_does_not_restore_a_backup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _game_store = _store(tmp_path)
+    backup = tmp_path / "backups" / "fixture"
+    restored: list[Path] = []
+    events: list[str] = []
+
+    @contextmanager
+    def hold(_root: Path, _store: Path):
+        events.append("lease-enter")
+        try:
+            yield
+        finally:
+            events.append("lease-exit")
+
+    monkeypatch.setattr(deletion, "hold_persistence_maintenance", hold)
+    monkeypatch.setattr(
+        deletion,
+        "wait_for_persistence_owners",
+        lambda _path: events.append("owners-clear"),
+    )
+    monkeypatch.setattr(
+        deletion,
+        "_create_backup",
+        lambda *_args: events.append("backup") or backup,
+    )
+
+    def fail_before_operation(*_args):
+        events.append("helper")
+        raise CharacterDeletionError("OWNER_CONFLICT", rollback_required=False)
+
+    monkeypatch.setattr(deletion, "_run_helper", fail_before_operation)
+    monkeypatch.setattr(
+        deletion,
+        "_restore_backup",
+        lambda _root, _store, path: restored.append(path),
+    )
+    request = _request(root)
+    request = CharacterDeletionRequest(
+        **{**request.__dict__, "backup_root": tmp_path / "backups"}
+    )
+
+    with pytest.raises(CharacterDeletionError, match="OWNER_CONFLICT"):
+        delete_character_or_account(request)
+
+    assert events == [
+        "owners-clear",
+        "lease-enter",
+        "backup",
+        "lease-exit",
+        "helper",
+    ]
+    assert restored == []
+
 def test_delete_character_retains_account_verifies_and_keeps_backup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root, game_store = _store(tmp_path)
 
-    def fake_helper(request, _root, _game_store):
+    def fake_helper(request, _root, _game_store, _owner_checkpoint):
         _mark_deleted(game_store, (request.character_id,), delete_account=False)
         return {
             "ok": True,
@@ -270,7 +371,7 @@ def test_delete_account_deletes_every_active_character(
 ) -> None:
     root, game_store = _store(tmp_path)
 
-    def fake_helper(_request, _root, _game_store):
+    def fake_helper(_request, _root, _game_store, _owner_checkpoint):
         _mark_deleted(game_store, (140000007, 140000008), delete_account=True)
         return {
             "ok": True,
@@ -297,6 +398,9 @@ def test_failed_deletion_restores_tables_files_manifest_and_portraits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root, game_store = _store(tmp_path)
+    database = game_store / "gamestore.sqlite"
+    ownership_barriers: list[Path] = []
+    lease_events: list[str] = []
     runtime_portrait = game_store / "images" / "Character" / "140000007_128.jpg"
     legacy_portrait = (
         root
@@ -309,7 +413,15 @@ def test_failed_deletion_restores_tables_files_manifest_and_portraits(
         / "140000007_64.png"
     )
 
-    def failing_helper(_request, _root, _game_store):
+    @contextmanager
+    def hold(_root: Path, _store: Path):
+        lease_events.append("enter")
+        try:
+            yield
+        finally:
+            lease_events.append("exit")
+
+    def failing_helper(_request, _root, _game_store, _owner_checkpoint):
         connection = sqlite3.connect(game_store / "gamestore.sqlite")
         try:
             connection.execute('DELETE FROM "accounts"')
@@ -325,6 +437,22 @@ def test_failed_deletion_restores_tables_files_manifest_and_portraits(
         legacy_portrait.unlink()
         raise CharacterDeletionError("simulated helper failure")
 
+    monkeypatch.setattr(
+        deletion,
+        "wait_for_persistence_owners",
+        lambda path: ownership_barriers.append(path),
+    )
+    monkeypatch.setattr(deletion, "hold_persistence_maintenance", hold)
+    monkeypatch.setattr(
+        deletion,
+        "persistence_owner_checkpoint",
+        lambda _path: {"maintenance": 4},
+    )
+    monkeypatch.setattr(
+        deletion,
+        "assert_persistence_owner_checkpoint",
+        lambda *_args, **_kwargs: None,
+    )
     monkeypatch.setattr(deletion, "_run_helper", failing_helper)
     request = _request(root)
     request = CharacterDeletionRequest(
@@ -347,3 +475,72 @@ def test_failed_deletion_restores_tables_files_manifest_and_portraits(
     assert (game_store / "manifest.json").read_text(encoding="utf-8") == "original manifest"
     assert runtime_portrait.read_bytes() == b"runtime portrait"
     assert legacy_portrait.read_bytes() == b"legacy portrait"
+    assert ownership_barriers == [database, database]
+    assert lease_events == ["enter", "exit", "enter", "exit"]
+
+
+def test_stale_deletion_rollback_checkpoint_does_not_restore(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _game_store = _store(tmp_path)
+    backup = tmp_path / "backups" / "fixture"
+    restored: list[Path] = []
+    monkeypatch.setattr(deletion, "persistence_owner_checkpoint", lambda _path: {"maintenance": 4, "world": 9})
+    monkeypatch.setattr(deletion, "_create_backup", lambda *_args: backup)
+    monkeypatch.setattr(
+        deletion,
+        "_run_helper",
+        lambda *_args: (_ for _ in ()).throw(CharacterDeletionError("WORK_FAILURE")),
+    )
+    monkeypatch.setattr(
+        deletion,
+        "assert_persistence_owner_checkpoint",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            deletion.PersistenceMaintenanceError("ownership changed after the maintenance backup")
+        ),
+    )
+    monkeypatch.setattr(
+        deletion,
+        "_restore_backup",
+        lambda _root, _store, path: restored.append(path),
+    )
+    request = _request(root)
+    request = CharacterDeletionRequest(
+        **{**request.__dict__, "backup_root": tmp_path / "backups"}
+    )
+
+    with pytest.raises(CharacterDeletionError, match="automatic rollback also failed"):
+        delete_character_or_account(request)
+
+    assert restored == []
+
+
+def test_legacy_deletion_failure_restores_its_scoped_backup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _game_store = _store(tmp_path)
+    backup = tmp_path / "backups" / "fixture"
+    restored: list[Path] = []
+    monkeypatch.setattr(deletion, "persistence_owner_checkpoint", lambda _path: None)
+    monkeypatch.setattr(deletion, "_create_backup", lambda *_args: backup)
+    monkeypatch.setattr(
+        deletion,
+        "_run_helper",
+        lambda *_args: (_ for _ in ()).throw(CharacterDeletionError("WORK_FAILURE")),
+    )
+    monkeypatch.setattr(
+        deletion,
+        "_restore_backup",
+        lambda _root, _store, path: restored.append(path),
+    )
+    request = _request(root)
+    request = CharacterDeletionRequest(
+        **{**request.__dict__, "backup_root": tmp_path / "backups"}
+    )
+
+    with pytest.raises(CharacterDeletionError, match="WORK_FAILURE"):
+        delete_character_or_account(request)
+
+    assert restored == [backup]

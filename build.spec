@@ -101,6 +101,7 @@ a = Analysis(
         'src.core.server_launcher', 'src.core.process_tracker',
         'src.core.profiles', 'src.core.mod_manager',
         'src.core.character_creation', 'src.core.character_deletion',
+        'src.core.native_maintenance',
         'src.core.overview_patch', 'src.core.overview_state',
         'src.core.groups',
         'src.core.platform', 'src.core.platform_win',

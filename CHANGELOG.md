@@ -2,6 +2,20 @@
 
 ## Changelog
 
+## v1.0.39 — 2026-08-14
+
+### Fixed
+- **Native character provisioning after service shutdown** — character creation and character/account deletion now wait for EveJS v0.12.5's durable world, wallet, and scheduler ownership leases to clear before backing up the GameStore and starting maintenance. This prevents the persistence-owner conflict that could appear immediately after the launcher stopped the game service.
+
+### Safety and compatibility
+- The ownership wait is bounded and fails closed with an actionable message if another process keeps renewing a lease. The launcher never forces ownership or edits lease records.
+- Maintenance acquires without replaying journal entries, rejects pending persistence recovery before character mutation, and validates that no owner epoch changed before an automatic rollback restores data.
+- A helper failure before maintenance begins no longer triggers an unnecessary restore. EveJS v0.12.4 keeps its established offline backup-and-rollback behavior without importing GameStore before the backup.
+
+### Verification
+- **1,145 automated tests passed**, including durable-lease expiry and renewal timing, held maintenance authority, pending-journal rejection, owner-checkpoint rollback fencing, legacy compatibility, Native creation/deletion, and adjacent lifecycle and Docker regressions.
+- Source compilation, helper syntax checks, dependency validation, the Foundation smoke suite, and release-version consistency passed before packaging.
+
 ## v1.0.38 — 2026-08-13
 
 ### Added

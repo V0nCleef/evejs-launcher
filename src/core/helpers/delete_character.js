@@ -6,6 +6,7 @@
 const fs = require("fs");
 const path = require("path");
 const {
+  assertOwnerCheckpoint,
   failureResult,
   runMaintenanceOperation,
 } = require("./game_store_maintenance");
@@ -39,18 +40,19 @@ async function main() {
   const result = await runMaintenanceOperation(
     database,
     "launcher-character-deletion",
+    () => assertOwnerCheckpoint(database, payload.ownerCheckpoint),
     async () => {
-    const scope = String(payload.scope || "");
-    const username = String(payload.username || "");
-    const expectedAccountID = positiveInt(payload.accountId);
-    const expectedCharacterID = positiveInt(payload.characterId);
-    const expectedCharacterName = String(payload.characterName || "");
-    if (!username || !expectedAccountID || !expectedCharacterID) {
-      throw new Error("A verified account and character target are required.");
-    }
-    if (scope !== "character" && scope !== "account") {
-      throw new Error("The deletion scope is invalid.");
-    }
+      const scope = String(payload.scope || "");
+      const username = String(payload.username || "");
+      const expectedAccountID = positiveInt(payload.accountId);
+      const expectedCharacterID = positiveInt(payload.characterId);
+      const expectedCharacterName = String(payload.characterName || "");
+      if (!username || !expectedAccountID || !expectedCharacterID) {
+        throw new Error("A verified account and character target are required.");
+      }
+      if (scope !== "character" && scope !== "account") {
+        throw new Error("The deletion scope is invalid.");
+      }
 
     const accountsResult = database.read("accounts", "/");
     const accounts = accountsResult.success && accountsResult.data
@@ -156,14 +158,15 @@ async function main() {
       }
     }
 
-    return {
-      scope,
-      username,
-      accountId: expectedAccountID,
-      accountDeleted: scope === "account",
-      deletedCharacters: targets,
-    };
-  });
+      return {
+        scope,
+        username,
+        accountId: expectedAccountID,
+        accountDeleted: scope === "account",
+        deletedCharacters: targets,
+      };
+    },
+  );
   emitResult({ ok: true, ...result });
 }
 

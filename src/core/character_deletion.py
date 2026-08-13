@@ -13,6 +13,13 @@ import subprocess
 from typing import Any
 import uuid
 
+from .native_maintenance import (
+    PersistenceMaintenanceError,
+    assert_persistence_owner_checkpoint,
+    hold_persistence_maintenance,
+    persistence_owner_checkpoint,
+    wait_for_persistence_owners,
+)
 from .platform import get_hidden_process_flags
 
 
@@ -51,6 +58,10 @@ _MUTATED_TABLES = (
 
 class CharacterDeletionError(RuntimeError):
     """Raised when an offline deletion cannot be completed or verified safely."""
+
+    def __init__(self, message: str, *, rollback_required: bool = True) -> None:
+        super().__init__(message)
+        self.rollback_required = bool(rollback_required)
 
 
 class CharacterDeletionScope(str, Enum):
@@ -425,6 +436,7 @@ def _run_helper(
     request: CharacterDeletionRequest,
     root: Path,
     game_store: Path,
+    owner_checkpoint: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     environment = os.environ.copy()
     environment["EVEJS_GAMESTORE_SQLITE_PATH"] = str(
@@ -439,6 +451,7 @@ def _run_helper(
             "accountId": request.account_id,
             "characterId": request.character_id,
             "characterName": request.character_name,
+            "ownerCheckpoint": owner_checkpoint,
         }
     )
     try:
@@ -473,7 +486,10 @@ def _run_helper(
                 if message
                 else f"GameStore shutdown failed: {shutdown_message}"
             )
-        raise CharacterDeletionError(message or "EveJS character deletion failed.")
+        raise CharacterDeletionError(
+            message or "EveJS character deletion failed.",
+            rollback_required=result.get("operationStarted") is not False,
+        )
     return result
 
 
@@ -545,24 +561,52 @@ def delete_character_or_account(
     root = Path(normalized.evejs_root)
     game_store = _game_store(root)
     database_path, data_path = _require_store_layout(game_store)
-    targets = _inspect_targets(database_path, normalized)
-    if not targets:
-        raise CharacterDeletionError("No character matched the deletion request.")
     backup_root = Path(normalized.backup_root or _default_backup_root())
-    backup_path = _create_backup(
-        root,
-        game_store,
-        database_path,
-        data_path,
-        backup_root,
-        targets,
-    )
     try:
-        helper_result = _run_helper(normalized, root, game_store)
+        wait_for_persistence_owners(database_path)
+        with hold_persistence_maintenance(root, game_store):
+            targets = _inspect_targets(database_path, normalized)
+            if not targets:
+                raise CharacterDeletionError(
+                    "No character matched the deletion request."
+                )
+            backup_path = _create_backup(
+                root,
+                game_store,
+                database_path,
+                data_path,
+                backup_root,
+                targets,
+            )
+            owner_checkpoint = persistence_owner_checkpoint(database_path)
+    except PersistenceMaintenanceError as exc:
+        raise CharacterDeletionError(
+            f"{exc} No character or account changes were made.",
+            rollback_required=False,
+        ) from exc
+    try:
+        helper_result = _run_helper(
+            normalized,
+            root,
+            game_store,
+            owner_checkpoint,
+        )
         _verify_result(database_path, normalized, targets, helper_result)
     except Exception as exc:
+        if (
+            isinstance(exc, CharacterDeletionError)
+            and not exc.rollback_required
+        ):
+            raise
         try:
-            _restore_backup(root, game_store, backup_path)
+            wait_for_persistence_owners(database_path)
+            with hold_persistence_maintenance(root, game_store):
+                assert_persistence_owner_checkpoint(
+                    database_path,
+                    owner_checkpoint,
+                    maintenance_epoch_advance=2,
+                )
+                _restore_backup(root, game_store, backup_path)
         except Exception as rollback_exc:
             raise CharacterDeletionError(
                 "Deletion failed and automatic rollback also failed. "

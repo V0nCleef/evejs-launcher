@@ -14,6 +14,13 @@ from typing import Any
 import uuid
 
 from .client_autologin import LOCAL_DUMMY_PASSWORD
+from .native_maintenance import (
+    PersistenceMaintenanceError,
+    assert_persistence_owner_checkpoint,
+    hold_persistence_maintenance,
+    persistence_owner_checkpoint,
+    wait_for_persistence_owners,
+)
 from .platform import get_hidden_process_flags
 
 
@@ -36,6 +43,10 @@ _ECMASCRIPT_WHITESPACE_PATTERN = re.compile(
 
 class CharacterCreationError(RuntimeError):
     """Raised when an offline creation operation cannot be completed safely."""
+
+    def __init__(self, message: str, *, rollback_required: bool = True) -> None:
+        super().__init__(message)
+        self.rollback_required = bool(rollback_required)
 
 
 @dataclass(frozen=True)
@@ -267,7 +278,12 @@ def _parse_helper_result(stdout: str) -> dict[str, Any]:
     )
 
 
-def _run_helper(request: CharacterCreationRequest, root: Path, game_store: Path) -> dict:
+def _run_helper(
+    request: CharacterCreationRequest,
+    root: Path,
+    game_store: Path,
+    owner_checkpoint: dict[str, int] | None = None,
+) -> dict:
     env = os.environ.copy()
     env["EVEJS_GAMESTORE_SQLITE_PATH"] = str(game_store / "gamestore.sqlite")
     env["EVEJS_GAMESTORE_DATA_DIR"] = str(game_store / "data")
@@ -278,6 +294,7 @@ def _run_helper(request: CharacterCreationRequest, root: Path, game_store: Path)
             "characterName": request.character_name,
             "isGM": request.is_gm,
             "password": LOCAL_DUMMY_PASSWORD,
+            "ownerCheckpoint": owner_checkpoint,
         }
     )
     try:
@@ -312,7 +329,10 @@ def _run_helper(request: CharacterCreationRequest, root: Path, game_store: Path)
                 if message
                 else f"GameStore shutdown failed: {shutdown_message}"
             )
-        raise CharacterCreationError(message or "EveJS character creation failed.")
+        raise CharacterCreationError(
+            message or "EveJS character creation failed.",
+            rollback_required=result.get("operationStarted") is not False,
+        )
     return result
 
 
@@ -375,22 +395,48 @@ def create_character(request: CharacterCreationRequest) -> CharacterCreationResu
     game_store = _game_store(root)
     database_path, data_path = _require_store_layout(game_store)
     backup_root = Path(normalized.backup_root or _default_backup_root())
-    backup_path = _create_backup(
-        game_store,
-        database_path,
-        data_path,
-        backup_root,
-    )
     try:
-        helper_result = _run_helper(normalized, root, game_store)
+        wait_for_persistence_owners(database_path)
+        with hold_persistence_maintenance(root, game_store):
+            backup_path = _create_backup(
+                game_store,
+                database_path,
+                data_path,
+                backup_root,
+            )
+            owner_checkpoint = persistence_owner_checkpoint(database_path)
+    except PersistenceMaintenanceError as exc:
+        raise CharacterCreationError(
+            f"{exc} No character changes were made.",
+            rollback_required=False,
+        ) from exc
+    try:
+        helper_result = _run_helper(
+            normalized,
+            root,
+            game_store,
+            owner_checkpoint,
+        )
         account_id, character_id = _verify_result(
             database_path,
             normalized,
             helper_result,
         )
     except Exception as exc:
+        if (
+            isinstance(exc, CharacterCreationError)
+            and not exc.rollback_required
+        ):
+            raise
         try:
-            _restore_backup(game_store, backup_path)
+            wait_for_persistence_owners(database_path)
+            with hold_persistence_maintenance(root, game_store):
+                assert_persistence_owner_checkpoint(
+                    database_path,
+                    owner_checkpoint,
+                    maintenance_epoch_advance=2,
+                )
+                _restore_backup(game_store, backup_path)
         except Exception as rollback_exc:
             raise CharacterCreationError(
                 f"Character creation failed and automatic rollback also failed. "

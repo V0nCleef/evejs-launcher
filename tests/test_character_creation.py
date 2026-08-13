@@ -1,6 +1,7 @@
 """Safety and rollback tests for offline Native character creation."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,15 @@ from src.core.character_creation import (
     normalize_character_name,
     normalize_creation_request,
 )
+
+
+@pytest.fixture(autouse=True)
+def _hold_test_maintenance_lease(monkeypatch: pytest.MonkeyPatch) -> None:
+    @contextmanager
+    def hold(_root: Path, _store: Path):
+        yield
+
+    monkeypatch.setattr(creation, "hold_persistence_maintenance", hold)
 
 
 def _store(tmp_path: Path) -> tuple[Path, Path]:
@@ -85,6 +95,7 @@ def test_creation_helper_runs_as_offline_maintenance_owner(
     def fake_run(command, **kwargs):
         captured["command"] = command
         captured["env"] = kwargs["env"]
+        captured["payload"] = json.loads(kwargs["input"])
         return subprocess.CompletedProcess(
             command,
             0,
@@ -106,6 +117,7 @@ def test_creation_helper_runs_as_offline_maintenance_owner(
         ),
         root,
         game_store,
+        {"maintenance": 4, "world": 9},
     )
 
     assert result["ok"] is True
@@ -113,6 +125,10 @@ def test_creation_helper_runs_as_offline_maintenance_owner(
     assert isinstance(env, dict)
     assert env["EVEJS_GAMESTORE_OWNER_ROLE"] == "maintenance"
     assert os.environ["EVEJS_GAMESTORE_OWNER_ROLE"] == "reader"
+    assert captured["payload"]["ownerCheckpoint"] == {
+        "maintenance": 4,
+        "world": 9,
+    }
 
 
 def test_creation_helper_reports_work_and_shutdown_failures(
@@ -150,13 +166,107 @@ def test_creation_helper_reports_work_and_shutdown_failures(
         )
 
 
+def test_creation_helper_marks_owner_conflict_as_pre_operation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, game_store = _store(tmp_path)
+
+    def fake_run(command, **_kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout=(
+                'EVEJS_LAUNCHER_RESULT={"ok":false,"error":"OWNER_CONFLICT",'
+                '"code":"PERSISTENCE_OWNER_CONFLICT","operationStarted":false}\n'
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(creation.subprocess, "run", fake_run)
+
+    with pytest.raises(CharacterCreationError, match="OWNER_CONFLICT") as captured:
+        creation._run_helper(
+            CharacterCreationRequest(
+                str(root),
+                "fixture-account",
+                "Fixture Pilot",
+                False,
+            ),
+            root,
+            game_store,
+        )
+
+    assert captured.value.rollback_required is False
+
+
+def test_pre_operation_helper_failure_does_not_restore_a_backup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _game_store = _store(tmp_path)
+    backup = tmp_path / "backups" / "fixture"
+    restored: list[Path] = []
+    events: list[str] = []
+
+    @contextmanager
+    def hold(_root: Path, _store: Path):
+        events.append("lease-enter")
+        try:
+            yield
+        finally:
+            events.append("lease-exit")
+
+    monkeypatch.setattr(creation, "hold_persistence_maintenance", hold)
+    monkeypatch.setattr(
+        creation,
+        "wait_for_persistence_owners",
+        lambda _path: events.append("owners-clear"),
+    )
+    monkeypatch.setattr(
+        creation,
+        "_create_backup",
+        lambda *_args: events.append("backup") or backup,
+    )
+
+    def fail_before_operation(*_args):
+        events.append("helper")
+        raise CharacterCreationError("OWNER_CONFLICT", rollback_required=False)
+
+    monkeypatch.setattr(creation, "_run_helper", fail_before_operation)
+    monkeypatch.setattr(
+        creation,
+        "_restore_backup",
+        lambda _store, path: restored.append(path),
+    )
+
+    with pytest.raises(CharacterCreationError, match="OWNER_CONFLICT"):
+        create_character(
+            CharacterCreationRequest(
+                str(root),
+                "fixture-account",
+                "Fixture Pilot",
+                False,
+                backup_root=tmp_path / "backups",
+            )
+        )
+
+    assert events == [
+        "owners-clear",
+        "lease-enter",
+        "backup",
+        "lease-exit",
+        "helper",
+    ]
+    assert restored == []
+
 def test_create_character_verifies_persistence_and_retains_backup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root, game_store = _store(tmp_path)
 
-    def fake_helper(request, _root, _game_store):
+    def fake_helper(request, _root, _game_store, _owner_checkpoint):
         con = sqlite3.connect(game_store / "gamestore.sqlite")
         try:
             con.execute(
@@ -216,8 +326,18 @@ def test_failed_creation_restores_tables_data_files_and_manifest(
 ) -> None:
     root, game_store = _store(tmp_path)
     database = game_store / "gamestore.sqlite"
+    ownership_barriers: list[Path] = []
+    lease_events: list[str] = []
 
-    def failing_helper(_request, _root, _game_store):
+    @contextmanager
+    def hold(_root: Path, _store: Path):
+        lease_events.append("enter")
+        try:
+            yield
+        finally:
+            lease_events.append("exit")
+
+    def failing_helper(_request, _root, _game_store, _owner_checkpoint):
         con = sqlite3.connect(database)
         try:
             con.execute('DELETE FROM "accounts"')
@@ -234,6 +354,22 @@ def test_failed_creation_restores_tables_data_files_and_manifest(
         (game_store / "manifest.json").write_text("partial", encoding="utf-8")
         raise CharacterCreationError("simulated helper failure")
 
+    monkeypatch.setattr(
+        creation,
+        "wait_for_persistence_owners",
+        lambda path: ownership_barriers.append(path),
+    )
+    monkeypatch.setattr(creation, "hold_persistence_maintenance", hold)
+    monkeypatch.setattr(
+        creation,
+        "persistence_owner_checkpoint",
+        lambda _path: {"maintenance": 4},
+    )
+    monkeypatch.setattr(
+        creation,
+        "assert_persistence_owner_checkpoint",
+        lambda *_args, **_kwargs: None,
+    )
     monkeypatch.setattr(creation, "_run_helper", failing_helper)
     with pytest.raises(CharacterCreationError, match="simulated helper failure"):
         create_character(
@@ -263,3 +399,72 @@ def test_failed_creation_restores_tables_data_files_and_manifest(
         )
     )["value"] == "original"
     assert (game_store / "manifest.json").read_text(encoding="utf-8") == "original manifest"
+    assert ownership_barriers == [database, database]
+    assert lease_events == ["enter", "exit", "enter", "exit"]
+
+
+def test_stale_rollback_checkpoint_retains_backup_without_restoring(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _game_store = _store(tmp_path)
+    backup = tmp_path / "backups" / "fixture"
+    restored: list[Path] = []
+    monkeypatch.setattr(creation, "persistence_owner_checkpoint", lambda _path: {"maintenance": 4, "world": 9})
+    monkeypatch.setattr(creation, "_create_backup", lambda *_args: backup)
+    monkeypatch.setattr(
+        creation,
+        "_run_helper",
+        lambda *_args: (_ for _ in ()).throw(CharacterCreationError("WORK_FAILURE")),
+    )
+    monkeypatch.setattr(
+        creation,
+        "assert_persistence_owner_checkpoint",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            creation.PersistenceMaintenanceError("ownership changed after the maintenance backup")
+        ),
+    )
+    monkeypatch.setattr(creation, "_restore_backup", lambda _store, path: restored.append(path))
+
+    with pytest.raises(CharacterCreationError, match="automatic rollback also failed"):
+        create_character(
+            CharacterCreationRequest(
+                str(root),
+                "fixture-account",
+                "Fixture Pilot",
+                False,
+                backup_root=tmp_path / "backups",
+            )
+        )
+
+    assert restored == []
+
+
+def test_legacy_creation_failure_restores_its_scoped_backup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _game_store = _store(tmp_path)
+    backup = tmp_path / "backups" / "fixture"
+    restored: list[Path] = []
+    monkeypatch.setattr(creation, "persistence_owner_checkpoint", lambda _path: None)
+    monkeypatch.setattr(creation, "_create_backup", lambda *_args: backup)
+    monkeypatch.setattr(
+        creation,
+        "_run_helper",
+        lambda *_args: (_ for _ in ()).throw(CharacterCreationError("WORK_FAILURE")),
+    )
+    monkeypatch.setattr(creation, "_restore_backup", lambda _store, path: restored.append(path))
+
+    with pytest.raises(CharacterCreationError, match="WORK_FAILURE"):
+        create_character(
+            CharacterCreationRequest(
+                str(root),
+                "fixture-account",
+                "Fixture Pilot",
+                False,
+                backup_root=tmp_path / "backups",
+            )
+        )
+
+    assert restored == [backup]

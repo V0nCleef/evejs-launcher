@@ -4,13 +4,22 @@ from __future__ import annotations
 from copy import deepcopy
 
 import pytest
-from PyQt6.QtCore import QThread, QTimer
+from PyQt6.QtCore import QCoreApplication, QEvent, QThread, QTimer
 from PyQt6.QtTest import QSignalSpy
 from PyQt6.QtWidgets import QMainWindow, QMessageBox
 
 from src import config
 from src import app as app_module
 from src.app import MainWindow
+
+
+@pytest.fixture(autouse=True)
+def _flush_deferred_qt_deletes(qapp):
+    """Release scheduled windows before the real-QThread lifecycle tests."""
+    yield
+    qapp.processEvents()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
 
 
 @pytest.fixture

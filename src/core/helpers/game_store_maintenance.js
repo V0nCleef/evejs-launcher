@@ -1,5 +1,7 @@
 "use strict";
 
+const path = require("path");
+
 // EveJS v0.12.5 makes unlabelled GameStore imports passive readers. Launcher
 // helpers are allowed to write only after the UI has proved every service and
 // client offline, so declare the explicit offline-writer role before any EveJS
@@ -92,7 +94,14 @@ async function shutdownDatabase(database, reason) {
   // server that the launcher may restart immediately afterward.
   if (typeof database.shutdown === "function") {
     const result = await database.shutdown(reason);
-    if (!result || result.success !== true) {
+    if (
+      !result ||
+      result.success !== true ||
+      (
+        typeof database.acquirePersistenceOwnerLease === "function" &&
+        result.released !== true
+      )
+    ) {
       const error = resultError(result, "GameStore maintenance shutdown failed");
       error.code =
         (result && result.code) || "GAMESTORE_SHUTDOWN_FAILED";
@@ -107,19 +116,128 @@ async function shutdownDatabase(database, reason) {
   return shutdownLegacyDatabase(database);
 }
 
-function acquireMaintenance(database) {
+function acquireMaintenance(database, options = {}) {
   if (typeof database.acquirePersistenceOwnerLease === "function") {
-    return database.acquirePersistenceOwnerLease({ recover: true });
+    return database.acquirePersistenceOwnerLease({
+      recover: options.recover === true,
+    });
   }
   return null;
 }
 
-async function runMaintenanceOperation(database, reason, operation) {
+function assertOwnerCheckpoint(database, checkpoint) {
+  const ownerLeaseSupported =
+    typeof database.acquirePersistenceOwnerLease === "function";
+  if (checkpoint === null || checkpoint === undefined) {
+    if (!ownerLeaseSupported) return;
+    const error = new Error(
+      "A maintenance owner checkpoint is required for this EveJS store.",
+    );
+    error.code = "PERSISTENCE_OWNER_CHECKPOINT_REQUIRED";
+    error.operationStarted = false;
+    throw error;
+  }
+  if (!ownerLeaseSupported) {
+    const error = new Error(
+      "The maintenance owner checkpoint does not match this EveJS store.",
+    );
+    error.code = "PERSISTENCE_OWNER_CHECKPOINT_INVALID";
+    error.operationStarted = false;
+    throw error;
+  }
+  if (!checkpoint || typeof checkpoint !== "object" || Array.isArray(checkpoint)) {
+    const error = new Error("The maintenance owner checkpoint is invalid.");
+    error.code = "PERSISTENCE_OWNER_CHECKPOINT_INVALID";
+    error.operationStarted = false;
+    throw error;
+  }
+  const expected = Object.fromEntries(
+    Object.entries(checkpoint).map(([role, epoch]) => [role, Number(epoch)]),
+  );
+  if (
+    !Number.isInteger(expected.maintenance) ||
+    expected.maintenance < 1 ||
+    Object.values(expected).some((epoch) => !Number.isInteger(epoch) || epoch < 1)
+  ) {
+    const error = new Error("The maintenance owner checkpoint is invalid.");
+    error.code = "PERSISTENCE_OWNER_CHECKPOINT_INVALID";
+    error.operationStarted = false;
+    throw error;
+  }
+
+  const BetterSqlite3 = require(path.join(
+    process.cwd(),
+    "server",
+    "node_modules",
+    "better-sqlite3",
+  ));
+  const sqlite = new BetterSqlite3(
+    process.env.EVEJS_GAMESTORE_SQLITE_PATH,
+    { readonly: true, fileMustExist: true },
+  );
+  let rows;
+  try {
+    const outbox = sqlite.prepare(
+      "SELECT COUNT(*) AS count FROM _persistence_outbox",
+    ).get();
+    if (!outbox || Number(outbox.count) !== 0) {
+      const error = new Error(
+        "EveJS character data requires persistence recovery first. " +
+          "Start the game service, let it finish loading, stop it cleanly, and try again.",
+      );
+      error.code = "PERSISTENCE_OUTBOX_PENDING";
+      error.operationStarted = false;
+      throw error;
+    }
+    rows = sqlite.prepare(
+      "SELECT owner_role, epoch FROM _persistence_owners ORDER BY owner_role",
+    ).all();
+  } finally {
+    sqlite.close();
+  }
+  const actual = Object.fromEntries(
+    rows.map((row) => [String(row.owner_role), Number(row.epoch)]),
+  );
+  const expectedRoles = Object.keys(expected).sort();
+  const actualRoles = Object.keys(actual).sort();
+  const unchanged =
+    JSON.stringify(expectedRoles) === JSON.stringify(actualRoles) &&
+    expectedRoles.every((role) => (
+      role === "maintenance"
+        ? actual[role] === expected[role] + 1
+        : actual[role] === expected[role]
+    ));
+  if (!unchanged) {
+    const error = new Error(
+      "EveJS persistence ownership changed after the maintenance backup. " +
+        "No character changes were made; try again with the game service stopped.",
+    );
+    error.code = "PERSISTENCE_OWNER_CHECKPOINT_STALE";
+    error.operationStarted = false;
+    throw error;
+  }
+}
+
+async function runMaintenanceOperation(database, reason, prepare, operation) {
   let workError = null;
   let value;
+  let operationStarted = false;
 
   try {
-    acquireMaintenance(database);
+    if (typeof prepare !== "function" || typeof operation !== "function") {
+      const error = new Error(
+        "GameStore maintenance preparation and operation are required.",
+      );
+      error.code = "PERSISTENCE_MAINTENANCE_INTERFACE_INVALID";
+      error.operationStarted = false;
+      throw error;
+    }
+    // Prove exclusivity without replaying the durable outbox. A scoped backup
+    // cannot restore internal journal acknowledgements, so prepare also rejects
+    // a non-empty outbox before application mutation begins.
+    acquireMaintenance(database, { recover: false });
+    await prepare();
+    operationStarted = true;
     value = await operation();
   } catch (error) {
     workError = normalizeError(error, "GameStore maintenance operation failed");
@@ -140,6 +258,9 @@ async function runMaintenanceOperation(database, reason, operation) {
   }
 
   if (workError) {
+    // The lifecycle owns this phase flag. Never let a lower-level error's
+    // stale metadata suppress rollback after application mutation began.
+    workError.operationStarted = operationStarted;
     throw workError;
   }
   return value;
@@ -154,6 +275,12 @@ function failureResult(error) {
     ok: false,
     error: normalized.message,
   };
+  if (normalized.code) {
+    result.code = String(normalized.code);
+  }
+  if (typeof normalized.operationStarted === "boolean") {
+    result.operationStarted = normalized.operationStarted;
+  }
   if (normalized.shutdownError) {
     result.shutdownError = normalizeError(
       normalized.shutdownError,
@@ -164,7 +291,10 @@ function failureResult(error) {
 }
 
 module.exports = {
+  acquireMaintenance,
+  assertOwnerCheckpoint,
   failureResult,
   requireSuccess,
   runMaintenanceOperation,
+  shutdownDatabase,
 };
