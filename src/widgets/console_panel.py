@@ -3,21 +3,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPoint, QSize
-from PyQt6.QtGui import QFont, QFontDatabase, QTextCursor, QMouseEvent
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize
+from PyQt6.QtGui import QFontDatabase, QTextCursor, QMouseEvent
 from PyQt6.QtWidgets import (
     QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
-from src.constants import COLORS
+from src.constants import SEMANTIC_COLORS as S
 
 
 class ConsolePanel(QFrame):
@@ -29,10 +28,10 @@ class ConsolePanel(QFrame):
     """
 
     MAX_LINES = 2000
-    DEFAULT_HEIGHT = 200
+    DEFAULT_HEIGHT = 230
     MIN_AUTO_CLOSE_HEIGHT = 50
     STATUS_BAR_OFFSET = 24
-    HEADER_HEIGHT = 28
+    HEADER_HEIGHT = 38
     MAX_HEIGHT_RATIO = 0.85
 
     closed = pyqtSignal()
@@ -40,7 +39,9 @@ class ConsolePanel(QFrame):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("consolePanel")
+        self.setProperty("deepSignal", True)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAccessibleName("Launcher console")
 
         self._log_path: Path | None = None
         self._streaming: bool = False
@@ -73,29 +74,42 @@ class ConsolePanel(QFrame):
         self._header.mouseReleaseEvent = self._header_mouse_release
 
         header_layout = QHBoxLayout(self._header)
-        header_layout.setContentsMargins(8, 0, 4, 0)
-        header_layout.setSpacing(4)
+        header_layout.setContentsMargins(12, 0, 8, 0)
+        header_layout.setSpacing(8)
 
-        self._title_label = QLabel("Console", self._header)
+        self._activity_label = QLabel("●  LIVE", self._header)
+        self._activity_label.setObjectName("consoleActivity")
+        self._activity_label.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+        )
+        header_layout.addWidget(self._activity_label)
+
+        self._title_label = QLabel("SIGNAL CONSOLE", self._header)
         self._title_label.setObjectName("consoleTitle")
+        self._title_label.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+        )
         header_layout.addWidget(self._title_label)
         header_layout.addStretch()
 
-        self._copy_btn = QPushButton("Copy", self._header)
+        self._copy_btn = QPushButton("COPY", self._header)
         self._copy_btn.setObjectName("consoleCopyBtn")
-        self._copy_btn.setFixedHeight(20)
+        self._copy_btn.setFixedHeight(24)
+        self._copy_btn.setAccessibleName("Copy visible console output")
         self._copy_btn.clicked.connect(self._copy_to_clipboard)
         header_layout.addWidget(self._copy_btn)
 
-        self._notepad_btn = QPushButton("Open in Notepad", self._header)
+        self._notepad_btn = QPushButton("OPEN LOG", self._header)
         self._notepad_btn.setObjectName("consoleNotepadBtn")
-        self._notepad_btn.setFixedHeight(20)
+        self._notepad_btn.setFixedHeight(24)
+        self._notepad_btn.setAccessibleName("Open log file in text editor")
         self._notepad_btn.clicked.connect(self._open_in_notepad)
         header_layout.addWidget(self._notepad_btn)
 
-        self._close_btn = QPushButton("✕", self._header)
+        self._close_btn = QPushButton("×", self._header)
         self._close_btn.setObjectName("consoleCloseBtn")
-        self._close_btn.setFixedSize(20, 20)
+        self._close_btn.setFixedSize(24, 24)
+        self._close_btn.setAccessibleName("Close console")
         self._close_btn.clicked.connect(self.stop)
         header_layout.addWidget(self._close_btn)
 
@@ -108,85 +122,111 @@ class ConsolePanel(QFrame):
         self._log.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self._log.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._log.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._log.setAccessibleName("Console output")
         layout.addWidget(self._log)
 
         self._set_monospace_font(10)
 
     def _apply_style(self) -> None:
-        c = COLORS
         self.setStyleSheet(f"""
             QFrame#consolePanel {{
-                background-color: {c['deep_space']};
-                border: 1px solid {c['steel']};
-                border-top: 2px solid {c['teal_dim']};
+                background-color: rgba(5, 12, 20, 248);
+                border: 1px solid {S['border_bright']};
+                border-top: 2px solid {S['accent']};
             }}
             QFrame#consoleHeader {{
-                background-color: {c['carbon']};
-                border-bottom: 1px solid {c['steel']};
+                background-color: rgba(10, 24, 36, 250);
+                border-bottom: 1px solid {S['border']};
+            }}
+            QLabel#consoleActivity {{
+                color: {S['success']};
+                background: transparent;
+                font-size: 9px;
+                font-weight: 700;
+                letter-spacing: 1px;
             }}
             QLabel#consoleTitle {{
-                color: {c['teal']};
-                font-weight: bold;
-                font-size: 11px;
+                color: {S['text_primary']};
+                background: transparent;
+                font-weight: 700;
+                font-size: 10px;
+                letter-spacing: 1px;
             }}
             QPushButton#consoleCopyBtn,
             QPushButton#consoleNotepadBtn {{
-                background-color: {c['steel']};
-                color: {c['white']};
-                border: 1px solid {c['teal_dim']};
-                border-radius: 3px;
-                padding: 0 6px;
-                font-size: 10px;
+                background-color: rgba(16, 39, 54, 230);
+                color: {S['text_secondary']};
+                border: 1px solid {S['border_bright']};
+                border-radius: 4px;
+                padding: 0 9px;
+                font-size: 9px;
+                font-weight: 700;
+                letter-spacing: 1px;
             }}
             QPushButton#consoleCopyBtn:hover,
             QPushButton#consoleNotepadBtn:hover {{
-                background-color: {c['teal_dim']};
+                background-color: {S['accent_soft']};
+                color: {S['text_primary']};
+                border-color: {S['accent']};
+            }}
+            QPushButton#consoleCopyBtn:focus,
+            QPushButton#consoleNotepadBtn:focus {{
+                border: 2px solid {S['text_primary']};
+            }}
+            QPushButton#consoleNotepadBtn:disabled {{
+                color: {S['text_muted']};
+                background-color: {S['surface']};
+                border-color: {S['border']};
             }}
             QPushButton#consoleCloseBtn {{
                 background-color: transparent;
-                color: {c['grey']};
-                border: none;
-                font-size: 12px;
-                font-weight: bold;
+                color: {S['text_secondary']};
+                border: 1px solid transparent;
+                border-radius: 4px;
+                font-size: 15px;
+                font-weight: 700;
             }}
             QPushButton#consoleCloseBtn:hover {{
-                color: {c['red']};
+                color: {S['danger']};
+                border-color: {S['danger']};
             }}
             QTextEdit#consoleLog {{
-                background-color: {c['void_black']};
-                color: {c['white']};
+                background-color: rgba(2, 7, 12, 252);
+                color: #C7E5E8;
                 border: none;
-                selection-background-color: {c['teal_dim']};
+                padding: 10px 12px;
+                selection-background-color: {S['accent_soft']};
+                selection-color: {S['text_primary']};
             }}
             QScrollBar:vertical {{
-                background-color: {c['carbon']};
-                width: 10px;
+                background-color: {S['background']};
+                width: 9px;
                 margin: 0;
             }}
             QScrollBar::handle:vertical {{
-                background-color: {c['steel']};
+                background-color: {S['border_bright']};
                 min-height: 20px;
                 border-radius: 4px;
             }}
             QScrollBar::handle:vertical:hover {{
-                background-color: {c['teal_dim']};
+                background-color: {S['accent_dim']};
             }}
             QScrollBar::add-line:vertical,
             QScrollBar::sub-line:vertical {{
                 height: 0;
             }}
             QScrollBar:horizontal {{
-                background-color: {c['carbon']};
-                height: 10px;
+                background-color: {S['background']};
+                height: 9px;
                 margin: 0;
             }}
             QScrollBar::handle:horizontal {{
-                background-color: {c['steel']};
+                background-color: {S['border_bright']};
                 min-width: 20px;
                 border-radius: 4px;
             }}
             QScrollBar::handle:horizontal:hover {{
-                background-color: {c['teal_dim']};
+                background-color: {S['accent_dim']};
             }}
             QScrollBar::add-line:horizontal,
             QScrollBar::sub-line:horizontal {{
@@ -266,6 +306,8 @@ class ConsolePanel(QFrame):
         """Start tailing *log_path* and show the panel."""
         self.stop_tailing()
         self._streaming = False
+        self._activity_label.setText("●  LIVE")
+        self._activity_label.setStyleSheet("")
         self._notepad_btn.setEnabled(True)
         self._log_path = Path(log_path)
         self._log.clear()
@@ -305,6 +347,8 @@ class ConsolePanel(QFrame):
         """Present a non-file stream while preserving the existing ring buffer."""
         self.stop_tailing()
         self._streaming = True
+        self._activity_label.setText("●  LIVE")
+        self._activity_label.setStyleSheet("")
         self._log_path = None
         self._log.clear()
         self._log_offset = 0
@@ -323,6 +367,12 @@ class ConsolePanel(QFrame):
         """Keep completed stream output visible, optionally with a safe notice."""
         if self._streaming and message:
             self._append_lines([message])
+        if self._streaming:
+            self._activity_label.setText("●  COMPLETE")
+            self._activity_label.setStyleSheet(
+                f"color: {S['text_muted']}; background: transparent; "
+                "font-size: 9px; font-weight: 700; letter-spacing: 1px;"
+            )
 
     def clear_content(self) -> None:
         """Clear the log text area without affecting tailing state."""

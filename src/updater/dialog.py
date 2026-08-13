@@ -1,14 +1,14 @@
-"""Dark-themed modal dialog that presents an available update to the user.
+"""Deep Signal dialog that presents an available launcher update.
 
-Displays the current version, new version, a scrollable markdown changelog,
-release date, and three action buttons: Download & Install, Remind Me Later,
-and Skip This Version.
+The updater remains deliberately small and modal, but shares the command-deck
+hierarchy used by the rest of the launcher: a release uplink header, a clear
+current-to-available version route, glass release notes, and explicit actions.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QPixmap
@@ -18,16 +18,14 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPushButton,
     QSizePolicy,
-    QSpacerItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
-from src.constants import COLORS
-
-if TYPE_CHECKING:
-    pass
+from src.constants import SEMANTIC_COLORS as S
+from src.theme import load_fonts
+from src.widgets.deep_signal_background import operations_scene_path
 
 
 class UpdateDialog(QDialog):
@@ -42,12 +40,16 @@ class UpdateDialog(QDialog):
     changelog:
         Markdown body from the GitHub release.
     download_url:
-        Direct URL of the ``.exe`` asset to download.
+        Direct URL of the launcher release asset to download.
     published_at:
         ISO-8601 timestamp string from GitHub.
     parent:
         Optional parent widget.
     """
+
+    _DESIGN_WIDTH = 680
+    _DESIGN_HEIGHT = 650
+    _SCREEN_MARGIN = 32
 
     def __init__(
         self,
@@ -68,6 +70,7 @@ class UpdateDialog(QDialog):
 
         self._build_ui()
         self._apply_styles()
+        self._fit_to_available_screen()
 
     # ------------------------------------------------------------------
     # Public properties
@@ -85,7 +88,13 @@ class UpdateDialog(QDialog):
     def _build_ui(self) -> None:
         """Assemble the dialog layout top-to-bottom."""
         self.setWindowTitle("Update Available")
-        self.setFixedSize(520, 520)
+        self.setObjectName("updateAvailableDialog")
+        self.setProperty("deepSignal", True)
+        # Leave native-font headroom for the release-uplink heading and badge.
+        # Height is capped against the active screen after styling so the
+        # scrollable notes yield space before the bottom action rail can move
+        # off-screen on scaled or remote desktops.
+        self.setFixedSize(self._DESIGN_WIDTH, self._DESIGN_HEIGHT)
         self.setWindowFlags(
             Qt.WindowType.Dialog
             | Qt.WindowType.FramelessWindowHint
@@ -93,100 +102,120 @@ class UpdateDialog(QDialog):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         self.setModal(True)
+        self.setAccessibleName("Launcher update available")
 
         # ── Root layout ───────────────────────────────────────────────
         root = QVBoxLayout(self)
-        root.setContentsMargins(28, 24, 28, 20)
+        root.setContentsMargins(26, 24, 26, 22)
         root.setSpacing(0)
 
         # ── Header row: logo + title ──────────────────────────────────
         header_row = QHBoxLayout()
         header_row.setSpacing(12)
 
-        # Logo placeholder — attempt to load the app icon; fall back to
-        # a styled unicode label if the icon file is missing.
-        logo_label = QLabel()
-        logo_path = (
-            __import__("pathlib").Path(__file__).resolve().parent.parent.parent
-            / "assets"
-            / "icon.png"
-        )
+        logo_label = QLabel(self)
+        logo_label.setObjectName("updateLogo")
+        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo_path = Path(__file__).resolve().parent.parent.parent / "assets" / "logo.png"
         if logo_path.exists():
             pixmap = QPixmap(str(logo_path)).scaled(
-                40, 40, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+                36,
+                36,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
             )
             logo_label.setPixmap(pixmap)
         else:
-            logo_label.setText("\u26a1")  # ⚡ lightning bolt
-            logo_label.setFont(QFont("Segoe UI", 22))
-            logo_label.setStyleSheet(f"color: {COLORS['teal']};")
-        logo_label.setFixedSize(44, 44)
+            logo_label.setText("\u25c9")
+            logo_label.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
+        logo_label.setFixedSize(42, 42)
         header_row.addWidget(logo_label)
 
-        title_label = QLabel("Update Available")
-        title_label.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
-        title_label.setStyleSheet(f"color: {COLORS['white']};")
-        header_row.addWidget(title_label)
+        heading = QVBoxLayout()
+        heading.setSpacing(1)
+        eyebrow = QLabel("DEEP SIGNAL // RELEASE UPLINK", self)
+        eyebrow.setObjectName("dialogEyebrow")
+        heading.addWidget(eyebrow)
+        title_label = QLabel("Update Available", self)
+        title_label.setObjectName("dialogTitle")
+        heading.addWidget(title_label)
+        header_row.addLayout(heading)
         header_row.addStretch()
 
+        channel = QLabel("STABLE CHANNEL", self)
+        channel.setObjectName("channelBadge")
+        channel.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        channel.setAccessibleName("Stable update channel")
+        header_row.addWidget(channel, alignment=Qt.AlignmentFlag.AlignTop)
+
         root.addLayout(header_row)
-        root.addSpacing(18)
+        root.addSpacing(16)
 
-        # ── Version row: current → new ────────────────────────────────
-        version_row = QHBoxLayout()
-        version_row.setSpacing(10)
-        version_row.setContentsMargins(0, 0, 0, 0)
+        self.hero_banner = QLabel(self)
+        self.hero_banner.setObjectName("releaseHero")
+        self.hero_banner.setFixedHeight(118)
+        self.hero_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._set_hero_scene()
 
-        cur_ver = QLabel(self._current_version)
-        cur_ver.setFont(QFont("Consolas", 13))
-        cur_ver.setStyleSheet(
-            f"color: {COLORS['grey']}; "
-            f"background: {COLORS['card']}; "
-            "border-radius: 6px; "
-            "padding: 6px 14px;"
-        )
-        version_row.addWidget(cur_ver)
+        version_row = QHBoxLayout(self.hero_banner)
+        version_row.setSpacing(14)
+        version_row.setContentsMargins(18, 15, 18, 15)
 
-        arrow = QLabel("\u2192")  # →
-        arrow.setFont(QFont("Segoe UI", 14))
-        arrow.setStyleSheet(f"color: {COLORS['teal']};")
+        current_block = QVBoxLayout()
+        current_block.setSpacing(3)
+        current_caption = QLabel("CURRENT BUILD", self.hero_banner)
+        current_caption.setObjectName("versionCaption")
+        current_block.addWidget(current_caption)
+        self.current_version_label = QLabel(self._current_version, self.hero_banner)
+        self.current_version_label.setObjectName("currentVersion")
+        self.current_version_label.setAccessibleName("Current launcher version")
+        current_block.addWidget(self.current_version_label)
+        current_block.addStretch()
+        version_row.addLayout(current_block, stretch=1)
+
+        arrow = QLabel("\u2192", self.hero_banner)
+        arrow.setObjectName("versionArrow")
+        arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
         version_row.addWidget(arrow)
 
-        new_ver = QLabel(self._new_version.lstrip("vV"))
-        new_ver.setFont(QFont("Consolas", 13, QFont.Weight.Bold))
-        new_ver.setStyleSheet(
-            f"color: {COLORS['green']}; "
-            f"background: {COLORS['card']}; "
-            "border-radius: 6px; "
-            "padding: 6px 14px;"
+        available_block = QVBoxLayout()
+        available_block.setSpacing(3)
+        available_caption = QLabel("AVAILABLE BUILD", self.hero_banner)
+        available_caption.setObjectName("versionCaption")
+        available_block.addWidget(available_caption)
+        self.new_version_label = QLabel(
+            self._new_version.lstrip("vV"), self.hero_banner
         )
-        version_row.addWidget(new_ver)
-        version_row.addStretch()
+        self.new_version_label.setObjectName("availableVersion")
+        self.new_version_label.setAccessibleName("Available launcher version")
+        available_block.addWidget(self.new_version_label)
+        available_block.addStretch()
+        version_row.addLayout(available_block, stretch=1)
 
-        root.addLayout(version_row)
+        root.addWidget(self.hero_banner)
         root.addSpacing(14)
 
-        # ── Release date ──────────────────────────────────────────────
-        date_text = self._format_date(self._published_at)
-        date_label = QLabel(f"Released: {date_text}")
-        date_label.setFont(QFont("Segoe UI", 10))
-        date_label.setStyleSheet(f"color: {COLORS['grey']};")
-        root.addWidget(date_label)
-        root.addSpacing(14)
-
-        # ── Changelog header ──────────────────────────────────────────
+        # ── Release notes ─────────────────────────────────────────────
+        notes_header = QHBoxLayout()
+        notes_header.setSpacing(10)
         changelog_header = QLabel(
             f"What's new in v{self._new_version.lstrip('vV')}"
         )
-        changelog_header.setFont(QFont("Segoe UI", 12, QFont.Weight.DemiBold))
-        changelog_header.setStyleSheet(f"color: {COLORS['white']};")
-        root.addWidget(changelog_header)
+        changelog_header.setObjectName("releaseNotesTitle")
+        notes_header.addWidget(changelog_header)
+        notes_header.addStretch()
+        date_label = QLabel(f"Released: {self._format_date(self._published_at)}")
+        date_label.setObjectName("releaseDate")
+        notes_header.addWidget(date_label)
+        root.addLayout(notes_header)
         root.addSpacing(8)
 
         # ── Changelog body ────────────────────────────────────────────
-        self._changelog_view = QTextEdit()
+        self._changelog_view = QTextEdit(self)
+        self._changelog_view.setObjectName("releaseNotes")
         self._changelog_view.setReadOnly(True)
         self._changelog_view.setMarkdown(self._changelog or "*No changelog provided.*")
+        self._changelog_view.setAccessibleName("Update release notes")
         self._changelog_view.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
@@ -199,6 +228,8 @@ class UpdateDialog(QDialog):
 
         # Skip This Version (muted / ghost)
         self._skip_btn = QPushButton("Skip This Version")
+        self._skip_btn.setObjectName("skipUpdateAction")
+        self._skip_btn.setProperty("class", "ghost")
         self._skip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._skip_btn.clicked.connect(self._on_skip)
         button_row.addWidget(self._skip_btn)
@@ -207,106 +238,238 @@ class UpdateDialog(QDialog):
 
         # Remind Me Later (ghost)
         self._remind_btn = QPushButton("Remind Me Later")
+        self._remind_btn.setObjectName("remindUpdateAction")
+        self._remind_btn.setProperty("class", "secondary")
         self._remind_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._remind_btn.clicked.connect(self.reject)
         button_row.addWidget(self._remind_btn)
 
         # Download & Install (primary / teal)
         self._install_btn = QPushButton("Download && Install")
+        self._install_btn.setObjectName("installUpdateAction")
+        self._install_btn.setProperty("class", "primary")
         self._install_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._install_btn.setDefault(True)
         self._install_btn.clicked.connect(self.accept)
         button_row.addWidget(self._install_btn)
 
         root.addLayout(button_row)
+
+    def _set_hero_scene(self) -> None:
+        """Use the approved Deep Signal orbital scene with a safe fallback."""
+        source = QPixmap(str(operations_scene_path(__file__)))
+        if source.isNull():
+            source = QPixmap(
+                str(
+                    Path(__file__).resolve().parent.parent.parent
+                    / "assets"
+                    / "hero"
+                    / "hero_nebula.png"
+                )
+            )
+        if source.isNull():
+            return
+
+        target_width = self.width() - 52
+        target_height = self.hero_banner.height()
+        scaled = source.scaled(
+            target_width,
+            target_height,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        crop_x = max(0, int((scaled.width() - target_width) * 0.68))
+        crop_y = max(0, (scaled.height() - target_height) // 2)
+        self.hero_banner.setPixmap(
+            scaled.copy(crop_x, crop_y, target_width, target_height)
+        )
 
     # ------------------------------------------------------------------
     # Style helpers
     # ------------------------------------------------------------------
 
     def _apply_styles(self) -> None:
-        """Apply the dark-themed stylesheet to the dialog and its children."""
+        """Apply self-contained Deep Signal styling for normal and handoff apps."""
+        try:
+            fonts = load_fonts()
+        except Exception:
+            fonts = {"header": "Segoe UI", "body": "Segoe UI", "mono": "Consolas"}
+        header = fonts["header"]
+        body = fonts["body"]
+        mono = fonts["mono"]
+
         self.setStyleSheet(
             f"""
-            UpdateDialog {{
-                background-color: {COLORS['panel']};
-                border: 1px solid {COLORS['steel']};
-                border-radius: 12px;
+            QDialog#updateAvailableDialog {{
+                background-color: {S['background']};
+                border: 1px solid {S['border_bright']};
+                border-radius: 13px;
             }}
-            """
-        )
-
-        self._changelog_view.setStyleSheet(
-            f"""
-            QTextEdit {{
-                background-color: {COLORS['card']};
-                color: {COLORS['white']};
-                border: 1px solid {COLORS['steel']};
-                border-radius: 8px;
-                padding: 10px;
-                font-size: 13px;
-                selection-background-color: {COLORS['teal_dim']};
+            QDialog#updateAvailableDialog QLabel {{
+                background: transparent;
+                border: none;
+                color: {S['text_secondary']};
+                font-family: '{body}';
             }}
+            QLabel#updateLogo {{
+                background-color: rgba(0, 200, 224, 18);
+                border: 1px solid {S['accent_dim']};
+                border-radius: 9px;
+                color: {S['accent']};
+            }}
+            QLabel#dialogEyebrow {{
+                color: {S['accent']};
+                font-family: '{header}';
+                font-size: 9px;
+                font-weight: 700;
+                letter-spacing: 2px;
+            }}
+            QLabel#dialogTitle {{
+                color: {S['text_primary']};
+                font-family: '{header}';
+                font-size: 23px;
+                font-weight: 700;
+                letter-spacing: 1px;
+            }}
+            QLabel#channelBadge {{
+                color: {S['success']};
+                background-color: rgba(79, 224, 127, 20);
+                border: 1px solid rgba(79, 224, 127, 112);
+                border-radius: 5px;
+                padding: 5px 9px;
+                font-family: '{header}';
+                font-size: 8px;
+                font-weight: 700;
+                letter-spacing: 1px;
+            }}
+            QLabel#releaseHero {{
+                background-color: rgba(3, 10, 17, 238);
+                border: 1px solid {S['border_bright']};
+                border-radius: 9px;
+            }}
+            QLabel#versionCaption {{
+                color: {S['text_muted']};
+                font-family: '{header}';
+                font-size: 8px;
+                font-weight: 700;
+                letter-spacing: 1.5px;
+            }}
+            QLabel#currentVersion, QLabel#availableVersion {{
+                background-color: rgba(3, 10, 17, 222);
+                border: 1px solid {S['border']};
+                border-radius: 5px;
+                padding: 6px 10px;
+                font-family: '{mono}';
+                font-size: 14px;
+                font-weight: 700;
+            }}
+            QLabel#currentVersion {{ color: {S['text_secondary']}; }}
+            QLabel#availableVersion {{
+                color: {S['success']};
+                border-color: rgba(79, 224, 127, 115);
+            }}
+            QLabel#versionArrow {{
+                color: {S['accent']};
+                font-family: '{header}';
+                font-size: 24px;
+                font-weight: 500;
+            }}
+            QLabel#releaseNotesTitle {{
+                color: {S['text_primary']};
+                font-family: '{header}';
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+            }}
+            QLabel#releaseDate {{
+                color: {S['text_muted']};
+                font-size: 10px;
+            }}
+            QTextEdit#releaseNotes {{
+                background-color: rgba(8, 20, 31, 232);
+                color: {S['text_secondary']};
+                border: 1px solid {S['border']};
+                border-radius: 9px;
+                padding: 11px;
+                font-family: '{body}';
+                font-size: 12px;
+                selection-background-color: {S['accent_soft']};
+            }}
+            QTextEdit#releaseNotes:focus {{ border-color: {S['accent_dim']}; }}
             QScrollBar:vertical {{
-                background: {COLORS['card']};
+                background: rgba(3, 10, 17, 190);
                 width: 8px;
-                border-radius: 4px;
+                margin: 2px;
+                border: none;
             }}
             QScrollBar::handle:vertical {{
-                background: {COLORS['steel']};
-                border-radius: 4px;
+                background: {S['border_bright']};
+                border-radius: 3px;
                 min-height: 30px;
             }}
-            QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical {{
-                height: 0px;
-            }}
-            """
-        )
-
-        # ── Primary button (Download & Install) ───────────────────────
-        self._install_btn.setStyleSheet(
-            f"""
+            QScrollBar::handle:vertical:hover {{ background: {S['accent_dim']}; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
             QPushButton {{
-                background-color: {COLORS['teal']};
-                color: {COLORS['void_black']};
-                border: none;
-                border-radius: 8px;
-                padding: 8px 20px;
-                font-size: 13px;
-                font-weight: bold;
+                min-height: 36px;
+                padding: 0 15px;
+                border-radius: 5px;
+                font-family: '{header}';
+                font-size: 9px;
+                font-weight: 700;
+                letter-spacing: 0.7px;
             }}
-            QPushButton:hover {{
-                background-color: {COLORS['teal_dim']};
+            QPushButton[class="primary"] {{
+                background-color: {S['accent']};
+                color: {S['background']};
+                border: 1px solid {S['accent']};
             }}
-            QPushButton:pressed {{
-                background-color: {COLORS['teal_dim']};
+            QPushButton[class="primary"]:hover {{
+                background-color: {S['text_primary']};
+                border-color: {S['text_primary']};
             }}
-            """
-        )
-
-        # ── Ghost / muted buttons ─────────────────────────────────────
-        ghost_style = (
-            f"""
-            QPushButton {{
+            QPushButton[class="secondary"] {{
+                background-color: {S['accent_soft']};
+                color: {S['text_primary']};
+                border: 1px solid {S['accent_dim']};
+            }}
+            QPushButton[class="secondary"]:hover {{
+                background-color: {S['accent_dim']};
+                border-color: {S['accent']};
+            }}
+            QPushButton[class="ghost"] {{
                 background: transparent;
-                color: {COLORS['grey']};
-                border: 1px solid {COLORS['steel']};
-                border-radius: 8px;
-                padding: 8px 16px;
-                font-size: 12px;
+                color: {S['text_muted']};
+                border: 1px solid {S['border']};
             }}
-            QPushButton:hover {{
-                color: {COLORS['white']};
-                border-color: {COLORS['grey']};
+            QPushButton[class="ghost"]:hover {{
+                background-color: {S['surface_hover']};
+                color: {S['text_primary']};
+                border-color: {S['border_bright']};
             }}
-            QPushButton:pressed {{
-                color: {COLORS['white']};
-                background-color: {COLORS['steel']};
-            }}
+            QPushButton:focus {{ border: 2px solid {S['text_primary']}; }}
+            QPushButton:pressed {{ padding-top: 1px; }}
             """
         )
-        self._remind_btn.setStyleSheet(ghost_style)
-        self._skip_btn.setStyleSheet(ghost_style)
+
+    def _fit_to_available_screen(self, available_height: int | None = None) -> None:
+        """Keep the frameless action rail inside the active screen.
+
+        ``available_height`` is injectable for deterministic geometry tests;
+        production uses the screen selected by Qt for this dialog.
+        """
+        if available_height is None:
+            screen = self.screen()
+            if screen is None:
+                return
+            available_height = screen.availableGeometry().height()
+
+        usable_height = max(1, int(available_height) - self._SCREEN_MARGIN)
+        minimum_layout_height = self.minimumSizeHint().height()
+        target_height = min(
+            self._DESIGN_HEIGHT,
+            max(minimum_layout_height, usable_height),
+        )
+        self.setFixedSize(self._DESIGN_WIDTH, target_height)
 
     # ------------------------------------------------------------------
     # Slots

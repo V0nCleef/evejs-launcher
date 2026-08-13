@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from src.core.runtime.docker_cli import DockerCommandResult
+from src.core.runtime.data import docker_project_identity
 from src.core.runtime.docker_compose import ComposeTarget, ContainerRecord
 from src.core.runtime.endpoints import Endpoint, RuntimeEndpoints
 from src.core.service_status import DockerControlPolicy, ServiceState
@@ -103,6 +104,48 @@ def test_policy_and_arbitrary_actions_reject_before_mutation(tmp_path: Path) -> 
     controller = ManagedComposeController(target, inspector, runner, policy=DockerControlPolicy.MANAGED)
     with pytest.raises(ValueError):
         controller.execute("up database")  # type: ignore[arg-type]
+    assert runner.calls == []
+
+
+def test_expected_effective_target_drift_rejects_before_lifecycle_mutation(
+    tmp_path: Path,
+) -> None:
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("name: actual\nservices: {}\n", encoding="utf-8")
+    target = ComposeTarget(compose, tmp_path, "fixture")
+    runner = FakeRunner()
+    inspector = FakeInspector({
+        "server": record("server", ServiceState.OFFLINE),
+        "market": record("market", ServiceState.OFFLINE),
+    })
+
+    def preflight(_selected: ComposeTarget):
+        inspector.preflights += 1
+        return type(
+            "Report",
+            (),
+            {
+                "ok": True,
+                "diagnostics": (),
+                "records": inspector.records,
+                "config": type("Config", (), {"project_name": "actual"})(),
+            },
+        )()
+
+    inspector.preflight = preflight  # type: ignore[method-assign]
+    controller = ManagedComposeController(
+        target,
+        inspector,
+        runner,
+        policy=DockerControlPolicy.MANAGED,
+        expected_target_identity="docker:stale-target",
+    )
+
+    result = controller.execute(DockerLifecycleAction.STOP_ALL)
+
+    assert not result.succeeded
+    assert result.target_identity == docker_project_identity(target, "actual")
+    assert "changed" in (result.error or "").lower()
     assert runner.calls == []
 
 

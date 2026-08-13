@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import Enum
+import hashlib
 import json
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
@@ -133,6 +134,8 @@ class ComposeService:
     dependencies: tuple[str, ...]
     stop_grace_period: str | None
     mounts: tuple[Mount, ...]
+    image: str | None = None
+    pull_policy: str | None = None
 
 
 @dataclass(frozen=True)
@@ -147,6 +150,9 @@ class ComposeConfig:
     services: Mapping[str, ComposeService]
     endpoints: RuntimeEndpoints
     capabilities: ComposeCapabilities
+    # Hash only: the effective JSON can contain secrets from Compose
+    # interpolation and must never be retained beyond parsing.
+    effective_config_digest: str | None = None
 
 
 @dataclass(frozen=True)
@@ -268,7 +274,17 @@ class ComposeInspector:
                 json.JSONDecodeError,
             ):
                 return PreflightReport.failed(PreflightFailureKind.INSPECT_FAILED)
-            records = MappingProxyType({service: found.get(service, ContainerRecord.absent(service)) for service in _REQUIRED_SERVICES | {"init"}})
+            # Preserve every effective/observed service for destructive
+            # controllers.  Ordinary presentation still reads its known keys,
+            # while maintenance can fail closed when a profile or extension
+            # service could share the same persistent store.
+            record_services = set(config.services) | set(found) | _REQUIRED_SERVICES | {"init"}
+            records = MappingProxyType(
+                {
+                    service: found.get(service, ContainerRecord.absent(service))
+                    for service in record_services
+                }
+            )
             diagnostics.append("Compose service records inspected.")
             return PreflightReport(True, tuple(diagnostics), config, records)
         except (
@@ -286,10 +302,13 @@ class ComposeInspector:
         """Read only current records after a successful cached preflight."""
         result = self._compose(target, "ps", "--all", "--format", "json")
         found = {record.service: record for record in parse_ps_output(result.stdout)}
-        return MappingProxyType({
-            service: found.get(service, ContainerRecord.absent(service))
-            for service in _REQUIRED_SERVICES
-        })
+        record_services = set(found) | _REQUIRED_SERVICES
+        return MappingProxyType(
+            {
+                service: found.get(service, ContainerRecord.absent(service))
+                for service in record_services
+            }
+        )
 
     def _run(self, args: tuple[str, ...], target: ComposeTarget) -> DockerCommandResult:
         self._assert_read_only(args, target)
@@ -410,6 +429,8 @@ def parse_compose_config(payload: Mapping[str, Any]) -> ComposeConfig:
             dependencies,
             _string_or_none(raw.get("stop_grace_period")),
             mounts,
+            _string_or_none(raw.get("image")),
+            _string_or_none(raw.get("pull_policy")),
         )
         for item in raw.get("ports", []):
             publication = _parse_port(item)
@@ -419,7 +440,21 @@ def parse_compose_config(payload: Mapping[str, Any]) -> ComposeConfig:
     if missing:
         raise ComposeValidationError(f"Effective Compose config is missing required services: {', '.join(sorted(missing))}.")
     endpoints = _resolve_endpoints(publications)
-    return ComposeConfig(_string_or_none(payload.get("name")), MappingProxyType(services), endpoints, ComposeCapabilities("init" in services, "market-tools" in services))
+    effective_config_digest = hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    return ComposeConfig(
+        _string_or_none(payload.get("name")),
+        MappingProxyType(services),
+        endpoints,
+        ComposeCapabilities("init" in services, "market-tools" in services),
+        effective_config_digest,
+    )
 
 
 def _dependencies(value: Any) -> tuple[str, ...]:

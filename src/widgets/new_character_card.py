@@ -2,65 +2,139 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QPainter, QPen
-from PyQt6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtGui import QColor, QKeyEvent, QPainter, QPen
+from PyQt6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
-from src.constants import COLORS as C
+from src.constants import SEMANTIC_COLORS as S
 
 
 class _PlusGlyph(QWidget):
+    """Static Deep Signal reticle used for the create-character action."""
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setFixedSize(128, 128)
+        self.setFixedSize(88, 88)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._available = True
+
+    def set_available(self, available: bool) -> None:
+        self._available = bool(available)
+        self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(QPen(QColor(C["teal"]), 3))
-        painter.setBrush(QColor(C["deep_space"]))
-        painter.drawEllipse(18, 18, 92, 92)
-        painter.drawLine(64, 42, 64, 86)
-        painter.drawLine(42, 64, 86, 64)
+
+        accent = QColor(S["accent"] if self._available else S["text_muted"])
+        accent.setAlpha(220 if self._available else 120)
+        soft = QColor(S["accent_soft"])
+        soft.setAlpha(130 if self._available else 60)
+
+        painter.setPen(QPen(soft, 1.0))
+        painter.setBrush(QColor(5, 17, 28, 190))
+        painter.drawEllipse(7, 7, 74, 74)
+        painter.drawEllipse(15, 15, 58, 58)
+
+        painter.setPen(QPen(accent, 2.0))
+        painter.drawLine(44, 27, 44, 61)
+        painter.drawLine(27, 44, 61, 44)
+
+        painter.setPen(QPen(accent, 1.0))
+        for start, end in (
+            ((44, 3), (44, 10)),
+            ((44, 78), (44, 85)),
+            ((3, 44), (10, 44)),
+            ((78, 44), (85, 44)),
+        ):
+            painter.drawLine(start[0], start[1], end[0], end[1])
         painter.end()
 
 
 class NewCharacterCard(QFrame):
+    """Keyboard-accessible provisioning card aligned with character cards."""
+
     requested = pyqtSignal()
+
+    CARD_MIN_WIDTH = 148
+    CARD_MAX_WIDTH = 196
+    CARD_HEIGHT = 252
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._available = True
         self._reason = ""
         self._hovered = False
-        self.setFixedSize(220, 280)
+        self.setObjectName("newCharacterCard")
+        self.setProperty("deepSignal", True)
+        self.setMinimumWidth(self.CARD_MIN_WIDTH)
+        self.setMaximumWidth(self.CARD_MAX_WIDTH)
+        self.setFixedHeight(self.CARD_HEIGHT)
+        self.resize(self.CARD_MAX_WIDTH, self.CARD_HEIGHT)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAccessibleName("Create a new local character")
         self._build_ui()
         self._restyle()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 14, 12, 12)
-        layout.setSpacing(8)
-        glyph = _PlusGlyph()
-        layout.addWidget(glyph, alignment=Qt.AlignmentFlag.AlignHCenter)
+        layout.setContentsMargins(10, 8, 10, 10)
+        layout.setSpacing(5)
 
-        title = QLabel("NEW CHARACTER")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet(
-            f"color: {C['white']}; font-size: 15px; font-weight: bold;"
+        signal_row = QHBoxLayout()
+        signal_row.setContentsMargins(0, 0, 0, 0)
+        signal_row.setSpacing(4)
+        self._signal_dot = QLabel("+")
+        self._signal_dot.setFixedWidth(10)
+        self._signal_dot.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
         )
-        layout.addWidget(title)
+        signal_row.addWidget(self._signal_dot)
+        self._signal_label = QLabel("NEW PILOT")
+        self._signal_label.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+        )
+        signal_row.addWidget(self._signal_label)
+        signal_row.addStretch()
+        layout.addLayout(signal_row)
 
-        subtitle = QLabel("Create a local EveJS account and pilot")
-        subtitle.setWordWrap(True)
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        subtitle.setStyleSheet(f"color: {C['grey']}; font-size: 11px;")
-        layout.addWidget(subtitle)
-        layout.addStretch()
+        self._accent_line = QFrame()
+        self._accent_line.setFixedHeight(2)
+        self._accent_line.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+        )
+        layout.addWidget(self._accent_line)
+
+        self._glyph = _PlusGlyph(self)
+        layout.addWidget(self._glyph, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        self._title = QLabel("CREATE CHARACTER")
+        self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._title.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self._title)
+
+        self._subtitle = QLabel("Provision a local EveJS account and pilot")
+        self._subtitle.setWordWrap(True)
+        self._subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._subtitle.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+        )
+        layout.addWidget(self._subtitle)
+        layout.addStretch(1)
 
         self._button = QPushButton("CREATE")
-        self._button.setFixedHeight(32)
-        self._button.setProperty("class", "primary")
+        self._button.setFixedHeight(28)
+        self._button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._button.setAccessibleName("Create a new local character")
         self._button.clicked.connect(self.requested.emit)
         layout.addWidget(self._button)
 
@@ -68,9 +142,22 @@ class NewCharacterCard(QFrame):
         self._available = bool(enabled)
         self._reason = "" if enabled else reason
         self._button.setEnabled(enabled)
-        self._button.setText("CREATE" if enabled else "NATIVE ONLY")
+        unavailable_label = "UNAVAILABLE"
+        reason_folded = self._reason.casefold()
+        if "native" in reason_folded:
+            unavailable_label = "NATIVE ONLY"
+        elif "managed" in reason_folded or "connect-only" in reason_folded:
+            unavailable_label = "MANAGED ONLY"
+        self._button.setText("CREATE" if enabled else unavailable_label)
         self._button.setToolTip(self._reason)
+        self._glyph.set_available(enabled)
         self.setToolTip(self._reason)
+        self.setAccessibleDescription(
+            "Character creation is available"
+            if enabled
+            else (self._reason or "Character creation is unavailable")
+        )
+        self._restyle()
 
     def enterEvent(self, event) -> None:  # noqa: N802
         self._hovered = True
@@ -82,15 +169,88 @@ class NewCharacterCard(QFrame):
         self._restyle()
         super().leaveEvent(event)
 
+    def focusInEvent(self, event) -> None:  # noqa: N802
+        self._restyle()
+        super().focusInEvent(event)
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802
+        self._restyle()
+        super().focusOutEvent(event)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        if self._available and event.key() in {
+            Qt.Key.Key_Enter,
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Space,
+        }:
+            self.requested.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def mousePressEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton and self._available:
             self.requested.emit()
         super().mousePressEvent(event)
 
     def _restyle(self) -> None:
-        border = C["teal_dim"] if self._hovered else C["steel"]
-        background = C["carbon"] if self._hovered else C["card"]
+        active = self._available and (self._hovered or self.hasFocus())
+        border = S["accent"] if active else S["border_bright"]
+        background = "rgba(10, 31, 44, 232)" if active else "rgba(7, 20, 31, 220)"
+        text = S["text_primary"] if self._available else S["text_muted"]
+        accent = S["accent"] if self._available else S["text_muted"]
         self.setStyleSheet(
-            f"QFrame {{ background-color: {background}; border: 1px dashed {border}; "
-            "border-radius: 6px; }}"
+            f"""
+            QFrame#newCharacterCard {{
+                background-color: {background};
+                border: 2px dashed {border};
+                border-radius: 8px;
+            }}
+            QFrame#newCharacterCard QLabel {{
+                background: transparent;
+                border: none;
+            }}
+            """
+        )
+        self._signal_dot.setStyleSheet(
+            f"color: {accent}; border: none; background: transparent; "
+            "font-size: 10px; font-weight: 700;"
+        )
+        self._signal_label.setStyleSheet(
+            f"color: {S['text_secondary']}; border: none; background: transparent; "
+            "font-size: 9px; font-weight: 700; letter-spacing: 1px;"
+        )
+        self._accent_line.setStyleSheet(
+            f"background-color: {accent}; border: none;"
+        )
+        self._title.setStyleSheet(
+            f"color: {text}; border: none; background: transparent; "
+            "font-size: 12px; font-weight: 700; letter-spacing: 1px;"
+        )
+        self._subtitle.setStyleSheet(
+            f"color: {S['text_muted']}; border: none; background: transparent; "
+            "font-size: 9px;"
+        )
+        self._button.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {accent};
+                color: {S['background']};
+                border: 1px solid {accent};
+                border-radius: 4px;
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: 1px;
+            }}
+            QPushButton:hover {{
+                background-color: {S['text_primary']};
+                border-color: {S['text_primary']};
+            }}
+            QPushButton:focus {{ border: 2px solid {S['text_primary']}; }}
+            QPushButton:disabled {{
+                background-color: {S['surface_elevated']};
+                color: {S['text_muted']};
+                border-color: {S['border']};
+            }}
+            """
         )

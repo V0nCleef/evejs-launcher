@@ -25,10 +25,67 @@ COLORS["panel"] = COLORS["deep_space"]
 COLORS["card"] = COLORS["carbon"]
 COLORS["hover"] = COLORS["steel"]
 
+# Deep Signal semantic roles.  The original palette and aliases above are kept
+# intact because existing pages still consume them directly.  New UI code
+# should prefer these intent-based names so a later palette pass does not
+# require changing individual widgets.
+SEMANTIC_COLORS: dict[str, str] = {
+    "background": COLORS["void_black"],
+    "background_raised": "#07111D",
+    "surface": COLORS["deep_space"],
+    "surface_elevated": COLORS["carbon"],
+    "surface_hover": COLORS["steel"],
+    "border": "#263747",
+    "border_bright": "#34586A",
+    "accent": COLORS["teal"],
+    "accent_dim": COLORS["teal_dim"],
+    "accent_soft": "#164A57",
+    "warning": COLORS["gold"],
+    "danger": COLORS["red"],
+    "success": COLORS["green"],
+    "text_primary": COLORS["white"],
+    "text_secondary": "#A7B6C5",
+    "text_muted": COLORS["grey"],
+}
+
+# Status widgets accept lifecycle names from both service and client domains.
+# Keeping the mapping here gives custom-painted controls and QSS roles one
+# authoritative colour contract without coupling them to runtime modules.
+STATUS_COLORS: dict[str, str] = {
+    "idle": SEMANTIC_COLORS["text_muted"],
+    "offline": SEMANTIC_COLORS["text_muted"],
+    "ready": SEMANTIC_COLORS["accent"],
+    "starting": SEMANTIC_COLORS["warning"],
+    "launching": SEMANTIC_COLORS["warning"],
+    "stopping": SEMANTIC_COLORS["warning"],
+    "online": SEMANTIC_COLORS["success"],
+    "running": SEMANTIC_COLORS["success"],
+    "degraded": SEMANTIC_COLORS["warning"],
+    "unknown": SEMANTIC_COLORS["warning"],
+    "failed": SEMANTIC_COLORS["danger"],
+    "error": SEMANTIC_COLORS["danger"],
+}
+
 # ── Shared visual scales ─────────────────────────────────────────────────────
 SPACING: dict[str, int] = {"xs": 4, "sm": 8, "md": 12, "lg": 16, "xl": 24}
 RADII: dict[str, int] = {"control": 4, "card": 6, "panel": 8}
 CONTROL_HEIGHTS: dict[str, int] = {"compact": 36, "action": 44}
+
+# Additive Deep Signal scales.  The legacy dictionaries above deliberately
+# retain their exact values for backwards compatibility and contract tests.
+DEEP_SIGNAL_RADII: dict[str, int] = {
+    "glass": 12,
+    "hero": 16,
+    "pill": 999,
+}
+MOTION_DURATIONS_MS: dict[str, int] = {
+    "instant": 0,
+    "fast": 140,
+    "page": 180,
+    "state": 260,
+    "ambient": 1_800,
+}
+MOTION_TIMER_INTERVAL_MS: int = 50
 
 # ── Application metadata ─────────────────────────────────────────────────────
 APP_NAME: str = "EveJS-Launcher"

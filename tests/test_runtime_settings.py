@@ -128,6 +128,10 @@ def test_main_window_applies_animation_config_during_construction(
     try:
         hero = window._home_page.hero
         assert hero.animations_enabled is False
+        assert window._home_page.signal_background.motion_enabled is False
+        assert window._home_page._motion.animations_enabled is False
+        assert window._characters_page.animations_enabled is False
+        assert window._status_bar.animations_enabled is False
         assert hero.rotation_interval_ms == 17_000
         assert hero.is_running() is False
     finally:
@@ -147,3 +151,7 @@ def test_settings_save_reapplies_animation_preferences_immediately(
 
     assert hero.animations_enabled is False
     assert hero.rotation_interval_ms == 9_000
+    assert animation_window._home_page.signal_background.motion_enabled is False
+    assert animation_window._home_page._motion.animations_enabled is False
+    assert animation_window._characters_page.animations_enabled is False
+    assert animation_window._status_bar.animations_enabled is False

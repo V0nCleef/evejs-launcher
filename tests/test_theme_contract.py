@@ -52,3 +52,18 @@ def test_theme_exposes_tool_deck_roles_and_focus_states() -> None:
     assert 'QPushButton[class="toolPrimary"]:focus' in qss
     assert 'QPushButton[class="toolDanger"]:focus' in qss
     assert "QComboBox:focus" in qss
+
+
+def test_theme_exposes_cinematic_operations_roles() -> None:
+    qss = build_qss({"header": "Segoe UI", "body": "Segoe UI", "mono": "Consolas"})
+
+    for role in (
+        'QFrame[class="signalInstrument"]',
+        'QFrame[class="recentActivity"]',
+        'QLabel[class="overallSignal"]',
+        'QLabel[class="activityMessage"]',
+        'QPushButton[deepRole="launchGroup"]',
+        'QPushButton[class="secondary"][deepRole="launchStack"]',
+    ):
+        assert role in qss
+    assert 'QFrame[class="signalInstrument"]:focus' in qss

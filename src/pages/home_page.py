@@ -1,16 +1,8 @@
-"""Home page for EveJS Launcher V2.
+"""Deep Signal Operations page for EveJS Launcher V2.
 
-Layout
-------
-+---------------------------------------------------------------+
-|  HeroBanner (176 px)                                          |
-+---------------------------------------------------------------+
-|  [Accounts] [Characters] [Running Clients] [Server Status]    |
-+---------------------------------------------------------------+
-|  [Launch All]  [Start All Servers]  [Kill All]                |
-+-------------------------------+-------------------------------+
-|  Latest release               |  Compact Resources             |
-+-------------------------------+-------------------------------+
+The presentation deliberately keeps the original Home public API. Runtime
+state still arrives exclusively through :class:`RuntimeSnapshot`; this module
+only renders that already-authoritative observation.
 """
 from __future__ import annotations
 
@@ -25,6 +17,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPushButton,
     QSizePolicy,
+    QStackedLayout,
     QVBoxLayout,
     QWidget,
 )
@@ -37,7 +30,12 @@ from src.core.service_status import (
     RuntimeSnapshot,
     ServiceState,
 )
+from src.ui.motion import MotionController
 from src.widgets.hero_banner import HeroBanner
+from src.widgets.deep_signal_background import DeepSignalBackground
+from src.widgets.docking_traffic_overlay import DockingTrafficOverlay
+from src.widgets.page_header import PageHeader
+from src.widgets.status_ring import StatusRing
 
 DISCORD_INVITE_URL = "https://discord.gg/HVTfKeqX3t"
 _CHANGELOG_PATH = Path(__file__).resolve().parent.parent.parent / "CHANGELOG.md"
@@ -70,7 +68,8 @@ class StatCard(QFrame):
 
     def __init__(self, label: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setProperty("class", "card")
+        self.setProperty("class", "signalMetric")
+        self.setProperty("deepSignal", True)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(84)
 
@@ -79,9 +78,7 @@ class StatCard(QFrame):
         layout.setSpacing(2)
 
         self.value_label = QLabel("—")
-        self.value_label.setStyleSheet(
-            f"color: {COLORS['white']}; font-size: 26px; font-weight: 700;"
-        )
+        self.value_label.setProperty("class", "metricValue")
         layout.addWidget(self.value_label)
 
         name_label = QLabel(label.upper())
@@ -97,7 +94,7 @@ class ServerStatusCard(QFrame):
 
 
 class ServiceRow(QFrame):
-    """Keyboard-accessible service state row that opens its console."""
+    """Standalone keyboard-accessible service instrument."""
 
     activated = pyqtSignal(str)
 
@@ -106,38 +103,80 @@ class ServiceRow(QFrame):
         service_key: str,
         label: str,
         parent: QWidget | None = None,
+        *,
+        motion_controller: MotionController | None = None,
     ) -> None:
         super().__init__(parent)
         self._service_key = service_key
         self._state_text = "Offline"
         self._detail_text = ""
-        self.setProperty("class", "serviceRow")
+        self.setProperty("class", "signalInstrument")
+        self.setProperty("deepSignal", True)
+        self.setFixedHeight(132)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Fixed,
+        )
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAccessibleName(f"{label} service status")
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 3, 8, 3)
-        layout.setSpacing(7)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(10)
+
+        self._ring = StatusRing(
+            label,
+            "OFF",
+            state=ServiceState.OFFLINE,
+            motion_controller=motion_controller,
+        )
+        self._ring.setFixedSize(80, 80)
+        self._ring.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        layout.addWidget(self._ring)
+
+        copy = QVBoxLayout()
+        copy.setContentsMargins(0, 8, 0, 8)
+        copy.setSpacing(4)
+        name_line = QHBoxLayout()
+        name_line.setContentsMargins(0, 0, 0, 0)
+        name_line.setSpacing(5)
 
         self._dot = QLabel("●")
         self._dot.setFixedWidth(12)
-        layout.addWidget(self._dot)
+        name_line.addWidget(self._dot)
 
-        name_label = QLabel(label.upper())
-        name_label.setProperty("class", "eyebrow")
-        name_label.setFixedWidth(48)
-        layout.addWidget(name_label)
+        self._name_label = QLabel(label.upper())
+        self._name_label.setProperty("class", "signalInstrumentName")
+        self._name_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        name_line.addWidget(self._name_label)
+        name_line.addStretch()
+        copy.addLayout(name_line)
 
         self._state_label = QLabel(self._state_text)
-        self._state_label.setProperty("class", "serviceState")
-        layout.addWidget(self._state_label)
+        self._state_label.setProperty("class", "signalInstrumentState")
+        self._state_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        copy.addWidget(self._state_label)
 
-        layout.addStretch()
         self._detail_label = QLabel()
         self._detail_label.setProperty("class", "muted")
-        self._detail_label.setAlignment(Qt.AlignmentFlag.AlignRight)
-        layout.addWidget(self._detail_label)
+        self._detail_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self._detail_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        copy.addWidget(self._detail_label)
+        copy.addStretch()
+        layout.addLayout(copy, 1)
 
         self.set_state(ServiceState.OFFLINE)
 
@@ -163,7 +202,7 @@ class ServiceRow(QFrame):
     ) -> None:
         """Render a service lifecycle state and optional owned-process detail."""
         labels = {
-            ServiceState.OFFLINE: ("Offline", COLORS["grey"]),
+            ServiceState.OFFLINE: ("Offline", COLORS["red"]),
             ServiceState.STARTING: ("Starting…", COLORS["gold"]),
             ServiceState.ONLINE: ("Online", COLORS["green"]),
             ServiceState.STOPPING: ("Stopping…", COLORS["gold"]),
@@ -178,15 +217,46 @@ class ServiceRow(QFrame):
             self._detail_text = f"Container {container}" + (f" ({health})" if health else "")
 
         self._dot.setStyleSheet(f"color: {color}; font-size: 14px;")
+        self._state_label.setStyleSheet(f"color: {color};")
+        self.setProperty("statusState", state.value)
+        self._state_label.setProperty("statusState", state.value)
+        ring_values = {
+            ServiceState.OFFLINE: "OFF",
+            ServiceState.STARTING: "INIT",
+            ServiceState.ONLINE: "ON",
+            ServiceState.STOPPING: "STOP",
+            ServiceState.FAILED: "ERR",
+            ServiceState.UNKNOWN: "?",
+        }
+        self._ring.set_state(
+            state,
+            value=ring_values[state],
+            detail="",
+            progress=1.0 if state is ServiceState.ONLINE else 0.72,
+        )
         self._state_label.setText(self._state_text)
-        detail_display = self._detail_text
-        if len(detail_display) > 30:
-            detail_display = f"{detail_display[:27]}…"
-        self._detail_label.setText(detail_display)
         self._detail_label.setToolTip(self._detail_text)
+        self._render_detail()
         self.setAccessibleDescription(
             f"{self._state_text}. {self._detail_text}".strip()
         )
+
+    def _render_detail(self) -> None:
+        available = self._detail_label.contentsRect().width()
+        if available <= 0:
+            self._detail_label.setText(self._detail_text)
+            return
+        self._detail_label.setText(
+            self._detail_label.fontMetrics().elidedText(
+                self._detail_text,
+                Qt.TextElideMode.ElideRight,
+                available,
+            )
+        )
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._render_detail()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() in (
@@ -208,37 +278,37 @@ class ServiceRow(QFrame):
         super().mouseReleaseEvent(event)
 
 class ServicesCard(QFrame):
-    """Operational card showing Game and Market independently."""
+    """Compatibility controller for the two visible service instruments."""
 
     console_requested = pyqtSignal(str)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        motion_controller: MotionController | None = None,
+    ) -> None:
         super().__init__(parent)
-        self.setProperty("class", "card")
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setFixedHeight(104)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 7, 10, 7)
-        layout.setSpacing(1)
-
-        header = QHBoxLayout()
-        header.setContentsMargins(6, 0, 6, 0)
-        title = QLabel("SERVICES")
-        title.setProperty("class", "eyebrow")
-        header.addWidget(title)
-        header.addStretch()
         self.mode_label = QLabel("ASK ON START")
         self.mode_label.setProperty("class", "muted")
-        header.addWidget(self.mode_label)
-        layout.addLayout(header)
+        self.mode_label.setParent(self)
+        self.mode_label.hide()
 
-        self.game_row = ServiceRow("server", "Game")
-        self.market_row = ServiceRow("market", "Market")
+        # These instruments are reparented into Home's three-column signal rail.
+        self.game_row = ServiceRow(
+            "server",
+            "Game",
+            None,
+            motion_controller=motion_controller,
+        )
+        self.market_row = ServiceRow(
+            "market",
+            "Market",
+            None,
+            motion_controller=motion_controller,
+        )
         self.game_row.activated.connect(self.console_requested.emit)
         self.market_row.activated.connect(self.console_requested.emit)
-        layout.addWidget(self.game_row)
-        layout.addWidget(self.market_row)
 
     def set_mode(self, label: str) -> None:
         self.mode_label.setText(label.upper())
@@ -258,6 +328,295 @@ class ServicesCard(QFrame):
             health=snapshot.market_health,
             error=snapshot.market_error,
         )
+
+
+class ClientSignalCard(QFrame):
+    """Third truthful signal instrument driven by the observed client count."""
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        motion_controller: MotionController | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setProperty("class", "signalInstrument")
+        self.setProperty("deepSignal", True)
+        self.setFixedHeight(132)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.setAccessibleName("Clients status")
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(10)
+
+        self._ring = StatusRing(
+            "Clients",
+            "0",
+            state=ServiceState.OFFLINE,
+            motion_controller=motion_controller,
+        )
+        self._ring.setFixedSize(80, 80)
+        layout.addWidget(self._ring)
+
+        copy = QVBoxLayout()
+        copy.setContentsMargins(0, 8, 0, 8)
+        copy.setSpacing(4)
+
+        name_line = QHBoxLayout()
+        name_line.setContentsMargins(0, 0, 0, 0)
+        name_line.setSpacing(5)
+
+        self._dot = QLabel("●")
+        self._dot.setFixedWidth(12)
+        name_line.addWidget(self._dot)
+
+        self._name_label = QLabel("CLIENTS")
+        self._name_label.setProperty("class", "signalInstrumentName")
+        self._name_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        name_line.addWidget(self._name_label)
+        name_line.addStretch()
+        copy.addLayout(name_line)
+
+        self._state_label = QLabel("NONE RUNNING")
+        self._state_label.setProperty("class", "signalInstrumentState")
+        self._state_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        copy.addWidget(self._state_label)
+
+        self._detail_label = QLabel("CAPSULES IDLE")
+        self._detail_label.setProperty("class", "muted")
+        self._detail_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        copy.addWidget(self._detail_label)
+        copy.addStretch()
+        layout.addLayout(copy, 1)
+
+        # Compatibility metric consumed by controller and dashboard tests.
+        self.value_label = QLabel("0", self)
+        self.value_label.hide()
+        self.set_value(0)
+
+    def set_value(self, value: str | int) -> None:
+        count = max(0, int(value))
+        self.value_label.setText(str(count))
+        state = ServiceState.ONLINE if count > 0 else ServiceState.OFFLINE
+        color = COLORS["green"] if count > 0 else COLORS["red"]
+        self._ring.set_state(
+            state,
+            value=count,
+            detail="",
+            progress=1.0 if count > 0 else 0.72,
+        )
+        self._state_label.setText(
+            f"{count} RUNNING" if count > 0 else "NONE RUNNING"
+        )
+        self._dot.setStyleSheet(f"color: {color}; font-size: 14px;")
+        self._state_label.setStyleSheet(f"color: {color};")
+        self.setProperty("statusState", state.value)
+        self._state_label.setProperty("statusState", state.value)
+        self._detail_label.setText(
+            "CAPSULE LINK ACTIVE" if count > 0 else "CAPSULES IDLE"
+        )
+        self.setAccessibleDescription(
+            f"{count} EVE client{'s' if count != 1 else ''} running"
+        )
+
+
+class ActivityRow(QFrame):
+    """One bounded telemetry transition in the Recent Activity feed."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setProperty("class", "activityRow")
+        self.setFixedHeight(25)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 0, 8, 0)
+        layout.setSpacing(8)
+
+        self.time_label = QLabel("--:--")
+        self.time_label.setProperty("class", "activityTime")
+        self.time_label.setFixedWidth(48)
+        layout.addWidget(self.time_label)
+
+        self.message_label = QLabel("Awaiting runtime transition")
+        self.message_label.setProperty("class", "activityMessage")
+        self.message_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        layout.addWidget(self.message_label, 1)
+
+        self.state_label = QLabel("WAIT")
+        self.state_label.setProperty("class", "activityState")
+        self.state_label.setProperty("state", "idle")
+        self.state_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.state_label.setFixedWidth(68)
+        layout.addWidget(self.state_label)
+        self._full_message = self.message_label.text()
+
+    def set_entry(self, timestamp: str, message: str, state: str, label: str) -> None:
+        self.time_label.setText(timestamp)
+        self._full_message = message
+        self.message_label.setToolTip(message)
+        self.state_label.setText(label.upper())
+        self.state_label.setProperty("state", state)
+        style = self.state_label.style()
+        style.unpolish(self.state_label)
+        style.polish(self.state_label)
+        self._render_message()
+
+    def clear_entry(self) -> None:
+        self.time_label.setText("--:--")
+        self._full_message = "Awaiting runtime transition"
+        self.message_label.setToolTip("")
+        self.state_label.setText("WAIT")
+        self.state_label.setProperty("state", "idle")
+        style = self.state_label.style()
+        style.unpolish(self.state_label)
+        style.polish(self.state_label)
+        self._render_message()
+
+    def _render_message(self) -> None:
+        available = self.message_label.contentsRect().width()
+        if available <= 0:
+            self.message_label.setText(self._full_message)
+            return
+        self.message_label.setText(
+            self.message_label.fontMetrics().elidedText(
+                self._full_message,
+                Qt.TextElideMode.ElideRight,
+                available,
+            )
+        )
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._render_message()
+
+
+class RecentActivityCard(QFrame):
+    """Four-row feed populated strictly from RuntimeSnapshot observations."""
+
+    _SERVICE_MESSAGES = {
+        ServiceState.OFFLINE: ("offline", "OFFLINE", "service offline"),
+        ServiceState.STARTING: ("warning", "STARTING", "launch sequence started"),
+        ServiceState.ONLINE: ("online", "ONLINE", "readiness signal online"),
+        ServiceState.STOPPING: ("warning", "STOPPING", "shutdown in progress"),
+        ServiceState.FAILED: ("danger", "FAILED", "service reported a failure"),
+        ServiceState.UNKNOWN: ("warning", "UNKNOWN", "telemetry unavailable"),
+    }
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setProperty("class", "recentActivity")
+        self.setProperty("deepSignal", True)
+        self.setMinimumHeight(142)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        self._entries: list[tuple[str, str, str, str]] = []
+        self._last_signature: tuple[ServiceState, ServiceState, int] | None = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(1)
+
+        self.header_layout = QHBoxLayout()
+        self.header_layout.setContentsMargins(4, 0, 2, 4)
+        title = QLabel("RECENT ACTIVITY")
+        title.setProperty("class", "sectionTitle")
+        self.header_layout.addWidget(title)
+        self.header_layout.addStretch()
+        layout.addLayout(self.header_layout)
+
+        self.activity_rows = [ActivityRow(self) for _ in range(4)]
+        for row in self.activity_rows:
+            layout.addWidget(row)
+        layout.addStretch(1)
+
+    def add_header_action(self, widget: QWidget) -> None:
+        self.header_layout.addWidget(widget)
+
+    def record_snapshot(self, snapshot: RuntimeSnapshot) -> None:
+        signature = (snapshot.game, snapshot.market, snapshot.running_clients)
+        if signature == self._last_signature:
+            return
+
+        timestamp = snapshot.checked_at.astimezone().strftime("%H:%M")
+        if self._last_signature is None:
+            message = (
+                f"Game {snapshot.game.value} · Market {snapshot.market.value} · "
+                f"{snapshot.running_clients} client"
+                f"{'s' if snapshot.running_clients != 1 else ''}"
+            )
+            if ServiceState.FAILED in (snapshot.game, snapshot.market):
+                state = "danger"
+            elif any(
+                service in {
+                    ServiceState.STARTING,
+                    ServiceState.STOPPING,
+                    ServiceState.UNKNOWN,
+                }
+                for service in (snapshot.game, snapshot.market)
+            ):
+                state = "warning"
+            elif snapshot.game is ServiceState.ONLINE and snapshot.market is ServiceState.ONLINE:
+                state = "online"
+            else:
+                state = "idle"
+            self._append(timestamp, message, state, "SYNC")
+        else:
+            previous_game, previous_market, previous_clients = self._last_signature
+            transitions: list[tuple[str, str, str]] = []
+            if snapshot.game is not previous_game:
+                state, label, message = self._SERVICE_MESSAGES[snapshot.game]
+                transitions.append((f"Game {message}", state, label))
+            if snapshot.market is not previous_market:
+                state, label, message = self._SERVICE_MESSAGES[snapshot.market]
+                transitions.append((f"Market {message}", state, label))
+            if snapshot.running_clients != previous_clients:
+                count = snapshot.running_clients
+                transitions.append((
+                    f"{count} EVE client{'s' if count != 1 else ''} running",
+                    "online" if count > 0 else "idle",
+                    "CLIENTS",
+                ))
+            for message, state, label in transitions:
+                self._append(timestamp, message, state, label)
+
+        self._last_signature = signature
+
+    def _append(self, timestamp: str, message: str, state: str, label: str) -> None:
+        self._entries.insert(0, (timestamp, message, state, label))
+        del self._entries[4:]
+        self._render_entries()
+
+    def _render_entries(self) -> None:
+        for index, row in enumerate(self.activity_rows):
+            if index < len(self._entries):
+                row.set_entry(*self._entries[index])
+            else:
+                row.clear_entry()
+
+    @property
+    def messages(self) -> tuple[str, ...]:
+        return tuple(entry[1] for entry in self._entries)
 
 
 class LatestReleaseCard(QFrame):
@@ -380,6 +739,9 @@ class HomePage(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        # One page-owned policy keeps all live status instruments synchronized
+        # and is destroyed with this page (never retained process-globally).
+        self._motion = MotionController(parent=self)
         self._stack_action = "start"
         self._launch_in_progress = False
         self._group_state = TargetGroupState()
@@ -392,99 +754,176 @@ class HomePage(QWidget):
 
     # ── UI construction ──────────────────────────────────────────────────────
     def _build_ui(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(16, 0, 16, 16)
-        root.setSpacing(12)
+        self.setProperty("deepSignal", True)
+        layers = QStackedLayout(self)
+        layers.setContentsMargins(0, 0, 0, 0)
+        layers.setStackingMode(QStackedLayout.StackingMode.StackAll)
 
-        # Hero banner
-        self.hero = HeroBanner(self)
-        self.hero.setFixedHeight(HeroBanner.HEIGHT)
-        root.addWidget(self.hero)
+        self.signal_background = DeepSignalBackground(
+            self,
+            motion_controller=self._motion,
+        )
+        layers.addWidget(self.signal_background)
 
-        # Stats row
-        stats_row = QHBoxLayout()
-        stats_row.setSpacing(12)
-        self.accounts_card = StatCard("Accounts")
-        self.characters_card = StatCard("Characters")
-        self.running_card = StatCard("Running Clients")
-        self.services_card = ServicesCard()
+        # Traffic is a transparent, click-through layer.  The orbital raster
+        # beneath it remains permanently static, while controls stay above it.
+        self.traffic_overlay = DockingTrafficOverlay(
+            self,
+            motion_controller=self._motion,
+        )
+        layers.addWidget(self.traffic_overlay)
+
+        self._foreground = QWidget(self)
+        self._foreground.setProperty("deepSignal", True)
+        layers.addWidget(self._foreground)
+        layers.setCurrentWidget(self._foreground)
+
+        # Keep the pre-redesign object graph alive for controllers and plugins,
+        # but make it impossible for those widgets to consume command-surface
+        # geometry.  These remain real, functional objects rather than mocks.
+        self._compatibility_store = QWidget(self)
+        self._compatibility_store.setObjectName("homeCompatibilityStore")
+        self._compatibility_store.hide()
+        self.hero = HeroBanner(self._compatibility_store)
+        self.accounts_card = StatCard("Accounts", self._compatibility_store)
+        self.characters_card = StatCard("Characters", self._compatibility_store)
+        self.release_card = LatestReleaseCard(self._compatibility_store)
+        self.resources_card = ResourcesCard(self._compatibility_store)
+        self.services_card = ServicesCard(
+            self._compatibility_store,
+            motion_controller=self._motion,
+        )
+        self.release_card.view_full_changelog_requested.connect(self._open_full_changelog)
+        self.resources_card.changelog_requested.connect(self._open_full_changelog)
+        self.resources_card.console_requested.connect(self.console_requested.emit)
         self.services_card.console_requested.connect(self.console_requested.emit)
-        # Compatibility alias for the former single-server card API.
         self.server_card = self.services_card.game_row
-        for card in (
-            self.accounts_card,
-            self.characters_card,
-            self.running_card,
-            self.services_card,
-        ):
-            stats_row.addWidget(card)
-        root.addLayout(stats_row)
 
-        # Quick actions row
+        canvas = QHBoxLayout(self._foreground)
+        canvas.setContentsMargins(24, 16, 24, 16)
+        canvas.setSpacing(0)
+
+        self.command_column = QWidget(self._foreground)
+        self.command_column.setObjectName("operationsCommandColumn")
+        self.command_column.setProperty("deepSignal", True)
+        self.command_column.setSizePolicy(
+            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Expanding,
+        )
+        command_layout = QVBoxLayout(self.command_column)
+        command_layout.setContentsMargins(0, 0, 0, 0)
+        command_layout.setSpacing(10)
+
+        overview = QWidget(self.command_column)
+        overview.setProperty("deepSignal", True)
+        overview_layout = QVBoxLayout(overview)
+        overview_layout.setContentsMargins(0, 0, 0, 0)
+        overview_layout.setSpacing(4)
+        self.page_header = PageHeader(
+            "OPERATIONS",
+            "Authoritative runtime telemetry and safe launcher-owned controls.",
+            "DEEP SIGNAL // COMMAND NETWORK",
+        )
+        overview_layout.addWidget(self.page_header)
+        overview_layout.addSpacing(2)
+        self.overall_status_label = QLabel("SYSTEMS STANDBY")
+        self.overall_status_label.setProperty("class", "overallSignal")
+        self.overall_status_label.setProperty("state", "offline")
+        overview_layout.addWidget(self.overall_status_label)
+        self.overall_detail_label = QLabel(
+            "Start the managed stack when you are ready."
+        )
+        self.overall_detail_label.setProperty("class", "pageSubtitle")
+        overview_layout.addWidget(self.overall_detail_label)
+        command_layout.addWidget(overview)
+
+        self.instrument_rail = QFrame(self.command_column)
+        self.instrument_rail.setObjectName("operationsSignalRail")
+        self.instrument_rail.setProperty("deepSignal", True)
+        signal_layout = QHBoxLayout(self.instrument_rail)
+        signal_layout.setContentsMargins(0, 0, 0, 0)
+        signal_layout.setSpacing(10)
+        self.running_card = ClientSignalCard(
+            self.instrument_rail,
+            motion_controller=self._motion,
+        )
+        signal_layout.addWidget(self.services_card.game_row, 1)
+        signal_layout.addWidget(self.services_card.market_row, 1)
+        signal_layout.addWidget(self.running_card, 1)
+        command_layout.addWidget(self.instrument_rail)
+
+        # Two primary commands only: stack lifecycle and selected-group launch.
         actions = QHBoxLayout()
-        actions.setSpacing(12)
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.setSpacing(10)
 
-        launch_box = QWidget()
-        launch_box.setSizePolicy(
+        self.btn_start_servers = QPushButton("Start Stack")
+        self.btn_start_servers.setProperty("class", "secondary")
+        self.btn_start_servers.setProperty("deepRole", "launchStack")
+        self.btn_start_servers.setFixedHeight(70)
+        self.btn_start_servers.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Fixed,
         )
-        launch_layout = QHBoxLayout(launch_box)
-        launch_layout.setContentsMargins(0, 0, 0, 0)
-        launch_layout.setSpacing(6)
+        self.btn_start_servers.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_start_servers.clicked.connect(self._emit_stack_action)
+        actions.addWidget(self.btn_start_servers, 1)
 
         self.group_combo = QComboBox()
-        self.group_combo.setMinimumWidth(130)
-        self.group_combo.setMaximumWidth(190)
-        self.group_combo.setFixedHeight(48)
+        self.group_combo.setFixedWidth(130)
+        self.group_combo.setFixedHeight(34)
+        self.group_combo.setAccessibleName("Launch group selector")
+        self.group_combo.setToolTip("Choose the character group for Launch Group")
         self.group_combo.currentIndexChanged.connect(self._on_group_combo_changed)
-        launch_layout.addWidget(self.group_combo)
+        actions.addWidget(
+            self.group_combo,
+            alignment=Qt.AlignmentFlag.AlignVCenter,
+        )
 
         self.btn_launch_all = QPushButton("Launch All")
         self.btn_launch_all.setProperty("class", "primary")
-        self.btn_launch_all.setFixedHeight(48)
+        self.btn_launch_all.setProperty("deepRole", "launchGroup")
+        self.btn_launch_all.setFixedHeight(70)
         self.btn_launch_all.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         self.btn_launch_all.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_launch_all.clicked.connect(self._emit_launch_action)
-        launch_layout.addWidget(self.btn_launch_all, stretch=1)
-        actions.addWidget(launch_box)
-
-        self.btn_start_servers = QPushButton("Start Stack")
-        self.btn_start_servers.setProperty("class", "secondary")
-        self.btn_start_servers.setFixedHeight(48)
-        self.btn_start_servers.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
-        self.btn_start_servers.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_start_servers.clicked.connect(self._emit_stack_action)
-        actions.addWidget(self.btn_start_servers)
+        actions.addWidget(self.btn_launch_all, 1)
+        command_layout.addLayout(actions)
 
         self.btn_kill_all = QPushButton("Kill All Clients")
         self.btn_kill_all.setProperty("class", "dangerOutline")
-        self.btn_kill_all.setFixedHeight(48)
+        self.btn_kill_all.setFixedHeight(30)
+        self.btn_kill_all.setMaximumWidth(148)
         self.btn_kill_all.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Fixed,
         )
         self.btn_kill_all.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_kill_all.clicked.connect(self.kill_all_clicked.emit)
-        actions.addWidget(self.btn_kill_all)
+        self.recent_activity = RecentActivityCard(self.command_column)
+        self.recent_activity.add_header_action(self.btn_kill_all)
+        command_layout.addWidget(self.recent_activity, 1)
 
-        root.addLayout(actions)
+        canvas.addWidget(self.command_column)
+        canvas.addStretch(1)
+        self._sync_command_width(self.width())
 
-        # Compact lower row: latest release + fast operational resources.
-        lower_row = QHBoxLayout()
-        lower_row.setSpacing(12)
-        self.release_card = LatestReleaseCard()
-        self.resources_card = ResourcesCard()
-        self.release_card.view_full_changelog_requested.connect(self._open_full_changelog)
-        self.resources_card.changelog_requested.connect(self._open_full_changelog)
-        self.resources_card.console_requested.connect(self.console_requested.emit)
-        lower_row.addWidget(self.release_card, stretch=3)
-        lower_row.addWidget(self.resources_card, stretch=2)
-        root.addLayout(lower_row)
-        root.addStretch(1)
+    def _sync_command_width(self, page_width: int) -> None:
+        """Keep commands full-width at minimum size and cinematic when wide."""
+        available = max(320, int(page_width) - 48)
+        self.command_column.setFixedWidth(min(760, available))
+        # Keep all live traffic on the exposed station side.  At the minimum
+        # launcher width this intentionally leaves no animation area.
+        self.traffic_overlay.set_reserved_left_px(
+            24 + self.command_column.width() + 12
+        )
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        if hasattr(self, "command_column"):
+            self._sync_command_width(event.size().width())
 
     # ── Data ─────────────────────────────────────────────────────────────────
     def _load_latest_release(self) -> None:
@@ -531,6 +970,14 @@ class HomePage(QWidget):
     def set_server_state(self, state: ServiceState) -> None:
         """Update only the game-service lifecycle state."""
         self.server_card.set_state(state)
+
+    def set_animations_enabled(self, enabled: bool) -> None:
+        """Apply one reduced-motion choice to every Operations decoration."""
+        enabled = bool(enabled)
+        self._motion.set_reduced_motion(not enabled)
+        self.hero.set_animations_enabled(enabled)
+        self.signal_background.set_motion_enabled(enabled)
+        self.traffic_overlay.set_motion_enabled(enabled)
 
     def set_server_mode(self, label: str) -> None:
         """Show the configured server-mode policy without exposing its path."""
@@ -634,6 +1081,8 @@ class HomePage(QWidget):
         """Apply the authoritative runtime observation to Home."""
         self.running_card.set_value(snapshot.running_clients)
         self.services_card.apply_snapshot(snapshot)
+        self.recent_activity.record_snapshot(snapshot)
+        self._update_overall_status(snapshot)
         self._update_stack_action(snapshot)
         has_running_clients = snapshot.running_clients > 0
         self.btn_kill_all.setEnabled(has_running_clients)
@@ -642,6 +1091,59 @@ class HomePage(QWidget):
             if has_running_clients
             else "No EVE clients are running"
         )
+
+    def _update_overall_status(self, snapshot: RuntimeSnapshot) -> None:
+        """Summarize the two independent service signals without new probes."""
+        states = {snapshot.game, snapshot.market}
+        if ServiceState.FAILED in states:
+            label, detail, state = (
+                "ATTENTION REQUIRED",
+                "A service failed. Open its telemetry row for diagnostics.",
+                "failed",
+            )
+        elif ServiceState.UNKNOWN in states:
+            label, detail, state = (
+                "TELEMETRY DEGRADED",
+                "The selected runtime is not currently observable.",
+                "degraded",
+            )
+        elif ServiceState.STARTING in states:
+            label, detail, state = (
+                "STACK INITIALIZING",
+                "Services are starting; readiness checks remain authoritative.",
+                "starting",
+            )
+        elif ServiceState.STOPPING in states:
+            label, detail, state = (
+                "STACK SHUTTING DOWN",
+                "Launcher-owned services are stopping safely.",
+                "starting",
+            )
+        elif states == {ServiceState.ONLINE}:
+            label, detail, state = (
+                "ALL SYSTEMS NOMINAL",
+                "Game and market readiness checks are online.",
+                "online",
+            )
+        elif ServiceState.ONLINE in states:
+            label, detail, state = (
+                "PARTIAL SIGNAL",
+                "One service is online; review the remaining service telemetry.",
+                "degraded",
+            )
+        else:
+            label, detail, state = (
+                "SYSTEMS STANDBY",
+                "Start the managed stack when you are ready.",
+                "offline",
+            )
+
+        self.overall_status_label.setText(label)
+        self.overall_status_label.setProperty("state", state)
+        style = self.overall_status_label.style()
+        style.unpolish(self.overall_status_label)
+        style.polish(self.overall_status_label)
+        self.overall_detail_label.setText(detail)
 
     def _update_stack_action(self, snapshot: RuntimeSnapshot) -> None:
         """Describe the next safe stack operation from the shared snapshot."""

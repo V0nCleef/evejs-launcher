@@ -297,6 +297,7 @@ class UpdateHandoffWindow(UpdateProgressDialog):
         self._result: tuple[bool, str] | None = None
         self._thread_finished = False
         self._started = False
+        self.set_handoff_mode()
         self.set_stage("install", "Waiting for the launcher to close…")
 
     def showEvent(self, event) -> None:  # noqa: N802
@@ -337,7 +338,7 @@ class UpdateHandoffWindow(UpdateProgressDialog):
             self.show_error(error)
             return
 
-        self.set_stage("install", "Restarting EveJS Launcher…")
+        self.set_stage("restart", "Restarting EveJS Launcher…")
         QTimer.singleShot(850, self._close_after_restart)
 
     def _close_after_restart(self) -> None:

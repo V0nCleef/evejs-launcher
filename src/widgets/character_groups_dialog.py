@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.constants import COLORS as C
+from src.constants import COLORS as C, SEMANTIC_COLORS as S
 from src.core.db import Account, Character
 from src.core.groups import (
     CharacterGroup,
@@ -75,8 +75,11 @@ class CharacterGroupsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Manage Character Groups")
         self.setModal(True)
+        self.setObjectName("characterGroupsDialog")
+        self.setProperty("deepSignal", True)
         self.resize(960, 660)
-        self.setMinimumSize(820, 560)
+        self.setMinimumSize(760, 520)
+        self.setAccessibleName("Manage character launch groups")
         self._accounts = list(accounts)
         self._hidden_characters = set(hidden_characters)
         self._groups = list(state.groups)
@@ -87,6 +90,7 @@ class CharacterGroupsDialog(QDialog):
         self._updating_editor = False
         self._member_items: dict[GroupMember, QTreeWidgetItem] = {}
         self._build_ui()
+        self._apply_deep_signal_style()
         self._refresh_group_list(select_id=self._initial_group_id())
 
     @property
@@ -111,7 +115,12 @@ class CharacterGroupsDialog(QDialog):
         root.setContentsMargins(24, 22, 24, 22)
         root.setSpacing(14)
 
+        eyebrow = QLabel("LAUNCH ORCHESTRATION  /  PILOT GROUPS")
+        eyebrow.setObjectName("dialogEyebrow")
+        root.addWidget(eyebrow)
+
         title = QLabel("MANAGE CHARACTER GROUPS")
+        title.setObjectName("dialogTitle")
         title.setProperty("class", "title")
         root.addWidget(title)
 
@@ -120,58 +129,54 @@ class CharacterGroupsDialog(QDialog):
             "from each account; characters may belong to multiple groups."
         )
         subtitle.setWordWrap(True)
+        subtitle.setObjectName("dialogIntro")
         subtitle.setProperty("class", "secondary")
         root.addWidget(subtitle)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setObjectName("groupsSplitter")
         splitter.setChildrenCollapsible(False)
         root.addWidget(splitter, stretch=1)
 
         left = QFrame()
+        left.setObjectName("groupsRail")
         left.setProperty("class", "card")
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(14, 14, 14, 14)
         left_layout.setSpacing(10)
 
         groups_title = QLabel("GROUPS")
+        groups_title.setObjectName("groupsTitle")
         groups_title.setProperty("class", "sectionTitle")
         left_layout.addWidget(groups_title)
 
         self.group_list = QListWidget()
+        self.group_list.setAccessibleName("Character groups")
         self.group_list.setSelectionMode(
             QAbstractItemView.SelectionMode.SingleSelection
         )
-        self.group_list.setStyleSheet(
-            f"""
-            QListWidget {{
-                background-color: {C['deep_space']};
-                border: 1px solid {C['steel']};
-                border-radius: 4px;
-                color: {C['white']};
-                padding: 4px;
-            }}
-            QListWidget::item {{ padding: 8px 6px; border-radius: 3px; }}
-            QListWidget::item:selected {{
-                background-color: {C['steel']};
-                color: {C['white']};
-            }}
-            """
+        self.group_list.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
+        self.group_list.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.group_list.currentRowChanged.connect(self._on_group_selected)
         left_layout.addWidget(self.group_list, stretch=1)
 
         create_row = QHBoxLayout()
         self.new_button = QPushButton("+ NEW")
+        self.new_button.setAccessibleName("Create new character group")
         self.new_button.setProperty("class", "secondary")
         self.new_button.clicked.connect(self._new_group)
         create_row.addWidget(self.new_button)
         self.duplicate_button = QPushButton("DUPLICATE")
+        self.duplicate_button.setAccessibleName("Duplicate selected character group")
         self.duplicate_button.setProperty("class", "ghost")
         self.duplicate_button.clicked.connect(self._duplicate_group)
         create_row.addWidget(self.duplicate_button)
         left_layout.addLayout(create_row)
 
         self.restore_button = QPushButton("RESTORE PREVIOUS")
+        self.restore_button.setAccessibleName("Restore verified previous groups")
         self.restore_button.setProperty("class", "ghost")
         self.restore_button.setToolTip(
             "Restore groups from a moved or upgraded EveJS installation "
@@ -183,14 +188,17 @@ class CharacterGroupsDialog(QDialog):
 
         order_row = QHBoxLayout()
         self.up_button = QPushButton("MOVE UP")
+        self.up_button.setAccessibleName("Move selected group up")
         self.up_button.setProperty("class", "compactGhost")
         self.up_button.clicked.connect(lambda: self._move_group(-1))
         order_row.addWidget(self.up_button)
         self.down_button = QPushButton("MOVE DOWN")
+        self.down_button.setAccessibleName("Move selected group down")
         self.down_button.setProperty("class", "compactGhost")
         self.down_button.clicked.connect(lambda: self._move_group(1))
         order_row.addWidget(self.down_button)
         self.delete_button = QPushButton("DELETE")
+        self.delete_button.setAccessibleName("Delete selected launcher group")
         self.delete_button.setProperty("class", "dangerOutline")
         self.delete_button.clicked.connect(self._delete_group)
         order_row.addWidget(self.delete_button)
@@ -198,12 +206,14 @@ class CharacterGroupsDialog(QDialog):
         splitter.addWidget(left)
 
         right = QFrame()
+        right.setObjectName("groupEditor")
         right.setProperty("class", "card")
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(16, 14, 16, 14)
         right_layout.setSpacing(10)
 
         self.editor_title = QLabel("GROUP DETAILS")
+        self.editor_title.setObjectName("editorTitle")
         self.editor_title.setProperty("class", "sectionTitle")
         right_layout.addWidget(self.editor_title)
 
@@ -213,6 +223,7 @@ class CharacterGroupsDialog(QDialog):
         name_label.setProperty("class", "muted")
         name_box.addWidget(name_label)
         self.name_edit = QLineEdit()
+        self.name_edit.setAccessibleName("Group name")
         self.name_edit.setMaxLength(40)
         self.name_edit.setPlaceholderText("Example: Miners")
         self.name_edit.textChanged.connect(self._on_name_changed)
@@ -224,6 +235,7 @@ class CharacterGroupsDialog(QDialog):
         color_label.setProperty("class", "muted")
         color_box.addWidget(color_label)
         self.color_combo = QComboBox()
+        self.color_combo.setAccessibleName("Group color")
         for key in GROUP_COLORS:
             self.color_combo.addItem(_COLOR_LABELS[key], key)
         self.color_combo.currentIndexChanged.connect(self._on_color_changed)
@@ -242,28 +254,17 @@ class CharacterGroupsDialog(QDialog):
         right_layout.addLayout(members_header)
 
         self.search_edit = QLineEdit()
+        self.search_edit.setAccessibleName("Search characters or accounts")
         self.search_edit.setPlaceholderText("Search character or account...")
         self.search_edit.setClearButtonEnabled(True)
         self.search_edit.textChanged.connect(self._filter_characters)
         right_layout.addWidget(self.search_edit)
 
         self.character_tree = QTreeWidget()
+        self.character_tree.setAccessibleName("Characters assigned to selected group")
         self.character_tree.setHeaderHidden(True)
         self.character_tree.setRootIsDecorated(True)
         self.character_tree.setAlternatingRowColors(False)
-        self.character_tree.setStyleSheet(
-            f"""
-            QTreeWidget {{
-                background-color: {C['deep_space']};
-                alternate-background-color: {C['carbon']};
-                border: 1px solid {C['steel']};
-                border-radius: 4px;
-                color: {C['white']};
-            }}
-            QTreeWidget::item {{ padding: 5px; }}
-            QTreeWidget::item:selected {{ background-color: {C['steel']}; }}
-            """
-        )
         self.character_tree.itemChanged.connect(self._on_member_changed)
         right_layout.addWidget(self.character_tree, stretch=1)
 
@@ -279,18 +280,181 @@ class CharacterGroupsDialog(QDialog):
 
         actions = QHBoxLayout()
         self.error_label = QLabel("")
+        self.error_label.setObjectName("dialogMessage")
+        self.error_label.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.error_label.setAccessibleName("Group validation message")
         self.error_label.setStyleSheet(f"color: {C['red']};")
         self.error_label.setWordWrap(True)
         actions.addWidget(self.error_label, stretch=1)
-        cancel = QPushButton("CANCEL")
-        cancel.setProperty("class", "ghost")
-        cancel.clicked.connect(self.reject)
-        actions.addWidget(cancel)
+        self.cancel_button = QPushButton("CANCEL")
+        self.cancel_button.setProperty("class", "ghost")
+        self.cancel_button.clicked.connect(self.reject)
+        actions.addWidget(self.cancel_button)
         self.save_button = QPushButton("SAVE GROUPS")
+        self.save_button.setAccessibleName("Save character groups")
         self.save_button.setProperty("class", "primary")
         self.save_button.clicked.connect(self._save)
         actions.addWidget(self.save_button)
         root.addLayout(actions)
+
+    def _apply_deep_signal_style(self) -> None:
+        """Polish the native dialog without changing group-edit semantics."""
+        self.setStyleSheet(
+            f"""
+            QDialog#characterGroupsDialog {{
+                background-color: {S['background']};
+                color: {S['text_primary']};
+            }}
+            QLabel {{ background: transparent; color: {S['text_secondary']}; }}
+            QLabel#dialogEyebrow {{
+                color: {S['accent']};
+                font-size: 9px;
+                font-weight: 700;
+                letter-spacing: 2px;
+            }}
+            QLabel#dialogTitle {{
+                color: {S['text_primary']};
+                font-size: 24px;
+                font-weight: 700;
+                letter-spacing: 2px;
+            }}
+            QLabel#dialogIntro {{ color: {S['text_secondary']}; font-size: 11px; }}
+            QFrame#groupsRail, QFrame#groupEditor {{
+                background-color: rgba(10, 24, 36, 232);
+                border: 1px solid {S['border']};
+                border-radius: 9px;
+            }}
+            QLabel#groupsTitle, QLabel#editorTitle {{
+                color: {S['accent']};
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: 1px;
+            }}
+            QSplitter#groupsSplitter::handle {{
+                background-color: transparent;
+                width: 10px;
+            }}
+            QLineEdit, QComboBox {{
+                min-height: 32px;
+                padding: 0 10px;
+                color: {S['text_primary']};
+                background-color: rgba(4, 12, 20, 238);
+                border: 1px solid {S['border_bright']};
+                border-radius: 5px;
+                selection-background-color: {S['accent_soft']};
+            }}
+            QLineEdit:focus, QComboBox:focus {{ border: 1px solid {S['accent']}; }}
+            QLineEdit:disabled, QComboBox:disabled {{
+                color: {S['text_muted']};
+                border-color: {S['border']};
+            }}
+            QComboBox::drop-down {{ border: none; width: 24px; }}
+            """
+        )
+        self.group_list.setStyleSheet(
+            f"""
+            QListWidget {{
+                background-color: rgba(3, 10, 17, 235);
+                border: 1px solid {S['border']};
+                border-radius: 6px;
+                color: {S['text_primary']};
+                padding: 5px;
+                outline: none;
+            }}
+            QListWidget::item {{
+                min-height: 26px;
+                padding: 5px 7px;
+                border: 1px solid transparent;
+                border-radius: 4px;
+            }}
+            QListWidget::item:hover {{ background-color: {S['surface_hover']}; }}
+            QListWidget::item:selected {{
+                background-color: {S['accent_soft']};
+                border-color: {S['accent_dim']};
+                color: {S['text_primary']};
+            }}
+            """
+        )
+        self.character_tree.setStyleSheet(
+            f"""
+            QTreeWidget {{
+                background-color: rgba(3, 10, 17, 235);
+                border: 1px solid {S['border']};
+                border-radius: 6px;
+                color: {S['text_primary']};
+                padding: 4px;
+                outline: none;
+            }}
+            QTreeWidget::item {{
+                min-height: 24px;
+                padding: 3px 5px;
+                border-radius: 3px;
+            }}
+            QTreeWidget::item:hover {{ background-color: {S['surface_hover']}; }}
+            QTreeWidget::item:selected {{ background-color: {S['accent_soft']}; }}
+            QTreeWidget::indicator {{
+                width: 15px;
+                height: 15px;
+                background-color: {S['background']};
+                border: 1px solid {S['border_bright']};
+                border-radius: 3px;
+            }}
+            QTreeWidget::indicator:checked {{
+                background-color: {S['accent']};
+                border-color: {S['accent']};
+            }}
+            QTreeWidget:disabled {{ color: {S['text_muted']}; }}
+            """
+        )
+        for button, variant in (
+            (self.save_button, "primary"),
+            (self.new_button, "secondary"),
+            (self.delete_button, "danger"),
+            (self.cancel_button, "ghost"),
+            (self.duplicate_button, "ghost"),
+            (self.restore_button, "ghost"),
+            (self.up_button, "ghost"),
+            (self.down_button, "ghost"),
+        ):
+            self._style_action_button(button, variant)
+
+    @staticmethod
+    def _style_action_button(button: QPushButton, variant: str) -> None:
+        if variant == "primary":
+            background, color, border = S["accent"], S["background"], S["accent"]
+            hover_background = S["text_primary"]
+        elif variant == "secondary":
+            background, color, border = S["accent_soft"], S["text_primary"], S["accent_dim"]
+            hover_background = S["accent_dim"]
+        elif variant == "danger":
+            background, color, border = "transparent", S["danger"], S["danger"]
+            hover_background = "#3B1B22"
+        else:
+            background, color, border = "transparent", S["text_secondary"], S["border_bright"]
+            hover_background = S["surface_hover"]
+        button.setMinimumHeight(32)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {background};
+                color: {color};
+                border: 1px solid {border};
+                border-radius: 5px;
+                padding: 0 10px;
+                font-size: 9px;
+                font-weight: 700;
+                letter-spacing: 1px;
+            }}
+            QPushButton:hover {{ background-color: {hover_background}; color: {S['text_primary']}; }}
+            QPushButton:focus {{ border: 2px solid {S['text_primary']}; }}
+            QPushButton:disabled {{
+                background-color: {S['surface']};
+                color: {S['text_muted']};
+                border-color: {S['border']};
+            }}
+            """
+        )
 
     def _current_group(self) -> CharacterGroup | None:
         row = self.group_list.currentRow()

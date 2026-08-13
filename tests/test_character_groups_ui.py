@@ -66,6 +66,20 @@ def test_dialog_creates_group_and_enforces_one_character_per_account(
     dialog.deleteLater()
 
 
+def test_groups_dialog_uses_native_responsive_deep_signal_shell(
+    qapp: QApplication,
+) -> None:
+    dialog = CharacterGroupsDialog(_accounts(), set(), TargetGroupState())
+
+    assert not bool(dialog.windowFlags() & Qt.WindowType.FramelessWindowHint)
+    assert dialog.objectName() == "characterGroupsDialog"
+    assert dialog.minimumWidth() <= 760
+    assert dialog.group_list.accessibleName() == "Character groups"
+    assert dialog.save_button.minimumHeight() >= 32
+    assert dialog.error_label.focusPolicy() == Qt.FocusPolicy.StrongFocus
+    dialog.deleteLater()
+
+
 def test_dialog_allows_same_character_in_multiple_groups(
     qapp: QApplication,
 ) -> None:

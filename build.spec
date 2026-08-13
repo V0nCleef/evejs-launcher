@@ -10,7 +10,7 @@ EXCLUDES = [
     # Qt6 modules we don't use
     'PyQt6.QtQuick', 'PyQt6.QtQml', 'PyQt6.QtQmlModels', 'PyQt6.QtQmlWorkerScript',
     'PyQt6.QtDesigner', 'PyQt6.QtPdf', 'PyQt6.QtPdfWidgets',
-    'PyQt6.QtMultimedia', 'PyQt6.QtMultimediaWidgets',
+    'PyQt6.QtMultimediaWidgets',
     'PyQt6.Qt3DAnimation', 'PyQt6.Qt3DCore', 'PyQt6.Qt3DExtras',
     'PyQt6.Qt3DInput', 'PyQt6.Qt3DLogic', 'PyQt6.Qt3DQuick',
     'PyQt6.Qt3DQuickAnimation', 'PyQt6.Qt3DQuickExtras', 'PyQt6.Qt3DQuickInput',
@@ -23,7 +23,7 @@ EXCLUDES = [
     'PyQt6.QtPurchasing', 'PyQt6.QtQuick3D', 'PyQt6.QtQuickControls2',
     'PyQt6.QtQuickDialogs2', 'PyQt6.QtQuickTemplates2', 'PyQt6.QtQuickWidgets',
     'PyQt6.QtRemoteObjects', 'PyQt6.QtScxml', 'PyQt6.QtSensors', 'PyQt6.QtSerialPort',
-    'PyQt6.QtStateMachine', 'PyQt6.QtTextToSpeech', 'PyQt6.QtVirtualKeyboard',
+    'PyQt6.QtStateMachine', 'PyQt6.QtVirtualKeyboard',
     'PyQt6.QtWaylandClient', 'PyQt6.QtWebView', 'PyQt6.QtBluetooth',
     'PyQt6.QtHelp', 'PyQt6.QtLocation', 'PyQt6.QtSvg', 'PyQt6.QtSvgWidgets',
     # Heavy Python packages we don't need in the bundle
@@ -35,9 +35,9 @@ EXCLUDES = [
     # PyQt6 plugins we don't use (via excludes in Analysis)
     'PyQt6.Qt6.plugins.sqldrivers', 'PyQt6.Qt6.plugins.sceneparsers',
     'PyQt6.Qt6.plugins.assetimporters', 'PyQt6.Qt6.plugins.renderers',
-    'PyQt6.Qt6.plugins.qmlls', 'PyQt6.Qt6.plugins.multimedia',
+    'PyQt6.Qt6.plugins.qmlls',
     'PyQt6.Qt6.plugins.tls', 'PyQt6.Qt6.plugins.qmllint',
-    'PyQt6.Qt6.plugins.texttospeech', 'PyQt6.Qt6.plugins.webengine',
+    'PyQt6.Qt6.plugins.webengine',
     'PyQt6.Qt6.plugins.position', 'PyQt6.Qt6.plugins.printsupport',
     'PyQt6.Qt6.plugins.sensors', 'PyQt6.Qt6.plugins.serialport',
     'PyQt6.Qt6.plugins.bluetooth', 'PyQt6.Qt6.plugins.nfc',
@@ -53,16 +53,15 @@ EXCLUDES = [
 # Binaries to exclude (DLLs that get bundled but we don't need)
 BINARY_EXCLUDES = [
     'opengl32sw.dll',  # Software OpenGL fallback — we have GPU
-    'avcodec-*.dll', 'avformat-*.dll', 'avutil-*.dll', 'swresample-*.dll', 'swscale-*.dll',
     'Qt6Quick*.dll', 'Qt6Qml*.dll', 'Qt6Designer*.dll', 'Qt6Pdf*.dll',
-    'Qt6ShaderTools*.dll', 'Qt6Quick3D*.dll', 'Qt6Multimedia*.dll',
+    'Qt6ShaderTools*.dll', 'Qt6Quick3D*.dll',
     'Qt6WebEngine*.dll', 'Qt6WebView*.dll', 'Qt6WebSockets*.dll',
     'Qt63D*.dll', 'Qt6Sql*.dll', 'Qt6Test*.dll', 'Qt6Xml*.dll',
     'Qt6Charts*.dll', 'Qt6DataVisualization*.dll', 'Qt6NetworkAuth*.dll',
     'Qt6Nfc*.dll', 'Qt6Positioning*.dll', 'Qt6PrintSupport*.dll',
     'Qt6Purchasing*.dll', 'Qt6RemoteObjects*.dll', 'Qt6Scxml*.dll',
     'Qt6Sensors*.dll', 'Qt6SerialPort*.dll', 'Qt6StateMachine*.dll',
-    'Qt6TextToSpeech*.dll', 'Qt6VirtualKeyboard*.dll', 'Qt6Bluetooth*.dll',
+    'Qt6VirtualKeyboard*.dll', 'Qt6Bluetooth*.dll',
     'Qt6Help*.dll', 'Qt6Location*.dll', 'Qt6Svg*.dll',
     'd3dcompiler_*.dll',  # DirectX shader compiler — not needed
 ]
@@ -73,6 +72,12 @@ a = Analysis(
     binaries=[],
     datas=[
         ('assets/hero/*.png', 'assets/hero'),
+        ('assets/deep_signal/*.png', 'assets/deep_signal'),
+        # Launcher-owned originals only. Personal playlist paths remain local
+        # config references and user MP3s are never copied into a release.
+        ('assets/audio/music/*.wav', 'assets/audio/music'),
+        ('assets/audio/voice/lyra/*.wav', 'assets/audio/voice/lyra'),
+        ('assets/audio/voice/lyra/manifest.json', 'assets/audio/voice/lyra'),
         ('assets/*.png', 'assets'),
         ('assets/*.ico', 'assets'),
         ('CHANGELOG.md', '.'),
@@ -85,10 +90,13 @@ a = Analysis(
     ],
     hiddenimports=[
         'PyQt6.QtWidgets', 'PyQt6.QtCore', 'PyQt6.QtGui',
+        'PyQt6.QtMultimedia',
         'sqlite3', 'json', 'socket', 'threading', 'logging',
         'pathlib', 'dataclasses', 'subprocess', 'webbrowser',
         'calendar',  # required by urllib → email → calendar chain when frozen
         'src', 'src.app', 'src.config', 'src.constants', 'src.theme',
+        'src.audio', 'src.audio.assets', 'src.audio.backends',
+        'src.audio.controller', 'src.audio.events', 'src.audio.settings',
         'src.core.db', 'src.core.discovery', 'src.core.launcher',
         'src.core.server_launcher', 'src.core.process_tracker',
         'src.core.profiles', 'src.core.mod_manager',
@@ -100,6 +108,10 @@ a = Analysis(
         'src.workers.character_creation_worker', 'src.workers.character_deletion_worker',
         'src.workers.overview_patch_worker',
         'src.widgets.title_bar', 'src.widgets.nav_panel', 'src.widgets.status_bar',
+        'src.widgets.deep_signal_background', 'src.widgets.docking_traffic_overlay',
+        'src.widgets.glass_panel',
+        'src.widgets.page_header', 'src.widgets.status_ring', 'src.ui.motion',
+        'src.widgets.shipboard_caption',
         'src.widgets.character_card', 'src.widgets.detail_panel', 'src.widgets.console_panel',
         'src.widgets.hero_banner', 'src.widgets.skeleton_card', 'src.widgets.toggle_switch',
         'src.widgets.update_button',

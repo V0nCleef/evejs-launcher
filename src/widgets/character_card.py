@@ -1,15 +1,18 @@
 """Character card widget for EveJS Launcher V2."""
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import (
+    QKeyEvent,
     QPixmap,
     QPainter,
     QPainterPath,
     QColor,
     QFontMetrics,
+    QPen,
 )
 from PyQt6.QtWidgets import (
     QFrame,
@@ -22,19 +25,21 @@ from PyQt6.QtWidgets import (
     QMenu,
 )
 
-from src.constants import COLORS as C, Status
+from src.constants import COLORS as C, SEMANTIC_COLORS as S, Status
 
 
 # Map status to bar color and button state
 _STATUS_CONFIG = {
     Status.READY: {
-        "bar_color": C["teal"],
+        "label": "READY",
+        "bar_color": C["green"],
         "btn_text": "LAUNCH",
         "btn_enabled": True,
         "btn_color": C["teal"],
         "btn_hover": C["teal_dim"],
     },
     Status.LAUNCHING: {
+        "label": "LAUNCHING",
         "bar_color": C["gold"],
         "btn_text": "LAUNCHING...",
         "btn_enabled": False,
@@ -42,6 +47,7 @@ _STATUS_CONFIG = {
         "btn_hover": C["gold"],
     },
     Status.RUNNING: {
+        "label": "RUNNING",
         "bar_color": C["green"],
         "btn_text": "RUNNING",
         "btn_enabled": False,
@@ -49,6 +55,7 @@ _STATUS_CONFIG = {
         "btn_hover": C["green"],
     },
     Status.BANNED: {
+        "label": "BANNED",
         "bar_color": C["gold"],
         "btn_text": "BANNED",
         "btn_enabled": False,
@@ -56,6 +63,7 @@ _STATUS_CONFIG = {
         "btn_hover": C["gold"],
     },
     Status.SAME_ACCOUNT_ONLINE: {
+        "label": "WAITING",
         "bar_color": C["grey"],
         "btn_text": "WAITING",
         "btn_enabled": False,
@@ -63,6 +71,7 @@ _STATUS_CONFIG = {
         "btn_hover": C["grey"],
     },
     Status.NO_PROFILE: {
+        "label": "NO PROFILE",
         "bar_color": C["grey"],
         "btn_text": "+ CREATE PROFILE",
         "btn_enabled": True,
@@ -70,6 +79,7 @@ _STATUS_CONFIG = {
         "btn_hover": C["white"],
     },
     Status.ERROR: {
+        "label": "ERROR",
         "bar_color": C["red"],
         "btn_text": "RETRY",
         "btn_enabled": True,
@@ -82,21 +92,18 @@ _STATUS_CONFIG = {
 class HexPortraitLabel(QLabel):
     """128×128 label displaying a hexagon-masked portrait."""
 
+    _SIZE = 112
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setFixedSize(128, 128)
+        self.setFixedSize(self._SIZE, self._SIZE)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._pixmap: Optional[QPixmap] = None
         self._show_skeleton = True
         self._update_style()
 
     def _update_style(self) -> None:
-        if self._show_skeleton:
-            self.setStyleSheet(
-                f"background-color: {C['steel']}; border-radius: 4px;"
-            )
-        else:
-            self.setStyleSheet("background-color: transparent;")
+        self.setStyleSheet("background-color: transparent; border: none;")
 
     def set_portrait(self, pixmap: Optional[QPixmap]) -> None:
         self._pixmap = pixmap
@@ -113,34 +120,41 @@ class HexPortraitLabel(QLabel):
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
         if self._show_skeleton or self._pixmap is None:
-            # Skeleton: draw a simple hex outline
             path = self._hex_path()
-            painter.fillPath(path, QColor(C["steel"]))
-            painter.setPen(QColor(C["grey"]))
+            painter.fillPath(path, QColor(12, 28, 41, 235))
+            painter.setPen(QPen(QColor(S["border_bright"]), 1.0))
             painter.drawPath(path)
+            center = self._SIZE // 2
+            painter.setPen(QPen(QColor(0, 200, 224, 54), 1.0))
+            painter.drawEllipse(center - 21, center - 21, 42, 42)
+            painter.drawLine(center, 24, center, self._SIZE - 24)
+            painter.drawLine(24, center, self._SIZE - 24, center)
         else:
             path = self._hex_path()
             painter.setClipPath(path)
             scaled = self._pixmap.scaled(
-                128, 128,
+                self._SIZE, self._SIZE,
                 Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                 Qt.TransformationMode.SmoothTransformation,
             )
-            x = (128 - scaled.width()) // 2
-            y = (128 - scaled.height()) // 2
+            x = (self._SIZE - scaled.width()) // 2
+            y = (self._SIZE - scaled.height()) // 2
             painter.drawPixmap(x, y, scaled)
+            painter.setClipping(False)
+            painter.setPen(QPen(QColor(S["border_bright"]), 1.0))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPath(path)
 
         painter.end()
 
     def _hex_path(self) -> QPainterPath:
         """Create a hexagon path centered in 128×128."""
         path = QPainterPath()
-        cx, cy = 64.0, 64.0
-        r = 60.0
-        # Pointy-top hexagon
-        import math
+        cx = cy = self._SIZE / 2.0
+        r = cx - 3.0
         for i in range(6):
             angle = math.radians(60 * i - 30)
             x = cx + r * math.cos(angle)
@@ -163,31 +177,28 @@ class HamburgerButton(QPushButton):
         super().__init__(parent)
         self.setFixedSize(28, 28)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAccessibleName("Character actions")
+        self.setToolTip("Character actions")
         self._hovered = False
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Background
-        bg = QColor(C["hover"]) if self._hovered else QColor(C["steel"])
+        border = QColor(S["accent"] if self.hasFocus() else S["border_bright"])
+        fill = QColor(18, 39, 54, 238 if self._hovered else 190)
+        painter.setPen(QPen(border, 1.0))
+        painter.setBrush(fill)
+        painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 4, 4)
+
+        dot_color = QColor(
+            S["text_primary"] if self._hovered else S["text_secondary"]
+        )
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(bg)
-        painter.drawRoundedRect(self.rect(), 4, 4)
-
-        # Three horizontal bars
-        bar_color = QColor(C["white"]) if self._hovered else QColor(C["grey"])
-        painter.setBrush(bar_color)
-        bar_w = 14
-        bar_h = 2
-        spacing = 5
-        center_x = self.width() / 2
-        center_y = self.height() / 2
-
-        for i in (-1, 0, 1):
-            y = center_y + i * spacing - bar_h / 2
-            x = center_x - bar_w / 2
-            painter.drawRoundedRect(int(x), int(y), bar_w, bar_h, 1, 1)
+        painter.setBrush(dot_color)
+        for x in (9, 14, 19):
+            painter.drawEllipse(x - 1, 13, 2, 2)
 
         painter.end()
 
@@ -201,8 +212,19 @@ class HamburgerButton(QPushButton):
         self.update()
         super().leaveEvent(event)
 
+    def focusInEvent(self, event) -> None:  # noqa: N802
+        self.update()
+        super().focusInEvent(event)
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802
+        self.update()
+        super().focusOutEvent(event)
+
 
 class CharacterCard(QFrame):
+    CARD_MIN_WIDTH = 148
+    CARD_MAX_WIDTH = 196
+    CARD_HEIGHT = 252
     """220×280px character card widget."""
 
     launched = pyqtSignal(str, str, int)  # username, char_name, char_id
@@ -239,111 +261,132 @@ class CharacterCard(QFrame):
         self._launch_available = True
         self._launch_unavailable_reason = ""
 
-        self.setFixedSize(220, 280)
+        self.setObjectName("characterCard")
+        self.setProperty("deepSignal", True)
+        self.setProperty("selected", False)
+        self.setProperty("status", status.value)
+        self.setMinimumWidth(self.CARD_MIN_WIDTH)
+        self.setMaximumWidth(self.CARD_MAX_WIDTH)
+        self.setFixedHeight(self.CARD_HEIGHT)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._selected = False
         self._mouse_inside = False
         self._setup_ui()
         self._apply_status(status)
+        self._restyle()
 
     def _setup_ui(self) -> None:
-        self.setStyleSheet(
-            f"""
-            QFrame {{
-                background-color: {C['card']};
-                border: 1px solid {C['steel']};
-                border-radius: 6px;
-            }}
-            """
-        )
-
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 12)
-        layout.setSpacing(0)
+        layout.setContentsMargins(10, 8, 10, 10)
+        layout.setSpacing(5)
 
-        # 3px status bar top
+        signal_row = QHBoxLayout()
+        signal_row.setContentsMargins(0, 0, 0, 0)
+        signal_row.setSpacing(4)
+        self._status_dot = QLabel("●")
+        self._status_dot.setFixedWidth(10)
+        signal_row.addWidget(self._status_dot)
+        self._status_label = QLabel("READY")
+        self._status_label.setStyleSheet(
+            f"color: {S['text_secondary']}; border: none; background: transparent; "
+            "font-size: 9px; font-weight: 700;"
+        )
+        signal_row.addWidget(self._status_label)
+        signal_row.addStretch()
+        self._selection_marker = QLabel("★")
+        self._selection_marker.setStyleSheet(
+            f"color: {S['accent']}; border: none; background: transparent; font-size: 13px;"
+        )
+        self._selection_marker.setToolTip("Selected character")
+        self._selection_marker.hide()
+        signal_row.addWidget(self._selection_marker)
+        layout.addLayout(signal_row)
+
         self._status_bar = QFrame()
-        self._status_bar.setFixedSize(220, 3)
+        self._status_bar.setFixedHeight(2)
+        self._status_bar.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         layout.addWidget(self._status_bar)
 
-        # Content wrapper with padding
-        content = QWidget()
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(12, 12, 12, 0)
-        content_layout.setSpacing(8)
-        layout.addWidget(content)
-
-        # Hex portrait
         self._portrait = HexPortraitLabel()
-        content_layout.addWidget(self._portrait, alignment=Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self._portrait, alignment=Qt.AlignmentFlag.AlignHCenter)
 
-        # Character name
         self._name_label = QLabel(self.char_name)
         self._name_label.setStyleSheet(
-            f"color: {C['white']}; font-size: 15px; font-weight: bold;"
+            f"color: {S['text_primary']}; border: none; background: transparent; "
+            "font-size: 14px; font-weight: 700;"
         )
         self._name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._name_label.setFixedWidth(196)
-        self._elide_name()
-        content_layout.addWidget(self._name_label)
+        layout.addWidget(self._name_label)
 
-        # Account
         self._account_label = QLabel(self.username)
         self._account_label.setStyleSheet(
-            f"color: {C['grey']}; font-size: 11px;"
+            f"color: {S['accent']}; border: none; background: transparent; font-size: 9px;"
         )
         self._account_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        content_layout.addWidget(self._account_label)
+        layout.addWidget(self._account_label)
 
-        # Stats row (ISK + ship)
-        stats_row = QWidget()
-        stats_layout = QHBoxLayout(stats_row)
-        stats_layout.setContentsMargins(0, 0, 0, 0)
-        stats_layout.setSpacing(12)
-
-        self._isk_label = QLabel(self.isk)
-        self._isk_label.setStyleSheet(
-            f"color: {C['white']}; font-size: 12px; font-family: 'Consolas', monospace;"
+        # Compatibility labels remain available to integrations that inspect
+        # them, but the compact card presents their values in one summary line.
+        self._isk_label = QLabel(self.isk, self)
+        self._isk_label.hide()
+        self._ship_label = QLabel(self.ship, self)
+        self._ship_label.hide()
+        self._summary_label = QLabel()
+        self._summary_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._summary_label.setStyleSheet(
+            f"color: {S['text_muted']}; border: none; background: transparent; font-size: 9px;"
         )
-        stats_layout.addWidget(self._isk_label)
+        layout.addWidget(self._summary_label)
+        layout.addStretch(1)
 
-        stats_layout.addStretch()
-
-        self._ship_label = QLabel(self.ship)
-        self._ship_label.setStyleSheet(
-            f"color: {C['grey']}; font-size: 12px; font-family: 'Consolas', monospace;"
-        )
-        stats_layout.addWidget(self._ship_label)
-
-        content_layout.addWidget(stats_row)
-
-        content_layout.addStretch()
-
-        # Button row
-        btn_row = QWidget()
-        btn_layout = QHBoxLayout(btn_row)
+        btn_layout = QHBoxLayout()
         btn_layout.setContentsMargins(0, 0, 0, 0)
         btn_layout.setSpacing(6)
 
         self._launch_btn = QPushButton("LAUNCH")
-        self._launch_btn.setFixedHeight(32)
+        self._launch_btn.setFixedHeight(28)
         self._launch_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._launch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._launch_btn.setAccessibleName(f"Launch {self.char_name}")
         self._launch_btn.clicked.connect(self._on_launch_clicked)
         btn_layout.addWidget(self._launch_btn)
 
         self._overflow_btn = HamburgerButton()
         self._overflow_btn.clicked.connect(self._on_overflow_clicked)
         btn_layout.addWidget(self._overflow_btn)
-
-        content_layout.addWidget(btn_row)
+        layout.addLayout(btn_layout)
+        self._elide_name()
 
     def _elide_name(self) -> None:
+        available = max(92, self.width() - 24)
         metrics = QFontMetrics(self._name_label.font())
         elided = metrics.elidedText(
-            self.char_name, Qt.TextElideMode.ElideRight, 190
+            self.char_name, Qt.TextElideMode.ElideRight, available
         )
         self._name_label.setText(elided)
         self._name_label.setToolTip(self.char_name)
+        summary = f"{self.ship}  ·  {self.isk} ISK"
+        summary_metrics = QFontMetrics(self._summary_label.font())
+        self._summary_label.setText(
+            summary_metrics.elidedText(
+                summary,
+                Qt.TextElideMode.ElideRight,
+                available,
+            )
+        )
+        self._summary_label.setToolTip(summary)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._elide_name()
 
     def set_selected(self, selected: bool) -> None:
         """Update the card's visual selection state.
@@ -351,57 +394,73 @@ class CharacterCard(QFrame):
         Uses Qt property selectors for clean styling — no layout jumps,
         no glow artefacts, no dynamic setStyleSheet() calls.
         """
-        self._selected = selected
-        self.setProperty("selected", selected)
+        self._selected = bool(selected)
+        self.setProperty("selected", self._selected)
+        self._selection_marker.setVisible(self._selected)
         self._restyle()
+        self._update_accessibility()
 
     # ═════════════════════════════════════════════════════════════════════
     #  Mouse tracking — enter / leave drive hover styling centrally
     # ═════════════════════════════════════════════════════════════════════
     def enterEvent(self, event) -> None:
         self._mouse_inside = True
-        if not self._selected:
-            self._restyle()
+        self._restyle()
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:
         self._mouse_inside = False
-        if not self._selected:
-            self._restyle()
+        self._restyle()
         super().leaveEvent(event)
+
+    def focusInEvent(self, event) -> None:  # noqa: N802
+        self._restyle()
+        super().focusInEvent(event)
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802
+        self._restyle()
+        super().focusOutEvent(event)
 
     # ── Central style dispatch ─────────────────────────────────────────────
     def _restyle(self) -> None:
         """Apply the correct stylesheet based on current (selected, hover) state.
 
-        All states keep a 1 px border so there is never a layout jump.
+        All states keep a 2 px border so there is never a layout jump.
         """
         if self._selected:
-            border_color = C["teal"]
-            bg = C["carbon"]  # keep the default card bg
+            border_color = S["accent"]
+            bg = "rgba(8, 31, 43, 238)"
+        elif self.hasFocus():
+            border_color = S["text_primary"]
+            bg = "rgba(10, 27, 39, 232)"
         elif self._mouse_inside:
-            border_color = C["teal_dim"]
-            bg = C["carbon"]
+            border_color = S["accent_dim"]
+            bg = "rgba(13, 31, 44, 232)"
         else:
-            border_color = C["steel"]
-            bg = C["card"]
+            border_color = S["border"]
+            bg = "rgba(7, 17, 29, 222)"
 
         self.setStyleSheet(
             f"""
-            QFrame {{
+            QFrame#characterCard {{
                 background-color: {bg};
-                border: 1px solid {border_color};
-                border-radius: 6px;
+                border: 2px solid {border_color};
+                border-radius: 7px;
             }}
             """
         )
 
     def _apply_status(self, status: Status) -> None:
         self._status = status
+        self.setProperty("status", status.value)
         cfg = _STATUS_CONFIG.get(status, _STATUS_CONFIG[Status.READY])
         self._status_bar.setStyleSheet(
-            f"background-color: {cfg['bar_color']}; border: none;"
+            f"background-color: {cfg['bar_color']}; border: none; border-radius: 1px;"
         )
+        self._status_dot.setStyleSheet(
+            f"color: {cfg['bar_color']}; border: none; background: transparent; font-size: 9px;"
+        )
+        self._status_label.setText(str(cfg["label"]))
         if self._launch_available:
             self._launch_btn.setText(cfg["btn_text"])
             self._launch_btn.setEnabled(cfg["btn_enabled"])
@@ -413,22 +472,41 @@ class CharacterCard(QFrame):
         self._launch_btn.setStyleSheet(
             f"""
             QPushButton {{
-                background-color: {cfg['btn_color']};
-                color: {C['void_black']};
-                border: none;
+                background-color: rgba(105, 72, 0, 224);
+                color: #FFE39A;
+                border: 1px solid {C['gold']};
                 border-radius: 4px;
                 font-weight: bold;
-                font-size: 12px;
+                font-size: 10px;
             }}
             QPushButton:hover:enabled {{
-                background-color: {cfg['btn_hover']};
+                background-color: {C['gold']};
+                color: {C['void_black']};
+            }}
+            QPushButton:focus {{
+                border: 2px solid #FFF2C3;
             }}
             QPushButton:disabled {{
-                background-color: {cfg['btn_color']};
-                color: {C['void_black']};
+                background-color: rgba(10, 22, 32, 210);
+                color: {S['text_muted']};
+                border: 1px solid {S['border']};
             }}
             """
         )
+        self._update_accessibility()
+
+    def _update_accessibility(self) -> None:
+        cfg = _STATUS_CONFIG.get(self._status, _STATUS_CONFIG[Status.READY])
+        self.setAccessibleName(self.char_name)
+        description = (
+            f"Character on account {self.username}. {cfg['label']}. "
+            f"Ship {self.ship}. Balance {self.isk} ISK."
+        )
+        if self._selected:
+            description += " Selected."
+        if not self._launch_available and self._launch_unavailable_reason:
+            description += f" {self._launch_unavailable_reason}"
+        self.setAccessibleDescription(description)
 
     def set_status(self, status: Status) -> None:
         """Update card status."""
@@ -454,12 +532,17 @@ class CharacterCard(QFrame):
 
     def _on_overflow_clicked(self) -> None:
         menu = QMenu(self)
+        menu.setAccessibleName(f"Actions for {self.char_name}")
         menu.setStyleSheet(
             f"""
             QMenu {{
                 background-color: {C['panel']};
                 color: {C['white']};
-                border: 1px solid {C['steel']};
+                border: 1px solid {S['border_bright']};
+                padding: 4px;
+            }}
+            QMenu::item {{
+                padding: 7px 20px;
             }}
             QMenu::item:selected {{
                 background-color: {C['hover']};
@@ -499,7 +582,19 @@ class CharacterCard(QFrame):
     def _on_view_details(self) -> None:
         self.selected.emit(self.username, self.char_name, self.char_id)
 
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        if event.key() in {
+            Qt.Key.Key_Enter,
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Space,
+        }:
+            self.selected.emit(self.username, self.char_name, self.char_id)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            self.setFocus(Qt.FocusReason.MouseFocusReason)
             self.selected.emit(self.username, self.char_name, self.char_id)
         super().mousePressEvent(event)

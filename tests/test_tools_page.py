@@ -365,6 +365,42 @@ def test_search_filters_refresh_and_actions_have_accessible_keyboard_contracts(
         _close_page(page)
 
 
+def test_deep_signal_header_filter_rail_and_action_roles_are_semantic(
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    _install_all_wrappers(tmp_path)
+    page = ToolsPage(str(tmp_path))
+    _show_page(qapp, page)
+
+    try:
+        assert page.page_header.title_label.text() == "TOOL DECK"
+        assert page.page_header.eyebrow_label.text() == "SYSTEM UTILITIES"
+        assert page.runtime_context_label.text() == "NATIVE HOST"
+        assert page.runtime_context_label.property("class") == "toolRuntimePill"
+        assert page.filter_rail.property("class") == "toolFilterRail"
+        assert page.scroll_area.accessibleName() == "Reviewed tool catalog"
+
+        launch = page.card_for("client-setup-wizard").action_buttons["launch"]
+        preview = page.card_for("reset-local-databases").action_buttons["preview"]
+        reset = page.card_for("reset-local-databases").action_buttons["reset"]
+        assert launch.property("class") == "toolPrimary"
+        assert preview.property("class") == "toolSecondary"
+        assert reset.property("class") == "toolDanger"
+
+        for control in (
+            page.runtime_context_label,
+            page.available_count_label,
+            page.refresh_button,
+            page.search_edit,
+            page.category_combo,
+        ):
+            assert control.accessibleName()
+        assert page.scroll_area.horizontalScrollBar().maximum() == 0
+    finally:
+        _close_page(page)
+
+
 def test_managed_docker_cards_render_resolved_semantic_actions_and_reasons(
     qapp: QApplication,
     tmp_path: Path,

@@ -507,6 +507,96 @@ def test_docker_project_identity_is_private_safe_and_project_specific(
     assert len(first) <= 80
 
 
+def test_docker_project_identity_changes_with_ordered_override_content(
+    tmp_path: Path,
+) -> None:
+    base = tmp_path / "compose.yaml"
+    override = tmp_path / "launcher.override.yaml"
+    base.write_text("services: {}\n", encoding="utf-8")
+    override.write_text("services:\n  server: {}\n", encoding="utf-8")
+    target = ComposeTarget(base, tmp_path, override_files=(override,))
+    first = docker_project_identity(target, "fixture")
+
+    override.write_text("services:\n  server:\n    environment: {}\n", encoding="utf-8")
+    second = docker_project_identity(target, "fixture")
+
+    assert first != second
+    assert str(tmp_path) not in first
+
+
+def test_docker_project_identity_changes_with_effective_mount_source(
+    tmp_path: Path,
+) -> None:
+    target = _target(tmp_path)
+    first_config = parse_compose_config(
+        _config_payload(
+            [
+                {
+                    "type": "volume",
+                    "source": "fixture-data-a",
+                    "target": "/var/lib/evejs",
+                }
+            ]
+        )
+    )
+    second_config = parse_compose_config(
+        _config_payload(
+            [
+                {
+                    "type": "volume",
+                    "source": "fixture-data-b",
+                    "target": "/var/lib/evejs",
+                }
+            ]
+        )
+    )
+
+    first = docker_project_identity(
+        target,
+        first_config.project_name,
+        config=first_config,
+    )
+    second = docker_project_identity(
+        target,
+        second_config.project_name,
+        config=second_config,
+    )
+
+    assert first != second
+    assert "fixture-data-a" not in first
+
+
+def test_docker_project_identity_changes_with_private_effective_environment(
+    tmp_path: Path,
+) -> None:
+    target = _target(tmp_path)
+    first_payload = _config_payload([])
+    second_payload = _config_payload([])
+    first_payload["services"]["server"]["environment"] = {
+        "PRIVATE_RUNTIME_VALUE": "fixture-secret-a"
+    }
+    second_payload["services"]["server"]["environment"] = {
+        "PRIVATE_RUNTIME_VALUE": "fixture-secret-b"
+    }
+    first_config = parse_compose_config(first_payload)
+    second_config = parse_compose_config(second_payload)
+
+    first = docker_project_identity(
+        target,
+        first_config.project_name,
+        config=first_config,
+    )
+    second = docker_project_identity(
+        target,
+        second_config.project_name,
+        config=second_config,
+    )
+
+    assert first != second
+    assert "fixture-secret-a" not in first
+    assert "fixture-secret-b" not in second
+
+
 def test_docker_settings_identity_is_private_safe_and_selection_specific(
     tmp_path: Path,
 ) -> None:

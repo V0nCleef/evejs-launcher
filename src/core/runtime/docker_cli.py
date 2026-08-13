@@ -1,14 +1,15 @@
-"""Bounded, argv-only Docker CLI execution for read-only inspection."""
+"""Bounded, argv-only Docker CLI execution for allowlisted operations."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import json
 import os
 import re
 import shutil
 import subprocess
 import tempfile
-from typing import Callable
+from typing import BinaryIO, Callable
 
 from src.core import platform
 
@@ -17,6 +18,7 @@ _SECRET_PATTERN = re.compile(r"(?i)(password|token|secret|apikey|api_key)\s*([=:
 _BEARER_PATTERN = re.compile(r"(?i)(authorization\s*:\s*bearer\s+)[^\s,]+")
 _URL_USERINFO_PATTERN = re.compile(r"(?i)([a-z][a-z0-9+.-]*://)[^\s/@:]+(?::[^\s/@]*)?@")
 _PROCESS_REAP_SECONDS = 1.0
+_MAX_INPUT_BYTES = 16 * 1024
 
 
 def redact_docker_diagnostic(value: object, *, limit: int = 512) -> str:
@@ -57,6 +59,7 @@ class DockerCommandError(RuntimeError):
 
 
 RawExecutor = Callable[[tuple[str, ...], Path, float], subprocess.CompletedProcess[str]]
+RawInputExecutor = Callable[[tuple[str, ...], Path, float, bytes], subprocess.CompletedProcess[str]]
 
 
 class DockerCommandRunner:
@@ -69,12 +72,14 @@ class DockerCommandRunner:
         executable: str | None = None,
         *,
         execute: RawExecutor | None = None,
+        execute_input: RawInputExecutor | None = None,
         output_limit: int = 64 * 1024,
     ) -> None:
         if output_limit <= 0:
             raise ValueError("output_limit must be positive")
         self.executable = executable or self.resolve_executable()
         self._execute = execute or self._execute_bounded
+        self._execute_input = execute_input or self._execute_bounded_input
         self._output_limit = output_limit
 
     @classmethod
@@ -112,14 +117,88 @@ class DockerCommandRunner:
             raise DockerCommandError(args[0], safe_result)
         return result
 
+    def run_with_input(
+        self,
+        args: tuple[str, ...],
+        *,
+        cwd: Path,
+        input_bytes: bytes,
+        timeout: float = 10.0,
+    ) -> DockerCommandResult:
+        """Run one Docker operation with a small, non-command-line stdin payload."""
+        if not args:
+            raise ValueError("Docker command arguments are required")
+        if not isinstance(input_bytes, bytes):
+            raise TypeError("input_bytes must be bytes")
+        if len(input_bytes) > _MAX_INPUT_BYTES:
+            raise ValueError("input_bytes must not exceed 16 KiB")
+        if timeout <= 0:
+            raise ValueError("timeout must be positive")
+
+        command = (self.executable, *args)
+        failure: DockerCommandResult | None = None
+        try:
+            completed = self._execute_input(command, cwd, timeout, input_bytes)
+        except subprocess.TimeoutExpired:
+            failure = DockerCommandResult(command, None, "", "", False, True)
+        except OSError:
+            # Input-bearing failures deliberately omit the originating
+            # diagnostic so a payload echoed by the OS/executor cannot cross
+            # this public boundary.
+            failure = DockerCommandResult(command, None, "", "", False, False)
+        if failure is not None:
+            # Raise after leaving the except block so the original exception,
+            # which may itself retain input/output, is not chained or exposed.
+            raise DockerCommandError(args[0], failure)
+
+        stdout, stdout_truncated = self._bound_without_input(completed.stdout or "", input_bytes)
+        stderr, stderr_truncated = self._bound_without_input(completed.stderr or "", input_bytes)
+        result = DockerCommandResult(
+            command,
+            completed.returncode,
+            stdout,
+            stderr,
+            stdout_truncated or stderr_truncated,
+            False,
+        )
+        if completed.returncode != 0:
+            safe_result = DockerCommandResult(command, completed.returncode, "", "", result.truncated, False)
+            raise DockerCommandError(args[0], safe_result)
+        return result
+
     def _execute_bounded(self, argv: tuple[str, ...], cwd: Path, timeout: float) -> subprocess.CompletedProcess[str]:
         """Capture through temporary files, avoiding an unbounded PIPE in memory."""
+        return self._execute_bounded_process(argv, cwd, timeout, stdin=subprocess.DEVNULL)
+
+    def _execute_bounded_input(
+        self,
+        argv: tuple[str, ...],
+        cwd: Path,
+        timeout: float,
+        input_bytes: bytes,
+    ) -> subprocess.CompletedProcess[str]:
+        """Feed bounded bytes through a temporary file, never an in-memory PIPE."""
+        with tempfile.TemporaryFile(mode="w+b") as stdin_file:
+            stdin_file.write(input_bytes)
+            stdin_file.flush()
+            stdin_file.seek(0)
+            return self._execute_bounded_process(argv, cwd, timeout, stdin=stdin_file)
+
+    def _execute_bounded_process(
+        self,
+        argv: tuple[str, ...],
+        cwd: Path,
+        timeout: float,
+        *,
+        stdin: int | BinaryIO,
+    ) -> subprocess.CompletedProcess[str]:
+        """Run with the shared bounded-output and Windows Job containment path."""
         with tempfile.TemporaryFile(mode="w+b") as stdout_file, tempfile.TemporaryFile(mode="w+b") as stderr_file:
             process = subprocess.Popen(
                 argv,
                 shell=False,
                 cwd=os.fspath(cwd),
-                stdin=subprocess.DEVNULL,
+                stdin=stdin,
                 stdout=stdout_file,
                 stderr=stderr_file,
                 text=False,
@@ -164,6 +243,33 @@ class DockerCommandRunner:
         truncated = len(value) > self._output_limit
         bounded = value[: self._output_limit]
         return self._redact(bounded), truncated
+
+    def _bound_without_input(self, value: str, input_bytes: bytes) -> tuple[str, bool]:
+        """Bound/redact output and remove an exact echo of the stdin payload."""
+        raw_truncated = len(value) > self._output_limit
+        payload = input_bytes.decode("utf-8", errors="replace")
+        scrubbed = value
+        secrets = {payload} if payload else set()
+        try:
+            parsed = json.loads(payload)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            parsed = None
+
+        def collect(candidate: object) -> None:
+            if isinstance(candidate, str) and candidate:
+                secrets.add(candidate)
+            elif isinstance(candidate, list):
+                for item in candidate:
+                    collect(item)
+            elif isinstance(candidate, dict):
+                for item in candidate.values():
+                    collect(item)
+
+        collect(parsed)
+        for secret in sorted(secrets, key=len, reverse=True):
+            scrubbed = scrubbed.replace(secret, "[REDACTED]")
+        bounded, scrubbed_truncated = self._bound(scrubbed)
+        return bounded, raw_truncated or scrubbed_truncated
 
     @staticmethod
     def _redact(value: str) -> str:

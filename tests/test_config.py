@@ -27,6 +27,35 @@ def test_fresh_config_uses_ask_preference(isolated_config: Path) -> None:
     assert "server_start_script" not in loaded
     assert "server_start_scripts" not in loaded
     assert "server_script_prompted" not in loaded
+    assert "audio_ui_sounds_enabled" not in loaded
+    assert "audio_ui_sounds_volume" not in loaded
+
+
+def test_retired_interface_cue_settings_are_discarded_on_load(
+    isolated_config: Path,
+) -> None:
+    isolated_config.write_text(
+        json.dumps(
+            {
+                "audio_ui_sounds_enabled": False,
+                "audio_ui_sounds_volume": 72,
+                "ui_sounds_enabled": True,
+                "ui_sounds_volume": 11,
+                "audio_music_volume": 64,
+                "audio_voice_volume": 93,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = config.load()
+
+    assert "audio_ui_sounds_enabled" not in loaded
+    assert "audio_ui_sounds_volume" not in loaded
+    assert "ui_sounds_enabled" not in loaded
+    assert "ui_sounds_volume" not in loaded
+    assert loaded["audio_music_volume"] == 64
+    assert loaded["audio_voice_volume"] == 93
 
 
 def test_each_load_has_independent_mutable_defaults(isolated_config: Path) -> None:
@@ -35,10 +64,45 @@ def test_each_load_has_independent_mutable_defaults(isolated_config: Path) -> No
 
     first["hidden_characters"].append("temporary")
     first["update_skip_versions"].append("9.9.9")
+    first["audio_music_library"].append("C:/Music/local.mp3")
 
     assert second["hidden_characters"] == []
     assert second["update_skip_versions"] == []
+    assert second["audio_music_library"] == []
     assert config.DEFAULT_CONFIG["hidden_characters"] == []
+    assert config.DEFAULT_CONFIG["audio_music_library"] == []
+
+
+def test_music_library_migrates_single_path_and_normalizes_lists(
+    isolated_config: Path,
+) -> None:
+    isolated_config.write_text(
+        json.dumps({"music_library": "  C:/Music/Local Track.mp3  "}),
+        encoding="utf-8",
+    )
+    assert config.load()["audio_music_library"] == [
+        "C:/Music/Local Track.mp3"
+    ]
+
+    isolated_config.write_text(
+        json.dumps(
+            {
+                "audio_music_library": [
+                    " C:/Music/First.mp3 ",
+                    "c:/music/FIRST.mp3",
+                    42,
+                    "",
+                    "D:/Music/Temporarily Missing.flac",
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert config.load()["audio_music_library"] == [
+        "C:/Music/First.mp3",
+        "D:/Music/Temporarily Missing.flac",
+    ]
 
 
 def test_legacy_absolute_script_migrates_to_relative_filename(
@@ -174,6 +238,24 @@ def test_malformed_json_is_backed_up_and_defaults_are_loaded(
     assert len(backups) == 1
     assert backups[0].read_text(encoding="utf-8") == broken_contents
     assert str(backups[0]) in caplog.text
+
+
+def test_windows_utf8_bom_config_loads_without_quarantine(
+    isolated_config: Path,
+) -> None:
+    payload = json.dumps(
+        {
+            "evejs_root": r"C:\Fixture\EveJS",
+            "update_auto_check": False,
+        }
+    )
+    isolated_config.write_bytes(b"\xef\xbb\xbf" + payload.encode("utf-8"))
+
+    loaded = config.load()
+
+    assert loaded["evejs_root"] == r"C:\Fixture\EveJS"
+    assert loaded["update_auto_check"] is False
+    assert list(isolated_config.parent.glob("config.json.*.broken")) == []
 
 
 def test_save_replaces_from_temporary_file_in_same_directory(

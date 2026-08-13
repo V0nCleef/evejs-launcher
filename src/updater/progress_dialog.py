@@ -8,7 +8,6 @@ from PyQt6.QtGui import QFont, QPixmap
 from PyQt6.QtWidgets import (
     QDialog,
     QFrame,
-    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QProgressBar,
@@ -17,7 +16,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.constants import COLORS
+from src.constants import SEMANTIC_COLORS as S
+from src.theme import load_fonts
+from src.widgets.deep_signal_background import operations_scene_path
 
 
 class UpdateProgressDialog(QDialog):
@@ -27,6 +28,14 @@ class UpdateProgressDialog(QDialog):
         "download": ("Downloading update", 0),
         "prepare": ("Preparing update", 1),
         "install": ("Installing update", 2),
+        "restart": ("Restarting launcher", 3),
+    }
+
+    _STAGE_BADGES = {
+        "download": "DOWNLOAD LINK",
+        "prepare": "PACKAGE VERIFY",
+        "install": "INSTALL HANDOFF",
+        "restart": "RESTART SEQUENCE",
     }
 
     def __init__(self, version: str, parent: QWidget | None = None) -> None:
@@ -34,6 +43,8 @@ class UpdateProgressDialog(QDialog):
         self._version = version.lstrip("vV")
         self._allow_close = False
         self._phase_labels: list[QLabel] = []
+        self._phase_frames: list[QFrame] = []
+        self._active_phase_index = 0
 
         self._build_ui()
         self._apply_styles()
@@ -42,81 +53,79 @@ class UpdateProgressDialog(QDialog):
     def _build_ui(self) -> None:
         """Assemble a compact, launcher-styled update surface."""
         self.setWindowTitle("EveJS Launcher Update")
-        self.setFixedSize(520, 432)
+        self.setObjectName("updateProgressDialog")
+        self.setProperty("deepSignal", True)
+        # The standalone updater can use different native font fallback
+        # metrics, so stay safely above the full header's minimum size hint.
+        self.setFixedSize(620, 430)
         self.setWindowFlags(
             Qt.WindowType.Dialog
             | Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        self.setAccessibleName("Launcher update progress")
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(28, 24, 28, 22)
+        root.setContentsMargins(24, 22, 24, 20)
         root.setSpacing(0)
 
         header = QHBoxLayout()
         header.setSpacing(12)
 
         logo = QLabel(self)
-        logo.setFixedSize(40, 40)
+        logo.setObjectName("updateLogo")
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo.setFixedSize(42, 42)
         logo_path = Path(__file__).resolve().parent.parent.parent / "assets" / "logo.png"
         if logo_path.is_file():
             pixmap = QPixmap(str(logo_path)).scaled(
-                40,
-                40,
+                36,
+                36,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
             logo.setPixmap(pixmap)
         else:
-            logo.setText("E")
-            logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            logo.setText("\u25c9")
             logo.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
-            logo.setStyleSheet(f"color: {COLORS['teal']};")
         header.addWidget(logo)
 
         heading = QVBoxLayout()
         heading.setSpacing(1)
-        eyebrow = QLabel("EVEJS LAUNCHER", self)
-        eyebrow.setStyleSheet(
-            f"color: {COLORS['grey']}; font-size: 10px; font-weight: 700; "
-            "letter-spacing: 1.6px;"
-        )
-        heading.addWidget(eyebrow)
+        self.context_label = QLabel("DEEP SIGNAL // UPDATE LINK", self)
+        self.context_label.setObjectName("dialogEyebrow")
+        heading.addWidget(self.context_label)
 
-        title = QLabel("Installing update", self)
-        title.setStyleSheet(
-            f"color: {COLORS['white']}; font-size: 20px; font-weight: 700;"
-        )
-        heading.addWidget(title)
+        self.window_heading = QLabel("Installing update", self)
+        self.window_heading.setObjectName("dialogTitle")
+        heading.addWidget(self.window_heading)
         header.addLayout(heading)
         header.addStretch()
 
         version = QLabel(f"v{self._version}", self)
-        version.setStyleSheet(
-            f"color: {COLORS['gold']}; background: {COLORS['card']}; "
-            f"border: 1px solid {COLORS['steel']}; border-radius: 6px; "
-            "padding: 5px 9px; font-family: Consolas; font-size: 11px;"
-        )
+        version.setObjectName("versionBadge")
+        version.setAccessibleName("Update version")
         header.addWidget(version, alignment=Qt.AlignmentFlag.AlignTop)
         root.addLayout(header)
-        root.addSpacing(18)
+        root.addSpacing(16)
 
         self.hero_banner = QLabel(self)
-        self.hero_banner.setFixedHeight(82)
-        self.hero_banner.setStyleSheet(
-            f"background: {COLORS['void_black']}; border: 1px solid {COLORS['steel']}; "
-            "border-radius: 8px;"
-        )
-        hero_path = (
-            Path(__file__).resolve().parent.parent.parent
-            / "assets"
-            / "hero"
-            / "hero_nebula.png"
-        )
-        if hero_path.is_file():
-            source = QPixmap(str(hero_path))
-            target_width = self.width() - 56
+        self.hero_banner.setObjectName("updateHero")
+        self.hero_banner.setFixedHeight(96)
+        source = QPixmap(str(operations_scene_path(__file__)))
+        if source.isNull():
+            source = QPixmap(
+                str(
+                    Path(__file__).resolve().parent.parent.parent
+                    / "assets"
+                    / "hero"
+                    / "hero_nebula.png"
+                )
+            )
+        if not source.isNull():
+            target_width = self.width() - 48
             target_height = self.hero_banner.height()
             hero = source.scaled(
                 target_width,
@@ -124,116 +133,314 @@ class UpdateProgressDialog(QDialog):
                 Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                 Qt.TransformationMode.SmoothTransformation,
             )
-            crop_x = max(0, (hero.width() - target_width) // 2)
+            crop_x = max(0, int((hero.width() - target_width) * 0.68))
             crop_y = max(0, (hero.height() - target_height) // 2)
             self.hero_banner.setPixmap(hero.copy(crop_x, crop_y, target_width, target_height))
-            opacity = QGraphicsOpacityEffect(self.hero_banner)
-            opacity.setOpacity(0.58)
-            self.hero_banner.setGraphicsEffect(opacity)
-        else:
-            self.hero_banner.setText("UPDATING EVEJS LAUNCHER")
-            self.hero_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.hero_banner.setStyleSheet(
-                f"background: {COLORS['void_black']}; border: 1px solid {COLORS['steel']}; "
-                f"border-radius: 8px; color: {COLORS['teal']}; font-size: 11px; "
-                "font-weight: 700; letter-spacing: 2px;"
-            )
+
+        hero_copy = QVBoxLayout(self.hero_banner)
+        hero_copy.setContentsMargins(16, 13, 16, 13)
+        hero_copy.setSpacing(3)
+        self.hero_state_label = QLabel("DOWNLOAD LINK", self.hero_banner)
+        self.hero_state_label.setObjectName("heroState")
+        hero_copy.addWidget(self.hero_state_label)
+        hero_copy.addStretch()
+        hero_detail = QLabel("SECURE RELEASE CHANNEL / VERIFIED PACKAGE", self.hero_banner)
+        hero_detail.setObjectName("heroDetail")
+        hero_copy.addWidget(hero_detail)
         root.addWidget(self.hero_banner)
-        root.addSpacing(20)
+        root.addSpacing(16)
 
-        self.status_label = QLabel(self)
-        self.status_label.setStyleSheet(
-            f"color: {COLORS['white']}; font-size: 15px; font-weight: 600;"
-        )
-        root.addWidget(self.status_label)
-        root.addSpacing(6)
+        self.status_panel = QFrame(self)
+        self.status_panel.setObjectName("updateStatusPanel")
+        self.status_panel.setProperty("state", "active")
+        status_layout = QVBoxLayout(self.status_panel)
+        status_layout.setContentsMargins(15, 12, 15, 13)
+        status_layout.setSpacing(5)
 
-        self.detail_label = QLabel(self)
+        status_header = QHBoxLayout()
+        status_header.setSpacing(8)
+        self.state_indicator = QLabel("", self.status_panel)
+        self.state_indicator.setObjectName("stateIndicator")
+        self.state_indicator.setProperty("state", "active")
+        self.state_indicator.setFixedSize(9, 9)
+        status_header.addWidget(self.state_indicator)
+        self.status_label = QLabel(self.status_panel)
+        self.status_label.setObjectName("updateStatus")
+        self.status_label.setAccessibleName("Update status")
+        status_header.addWidget(self.status_label)
+        status_header.addStretch()
+        self.state_badge = QLabel("ACTIVE LINK", self.status_panel)
+        self.state_badge.setObjectName("stateBadge")
+        self.state_badge.setProperty("state", "active")
+        status_header.addWidget(self.state_badge)
+        status_layout.addLayout(status_header)
+
+        self.detail_label = QLabel(self.status_panel)
+        self.detail_label.setObjectName("updateDetail")
         self.detail_label.setWordWrap(True)
-        self.detail_label.setStyleSheet(f"color: {COLORS['grey']}; font-size: 12px;")
-        root.addWidget(self.detail_label)
-        root.addSpacing(14)
+        status_layout.addWidget(self.detail_label)
 
-        self.progress_bar = QProgressBar(self)
+        self.progress_bar = QProgressBar(self.status_panel)
+        self.progress_bar.setObjectName("updateProgress")
+        self.progress_bar.setProperty("state", "active")
+        self.progress_bar.setAccessibleName("Update progress")
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setTextVisible(True)
         self.progress_bar.setFixedHeight(18)
-        root.addWidget(self.progress_bar)
-        root.addSpacing(20)
+        status_layout.addWidget(self.progress_bar)
+        root.addWidget(self.status_panel)
+        root.addSpacing(16)
 
         phases = QFrame(self)
         phases.setObjectName("updatePhases")
         phase_layout = QHBoxLayout(phases)
-        phase_layout.setContentsMargins(14, 10, 14, 10)
-        phase_layout.setSpacing(10)
-        for index, text in enumerate(("Download", "Prepare", "Restart")):
-            label = QLabel(text, phases)
+        phase_layout.setContentsMargins(10, 9, 10, 9)
+        phase_layout.setSpacing(7)
+        for index, text in enumerate(("Download", "Prepare", "Install", "Restart")):
+            phase = QFrame(phases)
+            phase.setObjectName("updatePhase")
+            phase.setProperty("phaseState", "pending")
+            phase_step = QVBoxLayout(phase)
+            phase_step.setContentsMargins(6, 5, 6, 5)
+            phase_step.setSpacing(1)
+            number = QLabel(f"0{index + 1}", phase)
+            number.setObjectName("phaseNumber")
+            number.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            phase_step.addWidget(number)
+            label = QLabel(text.upper(), phase)
+            label.setObjectName("phaseLabel")
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            phase_step.addWidget(label)
+            self._phase_frames.append(phase)
             self._phase_labels.append(label)
-            phase_layout.addWidget(label, stretch=1)
-            if index < 2:
+            phase_layout.addWidget(phase, stretch=1)
+            if index < 3:
                 divider = QLabel("›", phases)
-                divider.setStyleSheet(f"color: {COLORS['steel']}; font-size: 18px;")
+                divider.setObjectName("phaseDivider")
                 phase_layout.addWidget(divider)
         root.addWidget(phases)
         root.addStretch()
 
         self._close_button = QPushButton("Close", self)
+        self._close_button.setObjectName("closeUpdateAction")
+        self._close_button.setProperty("class", "secondary")
+        self._close_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self._close_button.setVisible(False)
         self._close_button.clicked.connect(self.accept)
         root.addWidget(self._close_button, alignment=Qt.AlignmentFlag.AlignRight)
 
     def _apply_styles(self) -> None:
-        """Apply the launcher palette locally so the child updater matches exactly."""
+        """Apply the Deep Signal palette locally for the standalone updater."""
+        try:
+            fonts = load_fonts()
+        except Exception:
+            fonts = {"header": "Segoe UI", "body": "Segoe UI", "mono": "Consolas"}
+        header = fonts["header"]
+        body = fonts["body"]
+        mono = fonts["mono"]
+
         self.setStyleSheet(
             f"""
-            UpdateProgressDialog {{
-                background: {COLORS['panel']};
-                border: 1px solid {COLORS['steel']};
-                border-radius: 12px;
+            QDialog#updateProgressDialog {{
+                background-color: {S['background']};
+                border: 1px solid {S['border_bright']};
+                border-radius: 13px;
+            }}
+            QDialog#updateProgressDialog QLabel {{
+                background: transparent;
+                border: none;
+                color: {S['text_secondary']};
+                font-family: '{body}';
+            }}
+            QLabel#updateLogo {{
+                background-color: rgba(0, 200, 224, 18);
+                border: 1px solid {S['accent_dim']};
+                border-radius: 9px;
+                color: {S['accent']};
+            }}
+            QLabel#dialogEyebrow {{
+                color: {S['accent']};
+                font-family: '{header}';
+                font-size: 9px;
+                font-weight: 700;
+                letter-spacing: 2px;
+            }}
+            QLabel#dialogTitle {{
+                color: {S['text_primary']};
+                font-family: '{header}';
+                font-size: 22px;
+                font-weight: 700;
+                letter-spacing: 1px;
+            }}
+            QLabel#versionBadge {{
+                color: {S['warning']};
+                background-color: rgba(255, 184, 0, 18);
+                border: 1px solid rgba(255, 184, 0, 106);
+                border-radius: 5px;
+                padding: 5px 9px;
+                font-family: '{mono}';
+                font-size: 10px;
+                font-weight: 700;
+            }}
+            QLabel#updateHero {{
+                background-color: rgba(3, 10, 17, 238);
+                border: 1px solid {S['border_bright']};
+                border-radius: 9px;
+            }}
+            QLabel#heroState {{
+                color: {S['text_primary']};
+                background-color: rgba(3, 10, 17, 220);
+                border: 1px solid rgba(0, 200, 224, 118);
+                border-radius: 4px;
+                padding: 5px 8px;
+                font-family: '{header}';
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: 1.4px;
+            }}
+            QLabel#heroDetail {{
+                color: {S['text_muted']};
+                font-family: '{mono}';
+                font-size: 8px;
+                letter-spacing: 0.7px;
+            }}
+            QFrame#updateStatusPanel {{
+                background-color: rgba(8, 20, 31, 232);
+                border: 1px solid {S['border']};
+                border-radius: 9px;
+            }}
+            QFrame#updateStatusPanel[state="error"] {{
+                background-color: rgba(45, 17, 23, 220);
+                border-color: {S['danger']};
+            }}
+            QLabel#stateIndicator {{
+                background-color: {S['accent']};
+                border: 1px solid rgba(240, 244, 248, 112);
+                border-radius: 4px;
+            }}
+            QLabel#stateIndicator[state="error"] {{ background-color: {S['danger']}; }}
+            QLabel#stateIndicator[state="restart"] {{ background-color: {S['success']}; }}
+            QLabel#updateStatus {{
+                color: {S['text_primary']};
+                font-family: '{header}';
+                font-size: 14px;
+                font-weight: 700;
+            }}
+            QLabel#updateStatus[state="error"] {{ color: {S['danger']}; }}
+            QLabel#updateDetail {{ color: {S['text_muted']}; font-size: 11px; }}
+            QLabel#stateBadge {{
+                color: {S['accent']};
+                background-color: rgba(0, 200, 224, 14);
+                border: 1px solid rgba(0, 200, 224, 90);
+                border-radius: 4px;
+                padding: 3px 6px;
+                font-family: '{header}';
+                font-size: 7px;
+                font-weight: 700;
+                letter-spacing: 1px;
+            }}
+            QLabel#stateBadge[state="error"] {{
+                color: {S['danger']};
+                background-color: rgba(224, 79, 79, 16);
+                border-color: rgba(224, 79, 79, 104);
+            }}
+            QLabel#stateBadge[state="restart"] {{
+                color: {S['success']};
+                background-color: rgba(79, 224, 127, 16);
+                border-color: rgba(79, 224, 127, 104);
             }}
             QFrame#updatePhases {{
-                background: {COLORS['card']};
-                border: 1px solid {COLORS['steel']};
-                border-radius: 8px;
+                background-color: rgba(3, 10, 17, 222);
+                border: 1px solid {S['border']};
+                border-radius: 9px;
             }}
-            QProgressBar {{
-                background: {COLORS['deep_space']};
-                border: 1px solid {COLORS['steel']};
+            QFrame#updatePhase {{
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 5px;
+            }}
+            QFrame#updatePhase[phaseState="active"] {{
+                background-color: rgba(0, 200, 224, 16);
+                border-color: rgba(0, 200, 224, 92);
+            }}
+            QFrame#updatePhase[phaseState="complete"] {{
+                background-color: rgba(79, 224, 127, 10);
+            }}
+            QFrame#updatePhase[phaseState="error"] {{
+                background-color: rgba(224, 79, 79, 16);
+                border-color: rgba(224, 79, 79, 100);
+            }}
+            QLabel#phaseNumber {{
+                color: {S['text_muted']};
+                font-family: '{mono}';
+                font-size: 7px;
+            }}
+            QLabel#phaseLabel {{
+                color: {S['text_muted']};
+                font-family: '{header}';
+                font-size: 8px;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+            }}
+            QFrame#updatePhase[phaseState="active"] QLabel {{ color: {S['accent']}; }}
+            QFrame#updatePhase[phaseState="complete"] QLabel {{ color: {S['success']}; }}
+            QFrame#updatePhase[phaseState="error"] QLabel {{ color: {S['danger']}; }}
+            QLabel#phaseDivider {{
+                color: {S['border_bright']};
+                font-size: 16px;
+            }}
+            QProgressBar#updateProgress {{
+                background-color: rgba(3, 10, 17, 232);
+                border: 1px solid {S['border_bright']};
                 border-radius: 8px;
-                color: {COLORS['white']};
-                font-size: 10px;
+                color: {S['text_primary']};
+                font-family: '{mono}';
+                font-size: 9px;
                 text-align: center;
             }}
-            QProgressBar::chunk {{
-                background: {COLORS['teal']};
+            QProgressBar#updateProgress::chunk {{
+                background-color: {S['accent']};
                 border-radius: 7px;
             }}
+            QProgressBar#updateProgress[state="error"]::chunk {{
+                background-color: {S['danger']};
+            }}
             QPushButton {{
-                background: transparent;
-                border: 1px solid {COLORS['steel']};
-                border-radius: 6px;
-                color: {COLORS['white']};
-                padding: 7px 14px;
+                min-height: 34px;
+                padding: 0 14px;
+                border-radius: 5px;
+                font-family: '{header}';
+                font-size: 9px;
+                font-weight: 700;
+                letter-spacing: 0.7px;
             }}
-            QPushButton:hover {{
-                border-color: {COLORS['teal']};
-                color: {COLORS['teal']};
+            QPushButton[class="secondary"] {{
+                background-color: {S['accent_soft']};
+                color: {S['text_primary']};
+                border: 1px solid {S['accent_dim']};
             }}
+            QPushButton[class="secondary"]:hover {{
+                background-color: {S['accent_dim']};
+                border-color: {S['accent']};
+            }}
+            QPushButton:focus {{ border: 2px solid {S['text_primary']}; }}
             """
         )
 
     def set_stage(self, stage: str, detail: str) -> None:
         """Show a named non-download phase with an active progress indicator."""
-        title, index = self._STAGES.get(stage, self._STAGES["prepare"])
+        stage_key = stage if stage in self._STAGES else "prepare"
+        title, index = self._STAGES[stage_key]
         self.status_label.setText(title)
         self.detail_label.setText(detail)
         self.progress_bar.setRange(0, 0)
+        self._set_visual_state(stage_key)
         self._set_active_phase(index)
 
     def set_download_progress(self, downloaded: int, total: int) -> None:
         """Render real byte progress from the release-asset download."""
         self.status_label.setText(self._STAGES["download"][0])
+        self._set_visual_state("download")
         self._set_active_phase(self._STAGES["download"][1])
 
         if total <= 0:
@@ -251,6 +458,7 @@ class UpdateProgressDialog(QDialog):
     def set_copy_progress(self, completed: int, total: int) -> None:
         """Render file-copy progress from the standalone updater process."""
         self.status_label.setText("Installing update")
+        self._set_visual_state("install")
         self._set_active_phase(self._STAGES["install"][1])
         if total <= 0:
             self.detail_label.setText("Copying launcher files…")
@@ -269,10 +477,26 @@ class UpdateProgressDialog(QDialog):
         self.detail_label.setText(detail)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
-        self.progress_bar.setStyleSheet(
-            f"QProgressBar::chunk {{ background: {COLORS['red']}; }}"
-        )
+        self.hero_state_label.setText("UPDATE LINK FAILED")
+        self.state_badge.setText("LINK FAILURE")
+        for widget in (
+            self.status_panel,
+            self.state_indicator,
+            self.status_label,
+            self.state_badge,
+            self.progress_bar,
+        ):
+            widget.setProperty("state", "error")
+            self._refresh_widget(widget)
+        self._set_active_phase(self._active_phase_index, failed=True)
         self._close_button.setVisible(True)
+
+    def set_handoff_mode(self) -> None:
+        """Identify the standalone updater without altering worker behavior."""
+        self.setProperty("handoffMode", True)
+        self.context_label.setText("DEEP SIGNAL // UPDATE AGENT")
+        self.window_heading.setText("Applying launcher update")
+        self._refresh_widget(self)
 
     def allow_close(self) -> None:
         """Permit programmatic shutdown after a successful handoff."""
@@ -284,18 +508,41 @@ class UpdateProgressDialog(QDialog):
         else:
             event.ignore()
 
-    def _set_active_phase(self, active_index: int) -> None:
-        for index, label in enumerate(self._phase_labels):
-            if index < active_index:
-                color = COLORS["green"]
-            elif index == active_index:
-                color = COLORS["teal"]
+    def _set_visual_state(self, stage: str) -> None:
+        visual_state = "restart" if stage == "restart" else "active"
+        badge = self._STAGE_BADGES.get(stage, self._STAGE_BADGES["prepare"])
+        self.hero_state_label.setText(badge)
+        self.state_badge.setText(badge)
+        for widget in (
+            self.status_panel,
+            self.state_indicator,
+            self.status_label,
+            self.state_badge,
+            self.progress_bar,
+        ):
+            widget.setProperty("state", visual_state)
+            self._refresh_widget(widget)
+
+    def _set_active_phase(self, active_index: int, *, failed: bool = False) -> None:
+        self._active_phase_index = min(
+            max(0, int(active_index)), max(0, len(self._phase_frames) - 1)
+        )
+        for index, frame in enumerate(self._phase_frames):
+            if index < self._active_phase_index:
+                state = "complete"
+            elif index == self._active_phase_index:
+                state = "error" if failed else "active"
             else:
-                color = COLORS["grey"]
-            label.setStyleSheet(
-                f"color: {color}; font-size: 11px; font-weight: "
-                f"{'700' if index == active_index else '500'};"
-            )
+                state = "pending"
+            frame.setProperty("phaseState", state)
+            self._refresh_widget(frame)
+
+    @staticmethod
+    def _refresh_widget(widget: QWidget) -> None:
+        style = widget.style()
+        style.unpolish(widget)
+        style.polish(widget)
+        widget.update()
 
     @staticmethod
     def _format_bytes(value: int) -> str:

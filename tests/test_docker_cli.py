@@ -31,6 +31,169 @@ def test_runner_preserves_windows_path_as_one_argv_element_and_explicit_cwd() ->
     )]
 
 
+def test_input_runner_preserves_paths_and_uses_separate_executor() -> None:
+    payload = b'{"username":"Pilot One"}'
+    calls: list[tuple[tuple[str, ...], Path, float, bytes]] = []
+
+    def execute(_argv: tuple[str, ...], _cwd: Path, _timeout: float) -> subprocess.CompletedProcess[str]:
+        pytest.fail("run_with_input must not use the legacy three-argument executor")
+
+    def execute_input(
+        argv: tuple[str, ...],
+        cwd: Path,
+        timeout: float,
+        input_bytes: bytes,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append((argv, cwd, timeout, input_bytes))
+        return subprocess.CompletedProcess(argv, 0, "created", "")
+
+    runner = DockerCommandRunner(
+        executable="C:/Program Files/Docker/Docker/resources/bin/docker.exe",
+        execute=execute,
+        execute_input=execute_input,
+    )
+    result = runner.run_with_input(
+        ("compose", "-f", "C:/Fixture Space/EveJS/compose.yaml", "run", "--rm", "server"),
+        cwd=Path("C:/Fixture Space/EveJS"),
+        input_bytes=payload,
+        timeout=2.5,
+    )
+
+    assert result.ok
+    assert calls == [(
+        (
+            "C:/Program Files/Docker/Docker/resources/bin/docker.exe",
+            "compose",
+            "-f",
+            "C:/Fixture Space/EveJS/compose.yaml",
+            "run",
+            "--rm",
+            "server",
+        ),
+        Path("C:/Fixture Space/EveJS"),
+        2.5,
+        payload,
+    )]
+    assert payload.decode() not in repr(result)
+
+
+def test_input_runner_rejects_payload_over_16_kib_before_execution() -> None:
+    payload = CANARY.encode() + (b"x" * (16 * 1024))
+
+    def execute_input(
+        _argv: tuple[str, ...],
+        _cwd: Path,
+        _timeout: float,
+        _input_bytes: bytes,
+    ) -> subprocess.CompletedProcess[str]:
+        pytest.fail("oversize input must be rejected before execution")
+
+    runner = DockerCommandRunner(executable="docker", execute_input=execute_input)
+
+    with pytest.raises(ValueError, match="16 KiB") as raised:
+        runner.run_with_input(("compose",), cwd=Path("C:/Fixture"), input_bytes=payload)
+
+    assert CANARY not in str(raised.value)
+
+
+def test_input_runner_scrubs_an_exact_payload_echo_from_success_output() -> None:
+    payload = CANARY.encode()
+
+    def execute_input(
+        argv: tuple[str, ...],
+        _cwd: Path,
+        _timeout: float,
+        input_bytes: bytes,
+    ) -> subprocess.CompletedProcess[str]:
+        echoed = input_bytes.decode()
+        return subprocess.CompletedProcess(argv, 0, f"before {echoed} after", echoed)
+
+    runner = DockerCommandRunner(executable="docker", execute_input=execute_input)
+    result = runner.run_with_input(("compose",), cwd=Path("C:/Fixture"), input_bytes=payload)
+
+    assert result.ok
+    assert CANARY not in result.stdout
+    assert CANARY not in result.stderr
+    assert "[REDACTED]" in result.stdout
+
+
+def test_input_runner_scrubs_before_truncating_payload_echo() -> None:
+    payload = b'{"username":"PRIVATE_ACCOUNT"}'
+
+    def execute_input(
+        argv: tuple[str, ...],
+        _cwd: Path,
+        _timeout: float,
+        input_bytes: bytes,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, input_bytes.decode() + " tail", "")
+
+    runner = DockerCommandRunner(
+        executable="docker",
+        execute_input=execute_input,
+        output_limit=8,
+    )
+    result = runner.run_with_input(
+        ("compose",),
+        cwd=Path("C:/Fixture"),
+        input_bytes=payload,
+    )
+
+    assert "PRIVATE" not in result.stdout
+    assert "PRIVATE_ACCOUNT" not in result.stdout
+    assert result.truncated is True
+
+
+def test_input_runner_timeout_drops_payload_and_originating_exception() -> None:
+    payload = CANARY.encode()
+
+    def execute_input(
+        argv: tuple[str, ...],
+        _cwd: Path,
+        timeout: float,
+        input_bytes: bytes,
+    ) -> subprocess.CompletedProcess[str]:
+        echoed = input_bytes.decode()
+        raise subprocess.TimeoutExpired(argv, timeout, output=echoed, stderr=echoed)
+
+    runner = DockerCommandRunner(executable="docker", execute_input=execute_input)
+
+    with pytest.raises(DockerCommandError) as raised:
+        runner.run_with_input(("compose",), cwd=Path("C:/Fixture"), input_bytes=payload, timeout=0.1)
+
+    error = raised.value
+    assert error.result.timed_out is True
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert CANARY not in str(error)
+    assert CANARY not in repr(error.result)
+
+
+def test_input_runner_os_error_drops_payload_and_originating_exception() -> None:
+    payload = CANARY.encode()
+
+    def execute_input(
+        _argv: tuple[str, ...],
+        _cwd: Path,
+        _timeout: float,
+        input_bytes: bytes,
+    ) -> subprocess.CompletedProcess[str]:
+        raise OSError(input_bytes.decode())
+
+    runner = DockerCommandRunner(executable="docker", execute_input=execute_input)
+
+    with pytest.raises(DockerCommandError) as raised:
+        runner.run_with_input(("compose",), cwd=Path("C:/Fixture"), input_bytes=payload)
+
+    error = raised.value
+    assert error.result.returncode is None
+    assert error.result.timed_out is False
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert CANARY not in str(error)
+    assert CANARY not in repr(error.result)
+
+
 def test_runner_nonzero_diagnostic_is_bounded_and_redacted() -> None:
     def execute(argv: tuple[str, ...], cwd: Path, timeout: float) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(argv, 17, CANARY + "\n" + ("x" * 500), CANARY + "\n" + ("y" * 500))
@@ -124,6 +287,80 @@ def test_bounded_runner_assigns_suspended_process_to_job_before_resume(
         ("resume", 91),
         ("wait", 1.0),
         ("close_job", 77),
+    ]
+
+
+def test_bounded_input_runner_uses_tempfile_stdin_and_same_job_containment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = b'{"password":"not-on-the-command-line"}'
+    observed: dict[str, object] = {}
+    events: list[tuple[str, int | float]] = []
+
+    class Process:
+        _handle = 95
+
+        def wait(self, timeout: float) -> int:
+            events.append(("wait", timeout))
+            return 0
+
+        def kill(self) -> None:
+            pytest.fail("successful command must not be killed")
+
+    def popen(*args: object, **kwargs: object) -> Process:
+        stdin = kwargs["stdin"]
+        assert stdin != subprocess.PIPE
+        assert stdin != subprocess.DEVNULL
+        assert hasattr(stdin, "read")
+        observed["argv"] = args[0]
+        observed["cwd"] = kwargs["cwd"]
+        observed["input"] = stdin.read()
+        events.append(("popen", int(kwargs["creationflags"])))
+        return Process()
+
+    monkeypatch.setattr(platform, "get_suspended_hidden_process_flags", lambda: {"creationflags": 456})
+    monkeypatch.setattr(
+        platform,
+        "create_kill_on_close_job",
+        lambda handle: events.append(("create_job", handle)) or 80,
+    )
+    monkeypatch.setattr(
+        platform,
+        "resume_process",
+        lambda handle: events.append(("resume", handle)) or True,
+    )
+    monkeypatch.setattr(
+        platform,
+        "close_job",
+        lambda handle: events.append(("close_job", handle)),
+    )
+    monkeypatch.setattr(
+        platform,
+        "terminate_job",
+        lambda _handle: pytest.fail("normal completion must not terminate the Job"),
+    )
+    monkeypatch.setattr("src.core.runtime.docker_cli.subprocess.Popen", popen)
+    runner = DockerCommandRunner(executable="docker")
+
+    result = runner._execute_bounded_input(
+        ("docker", "compose", "-f", "C:/Fixture Space/compose.yaml", "run"),
+        Path("C:/Fixture Space"),
+        1.0,
+        payload,
+    )
+
+    assert result.returncode == 0
+    assert observed == {
+        "argv": ("docker", "compose", "-f", "C:/Fixture Space/compose.yaml", "run"),
+        "cwd": str(Path("C:/Fixture Space")),
+        "input": payload,
+    }
+    assert events == [
+        ("popen", 456),
+        ("create_job", 95),
+        ("resume", 95),
+        ("wait", 1.0),
+        ("close_job", 80),
     ]
 
 

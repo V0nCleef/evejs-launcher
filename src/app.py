@@ -28,11 +28,10 @@ from PyQt6.QtCore import (
     pyqtSignal,
     pyqtSlot,
 )
-from PyQt6.QtGui import QColor, QCursor, QIcon
+from PyQt6.QtGui import QCursor, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
-    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QInputDialog,
     QMainWindow,
@@ -44,6 +43,12 @@ from PyQt6.QtWidgets import (
 )
 
 from . import config
+from .audio.controller import AudioController
+from .audio.events import (
+    VoiceEvent,
+    service_start_result_event,
+    service_stop_result_event,
+)
 from .constants import APP_TITLE, Page, Ports
 from .core.client_launch_queue import AsyncClientLaunchQueue
 from .core.dashboard import visible_account_count, visible_character_rows
@@ -69,6 +74,7 @@ from .core.groups import (
 from .core.character_creation import (
     CharacterCreationRequest,
     CharacterCreationResult,
+    normalize_character_name,
 )
 from .core.character_deletion import (
     CharacterDeletionRequest,
@@ -121,6 +127,11 @@ from .core.service_status import (
     derive_service_state,
 )
 from .core.runtime.docker_cli import DockerCommandRunner
+from .core.runtime.docker_character_creation import (
+    DockerCharacterCreationRequest,
+    DockerCharacterCreationResult,
+    ManagedDockerCharacterCreationController,
+)
 from .core.runtime.docker_compose import ComposeInspector, ComposeTarget
 from .core.runtime.docker_controller import DockerLifecycleAction, ManagedComposeController
 from .core.runtime.docker_setup import (
@@ -161,12 +172,16 @@ from .pages.tools_page import ToolsPage
 from .utils.cache import PortraitCache
 from .utils.logger import setup_logger
 from .widgets.console_panel import ConsolePanel
+from .widgets.shipboard_caption import ShipboardCaption
 from .widgets.character_groups_dialog import CharacterGroupsDialog
 from .widgets.nav_panel import NavPanel
 from .widgets.new_character_dialog import NewCharacterDialog, NewCharacterDraft
 from .widgets.status_bar import StatusBar
 from .widgets.title_bar import TitleBar
 from .workers.docker_lifecycle_worker import DockerLifecycleWorker
+from .workers.docker_character_creation_worker import (
+    DockerCharacterCreationWorker,
+)
 from .workers.docker_log_worker import DockerLogWorker
 from .workers.docker_monitor import DockerMonitor, DockerObservation
 from .workers.docker_preflight_worker import DockerPreflightWorker
@@ -291,8 +306,11 @@ class MainWindow(QMainWindow):
     _service_probe_requested = pyqtSignal()
     _docker_observe_requested = pyqtSignal()
     _service_monitor_stop_requested = pyqtSignal()
+    shipboard_caption_requested = pyqtSignal(str)
 
     _MARGIN = 8  # px resize-hit border around the frame
+    _VOICE_PREPARE_MAX_ATTEMPTS = 3
+    _VOICE_PREPARE_RETRY_DELAY_MS = 250
 
     def __init__(self) -> None:
         super().__init__()
@@ -308,15 +326,14 @@ class MainWindow(QMainWindow):
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
 
-        # Window drop shadow on the frame itself
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(24)
-        shadow.setOffset(0, 4)
-        shadow.setColor(QColor(0, 0, 0, 0x88))
-        self.setGraphicsEffect(shadow)
-
         # ── State ──────────────────────────────────────────────────────
         self._cfg = config.load()
+        # Backends remain lazy until music or an announcement is requested.
+        self._audio_controller = AudioController(self._cfg, self)
+        self._voice_prepare_attempts = 0
+        self._audio_controller.caption_requested.connect(
+            self.shipboard_caption_requested.emit
+        )
         resolved_client_path = resolve_client_tq_path(
             str(self._cfg.get("client_path", "")),
             str(self._cfg.get("evejs_root", "")),
@@ -354,7 +371,10 @@ class MainWindow(QMainWindow):
         self._lifecycle_thread: QThread | None = None
         self._lifecycle_worker: QObject | None = None
         self._lifecycle_start_scope = (False, False)
+        self._lifecycle_start_token: object | None = None
+        self._lifecycle_start_voice_event: VoiceEvent | None = None
         self._lifecycle_stop_scope = (False, False)
+        self._lifecycle_stop_voice_event: VoiceEvent | None = None
         self._lifecycle_ready_callback: Callable[[], None] | None = None
         self._lifecycle_stop_callback: Callable[[], None] | None = None
         self._lifecycle_after_thread_callback: Callable[[], None] | None = None
@@ -369,12 +389,24 @@ class MainWindow(QMainWindow):
         self._docker_lifecycle_generation: int | None = None
         self._docker_lifecycle_target: tuple[object, ...] | None = None
         self._docker_lifecycle_action: DockerLifecycleAction | None = None
+        self._docker_lifecycle_observed_target: str | None = None
+        self._docker_lifecycle_completion: Callable[[bool], None] | None = None
+        self._docker_lifecycle_suppress_failure_dialog = False
         self._docker_tool_token: object | None = None
         self._docker_tool_generation: int | None = None
         self._docker_tool_target: tuple[object, ...] | None = None
         self._docker_tool_observed_target: str | None = None
         self._docker_tool_action: DockerToolAction | None = None
         self._docker_tool_request: tuple[str, str] | None = None
+        self._docker_character_token: object | None = None
+        self._docker_character_generation: int | None = None
+        self._docker_character_target: tuple[object, ...] | None = None
+        self._docker_character_observed_target: str | None = None
+        self._docker_character_request: DockerCharacterCreationRequest | None = None
+        self._docker_character_overview_source_id: int | None = None
+        self._docker_character_result: DockerCharacterCreationResult | None = None
+        self._docker_character_restore_game = False
+        self._docker_character_restore_market = False
         self._close_in_progress = False
         self._launch_queue: AsyncClientLaunchQueue | None = None
         self._client_launch_thread: QThread | None = None
@@ -455,6 +487,7 @@ class MainWindow(QMainWindow):
 
         # ── Build UI ───────────────────────────────────────────────────
         self._build_ui()
+        self._title_bar.set_music_muted(self._audio_controller.music_muted)
         self._apply_runtime_settings()
         self._home_page.set_server_mode(self._effective_server_mode_label())
 
@@ -506,12 +539,35 @@ class MainWindow(QMainWindow):
 
         # ── Update system ──────────────────────────────────────────────
         self._title_bar.update_clicked.connect(self._on_update_clicked)
+        self._title_bar.music_mute_changed.connect(
+            self._audio_controller.set_music_muted
+        )
+        self._audio_controller.music_muted_changed.connect(
+            self._title_bar.set_music_muted
+        )
+        self._audio_controller.music_muted_changed.connect(
+            self._on_music_mute_changed
+        )
+        self._audio_controller.music_playback_changed.connect(
+            self._title_bar.set_audio_status
+        )
 
         self._active_update_checkers: list[UpdateChecker] = []
         self._update_checker = self._create_update_checker()
 
         self._settings_page.settings_update_check.connect(self._on_manual_update_check)
         self._settings_page.settings_saved.connect(self._on_settings_saved)
+        self._settings_page.voice_preview_requested.connect(
+            self._preview_shipboard_voice
+        )
+        self._settings_page.set_voice_preview_available(
+            False,
+            "Preparing bundled LYRA voice catalog…",
+        )
+        # Native QSoundEffect can report unavailable when constructed before
+        # Qt enters its event loop. Probe once the window is event-loop ready,
+        # just like the optional launcher ambience below.
+        QTimer.singleShot(0, self._prepare_shipboard_voice)
         self._settings_page.save_finished.connect(
             self._on_settings_save_finished
         )
@@ -521,6 +577,10 @@ class MainWindow(QMainWindow):
 
         if self._cfg.get("update_auto_check", True):
             QTimer.singleShot(2000, self._start_automatic_update_check)
+
+        # Initialize local ambience only after the window has entered Qt's
+        # event loop.  Playback is optional and never gates launcher startup.
+        QTimer.singleShot(0, self._start_launcher_ambience)
 
         interval_hours = int(self._cfg.get("update_check_interval_hours", 6))
         if interval_hours > 0:
@@ -591,6 +651,13 @@ class MainWindow(QMainWindow):
         self._console_panel = ConsolePanel(central)
         self._console_panel.closed.connect(self._on_console_panel_closed)
         self._console_panel.hide()
+
+        # Accessible text mirror for optional LYRA speech. It is deliberately
+        # static while visible and never intercepts launcher input.
+        self._shipboard_caption = ShipboardCaption(central)
+        self.shipboard_caption_requested.connect(
+            self._shipboard_caption.show_caption
+        )
 
         # Status bar (bottom)
         self._status_bar = StatusBar(self)
@@ -689,7 +756,32 @@ class MainWindow(QMainWindow):
             interval_sec = 6
         hero = self._home_page.hero
         hero.set_rotation_interval(interval_sec)
-        hero.set_animations_enabled(bool(self._cfg.get("animations_enabled", True)))
+        animations_enabled = bool(self._cfg.get("animations_enabled", True))
+        apply_page_motion = getattr(
+            self._home_page,
+            "set_animations_enabled",
+            None,
+        )
+        if callable(apply_page_motion):
+            apply_page_motion(animations_enabled)
+        else:
+            # Lightweight controller test doubles may expose only the legacy
+            # hero seam; production HomePage owns the full motion policy.
+            hero.set_animations_enabled(animations_enabled)
+
+        # Keep the preference application tolerant of lightweight controller
+        # fixtures while making the production setting truly launcher-wide.
+        for surface in (
+            getattr(self, "_characters_page", None),
+            getattr(self, "_status_bar", None),
+        ):
+            apply_surface_motion = getattr(
+                surface,
+                "set_animations_enabled",
+                None,
+            )
+            if callable(apply_surface_motion):
+                apply_surface_motion(animations_enabled)
 
     def _open_settings_page(self) -> None:
         """Route page-owned setup actions through the central navigation state."""
@@ -1044,7 +1136,14 @@ class MainWindow(QMainWindow):
             self._cfg.get("docker_project_name"),
         )
 
-    def _begin_docker_lifecycle(self, action: DockerLifecycleAction) -> bool:
+    def _begin_docker_lifecycle(
+        self,
+        action: DockerLifecycleAction,
+        *,
+        expected_target_identity: str | None = None,
+        on_complete: Callable[[bool], None] | None = None,
+        suppress_failure_dialog: bool = False,
+    ) -> bool:
         if not self._docker_managed():
             self._docker_unavailable(self._docker_control_reason())
             return False
@@ -1058,6 +1157,7 @@ class MainWindow(QMainWindow):
             return ManagedComposeController(
                 target, ComposeInspector(runner), runner,
                 policy=DockerControlPolicy.MANAGED,
+                expected_target_identity=expected_target_identity,
             )
 
         worker = DockerLifecycleWorker(
@@ -1079,6 +1179,11 @@ class MainWindow(QMainWindow):
         self._docker_lifecycle_generation = getattr(self, "_monitor_generation", 0)
         self._docker_lifecycle_target = self._docker_target_identity()
         self._docker_lifecycle_action = action
+        self._docker_lifecycle_observed_target = expected_target_identity
+        self._docker_lifecycle_completion = on_complete
+        self._docker_lifecycle_suppress_failure_dialog = bool(
+            suppress_failure_dialog
+        )
         game = ServiceState.STARTING if action in {
             DockerLifecycleAction.START_GAME,
             DockerLifecycleAction.START_STACK,
@@ -1092,23 +1197,58 @@ class MainWindow(QMainWindow):
         market = ServiceState.STOPPING if action in {DockerLifecycleAction.STOP_MARKET, DockerLifecycleAction.STOP_ALL} else market
         self._runtime_snapshot = replace(snapshot, game=game, market=market)
         self._apply_runtime_snapshot(self._runtime_snapshot)
+        launching_event = self._docker_start_voice_event(action)
         self._begin_lifecycle_worker(worker, self._on_docker_lifecycle_completed)
+        if launching_event is not None:
+            self._announce_shipboard(launching_event)
+        stopping_event = self._docker_stop_voice_event(action)
+        if stopping_event is not None:
+            self._announce_shipboard(stopping_event)
         return True
 
     @pyqtSlot(object)
     def _on_docker_lifecycle_completed(self, result: object) -> None:
         from .core.runtime.docker_controller import DockerLifecycleResult
         expected_action = getattr(self, "_docker_lifecycle_action", None)
+        expected_observed_target = getattr(
+            self,
+            "_docker_lifecycle_observed_target",
+            None,
+        )
         current = (
             isinstance(result, DockerLifecycleResult)
             and result.action is expected_action
             and self._docker_lifecycle_generation == getattr(self, "_monitor_generation", 0)
             and self._docker_lifecycle_target == self._docker_target_identity()
+            and (
+                expected_observed_target is None
+                or (
+                    result.target_identity == expected_observed_target
+                    and self._current_observed_docker_target_identity()
+                    == expected_observed_target
+                )
+            )
         )
         close_stop_result = (
             self._docker_close_pending and self._docker_close_stop_started
         )
         if isinstance(result, DockerLifecycleResult) and self._docker_managed() and current:
+            launching_event = self._docker_start_voice_event(expected_action)
+            if launching_event is not None:
+                self._announce_shipboard(
+                    service_start_result_event(
+                        launching_event,
+                        succeeded=result.succeeded,
+                    )
+                )
+            stopping_event = self._docker_stop_voice_event(expected_action)
+            if stopping_event is not None:
+                self._announce_shipboard(
+                    service_stop_result_event(
+                        stopping_event,
+                        succeeded=result.succeeded,
+                    )
+                )
             snapshot = self._docker_cached_snapshot()
             records = result.records or {}
             game_record, market_record = records.get("server"), records.get("market")
@@ -1136,7 +1276,15 @@ class MainWindow(QMainWindow):
                 snapshot = replace(prior, game_error=game_error, market_error=market_error)
             self._runtime_snapshot = snapshot
             self._apply_runtime_snapshot(snapshot)
-            if not result.succeeded and not close_stop_result:
+            if (
+                not result.succeeded
+                and not close_stop_result
+                and not getattr(
+                    self,
+                    "_docker_lifecycle_suppress_failure_dialog",
+                    False,
+                )
+            ):
                 QMessageBox.critical(self, "Docker Lifecycle Failed", result.error or "Docker lifecycle operation failed.")
             self._docker_observe_requested.emit()
         if close_stop_result:
@@ -1152,10 +1300,25 @@ class MainWindow(QMainWindow):
                     "Docker Shutdown Failed",
                     "Docker shutdown could not be confirmed. The launcher remains open; check Docker status and retry.",
                 )
+        completion = getattr(self, "_docker_lifecycle_completion", None)
+        completion_succeeded = bool(
+            isinstance(result, DockerLifecycleResult)
+            and current
+            and result.succeeded
+        )
+        if callable(completion):
+            self._lifecycle_after_thread_callback = (
+                lambda callback=completion, succeeded=completion_succeeded: callback(
+                    succeeded
+                )
+            )
         self._docker_lifecycle_snapshot = None
         self._docker_lifecycle_generation = None
         self._docker_lifecycle_target = None
         self._docker_lifecycle_action = None
+        self._docker_lifecycle_observed_target = None
+        self._docker_lifecycle_completion = None
+        self._docker_lifecycle_suppress_failure_dialog = False
         self._lifecycle_result_received = True
         self._finish_lifecycle_if_complete()
 
@@ -1182,6 +1345,28 @@ class MainWindow(QMainWindow):
             DockerLifecycleAction.RESTART_GAME: (True, False),
             DockerLifecycleAction.RECREATE_GAME: (True, False),
         }[action]
+
+    @staticmethod
+    def _docker_stop_voice_event(
+        action: DockerLifecycleAction | None,
+    ) -> VoiceEvent | None:
+        """Map only explicit Docker stop actions to bounded LYRA events."""
+        return {
+            DockerLifecycleAction.STOP_GAME: VoiceEvent.GAME_SERVER_STOPPING,
+            DockerLifecycleAction.STOP_MARKET: VoiceEvent.MARKET_SERVER_STOPPING,
+            DockerLifecycleAction.STOP_ALL: VoiceEvent.SERVER_STACK_STOPPING,
+        }.get(action)
+
+    @staticmethod
+    def _docker_start_voice_event(
+        action: DockerLifecycleAction | None,
+    ) -> VoiceEvent | None:
+        """Map only explicit Docker start actions to bounded LYRA events."""
+        return {
+            DockerLifecycleAction.START_GAME: VoiceEvent.GAME_SERVER_LAUNCHING,
+            DockerLifecycleAction.START_MARKET: VoiceEvent.MARKET_SERVER_LAUNCHING,
+            DockerLifecycleAction.START_STACK: VoiceEvent.SERVER_STACK_LAUNCHING,
+        }.get(action)
 
     # ── Server control ─────────────────────────────────────────────────
 
@@ -1432,7 +1617,10 @@ class MainWindow(QMainWindow):
         worker.moveToThread(thread)
         thread.started.connect(worker.run)  # type: ignore[attr-defined]
         worker.completed.connect(completed_handler)  # type: ignore[attr-defined]
-        if isinstance(worker, (DockerLifecycleWorker, DockerToolWorker)):
+        if isinstance(
+            worker,
+            (DockerLifecycleWorker, DockerToolWorker, DockerCharacterCreationWorker),
+        ):
             # QObject deletion must be delivered in its owning worker thread.
             # Deletion then tears down the dedicated event loop; connecting
             # thread.finished -> worker.deleteLater is too late and leaks.
@@ -1493,6 +1681,7 @@ class MainWindow(QMainWindow):
         mode: str | None,
         on_ready: Callable[[], None] | None,
         error_title: str,
+        voice_event: VoiceEvent | None = None,
     ) -> bool:
         """Start requested services in a worker, waiting Market → Game readiness."""
         if self._docker_mode():
@@ -1500,6 +1689,9 @@ class MainWindow(QMainWindow):
             return False
         if self._lifecycle_active():
             log.info("Ignored service start while another lifecycle operation is active")
+            return False
+        if not start_market and not start_game:
+            log.info("Ignored empty service-start request")
             return False
         evejs_root = str(self._cfg.get("evejs_root", ""))
         if not evejs_root:
@@ -1512,6 +1704,9 @@ class MainWindow(QMainWindow):
             self._server_intent = ServiceState.STARTING
             self._server_error = None
         self._lifecycle_start_scope = (start_market, start_game)
+        start_token = object()
+        self._lifecycle_start_token = start_token
+        self._lifecycle_start_voice_event = voice_event
         self._lifecycle_ready_callback = on_ready
         self._lifecycle_error_title = error_title
         worker = ServiceStartWorker(
@@ -1522,9 +1717,28 @@ class MainWindow(QMainWindow):
             start_market_fn=start_market_server,
             start_game_fn=start_game_server,
         )
-        self._begin_lifecycle_worker(worker, self._on_service_start_completed)
+        self._begin_lifecycle_worker(
+            worker,
+            lambda result, token=start_token: self._on_service_start_completed_for_token(
+                result,
+                token,
+            ),
+        )
         self._publish_cached_runtime()
+        if voice_event is not None:
+            self._announce_shipboard(voice_event)
         return True
+
+    def _on_service_start_completed_for_token(
+        self,
+        result: ServiceStartResult,
+        token: object,
+    ) -> None:
+        """Accept a Native start result only from its retained worker binding."""
+        if token is not getattr(self, "_lifecycle_start_token", None):
+            log.info("Ignored stale or duplicate service-start completion")
+            return
+        self._on_service_start_completed(result)
 
     @pyqtSlot(object)
     def _on_service_start_completed(self, result: ServiceStartResult) -> None:
@@ -1566,8 +1780,18 @@ class MainWindow(QMainWindow):
 
         self._service_reachability = (game_reachable, market_reachable)
         self._lifecycle_start_scope = (False, False)
+        self._lifecycle_start_token = None
         callback = getattr(self, "_lifecycle_ready_callback", None)
         self._lifecycle_ready_callback = None
+        launching_event = getattr(self, "_lifecycle_start_voice_event", None)
+        self._lifecycle_start_voice_event = None
+        if launching_event is not None:
+            self._announce_shipboard(
+                service_start_result_event(
+                    launching_event,
+                    succeeded=result.succeeded,
+                )
+            )
         if result.succeeded:
             self._lifecycle_after_thread_callback = callback
         else:
@@ -1593,6 +1817,7 @@ class MainWindow(QMainWindow):
         stop_game: bool,
         stop_market: bool,
         on_complete: Callable[[], None] | None,
+        voice_event: VoiceEvent | None = None,
     ) -> bool:
         """Stop launcher-owned Game then Market processes in a worker."""
         if self._docker_mode():
@@ -1629,9 +1854,18 @@ class MainWindow(QMainWindow):
             market_process is not None,
         )
         self._lifecycle_stop_callback = on_complete
+        if voice_event is VoiceEvent.SERVER_STACK_STOPPING:
+            voice_event = {
+                (True, True): VoiceEvent.SERVER_STACK_STOPPING,
+                (True, False): VoiceEvent.GAME_SERVER_STOPPING,
+                (False, True): VoiceEvent.MARKET_SERVER_STOPPING,
+            }[self._lifecycle_stop_scope]
+        self._lifecycle_stop_voice_event = voice_event
         worker = ServiceStopWorker(game_process, market_process)
         self._begin_lifecycle_worker(worker, self._on_service_stop_completed)
         self._publish_cached_runtime()
+        if voice_event is not None:
+            self._announce_shipboard(voice_event)
         return True
 
     @pyqtSlot(object)
@@ -1669,8 +1903,17 @@ class MainWindow(QMainWindow):
 
         self._service_reachability = (game_reachable, market_reachable)
         self._lifecycle_stop_scope = (False, False)
+        stopping_event = getattr(self, "_lifecycle_stop_voice_event", None)
+        self._lifecycle_stop_voice_event = None
         callback = getattr(self, "_lifecycle_stop_callback", None)
         self._lifecycle_stop_callback = None
+        if stopping_event is not None:
+            self._announce_shipboard(
+                service_stop_result_event(
+                    stopping_event,
+                    succeeded=result.succeeded,
+                )
+            )
         if result.succeeded:
             self._lifecycle_after_thread_callback = callback
         else:
@@ -1741,6 +1984,7 @@ class MainWindow(QMainWindow):
             mode=mode,
             on_ready=None,
             error_title="Game Server Error",
+            voice_event=VoiceEvent.GAME_SERVER_LAUNCHING,
         )
 
     def _stop_server(self) -> None:
@@ -1770,6 +2014,7 @@ class MainWindow(QMainWindow):
             stop_game=True,
             stop_market=False,
             on_complete=None,
+            voice_event=VoiceEvent.GAME_SERVER_STOPPING,
         )
 
     def _on_mods_apply_restart(self) -> None:
@@ -1889,6 +2134,7 @@ class MainWindow(QMainWindow):
             mode=None,
             on_ready=None,
             error_title="Market Server Error",
+            voice_event=VoiceEvent.MARKET_SERVER_LAUNCHING,
         )
 
     def _stop_market(self) -> None:
@@ -1903,6 +2149,7 @@ class MainWindow(QMainWindow):
                 stop_game=False,
                 stop_market=True,
                 on_complete=None,
+                voice_event=VoiceEvent.MARKET_SERVER_STOPPING,
             )
             return
         if is_server_running(port=int(Ports.MARKET_RPC)):
@@ -1956,13 +2203,15 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Already Running", "Both servers are already online.")
             return
 
-        self._start_service_sequence(
+        if self._start_service_sequence(
             start_market=start_market,
             start_game=start_game,
             mode=resolved[0] if resolved is not None else None,
             on_ready=None,
             error_title="Service Startup Failed",
-        )
+            voice_event=VoiceEvent.SERVER_STACK_LAUNCHING,
+        ):
+            return
 
     def _stop_all_servers(self) -> None:
         """Stop launcher-owned Game then Market in one ordered worker sequence."""
@@ -1976,6 +2225,7 @@ class MainWindow(QMainWindow):
             stop_game=True,
             stop_market=True,
             on_complete=None,
+            voice_event=VoiceEvent.SERVER_STACK_STOPPING,
         )
 
     # ── Auto-start hook used before client launches ───────────────────
@@ -2144,13 +2394,22 @@ class MainWindow(QMainWindow):
 
     def _show_new_character_dialog(self) -> None:
         if self._docker_mode():
-            QMessageBox.information(
-                self,
-                "New Character",
-                "Launcher-managed character creation is currently available for "
-                "Native EveJS installations only.",
-            )
-            return
+            if not self._docker_managed():
+                QMessageBox.information(
+                    self,
+                    "New Character",
+                    "Launcher-managed Docker character creation requires Managed "
+                    "Docker mode. Connect-only mode remains read-only.",
+                )
+                return
+            if self._current_observed_docker_target_identity() is None:
+                QMessageBox.information(
+                    self,
+                    "New Character",
+                    "Wait for the launcher to verify the selected Docker Compose "
+                    "project, then try again.",
+                )
+                return
         root = str(self._cfg.get("evejs_root", ""))
         client_path = str(self._cfg.get("client_path", ""))
         if not root or not client_path:
@@ -2169,6 +2428,9 @@ class MainWindow(QMainWindow):
             inspect_overview_patch(client_path),
             self._snapshot_ready_ids(),
             parent=self,
+            runtime_label=(
+                "MANAGED DOCKER COMPOSE" if self._docker_mode() else "NATIVE RUNTIME"
+            ),
         )
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         dialog.create_requested.connect(self._on_new_character_create)
@@ -2314,9 +2576,6 @@ class MainWindow(QMainWindow):
         dialog = self._new_character_dialog
         if dialog is None or not isinstance(draft, NewCharacterDraft):
             return
-        if self._docker_mode():
-            dialog.show_error("Character creation is available in Native mode only.")
-            return
         if any(
             (
                 self._character_creation_thread is not None,
@@ -2340,6 +2599,10 @@ class MainWindow(QMainWindow):
                 dialog.set_patch_status(patch_status)
                 dialog.show_error("Install the overview bridge before copying an overview.")
                 return
+
+        if self._docker_mode():
+            self._begin_docker_character_creation(draft)
+            return
 
         game_active = is_server_running(port=int(Ports.GAME_TCP))
         market_active = self._is_market_running()
@@ -2400,6 +2663,437 @@ class MainWindow(QMainWindow):
             self._character_creation_request = None
             dialog.set_busy(False)
             dialog.show_error("The EveJS services could not be prepared for creation.")
+
+    def _docker_character_context_is_current(
+        self,
+        token: object | None = None,
+        *,
+        allow_closing: bool = False,
+    ) -> bool:
+        """Recheck every authority component captured for Docker mutation."""
+        expected_token = getattr(self, "_docker_character_token", None)
+        expected_target = getattr(self, "_docker_character_observed_target", None)
+        return (
+            expected_token is not None
+            and (token is None or token is expected_token)
+            and self._docker_managed()
+            and (
+                allow_closing
+                or not getattr(self, "_close_in_progress", False)
+            )
+            and getattr(self, "_docker_character_generation", None)
+            == getattr(self, "_monitor_generation", 0)
+            and getattr(self, "_docker_character_target", None)
+            == self._docker_target_identity()
+            and expected_target is not None
+            and self._current_observed_docker_target_identity() == expected_target
+        )
+
+    def _begin_docker_character_creation(self, draft: NewCharacterDraft) -> None:
+        """Sequence stop -> one transactional helper -> prior-state restore."""
+        dialog = self._new_character_dialog
+        if dialog is None:
+            return
+        character_name = normalize_character_name(draft.character_name)
+        if character_name is None:
+            dialog.show_error(
+                "Character name must be 3-37 characters and cannot contain "
+                "control characters."
+            )
+            return
+        if not self._docker_managed():
+            dialog.show_error(
+                "Docker character creation requires Managed mode; Connect-only "
+                "mode remains read-only."
+            )
+            return
+        observed_target = self._current_observed_docker_target_identity()
+        if observed_target is None:
+            dialog.show_error(
+                "Docker target context is not current. Wait for Docker status to "
+                "refresh, then try again."
+            )
+            return
+        snapshot = self._docker_cached_snapshot()
+        transitional = {
+            ServiceState.STARTING,
+            ServiceState.STOPPING,
+            ServiceState.UNKNOWN,
+        }
+        if snapshot.game in transitional or snapshot.market in transitional:
+            dialog.show_error(
+                "Wait for Docker Game and Market status to become stable first."
+            )
+            return
+        if (
+            snapshot.game is ServiceState.ONLINE
+            and snapshot.market is ServiceState.OFFLINE
+        ):
+            dialog.show_error(
+                "Docker Game is online while Market is offline. Start Market or "
+                "stop Game, wait for status to settle, then try again."
+            )
+            return
+
+        restore_game = snapshot.game is ServiceState.ONLINE
+        restore_market = snapshot.market is ServiceState.ONLINE
+        needs_stop = snapshot.game is not ServiceState.OFFLINE or (
+            snapshot.market is not ServiceState.OFFLINE
+        )
+        if needs_stop:
+            reply = QMessageBox.question(
+                self,
+                "Create Character Safely",
+                "The launcher will temporarily stop the selected Compose services, "
+                "create a scoped game-store backup, create and verify the character, "
+                "then restore only the services that were online. Continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        token = object()
+        self._docker_character_token = token
+        self._docker_character_generation = getattr(self, "_monitor_generation", 0)
+        self._docker_character_target = self._docker_target_identity()
+        self._docker_character_observed_target = observed_target
+        self._docker_character_request = DockerCharacterCreationRequest(
+            draft.username,
+            character_name,
+            draft.is_gm,
+        )
+        self._docker_character_overview_source_id = draft.overview_source_character_id
+        self._docker_character_result = None
+        self._docker_character_restore_game = restore_game
+        self._docker_character_restore_market = restore_market
+        dialog.show_error("")
+        dialog.set_busy(True, "PREPARING DOCKER DATA…" if needs_stop else "CREATING & VERIFYING…")
+
+        if needs_stop:
+            began = self._begin_docker_lifecycle(
+                DockerLifecycleAction.STOP_ALL,
+                expected_target_identity=observed_target,
+                on_complete=lambda succeeded, operation_token=token: (
+                    self._after_docker_character_stop(operation_token, succeeded)
+                ),
+                suppress_failure_dialog=True,
+            )
+            if not began:
+                self._abort_docker_character_creation(
+                    "The selected Compose services could not be prepared safely."
+                )
+            return
+        self._begin_docker_character_creation_worker(token)
+
+    def _after_docker_character_stop(
+        self,
+        token: object,
+        succeeded: bool,
+    ) -> None:
+        """Continue only after the retained lifecycle worker has been released."""
+        if not self._docker_character_context_is_current(
+            token,
+            allow_closing=True,
+        ):
+            self._clear_docker_character_creation()
+            return
+        if not succeeded:
+            self._finish_docker_character_without_mutation(
+                token,
+                "The selected Compose services could not be stopped; no character "
+                "data was changed.",
+            )
+            return
+        if getattr(self, "_close_in_progress", False):
+            self._finish_docker_character_without_mutation(
+                token,
+                "Character creation was cancelled while the launcher was closing; "
+                "no character data was changed.",
+            )
+            return
+        if self._tracker.running_count or is_eve_client_running():
+            result = DockerCharacterCreationResult(
+                False,
+                rollback_confirmed=True,
+                restart_safe=True,
+                error=(
+                    "An EVE client started while services were stopping; no "
+                    "character data was changed."
+                ),
+                request_token=token,
+                target_identity=getattr(
+                    self,
+                    "_docker_character_observed_target",
+                    None,
+                ),
+            )
+            self._docker_character_result = result
+            self._after_docker_character_creation_worker()
+            return
+        self._begin_docker_character_creation_worker(token)
+
+    def _finish_docker_character_without_mutation(
+        self,
+        token: object,
+        error: str,
+    ) -> None:
+        """Restore prior service state after a confirmed no-mutation outcome."""
+        result = DockerCharacterCreationResult(
+            False,
+            backup_created=False,
+            rollback_confirmed=True,
+            restart_safe=True,
+            error=error,
+            request_token=token,
+            target_identity=getattr(
+                self,
+                "_docker_character_observed_target",
+                None,
+            ),
+        )
+        self._docker_character_result = result
+        self._after_docker_character_creation_worker()
+
+    def _begin_docker_character_creation_worker(self, token: object) -> None:
+        """Create the Docker controller only after entering its worker thread."""
+        request = getattr(self, "_docker_character_request", None)
+        observed_target = getattr(self, "_docker_character_observed_target", None)
+        if (
+            request is None
+            or observed_target is None
+            or not self._docker_character_context_is_current(token)
+            or self._lifecycle_active()
+        ):
+            self._abort_docker_character_creation(
+                "Docker target context changed before character creation could run."
+            )
+            return
+
+        helper_directory = Path(__file__).resolve().parent / "core" / "helpers"
+        backup_directory = (
+            config.CONFIG_DIR / "backups" / "docker_character_creation"
+        )
+
+        def controller_factory(
+            target: ComposeTarget,
+        ) -> ManagedDockerCharacterCreationController:
+            runner = DockerCommandRunner()
+            return ManagedDockerCharacterCreationController(
+                target,
+                ComposeInspector(runner),
+                runner,
+                policy=DockerControlPolicy.MANAGED,
+                expected_target_identity=observed_target,
+                helper_directory=helper_directory,
+                backup_directory=backup_directory,
+            )
+
+        worker_factory = getattr(
+            self,
+            "_docker_character_creation_worker_factory",
+            None,
+        )
+        worker = (
+            worker_factory(request, observed_target, token)
+            if callable(worker_factory)
+            else DockerCharacterCreationWorker(
+                self._docker_lifecycle_target_factory(),
+                controller_factory,
+                request,
+                policy=DockerControlPolicy.MANAGED,
+                expected_target_identity=observed_target,
+                request_token=token,
+            )
+        )
+        dialog = self._new_character_dialog
+        if dialog is not None:
+            dialog.set_busy(True, "CREATING & VERIFYING…")
+        self._begin_lifecycle_worker(
+            worker,
+            self._on_docker_character_creation_completed,
+        )
+
+    @pyqtSlot(object)
+    def _on_docker_character_creation_completed(self, result: object) -> None:
+        """Accept only a result attributed to the still-current target context."""
+        current = (
+            isinstance(result, DockerCharacterCreationResult)
+            and result.request_token is getattr(self, "_docker_character_token", None)
+            and self._docker_character_context_is_current(
+                result.request_token,
+                allow_closing=True,
+            )
+            and result.target_identity
+            == getattr(self, "_docker_character_observed_target", None)
+        )
+        if current:
+            self._docker_character_result = result
+            self._lifecycle_after_thread_callback = (
+                self._after_docker_character_creation_worker
+            )
+        else:
+            dialog = getattr(self, "_new_character_dialog", None)
+            closing = bool(getattr(self, "_close_in_progress", False))
+            self._clear_docker_character_creation()
+            if dialog is not None and not closing:
+                dialog.set_busy(False)
+                dialog.show_error(
+                    "Docker target context changed while character creation was "
+                    "finishing. Refresh Docker status before trying again."
+                )
+        self._lifecycle_result_received = True
+        self._finish_lifecycle_if_complete()
+
+    def _after_docker_character_creation_worker(self) -> None:
+        """Restore prior services only after a verified success or rollback."""
+        result = getattr(self, "_docker_character_result", None)
+        token = getattr(self, "_docker_character_token", None)
+        if (
+            not isinstance(result, DockerCharacterCreationResult)
+            or not self._docker_character_context_is_current(
+                token,
+                allow_closing=True,
+            )
+        ):
+            self._clear_docker_character_creation()
+            return
+
+        restart_safe = (
+            result.restart_safe is True
+            and (
+                result.cleanup_confirmed is True
+                if result.succeeded
+                else result.rollback_confirmed is True
+            )
+        )
+        restore_game = bool(self._docker_character_restore_game)
+        restore_market = bool(self._docker_character_restore_market)
+        closing = bool(getattr(self, "_close_in_progress", False))
+        keep_running = bool(
+            self._cfg.get("docker_keep_running_on_exit", True)
+        )
+        should_restore = not closing or keep_running
+        if restart_safe and should_restore and (restore_game or restore_market):
+            action = (
+                DockerLifecycleAction.START_STACK
+                if restore_game
+                else DockerLifecycleAction.START_MARKET
+            )
+            began = self._begin_docker_lifecycle(
+                action,
+                expected_target_identity=result.target_identity,
+                on_complete=lambda succeeded, outcome=result: (
+                    self._finalize_docker_character_creation(
+                        outcome,
+                        restore_succeeded=succeeded,
+                    )
+                ),
+                suppress_failure_dialog=True,
+            )
+            if began:
+                return
+            self._finalize_docker_character_creation(
+                result,
+                restore_succeeded=False,
+            )
+            return
+        self._finalize_docker_character_creation(
+            result,
+            restore_succeeded=None,
+        )
+
+    def _finalize_docker_character_creation(
+        self,
+        result: DockerCharacterCreationResult,
+        *,
+        restore_succeeded: bool | None,
+    ) -> None:
+        """Publish one current result after all authorized restoration is done."""
+        token = getattr(self, "_docker_character_token", None)
+        current = (
+            self._docker_character_context_is_current(
+                token,
+                allow_closing=True,
+            )
+            and result is getattr(self, "_docker_character_result", None)
+        )
+        request = getattr(self, "_docker_character_request", None)
+        source_id = getattr(self, "_docker_character_overview_source_id", None)
+        closing = bool(getattr(self, "_close_in_progress", False))
+        self._clear_docker_character_creation()
+        if not current or request is None or closing:
+            if closing:
+                QTimer.singleShot(0, self.close)
+            return
+
+        dialog = self._new_character_dialog
+        if result.succeeded:
+            overview_error = ""
+            if source_id is not None and result.character_id is not None:
+                try:
+                    add_pending_overview_import(result.character_id, source_id)
+                except Exception as exc:
+                    log.exception("Unable to persist pending overview import")
+                    overview_error = str(exc) or type(exc).__name__
+            self._keep_created_character_visible(request.character_name)
+            self._refresh_characters()
+            if dialog is not None:
+                dialog.set_busy(False)
+                dialog.accept()
+            created = "The Docker account and character were created and verified."
+            if result.cleanup_confirmed is False:
+                QMessageBox.warning(
+                    self,
+                    "Character Created — Cleanup Unconfirmed",
+                    f"{created}\n\nDo not retry creation. EveJS did not confirm "
+                    "final maintenance cleanup, so the Compose services were kept "
+                    "stopped. Retain the scoped backup and verify the game store "
+                    "before starting services.",
+                )
+            elif restore_succeeded is False:
+                QMessageBox.warning(
+                    self,
+                    "Character Created — Services Not Restored",
+                    f"{created}\n\nThe prior Compose service state could not be "
+                    "restored automatically.",
+                )
+            elif overview_error:
+                QMessageBox.warning(
+                    self,
+                    "Character Created — Overview Not Queued",
+                    f"{created}\n\nThe pending overview import could not be saved: "
+                    f"{overview_error}",
+                )
+            else:
+                QMessageBox.information(self, "Character Created", created)
+        else:
+            if dialog is not None:
+                dialog.set_busy(False)
+                message = result.error or "Docker character creation failed."
+                if restore_succeeded is False:
+                    message += " The prior Compose service state was not restored."
+                dialog.show_error(message)
+            self._docker_observe_requested.emit()
+
+    def _abort_docker_character_creation(self, message: str) -> None:
+        """Release a not-yet-mutating request and keep the dialog actionable."""
+        dialog = self._new_character_dialog
+        self._clear_docker_character_creation()
+        if dialog is not None and not getattr(self, "_close_in_progress", False):
+            dialog.set_busy(False)
+            dialog.show_error(message)
+
+    def _clear_docker_character_creation(self) -> None:
+        self._docker_character_token = None
+        self._docker_character_generation = None
+        self._docker_character_target = None
+        self._docker_character_observed_target = None
+        self._docker_character_request = None
+        self._docker_character_overview_source_id = None
+        self._docker_character_result = None
+        self._docker_character_restore_game = False
+        self._docker_character_restore_market = False
 
     def _begin_character_creation_worker(self) -> None:
         request = self._character_creation_request
@@ -3225,13 +3919,22 @@ class MainWindow(QMainWindow):
             request.username,
             request.character_name,
         )
+        if not from_queue:
+            self._announce_shipboard(
+                VoiceEvent.CHARACTER_LAUNCHING,
+                character_name=request.character_name,
+            )
         thread.start()
         return True
 
     @pyqtSlot(object)
     def _on_client_launch_completed(self, result: ClientLaunchResult) -> None:
         request = self._client_launch_request
-        if request is None or result.request != request:
+        if (
+            request is None
+            or result.request != request
+            or self._client_launch_result_received
+        ):
             return
         self._client_launch_result_received = True
         self._client_launch_succeeded = True
@@ -3244,7 +3947,11 @@ class MainWindow(QMainWindow):
     @pyqtSlot(object)
     def _on_client_launch_failed(self, failure: ClientLaunchFailure) -> None:
         request = self._client_launch_request
-        if request is None or failure.request != request:
+        if (
+            request is None
+            or failure.request != request
+            or self._client_launch_result_received
+        ):
             return
         self._client_launch_result_received = True
         self._client_launch_succeeded = False
@@ -3255,6 +3962,11 @@ class MainWindow(QMainWindow):
             failure.error_type,
             failure.message,
         )
+        if not self._client_launch_from_queue:
+            self._announce_shipboard(
+                VoiceEvent.CHARACTER_LAUNCH_FAILED,
+                character_name=request.character_name,
+            )
         if self._client_launch_show_errors and not self._close_in_progress:
             QMessageBox.critical(self, "Launch Error", failure.message)
         self._refresh_character_views()
@@ -3602,6 +4314,10 @@ class MainWindow(QMainWindow):
             0,
             group_name,
         )
+        self._announce_shipboard(
+            VoiceEvent.GROUP_LAUNCHING,
+            group_name=group_name or "",
+        )
         queue.start()
 
     def _cancel_launch_queue(self) -> None:
@@ -3638,12 +4354,15 @@ class MainWindow(QMainWindow):
         succeeded: int,
         cancelled: bool,
     ) -> None:
+        if getattr(self, "_launch_queue", None) is None:
+            return
         skipped_running = getattr(self, "_launch_queue_skipped_running", 0)
         skipped_unavailable = getattr(
             self,
             "_launch_queue_skipped_unavailable",
             0,
         )
+        group_name = getattr(self, "_launch_queue_group_name", None)
         self._launch_queue = None
         self._home_page.finish_launch_progress(attempted, succeeded, cancelled)
         self._characters_page.finish_group_launch_progress()
@@ -3654,6 +4373,13 @@ class MainWindow(QMainWindow):
         self._update_status_bar()
         if self._close_in_progress:
             return
+        self._announce_shipboard(
+            VoiceEvent.LAUNCH_SEQUENCE_COMPLETE,
+            group_name=group_name or "",
+            launched_count=succeeded,
+            failed_count=max(0, attempted - succeeded),
+            cancelled=cancelled,
+        )
         if cancelled:
             message = (
                 f"Launched {succeeded} client(s); remaining queued launches were cancelled."
@@ -3685,10 +4411,13 @@ class MainWindow(QMainWindow):
             )
 
     def _kill_all_clients(self) -> None:
+        if self._tracker.running_count > 0:
+            self._announce_shipboard(VoiceEvent.CLIENTS_TERMINATING)
         count = self._tracker.kill_all()
         self._refresh_characters()
         self._update_status_bar()
         if count > 0:
+            self._announce_shipboard(VoiceEvent.CLIENTS_TERMINATED)
             QMessageBox.information(self, "Killed", f"Terminated {count} client(s).")
 
     def _on_hide_character(self, character_name: str) -> None:
@@ -4126,6 +4855,59 @@ class MainWindow(QMainWindow):
         if self._close_in_progress and not self._background_data_active():
             QTimer.singleShot(0, self.close)
 
+    def _refresh_character_creation_availability(
+        self,
+        snapshot: RuntimeSnapshot | None = None,
+    ) -> None:
+        """Expose creation only for Native or a current stable Managed target."""
+        creation_setter = getattr(
+            getattr(self, "_characters_page", None),
+            "set_character_creation_available",
+            None,
+        )
+        if not callable(creation_setter):
+            return
+        if not self._cfg.get("evejs_root", "") or not self._cfg.get(
+            "client_path",
+            "",
+        ):
+            creation_setter(
+                False,
+                "Configure the EveJS root and copied EVE client path first.",
+            )
+            return
+        if not self._docker_mode():
+            creation_setter(True)
+            return
+        if not self._docker_managed():
+            creation_setter(
+                False,
+                "Managed Docker mode is required; Connect-only mode is read-only.",
+            )
+            return
+        current = snapshot or getattr(self, "_runtime_snapshot", None)
+        if (
+            not isinstance(current, RuntimeSnapshot)
+            or self._current_observed_docker_target_identity() is None
+        ):
+            creation_setter(
+                False,
+                "Wait for the selected Docker Compose target to be verified.",
+            )
+            return
+        transitional = {
+            ServiceState.STARTING,
+            ServiceState.STOPPING,
+            ServiceState.UNKNOWN,
+        }
+        if current.game in transitional or current.market in transitional:
+            creation_setter(
+                False,
+                "Wait for Docker Game and Market status to become stable.",
+            )
+            return
+        creation_setter(True)
+
     def _refresh_character_views(self) -> None:
         """Refresh cards and dashboard metrics without another database read."""
         evejs_root = self._cfg.get("evejs_root", "")
@@ -4153,24 +4935,7 @@ class MainWindow(QMainWindow):
         except Exception:
             log.exception("Characters page refresh failed")
 
-        creation_setter = getattr(
-            self._characters_page,
-            "set_character_creation_available",
-            None,
-        )
-        if callable(creation_setter):
-            if self._docker_mode():
-                creation_setter(
-                    False,
-                    "Character creation is available for Native EveJS installations only.",
-                )
-            elif not evejs_root or not self._cfg.get("client_path", ""):
-                creation_setter(
-                    False,
-                    "Configure the EveJS root and copied EVE client path first.",
-                )
-            else:
-                creation_setter(True)
+        self._refresh_character_creation_availability()
 
         management_setter = getattr(
             self._characters_page,
@@ -4423,6 +5188,12 @@ class MainWindow(QMainWindow):
         )
         if target_changed:
             self._docker_tool_token = None
+            if getattr(self, "_docker_character_token", None) is not None:
+                self._abort_docker_character_creation(
+                    "The observed Docker Compose target changed while character "
+                    "creation was finishing. Verify the selected target before "
+                    "trying again."
+                )
             self._cancel_launch_queue()
             if hasattr(self, "_account_thread"):
                 self._cancel_data_loads()
@@ -4677,6 +5448,7 @@ class MainWindow(QMainWindow):
             else "No EVE clients are running"
         )
         self._home_page.apply_runtime_snapshot(snapshot)
+        self._refresh_character_creation_availability(snapshot)
         docker = snapshot.backend is RuntimeBackend.DOCKER_COMPOSE
         if docker:
             managed = snapshot.docker_control_policy is DockerControlPolicy.MANAGED
@@ -4788,7 +5560,9 @@ class MainWindow(QMainWindow):
             draft = self._docker_setup_draft()
 
             def target_factory() -> ComposeTarget:
-                return build_compose_target(draft)
+                # Monitoring, data, lifecycle, and mutation workers must all
+                # observe the same ordered launcher-owned override chain.
+                return attach_docker_mod_override(build_compose_target(draft))
 
             monitor = DockerMonitor(
                 target_factory,
@@ -5296,14 +6070,143 @@ class MainWindow(QMainWindow):
         config.save(self._cfg)
         self._settings_page.set_update_check_done(True)
 
+    def _announce_shipboard(self, event: VoiceEvent, **context: object) -> bool:
+        """Publish one non-blocking local announcement without gating its action."""
+        try:
+            if getattr(self, "_close_in_progress", False):
+                return False
+            controller = getattr(self, "_audio_controller", None)
+        except RuntimeError:
+            # Partially constructed diagnostic/test wrappers have no Qt base
+            # state. Optional audio must remain inert rather than gate the
+            # lifecycle action they are exercising.
+            return False
+        announce = getattr(controller, "announce", None)
+        if not callable(announce):
+            return False
+        try:
+            return bool(announce(event, **context))
+        except Exception:  # noqa: BLE001 - optional platform speech must be isolated
+            log.exception("Shipboard announcement failed for %s", event.value)
+            return False
+
+    @pyqtSlot()
+    def _prepare_shipboard_voice(self) -> None:
+        """Initialize the local LYRA clip backend once Qt is event-loop ready."""
+        if getattr(self, "_close_in_progress", False):
+            return
+        page = getattr(self, "_settings_page", None)
+        controller = getattr(self, "_audio_controller", None)
+        if page is None or controller is None:
+            return
+        attempts = int(getattr(self, "_voice_prepare_attempts", 0)) + 1
+        self._voice_prepare_attempts = attempts
+        voice_preview_available = False
+        if bool(getattr(controller, "speech_supported", False)):
+            try:
+                voice_preview_available = bool(
+                    controller.prepare_voice_preview()
+                )
+            except Exception:  # noqa: BLE001 - optional local clip probing
+                log.exception("Bundled LYRA catalog capability probe failed")
+        if not voice_preview_available and attempts < int(
+            getattr(self, "_VOICE_PREPARE_MAX_ATTEMPTS", 3)
+        ):
+            QTimer.singleShot(
+                int(getattr(self, "_VOICE_PREPARE_RETRY_DELAY_MS", 250)),
+                self._prepare_shipboard_voice,
+            )
+            return
+        voice_reason = (
+            "Bundled LYRA voice catalog is ready."
+            if voice_preview_available
+            else "Bundled LYRA voice asset unavailable."
+        )
+        page.set_voice_preview_available(
+            voice_preview_available,
+            voice_reason,
+        )
+
+    @pyqtSlot()
+    def _start_launcher_ambience(self) -> None:
+        """Start the bundled original loop and publish its truthful UI state."""
+        if getattr(self, "_close_in_progress", False):
+            return
+        controller = getattr(self, "_audio_controller", None)
+        start_music = getattr(controller, "start_music", None)
+        if not callable(start_music):
+            return
+        try:
+            # ``start_music`` reports request acceptance. Real playback is
+            # asynchronous, so only AudioController.music_playback_changed
+            # may promote the title capsule to its active state.
+            start_music()
+        except Exception:  # noqa: BLE001 - optional platform media is isolated
+            log.exception("Launcher ambience could not be started")
+        track_name = str(
+            getattr(controller, "music_track_name", "STATION SOUNDSCAPE")
+        )
+        self._title_bar.set_audio_status(
+            bool(getattr(controller, "music_active", False)),
+            track_name,
+        )
+
+    @pyqtSlot()
+    def _preview_shipboard_voice(self) -> None:
+        """Preview LYRA with the unsaved Audio & Voice form values."""
+        if getattr(self, "_close_in_progress", False):
+            return
+        page = getattr(self, "_settings_page", None)
+        controller = getattr(self, "_audio_controller", None)
+        preview = getattr(controller, "preview_voice", None)
+        draft = getattr(page, "audio_preview_settings", None)
+        if not callable(preview) or not callable(draft):
+            return
+        try:
+            spoken = bool(preview(draft()))
+        except Exception:  # noqa: BLE001 - optional clip playback is isolated
+            log.exception("Shipboard voice preview failed")
+            spoken = False
+        if not spoken:
+            # One asynchronous playback rejection is not a capability probe.
+            # Keep the verified catalog/backend state so the user can retry.
+            log.warning("Shipboard voice preview did not start")
+
+    @pyqtSlot(bool)
+    def _on_music_mute_changed(self, muted: bool) -> None:
+        """Persist only soundtrack mute without changing LYRA voice output."""
+        muted = bool(muted)
+        self._cfg["audio_music_muted"] = muted
+        try:
+            persisted = config.load()
+            persisted["audio_music_muted"] = muted
+            config.save(persisted)
+        except OSError:
+            # Music remains safely muted/unmuted for this process even if the
+            # preference cannot be written; launcher actions remain unaffected.
+            log.exception("Could not persist the soundtrack mute setting")
+
     def _on_settings_saved(self, cfg: dict) -> None:
         """Refresh in-memory config and character grid after settings save."""
         previous_root = str(self._cfg.get("evejs_root", ""))
+        previous_docker_target = self._docker_target_identity()
         previous_monitor = (
             self._cfg.get("runtime_backend"), self._cfg.get("docker_compose_file"),
             self._cfg.get("docker_project_name"), previous_root,
         )
         self._cfg.update(cfg)
+        if (
+            self._docker_target_identity() != previous_docker_target
+            and getattr(self, "_docker_character_token", None) is not None
+        ):
+            self._abort_docker_character_creation(
+                "Docker runtime settings changed while character creation was "
+                "finishing. Verify the selected target before trying again."
+            )
+        audio_controller = getattr(self, "_audio_controller", None)
+        apply_audio_settings = getattr(audio_controller, "apply_settings", None)
+        if callable(apply_audio_settings):
+            apply_audio_settings(self._cfg)
         self._settings_generation = getattr(self, "_settings_generation", 0) + 1
         current_root = str(self._cfg.get("evejs_root", ""))
         current_monitor = (
@@ -5384,6 +6287,9 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         if self._console_panel.isVisible() and hasattr(self._console_panel, "_reposition"):
             self._console_panel._reposition()
+        caption = getattr(self, "_shipboard_caption", None)
+        if caption is not None and caption.isVisible():
+            caption.reposition()
 
     def _complete_deferred_close(self) -> None:
         """Request the final close only after its lifecycle worker is released."""
@@ -5422,6 +6328,7 @@ class MainWindow(QMainWindow):
             launch_queue.cancel()
         if getattr(self, "_client_launch_thread", None) is not None:
             self._close_in_progress = True
+            self._shutdown_audio_for_close()
             event.ignore()
             return
         if (
@@ -5432,10 +6339,12 @@ class MainWindow(QMainWindow):
             or getattr(self, "_overview_patch_thread", None) is not None
         ):
             self._close_in_progress = True
+            self._shutdown_audio_for_close()
             event.ignore()
             return
         if getattr(self, "_docker_preflight_thread", None) is not None:
             self._close_in_progress = True
+            self._shutdown_audio_for_close()
             event.ignore()
             return
         if self._update_install_worker is not None:
@@ -5443,6 +6352,7 @@ class MainWindow(QMainWindow):
             return
         if getattr(self, "_docker_log_thread", None) is not None:
             self._close_in_progress = True
+            self._shutdown_audio_for_close()
             self._stop_docker_log_stream()
             event.ignore()
             return
@@ -5508,6 +6418,7 @@ class MainWindow(QMainWindow):
             if self._has_running_update_checker():
                 event.ignore()
                 return
+            self._shutdown_audio_for_close()
             event.accept()
             return
         if getattr(self, "_close_after_lifecycle", False):
@@ -5521,6 +6432,7 @@ class MainWindow(QMainWindow):
             if self._has_running_update_checker():
                 event.ignore()
                 return
+            self._shutdown_audio_for_close()
             event.accept()
             return
 
@@ -5555,4 +6467,11 @@ class MainWindow(QMainWindow):
         if self._has_running_update_checker():
             event.ignore()
             return
+        self._shutdown_audio_for_close()
         event.accept()
+
+    def _shutdown_audio_for_close(self) -> None:
+        """Stop optional playback without delaying or initializing backends."""
+        audio_controller = getattr(self, "_audio_controller", None)
+        if audio_controller is not None:
+            audio_controller.shutdown()

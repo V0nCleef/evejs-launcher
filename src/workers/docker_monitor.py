@@ -160,6 +160,7 @@ class DockerMonitor(QObject):
                     self._target_identity = docker_project_identity(
                         self._target,
                         getattr(report.config, "project_name", None),
+                        config=report.config,
                     )
                 records = report.records or {}
             else:

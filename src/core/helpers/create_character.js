@@ -10,8 +10,9 @@ const {
   requireSuccess,
   runMaintenanceOperation,
 } = require("./game_store_maintenance");
-
-const RESULT_PREFIX = "EVEJS_LAUNCHER_RESULT=";
+const {
+  exitWithTerminalResult,
+} = require("./terminal_result");
 
 function readPayload() {
   return JSON.parse(fs.readFileSync(0, "utf8"));
@@ -19,10 +20,6 @@ function readPayload() {
 
 function escapePointer(value) {
   return String(value).replace(/~/g, "~0").replace(/\//g, "~1");
-}
-
-function emitResult(payload) {
-  process.stdout.write(`${RESULT_PREFIX}${JSON.stringify(payload)}\n`);
 }
 
 async function main() {
@@ -135,10 +132,10 @@ async function main() {
       rookieShipVerified,
     };
   });
-  emitResult({ ok: true, ...result });
+  return { ok: true, ...result };
 }
 
-main().catch((error) => {
-  emitResult(failureResult(error));
-  process.exitCode = 1;
-});
+main().then(
+  (result) => exitWithTerminalResult(result, 0),
+  (error) => exitWithTerminalResult(failureResult(error), 1),
+);

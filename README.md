@@ -1,12 +1,12 @@
 # EveJS Launcher
 
-EveJS Launcher is a Windows desktop control panel for a local EveJS installation. It brings the game server, market server, EVE clients, character profiles, mods, maintenance tools, and launcher updates into one application, with an explicit choice between Native processes and Docker Compose.
+EveJS Launcher is a Windows desktop control panel for a local EveJS installation. It brings the game server, market server, EVE clients, character profiles, mods, maintenance tools, launcher updates, and local shipboard audio into one application, with an explicit choice between Native processes and Docker Compose.
 
 [Download the latest release](https://github.com/V0nCleef/evejs-launcher/releases/latest) · [Read the release notes](https://github.com/V0nCleef/evejs-launcher/releases) · [Join the EveJS Discord](https://discord.gg/HVTfKeqX3t)
 
 ![EveJS Launcher Home page with group launch controls and service status](screenshots/home.png)
 
-The Home page is the operational view: current service state, account and character totals, running clients, stack controls, release notes, and direct access to both service consoles.
+Home is the Deep Signal command network: authoritative Game and Market state, recent service activity, running-client telemetry, stack lifecycle controls, and selected-group launch controls.
 
 ## Start here
 
@@ -68,19 +68,19 @@ Docker uses an existing EveJS Compose project. The normal setup leaves **Compose
 
 ## Interface tour
 
-The launcher has five navigation pages. The captures below show v1.0.36. Character and account names are obscured where real local data is shown, and setup fields use generic example paths.
+The launcher has five navigation pages. The captures below show v1.0.38 in one isolated documentation run. Real character and account labels are blurred in memory before capture, setup fields use generic example paths, and the displayed Online states are simulated without starting services.
 
 ### Home
 
 Home combines service controls and status in one place. Game and Market are tracked independently through Offline, Starting, Online, Stopping, and Failed states. A service started outside the launcher is detected as externally managed and is never force-stopped by the launcher.
 
-The screenshot at the top of this page shows a live local offline state; no server processes were started to create it. The Docker example below uses a simulated healthy observation.
+The screenshot at the top of this page uses a simulated healthy Native observation; the Docker example below uses the same safe presentation approach. No server process or container was started to create either image.
 
 ### Characters
 
 ![Characters page with portraits, launch-group controls, and private names obscured](screenshots/characters.png)
 
-Characters are read from the configured EveJS installation and grouped into account-aware cards. Each card shows the portrait, wallet balance, ship, launch state, and account state. Selecting a card opens the detail panel with skill points, location, security status, and launch controls. The New Character tile starts the Native character-creation workflow.
+Characters are read from the configured EveJS installation and grouped into account-aware cards. Each card shows the portrait, wallet balance, ship, launch state, and account state. Selecting a card opens the detail panel with skill points, location, security status, and launch controls. The New Character tile supports Native and compatible Managed Docker Compose projects; creation remains disabled in Connect-only mode.
 
 ![Character group editor with configurable membership](screenshots/character-groups.png)
 
@@ -88,7 +88,7 @@ Groups are completely user-configurable. Create and rename groups, add or remove
 
 ![New Character dialog with optional GM and overview-copy settings](screenshots/new-character.png)
 
-On a Native installation, New Character accepts an account name, character name, optional GM status, and an optional captured overview source. Overview transfer uses an opt-in, reversible bridge that is installed only for the exact supported EVE client build 3396210. When a source still needs capture, launch that source once through the launcher, then launch the new character to apply the queued copy.
+On Native and compatible Managed Docker Compose installations, New Character accepts an account name, character name, optional GM status, and an optional captured overview source. Overview transfer uses an opt-in, reversible bridge that is installed only for the exact supported EVE client build 3396210. When a source still needs capture, launch that source once through the launcher, then launch the new character to apply the queued copy.
 
 The character card menu can hide a character without touching game data, assign it to groups, or begin deletion. Character/account deletion is Native-only, requires Game, Market, and all EVE clients to be offline, creates a scoped backup, and requires typed confirmation before any database change.
 
@@ -112,17 +112,21 @@ The launcher does not recursively expose arbitrary scripts. It resolves only kno
 
 ![Native settings with generic example paths](screenshots/native-settings.png)
 
-*v1.0.36 Native Runtime settings. Game and Market run directly on Windows, and Docker Desktop is not required.*
+*v1.0.38 Native Runtime settings. Game and Market run directly on Windows, and Docker Desktop is not required.*
 
 #### Docker Compose runtime
 
 ![Docker Compose settings with generic example paths](screenshots/docker-settings.png)
 
-*v1.0.36 Docker Runtime settings. Compose File is blank so `<EveJS Root>\compose.yaml` is selected automatically; the advanced Project Name is also optional and blank.*
+*v1.0.38 Managed Docker Runtime settings. Compose File is blank so `<EveJS Root>\compose.yaml` is selected automatically; the advanced Project Name is also optional and blank.*
 
-![Launch settings with the optional auto-login capability check](screenshots/launch-settings.png)
+#### Audio and LYRA
 
-Settings covers the EveJS root, EVE client path, proxy address, Native/Docker runtime selection, Compose target and control policy, launch timing, service auto-start, compatible local auto-login, animation preferences, update checks, server-mode selection, hidden characters, and local-data cleanup.
+![Audio and Voice settings showing the bundled LYRA Balanced Lift profile ready for preview](screenshots/audio-settings.png)
+
+The Audio & Voice panel controls the bundled Deep Signal soundscape and local prerecorded launcher announcements. LYRA is distinct from EVE's Aura: v1.0.38 ships an English (UK) prerecorded catalog using the **Balanced Lift** profile. Music and voice can be enabled and balanced independently, event announcements and ducking remain optional, and **Preview LYRA** verifies the bundled voice locally.
+
+Settings covers the EveJS root, EVE client path, proxy address, Native/Docker runtime selection, Compose target and control policy, launch timing, service auto-start, compatible local auto-login, soundtrack and LYRA controls, motion preferences, update checks, server-mode selection, hidden characters, and local-data cleanup.
 
 ## What the launcher manages
 
@@ -137,6 +141,7 @@ Settings covers the EveJS root, EVE client path, proxy address, Native/Docker ru
 | Characters | Reads character data and current portraits; supports search, hiding, grouping, Native creation with optional GM/overview copy, and backup-first deletion. |
 | Mods | Discovers mods, toggles their loader state, and restarts Game when requested. |
 | Tools | Resolves 11 reviewed external utility wrappers with prerequisite and risk information. |
+| Audio and voice | Plays the bundled Deep Signal soundscape and local prerecorded LYRA announcements with separate volume, event, ducking, and preview controls. |
 | Updates | Checks GitHub Releases, downloads the release ZIP, shows progress, stages replacement, restarts, and cleans validated update artifacts. |
 
 ## Service startup and detection
@@ -182,6 +187,12 @@ A valid pristine project is reported separately from runtime readiness and data 
 | **Managed** | Same read-only observation | Start, stop, restart, force-recreate, supported mod activation, and reviewed Docker Tool Deck actions | Honors **Keep Stack Running on Exit**; otherwise stops Game before Market |
 
 Managed lifecycle work, Compose inspection, log streaming, setup preflight, and container-side tools run on workers rather than the Qt GUI thread. Status is based on Compose state and health: a healthy running service is Online, an unhealthy service is Failed, and an intentionally exited service is Offline with its exit code retained for diagnostics. When a required service has no health check, Game becomes Online only after its effective Game TCP endpoint and Proxy `/health` respond; Market requires its effective `/health` endpoint.
+
+#### Managed Docker character creation
+
+New Character is available only in **Managed** Docker mode; Connect-only remains read-only, and character/account deletion remains Native-only. Close every EVE client before starting. The launcher records the prior service state, temporarily stops the selected Compose stack, creates and verifies a scoped game-store backup, creates the account and character, verifies the character and rookie ship, and checks for unexpected data changes. If creation or verification fails, it attempts and verifies a rollback from that backup. Services that were previously online are restored only after success or a confirmed rollback and maintenance-lease release; if safety cannot be confirmed, the backup is retained and the stack stays offline.
+
+This mutation path has a strict compatibility gate. It accepts only the reviewed EveJS v0.12.5 `server`, `market`, and `init` Compose layout with no extra effective services, the supported game-store mount, `pull_policy: never`, and the expected runtime package and API fingerprints. The selected project and container contract are revalidated immediately before maintenance begins, so an unsupported or changed target fails before game data is modified.
 
 #### Docker endpoints
 
@@ -309,7 +320,13 @@ Configuration is stored in:
 | Auto-Start Market | Starts Market when required | Off |
 | Auto-Login Character | Uses the verified local auto-login path for a compatible Native client | Off |
 | Server Start Selection | Always ask or a detected vanilla/modded indicator | Always ask |
-| Animations | Hero rotation and page effects | On |
+| Music | Enables the bundled Deep Signal soundscape | On |
+| Music Volume | Playback level for the bundled soundscape | `50%` |
+| LYRA Voice | Enables bundled prerecorded launcher announcements | On |
+| LYRA Voice Volume | Playback level for LYRA announcements | `100%` |
+| Announce Results | Announces supported completion and failure events | On |
+| Music Ducking | Adjusts music while LYRA announcements play | On |
+| Animations | Deep Signal traffic, signal motion, and page effects | On |
 | Hero Rotation Interval | Time between Home banner images | `6 seconds` |
 | Auto-Check for Updates | Periodic GitHub Release checks | On |
 | Update Check Interval | Time between automatic checks | `6 hours` |

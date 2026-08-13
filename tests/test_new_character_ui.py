@@ -36,6 +36,32 @@ def test_new_character_tile_is_first_and_emits_request(qapp: QApplication) -> No
     page.deleteLater()
 
 
+def test_new_character_tile_supports_keyboard_and_unavailable_guard(
+    qapp: QApplication,
+) -> None:
+    tile = NewCharacterCard()
+    spy = QSignalSpy(tile.requested)
+
+    tile.setFocus()
+    QTest.keyClick(tile, Qt.Key.Key_Return)
+
+    assert len(spy) == 1
+    assert tile.accessibleName() == "Create a new local character"
+    assert tile.minimumWidth() <= 148
+    assert tile.maximumWidth() == 196
+
+    tile.set_available(False, "Native runtime required")
+    QTest.keyClick(tile, Qt.Key.Key_Space)
+
+    assert len(spy) == 1
+    assert tile._button.text() == "NATIVE ONLY"
+    assert "Native runtime" in tile.accessibleDescription()
+
+    tile.set_available(False, "Managed Docker mode is required")
+    assert tile._button.text() == "MANAGED ONLY"
+    tile.deleteLater()
+
+
 def test_character_overflow_exposes_character_and_account_deletion(
     qapp: QApplication,
     monkeypatch,
@@ -100,6 +126,53 @@ def test_dialog_requires_patched_ready_snapshot_for_overview_copy(
     assert isinstance(draft, NewCharacterDraft)
     assert draft.overview_source_character_id == 140000007
     assert draft.is_gm is False
+    dialog.deleteLater()
+
+
+def test_dialog_uses_javascript_character_name_semantics(
+    qapp: QApplication,
+) -> None:
+    status = OverviewPatchStatus(
+        OverviewPatchState.PATCHED,
+        "Overview copy bridge installed; original backup verified.",
+        3396210,
+    )
+    dialog = NewCharacterDialog([], status, set())
+    spy = QSignalSpy(dialog.create_requested)
+    dialog.account_edit.setText("fixture-new")
+
+    dialog.character_edit.setText("Fixture\x7fPilot")
+    assert not dialog.create_button.isEnabled()
+
+    dialog.character_edit.setText("🚀" * 19)
+    assert not dialog.create_button.isEnabled()
+
+    dialog.character_edit.setText("\ufeff Étoile\ufeff\u200b🚀 \ufeff")
+    assert dialog.create_button.isEnabled()
+    QTest.mouseClick(dialog.create_button, Qt.MouseButton.LeftButton)
+
+    assert len(spy) == 1
+    draft = spy[0][0]
+    assert isinstance(draft, NewCharacterDraft)
+    assert draft.character_name == "Étoile \u200b🚀"
+    dialog.deleteLater()
+
+
+def test_new_character_dialog_uses_native_responsive_deep_signal_shell(
+    qapp: QApplication,
+) -> None:
+    status = OverviewPatchStatus(
+        OverviewPatchState.READY,
+        "Supported client; ready to patch.",
+        3396210,
+    )
+    dialog = NewCharacterDialog([_account()], status, set())
+
+    assert not bool(dialog.windowFlags() & Qt.WindowType.FramelessWindowHint)
+    assert dialog.objectName() == "newCharacterDialog"
+    assert dialog.minimumWidth() <= 560
+    assert dialog.create_button.minimumHeight() >= 34
+    assert dialog.account_edit.accessibleName() == "Local account name"
     dialog.deleteLater()
 
 

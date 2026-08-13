@@ -30,25 +30,36 @@ from PyQt6.QtCore import (
     QPropertyAnimation,
     QRect,
     QThread,
+    QTimer,
     Qt,
     pyqtSignal,
     pyqtSlot,
 )
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import (
+    QColor,
+    QKeyEvent,
+    QLinearGradient,
+    QPainter,
+    QPaintEvent,
+    QPixmap,
+)
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
+    QStackedLayout,
     QVBoxLayout,
     QWidget,
 )
 
-from src.constants import Status
+from src.constants import COLORS as C, SEMANTIC_COLORS as S, Status
 from src.core.dashboard import visible_character_rows
 from src.core.db import Account, Character, _fmt_isk, _fmt_sp
 from src.core.groups import TargetGroupState
@@ -59,16 +70,80 @@ from src.core.runtime.portraits import (
     PortraitRequest,
     PortraitTarget,
 )
+from src.ui.motion import MotionController
 from src.utils.cache import PortraitCache
 from src.widgets.character_card import CharacterCard
+from src.widgets.deep_signal_background import operations_scene_path
 from src.widgets.detail_panel import DetailPanel
 from src.widgets.new_character_card import NewCharacterCard
 from src.widgets.skeleton_card import SkeletonCard
+from src.widgets.page_header import PageHeader
 from src.workers.portrait_worker import PortraitLoadFailure, PortraitLoader
 
-GRID_COLUMNS = 3
-GRID_SPACING = 12
+GRID_COLUMNS = 6
+GRID_SPACING = 10
 _SKELETON_COUNT = 6
+_DETAIL_HEIGHT = 150
+
+
+class _StaticCharacterScene(QWidget):
+    """One cached, permanently static character-page scene.
+
+    This deliberately avoids the Operations background's richer procedural
+    fallback and cross-page motion compatibility plumbing.  The Characters
+    page only needs an immutable raster backdrop behind its roster.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        self._scene = QPixmap(str(operations_scene_path()))
+        self._cache = QPixmap()
+
+    def is_animating(self) -> bool:
+        return False
+
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
+        del event
+        if self._cache.size() != self.size():
+            self._cache = QPixmap(max(1, self.width()), max(1, self.height()))
+            self._cache.fill(QColor(S["background"]))
+            painter = QPainter(self._cache)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            if not self._scene.isNull():
+                scaled = self._scene.scaled(
+                    self.size(),
+                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                excess_x = max(0, scaled.width() - self.width())
+                excess_y = max(0, scaled.height() - self.height())
+                source_x = round(excess_x * 0.70)
+                source_y = round(excess_y * 0.48)
+                painter.drawPixmap(
+                    self.rect(),
+                    scaled,
+                    scaled.rect().adjusted(
+                        source_x,
+                        source_y,
+                        -(excess_x - source_x),
+                        -(excess_y - source_y),
+                    ),
+                )
+            fade = QLinearGradient(0, 0, max(1, self.width()), 0)
+            fade.setColorAt(0.0, QColor(3, 8, 14, 247))
+            fade.setColorAt(0.48, QColor(3, 9, 16, 190))
+            fade.setColorAt(0.82, QColor(3, 10, 17, 44))
+            fade.setColorAt(1.0, QColor(3, 10, 17, 8))
+            painter.fillRect(self.rect(), fade)
+            painter.end()
+        output = QPainter(self)
+        output.drawPixmap(0, 0, self._cache)
+        output.end()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        self._cache = QPixmap()
+        super().resizeEvent(event)
 
 
 class CharactersPage(QWidget):
@@ -96,9 +171,16 @@ class CharactersPage(QWidget):
         self._rotation_pool: list[tuple[str, Character]] = []
         self._selected_key: tuple[str, int] | None = None
         self._tracker: ProcessTracker | None = None
+        self._motion = MotionController(parent=self)
         self._animating: bool = False
         self._transition_group: QParallelAnimationGroup | None = None
-
+        self._grid_columns = GRID_COLUMNS
+        self._compact_controls = False
+        self._reflow_pending = False
+        self._reflow_timer = QTimer(self)
+        self._reflow_timer.setSingleShot(True)
+        self._reflow_timer.setInterval(0)
+        self._reflow_timer.timeout.connect(self._perform_deferred_reflow)
 
         self._portrait_threads: dict[
             QThread,
@@ -125,6 +207,155 @@ class CharactersPage(QWidget):
 
     # ── UI construction ──────────────────────────────────────────────────────
     def _build_ui(self) -> None:
+        """Build the static Deep Signal roster and responsive command rail."""
+        self.setProperty("deepSignal", True)
+        self.setAccessibleName("Characters")
+
+        layers = QStackedLayout(self)
+        layers.setContentsMargins(0, 0, 0, 0)
+        layers.setStackingMode(QStackedLayout.StackingMode.StackAll)
+
+        self.signal_background = _StaticCharacterScene(self)
+        layers.addWidget(self.signal_background)
+
+        self._foreground = QWidget(self)
+        self._foreground.setProperty("deepSignal", True)
+        layers.addWidget(self._foreground)
+        layers.setCurrentWidget(self._foreground)
+
+        root = QVBoxLayout(self._foreground)
+        root.setContentsMargins(24, 14, 24, 14)
+        root.setSpacing(10)
+
+        self.page_header = PageHeader(
+            "CHARACTERS",
+            "Inspect capsule telemetry, organise launch groups, and deploy a pilot.",
+            "DEEP SIGNAL // CAPSULE REGISTRY",
+            self._foreground,
+        )
+        self.count_label = QLabel("")
+        self.count_label.setProperty("class", "signalPill")
+        self.count_label.setAccessibleName("Visible character count")
+        self.page_header.add_action(self.count_label)
+        root.addWidget(self.page_header)
+
+        self.controls_panel = QFrame(self._foreground)
+        self.controls_panel.setProperty("class", "glassPanel")
+        self.controls_panel.setProperty("variant", "quiet")
+        self.controls_panel.setProperty("deepSignal", True)
+        self._controls_grid = QGridLayout(self.controls_panel)
+        self._controls_grid.setContentsMargins(10, 8, 10, 8)
+        self._controls_grid.setHorizontalSpacing(8)
+        self._controls_grid.setVerticalSpacing(7)
+
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Search character, account, or ship…")
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.setMinimumWidth(120)
+        self.search_edit.setFixedHeight(38)
+        self.search_edit.setSizePolicy(
+            QSizePolicy.Policy.MinimumExpanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.search_edit.setAccessibleName("Search characters")
+        self.search_edit.setToolTip("Filter by character, account, or active ship")
+        self.search_edit.textChanged.connect(self._apply_filter)
+
+        self.status_combo = QComboBox()
+        self.status_combo.setMinimumWidth(90)
+        self.status_combo.setFixedHeight(38)
+        self.status_combo.setSizePolicy(
+            QSizePolicy.Policy.MinimumExpanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.status_combo.setAccessibleName("Character status filter")
+        self.status_combo.setToolTip("Show characters in one launch state")
+        self.status_combo.addItem("ALL STATUS", None)
+        self.status_combo.addItem("READY", Status.READY)
+        self.status_combo.addItem("RUNNING", Status.RUNNING)
+        self.status_combo.addItem("LAUNCHING", Status.LAUNCHING)
+        self.status_combo.addItem("WAITING", Status.SAME_ACCOUNT_ONLINE)
+        self.status_combo.addItem("ERROR", Status.ERROR)
+        self.status_combo.currentIndexChanged.connect(
+            lambda _index: self._apply_filter(self.search_edit.text())
+        )
+
+        self.group_combo = QComboBox()
+        self.group_combo.setMinimumWidth(120)
+        self.group_combo.setFixedHeight(38)
+        self.group_combo.setSizePolicy(
+            QSizePolicy.Policy.MinimumExpanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.group_combo.setAccessibleName("Launch group selector")
+        self.group_combo.setToolTip("Choose the roster group to display and launch")
+        self.group_combo.currentIndexChanged.connect(self._on_group_combo_changed)
+
+        self.launch_group_button = QPushButton("LAUNCH ALL")
+        self.launch_group_button.setMinimumWidth(120)
+        self.launch_group_button.setFixedHeight(38)
+        self.launch_group_button.setSizePolicy(
+            QSizePolicy.Policy.MinimumExpanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.launch_group_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.launch_group_button.setAccessibleName("Launch selected character group")
+        self.launch_group_button.setStyleSheet(
+            f"QPushButton {{ background-color: rgba(105, 72, 0, 232); "
+            f"color: #FFE39A; border: 1px solid {C['gold']}; border-radius: 4px; "
+            "padding: 0 14px; font-size: 12px; font-weight: 700; }}"
+            f"QPushButton:hover:enabled {{ background-color: {C['gold']}; "
+            f"color: {C['void_black']}; }}"
+            "QPushButton:focus { border: 2px solid #FFF2C3; }"
+            f"QPushButton:disabled {{ background-color: rgba(10, 22, 32, 210); "
+            f"color: {S['text_muted']}; border-color: {S['border']}; }}"
+        )
+        self.launch_group_button.clicked.connect(self._emit_group_launch_action)
+
+        self.manage_groups_button = QPushButton("MANAGE GROUPS")
+        self.manage_groups_button.setProperty("class", "signalSecondary")
+        self.manage_groups_button.setMinimumWidth(120)
+        self.manage_groups_button.setFixedHeight(38)
+        self.manage_groups_button.setSizePolicy(
+            QSizePolicy.Policy.MinimumExpanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.manage_groups_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.manage_groups_button.setAccessibleName("Manage character groups")
+        self.manage_groups_button.clicked.connect(
+            lambda: self.manage_groups_requested.emit(None)
+        )
+        self._layout_controls(compact=self.width() < 900)
+        root.addWidget(self.controls_panel)
+
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._scroll.setAccessibleName("Character roster")
+
+        self._grid_container = QWidget()
+        self._grid_container.setProperty("deepSignal", True)
+        self._grid_container.installEventFilter(self)
+        self._grid = QGridLayout(self._grid_container)
+        self._grid.setSpacing(GRID_SPACING)
+        self._grid.setContentsMargins(0, 0, 0, 0)
+        self._grid.setAlignment(
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft
+        )
+        self._scroll.setWidget(self._grid_container)
+        root.addWidget(self._scroll, stretch=1)
+
+        self.detail_panel = DetailPanel()
+        self.detail_panel.launch_clicked.connect(self._on_detail_launch)
+        self.detail_panel.hide_clicked.connect(self._on_detail_hide)
+        self.detail_panel.setMaximumHeight(0)
+        self.detail_panel.hide()
+        root.addWidget(self.detail_panel)
+
+    def _build_legacy_ui(self) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(12)
@@ -211,6 +442,67 @@ class CharactersPage(QWidget):
         root.addLayout(content, stretch=1)
 
     # ── Loading placeholders ─────────────────────────────────────────────────
+    def _layout_controls(self, *, compact: bool) -> None:
+        """Reflow the same controls into one or two rows without rebuilding."""
+        self._compact_controls = bool(compact)
+        widgets = (
+            self.search_edit,
+            self.status_combo,
+            self.group_combo,
+            self.launch_group_button,
+            self.manage_groups_button,
+        )
+        for widget in widgets:
+            self._controls_grid.removeWidget(widget)
+        for column in range(6):
+            self._controls_grid.setColumnStretch(column, 0)
+
+        # ``Ignored`` makes QGridLayout disregard a control's size hint.  The
+        # zero-stretch action columns then collapse to a few pixels while the
+        # buttons keep their widget minimums and paint outside their cells.
+        # Keep every cell's minimum contribution in both responsive modes so
+        # controls can reflow without overlapping or being clipped.
+        horizontal_policy = QSizePolicy.Policy.MinimumExpanding
+        for widget in widgets:
+            widget.setSizePolicy(
+                horizontal_policy,
+                QSizePolicy.Policy.Fixed,
+            )
+
+        if compact:
+            self._controls_grid.addWidget(self.search_edit, 0, 0, 1, 3)
+            self._controls_grid.addWidget(self.status_combo, 0, 3)
+            self._controls_grid.addWidget(self.group_combo, 1, 0, 1, 2)
+            self._controls_grid.addWidget(self.launch_group_button, 1, 2)
+            self._controls_grid.addWidget(self.manage_groups_button, 1, 3)
+            self._controls_grid.setColumnStretch(0, 2)
+            self._controls_grid.setColumnStretch(1, 2)
+        else:
+            self._controls_grid.addWidget(self.search_edit, 0, 0)
+            self._controls_grid.addWidget(self.status_combo, 0, 1)
+            self._controls_grid.addWidget(self.group_combo, 0, 2)
+            self._controls_grid.addWidget(self.launch_group_button, 0, 3)
+            self._controls_grid.addWidget(self.manage_groups_button, 0, 4)
+            self._controls_grid.setColumnStretch(0, 3)
+            self._controls_grid.setColumnStretch(2, 2)
+        self.controls_panel.updateGeometry()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        if hasattr(self, "_controls_grid"):
+            compact = event.size().width() < 900
+            if compact != self._compact_controls:
+                self._layout_controls(compact=compact)
+        if hasattr(self, "_grid") and not self._reflow_pending:
+            self._reflow_pending = True
+            self._reflow_timer.start()
+
+    def _perform_deferred_reflow(self) -> None:
+        self._reflow_pending = False
+        if hasattr(self, "_grid") and not self._animating:
+            if not self._relayout_skeletons():
+                self._relayout_grid()
+
     def show_skeletons(self, count: int = _SKELETON_COUNT) -> None:
         """Replace the grid with skeleton placeholder cards."""
         self.cancel_portrait_loads(invalidate=True)
@@ -218,8 +510,34 @@ class CharactersPage(QWidget):
         self._cards.clear()
         for i in range(count):
             skeleton = SkeletonCard()
-            self._grid.addWidget(skeleton, i // GRID_COLUMNS, i % GRID_COLUMNS)
+            self._grid.addWidget(skeleton, i // 3, i % 3)
+        self._relayout_skeletons()
         self.count_label.setText("Loading…")
+
+    def _relayout_skeletons(self) -> bool:
+        skeletons = [
+            self._grid.itemAt(index).widget()
+            for index in range(self._grid.count())
+            if isinstance(self._grid.itemAt(index).widget(), SkeletonCard)
+        ]
+        if not skeletons:
+            return False
+        available = self._scroll.viewport().width()
+        if available <= 0:
+            available = max(320, self.width() - 48)
+        columns = max(
+            1,
+            min(GRID_COLUMNS, (available + GRID_SPACING) // (220 + GRID_SPACING)),
+        )
+        for skeleton in skeletons:
+            self._grid.removeWidget(skeleton)
+        for index, skeleton in enumerate(skeletons):
+            self._grid.addWidget(
+                skeleton,
+                index // columns,
+                index % columns,
+            )
+        return True
 
     def _clear_grid(self) -> None:
         while self._grid.count():
@@ -337,7 +655,7 @@ class CharactersPage(QWidget):
 
         # Show/hide the detail panel based on selection state.
         if self._selected_key is None:
-            self.detail_panel.setMaximumWidth(0)
+            self.detail_panel.setMaximumHeight(0)
             self.detail_panel.hide()
         # If a character is currently selected but no longer in the pool
         # (e.g. hidden or removed), clear selection.
@@ -385,19 +703,56 @@ class CharactersPage(QWidget):
         return Status.READY
 
     def _relayout_grid(self) -> None:
-        """Re-position all cards in row-major order."""
+        """Re-position visible cards using the current viewport width."""
+        available = self._scroll.viewport().width()
+        if available <= 0:
+            available = max(320, self.width() - 48)
+        minimum = 156
+        columns = max(
+            1,
+            min(
+                GRID_COLUMNS,
+                (available + GRID_SPACING) // (minimum + GRID_SPACING),
+            ),
+        )
+        card_width = min(
+            CharacterCard.CARD_MAX_WIDTH,
+            max(
+                minimum,
+                (available - GRID_SPACING * (columns - 1)) // columns,
+            ),
+        )
+        self._grid_columns = int(columns)
+
         if self._new_character_card is not None:
             self._grid.removeWidget(self._new_character_card)
         for card in self._cards.values():
             self._grid.removeWidget(card)
-        offset = 0
-        if self._new_character_card is not None:
-            self._grid.addWidget(self._new_character_card, 0, 0)
-            offset = 1
-        for i, (username, char) in enumerate(self._rotation_pool, start=offset):
+
+        visible_widgets: list[QWidget] = []
+        if (
+            self._new_character_card is not None
+            and not self._new_character_card.isHidden()
+        ):
+            self._new_character_card.setFixedSize(
+                int(card_width),
+                CharacterCard.CARD_HEIGHT,
+            )
+            visible_widgets.append(self._new_character_card)
+        for username, char in self._rotation_pool:
             card = self._cards.get((username, char.char_id))
-            if card is not None:
-                self._grid.addWidget(card, i // GRID_COLUMNS, i % GRID_COLUMNS)
+            if card is not None and not card.isHidden():
+                card.setFixedWidth(int(card_width))
+                visible_widgets.append(card)
+
+        for index, widget in enumerate(visible_widgets):
+            self._grid.addWidget(
+                widget,
+                index // self._grid_columns,
+                index % self._grid_columns,
+            )
+        for column in range(GRID_COLUMNS):
+            self._grid.setColumnStretch(column, 0)
 
     def _load_portrait_for_card(self, card: CharacterCard) -> None:
         """Start an async portrait load for a character card."""
@@ -667,12 +1022,66 @@ class CharactersPage(QWidget):
         self.detail_panel.set_launch_pending(
             self._launching_accounts.get(selected_username) == selected_character
         )
+        if self.status_combo.currentData() is not None:
+            self._apply_filter(self.search_edit.text())
 
     # ── Grid transition animation ─────────────────────────────────────────────
 
     _TRANSITION_DURATION = 300  # ms
 
+    @property
+    def animations_enabled(self) -> bool:
+        """Whether the character detail command pane may transition."""
+        return self._motion.animations_enabled
+
+    def set_animations_enabled(self, enabled: bool) -> None:
+        """Apply reduced motion immediately, settling any active transition."""
+        self._motion.set_reduced_motion(not bool(enabled))
+        if not self._motion.animations_enabled:
+            self._cancel_transition()
+
     def _animate_detail_transition(self, show: bool) -> None:
+        """Reveal the selected detail command pane without moving the backdrop."""
+        if self._transition_group is not None:
+            self._transition_group.stop()
+            self._transition_group.deleteLater()
+            self._transition_group = None
+
+        if not self._motion.animations_enabled:
+            self._settle_detail_transition(show)
+            return
+
+        start_height = self.detail_panel.maximumHeight()
+        end_height = _DETAIL_HEIGHT if show else 0
+        if show:
+            self.detail_panel.show()
+        if start_height == end_height:
+            self.detail_panel.setMaximumHeight(end_height)
+            if not show:
+                self.detail_panel.hide()
+                self.detail_panel.show_empty()
+            return
+
+        self._animating = True
+        group = QParallelAnimationGroup(self)
+        panel_animation = QPropertyAnimation(
+            self.detail_panel,
+            b"maximumHeight",
+            group,
+        )
+        panel_animation.setStartValue(start_height)
+        panel_animation.setEndValue(end_height)
+        self._motion.configure(
+            panel_animation,
+            "page",
+            QEasingCurve.Type.OutCubic if show else QEasingCurve.Type.InCubic,
+        )
+        group.addAnimation(panel_animation)
+        group.finished.connect(self._finish_detail_transition)
+        self._transition_group = group
+        group.start()
+
+    def _animate_detail_transition_legacy(self, show: bool) -> None:
         """Animate cards repositioning + detail panel sliding in/out."""
 
         # Debounce: skip if an animation is already in progress.
@@ -759,6 +1168,22 @@ class CharactersPage(QWidget):
         group.start()
 
     def _finish_detail_transition(self) -> None:
+        """Settle the compact detail pane after its height transition."""
+        self._animating = False
+        group = self._transition_group
+        self._transition_group = None
+        if group is not None:
+            group.deleteLater()
+        if self.detail_panel.maximumHeight() <= 0:
+            self.detail_panel.setMaximumHeight(0)
+            self.detail_panel.hide()
+            self.detail_panel.show_empty()
+        else:
+            self.detail_panel.setMaximumHeight(_DETAIL_HEIGHT)
+            self.detail_panel.show()
+        self._relayout_grid()
+
+    def _finish_detail_transition_legacy(self) -> None:
         """Called when the card/detail-panel animation group finishes."""
         self._animating = False
 
@@ -780,20 +1205,43 @@ class CharactersPage(QWidget):
 
     def _cancel_transition(self) -> None:
         """Stop any in-progress transition and jump to the final state."""
-        if self._transition_group is not None and self._transition_group.state() == 1:  # Running
-            self._transition_group.stop()
-        self._finish_detail_transition()
+        self._settle_detail_transition(self._selected_key is not None)
+
+    def _settle_detail_transition(self, show: bool) -> None:
+        """Stop transition ownership and render its deterministic end state."""
+        group = self._transition_group
+        self._transition_group = None
+        if group is not None:
+            group.stop()
+            group.deleteLater()
+        self._animating = False
+        target = _DETAIL_HEIGHT if show else 0
+        self.detail_panel.setMaximumHeight(target)
+        if show:
+            self.detail_panel.show()
+        else:
+            self.detail_panel.hide()
+            self.detail_panel.show_empty()
+        self._relayout_grid()
 
     # ── Filtering ────────────────────────────────────────────────────────────
     def _apply_filter(self, text: str) -> None:
         needle = text.strip().lower()
         group_member_ids = self._selected_group_member_ids()
+        status_filter = self.status_combo.currentData()
         if self._new_character_card is not None:
             self._new_character_card.setVisible(
-                not needle
-                or any(
-                    needle in value
-                    for value in ("new character", "create character", "new account")
+                status_filter is None
+                and (
+                    not needle
+                    or any(
+                        needle in value
+                        for value in (
+                            "new character",
+                            "create character",
+                            "new account",
+                        )
+                    )
                 )
             )
         visible = 0
@@ -801,15 +1249,20 @@ class CharactersPage(QWidget):
             in_group = (
                 group_member_ids is None or card.char_id in group_member_ids
             )
+            in_status = status_filter is None or card._status == status_filter
             if not needle:
-                match = in_group
+                match = in_group and in_status
             else:
                 haystacks = (
                     username.lower(),
                     card.char_name.lower(),
                     (card.ship or "").lower(),
                 )
-                match = in_group and any(needle in h for h in haystacks)
+                match = (
+                    in_group
+                    and in_status
+                    and any(needle in h for h in haystacks)
+                )
             card.setVisible(match)
             if match:
                 visible += 1
@@ -819,7 +1272,7 @@ class CharactersPage(QWidget):
             if group_member_ids is None
             else sum(card.char_id in group_member_ids for card in self._cards.values())
         )
-        if needle:
+        if needle or status_filter is not None:
             self.count_label.setText(f"({visible} / {group_total})")
         elif group_member_ids is not None:
             self.count_label.setText(f"({group_total} of {total})")
@@ -830,6 +1283,7 @@ class CharactersPage(QWidget):
             selected_card = self._cards.get(self._selected_key)
             if selected_card is not None and selected_card.isHidden():
                 self.clear_selection()
+        self._relayout_grid()
 
     # ── Selection ─────────────────────────────────────────────────────
     def _on_card_selected(self, username: str, char_name: str, char_id: int) -> None:
@@ -855,7 +1309,7 @@ class CharactersPage(QWidget):
 
         # If the panel is already visible (switching between cards), just
         # swap the content without re-animating the panel.
-        panel_already_open = self.detail_panel.maximumWidth() > 0
+        panel_already_open = self.detail_panel.maximumHeight() > 0
         if not panel_already_open:
             self.detail_panel.show()
             self._animate_detail_transition(show=True)
@@ -965,6 +1419,16 @@ class CharactersPage(QWidget):
         self.hide_character.emit(character_name)
 
     # ── Click on empty grid space → deselect ───────────────────────────────
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        if event.key() == Qt.Key.Key_Escape:
+            if self.search_edit.text():
+                self.search_edit.clear()
+            elif self._selected_key is not None:
+                self.clear_selection()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
         if obj is self._grid_container and event.type() == event.Type.MouseButtonPress:
             if event.button() == Qt.MouseButton.LeftButton:

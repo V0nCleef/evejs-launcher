@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PyQt6.QtCore import Qt
+
 from src.core.service_status import DockerControlPolicy, RuntimeBackend
 from src.pages.mods_page import ModsPage
 
@@ -85,3 +87,44 @@ def test_root_change_rebuilds_cards_from_new_root(qapp, tmp_path: Path) -> None:
     page.set_evejs_root(str(new_root))
 
     assert [row.mod.name for row in page._rows] == ["New Mod"]
+
+
+def test_deep_signal_manifest_is_accessible_and_privacy_safe_at_minimum_width(
+    qapp,
+    tmp_path: Path,
+) -> None:
+    loader = _loader(tmp_path, "Fixture Mod")
+    page = ModsPage()
+    page.set_evejs_root(str(tmp_path))
+    page.resize(756, 560)
+    page.show()
+    qapp.processEvents()
+
+    try:
+        row = page._rows[0]
+
+        assert page.page_header.title_label.text() == "MODS"
+        assert page.page_header.eyebrow_label.text() == "EXTENSION CONTROL"
+        assert page.runtime_panel.property("class") == "modsRuntimePanel"
+        assert page.manifest_panel.property("class") == "modsManifestPanel"
+        assert page.action_rail.property("class") == "modsActionRail"
+        assert page.runtime_state_label.text() == "NATIVE HOST"
+        assert page._scroll.horizontalScrollBarPolicy() == (
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        assert page._scroll.horizontalScrollBar().maximum() == 0
+
+        assert page.refresh_btn.accessibleName() == "Refresh mods"
+        assert page.refresh_btn.accessibleDescription()
+        assert page.apply_btn.accessibleName()
+        assert page.apply_btn.accessibleDescription()
+        assert row.accessibleName() == "Mod Fixture Mod"
+        assert row.toggle.accessibleName() == "Enable Fixture Mod"
+        assert row.toggle.accessibleDescription()
+        assert row.state_label.text() == "ENABLED"
+
+        assert str(tmp_path) not in row.path_label.text()
+        assert row.path_label.toolTip() == str(loader.parent)
+    finally:
+        page.close()
+        page.deleteLater()

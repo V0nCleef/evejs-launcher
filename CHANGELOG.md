@@ -2,6 +2,28 @@
 
 ## Changelog
 
+## v1.0.38 — 2026-08-13
+
+### Added
+- **Deep Signal interface** — Home, Characters, Mods, Tools, Settings, the setup wizard, and the updater now share one glass-panel operations-console design with responsive layouts, clearer hierarchy, and semantic service states.
+- **LYRA Balanced Lift voice** — a bundled fixed catalog announces important service and client operations, with independent voice controls, a Settings preview, captions, bounded startup retries, and no runtime voice synthesis.
+- **Living Universe audio** — the original Celestial Transit soundtrack and Deep Signal ambience add an optional soundscape without UI click sounds. Music and LYRA voice can be controlled independently.
+- **Managed Docker character creation** — compatible launcher-controlled EveJS v0.12.5 Compose projects can create a new account and character from the Characters page. Connect-only remains read-only, and character/account deletion remains Native-only.
+
+### Changed
+- **First-run and update flow** — the setup wizard, available-update dialog, download/install progress, restart stage, failure state, and standalone update agent now use the Deep Signal visual system and explicit progress stages.
+- **Public documentation** — README screenshots now reflect the v1.0.38 interface with generic example paths, private identity text obscured, and no mouse cursor.
+
+### Safety and compatibility
+- Managed Docker creation freezes and revalidates the exact stopped Compose target immediately before mutation, including the effective interpolated config, service records, reviewed image/runtime contract, authoritative GameStore mount, and nested/overlapping mount exclusions.
+- Creation acquires the maintenance lease, creates and revalidates a scoped retained backup, verifies the account, character, rookie ship, persistence queue, and exact allowed logical data changes, and restores only the services that were previously online after confirmed cleanup or rollback.
+- Unsupported layouts, changed targets, ambiguous service states, invalid helper inputs, pending persistence work, damaged backups, unexpected existing-data changes, and unverified rollback or lease cleanup all fail closed before service restoration.
+- LYRA ships only the finite reviewed WAV catalog and manifest. Raw voice sources, the approved review master, and synthesis/processing tools are excluded from the application package.
+
+### Verification
+- **1,120 automated tests passed**, covering Managed Docker creation authority, backup, rollback, retained-data, service restoration, Deep Signal UI, LYRA catalog/playback, and Native compatibility behavior.
+- Native Qt Multimedia playback, source-mode visual checks, packaged LYRA integrity, frozen Settings preview, and Windows startup/shutdown were verified before publication.
+
 ## v1.0.37 — 2026-08-12
 
 ### Added

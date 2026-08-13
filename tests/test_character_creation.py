@@ -14,6 +14,7 @@ from src.core.character_creation import (
     CharacterCreationError,
     CharacterCreationRequest,
     create_character,
+    normalize_character_name,
     normalize_creation_request,
 )
 
@@ -63,6 +64,14 @@ def test_creation_request_validation_is_local_and_strict(tmp_path: Path) -> None
         normalize_creation_request(
             CharacterCreationRequest(str(root), "bad/account", "Fixture Pilot", False)
         )
+
+
+def test_character_name_normalization_matches_javascript_protocol() -> None:
+    assert normalize_character_name("\ufeff  Étoile\u00a0🚀  \ufeff") == "Étoile 🚀"
+    assert normalize_character_name("Pilot\u200bName") == "Pilot\u200bName"
+    assert normalize_character_name("Pilot\x7fName") is None
+    assert normalize_character_name("🚀" * 18) == "🚀" * 18
+    assert normalize_character_name("🚀" * 19) is None
 
 
 def test_creation_helper_runs_as_offline_maintenance_owner(

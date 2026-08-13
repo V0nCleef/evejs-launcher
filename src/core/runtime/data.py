@@ -284,7 +284,7 @@ def select_docker_data_source(
             "The selected Docker project does not expose a supported Server data layout.",
         )
 
-    identity = docker_project_identity(target, config.project_name)
+    identity = docker_project_identity(target, config.project_name, config=config)
     if mount.type.casefold() == "bind":
         game_store_path = _resolve_bind_source(target, mount.source)
         if not (game_store_path / "gamestore.sqlite").is_file():
@@ -363,14 +363,81 @@ def inspect_docker_data_source(
 def docker_project_identity(
     target: ComposeTarget,
     effective_project_name: str | None,
+    *,
+    config: ComposeConfig | None = None,
 ) -> str:
-    """Return a private-safe identity that separates every selected project."""
+    """Return a private-safe identity for the exact effective Compose target.
+
+    Mutating workers must be invalidated when either the ordered file chain or
+    any Compose file changes in place.  Hashing the bytes here keeps paths and
+    configuration private while letting a fresh preflight detect drift from a
+    monitor observation made against older content.
+    """
+    compose_files = (target.compose_file, *target.override_files)
+    compose_material: list[str] = []
+    for path in compose_files:
+        try:
+            content_digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            content_digest = "unreadable"
+        compose_material.extend((str(path), content_digest))
+    effective_material = ""
+    if isinstance(config, ComposeConfig):
+        services = []
+        for service_name in sorted(config.services):
+            service = config.services[service_name]
+            services.append(
+                {
+                    "name": service_name,
+                    "image": service.image,
+                    "pullPolicy": service.pull_policy,
+                    "healthcheck": service.has_healthcheck,
+                    "dependencies": sorted(service.dependencies),
+                    "stopGracePeriod": service.stop_grace_period,
+                    "mounts": [
+                        {
+                            "type": mount.type,
+                            "source": mount.source,
+                            "target": mount.target,
+                        }
+                        for mount in service.mounts
+                    ],
+                }
+            )
+        endpoints = (
+            {
+                name: {
+                    "service": endpoint.service,
+                    "host": endpoint.host,
+                    "port": endpoint.port,
+                    "target": endpoint.target,
+                    "protocol": endpoint.protocol,
+                }
+                for name, endpoint in sorted(vars(config.endpoints).items())
+            }
+            if isinstance(config.endpoints, RuntimeEndpoints)
+            else {}
+        )
+        effective_material = json.dumps(
+            {
+                "services": services,
+                "endpoints": endpoints,
+                "capabilities": {
+                    "init": config.capabilities.init,
+                    "marketTools": config.capabilities.market_tools,
+                },
+                "effectiveConfigDigest": config.effective_config_digest,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
     return _target_digest(
         "docker",
-        str(target.compose_file),
         str(target.project_directory),
         target.project_name or "",
         effective_project_name or "",
+        effective_material,
+        *compose_material,
     )
 
 

@@ -4,7 +4,8 @@ Sections
 --------
 * General        — EveJS root, client path, proxy URL
 * Launch         — stagger delay, auto-start toggles
-* UI             — animations toggle, hero rotation interval
+* Audio & Voice  — ambience, local shipboard voice, events, accessibility
+* UI             — motion preference and hero rotation interval
 * Hidden Characters— list of hidden character names with a "Show Selected" action
 * Danger Zone    — delete all local launcher data
 
@@ -24,6 +25,8 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -32,6 +35,8 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
+    QSlider,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -53,6 +58,16 @@ class FocusWheelSpinBox(QSpinBox):
             super().wheelEvent(event)
         else:
             event.ignore()  # propagate to parent scroll area
+
+
+class FocusWheelSlider(QSlider):
+    """A slider that leaves page scrolling alone until it has focus."""
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
 
 from src import config
 from src.constants import COLORS, APP_VERSION
@@ -120,6 +135,7 @@ class SettingsPage(QWidget):
     save_finished = pyqtSignal(bool)
     settings_update_check = pyqtSignal()
     docker_preflight_requested = pyqtSignal(object)
+    voice_preview_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -129,6 +145,12 @@ class SettingsPage(QWidget):
         self._validated_docker_fingerprint: str | None = None
         self._save_after_docker_preflight = False
         self._settings_baseline: dict[str, object] | None = None
+        self._voice_preview_available = False
+        self._voice_preview_reason = (
+            "Bundled LYRA voice pack has not been verified yet."
+        )
+        self._syncing_motion_toggles = False
+        self._audio_layout_mode = ""
         self._build_ui()
         self.load_settings()
 
@@ -143,20 +165,25 @@ class SettingsPage(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        outer.addWidget(scroll)
+        self.settings_scroll = QScrollArea()
+        self.settings_scroll.setObjectName("settingsScrollArea")
+        self.settings_scroll.setWidgetResizable(True)
+        self.settings_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        outer.addWidget(self.settings_scroll)
 
-        container = QWidget()
-        scroll.setWidget(container)
+        self.settings_container = QWidget()
+        self.settings_container.setObjectName("settingsContainer")
+        self.settings_container.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+        self.settings_scroll.setWidget(self.settings_container)
 
-        root = QVBoxLayout(container)
+        root = QVBoxLayout(self.settings_container)
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(14)
-
-        title = QLabel("SETTINGS")
-        title.setProperty("class", "title")
-        root.addWidget(title)
 
         # ── General ──────────────────────────────────────────────────────────
         general_box = QGroupBox("General")
@@ -194,6 +221,10 @@ class SettingsPage(QWidget):
         runtime_form = QFormLayout(self.runtime_box)
         runtime_form.setSpacing(8)
         self.runtime_backend_combo = QComboBox()
+        self.runtime_backend_combo.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Fixed,
+        )
         self.runtime_backend_combo.addItem(
             "Native — run directly on Windows",
             "native",
@@ -241,6 +272,10 @@ class SettingsPage(QWidget):
         docker_form.addRow("", self.docker_compose_resolved_label)
 
         self.docker_policy_combo = QComboBox()
+        self.docker_policy_combo.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Fixed,
+        )
         self.docker_policy_combo.addItem(
             "Connect only — observe an existing stack",
             "connect_only",
@@ -366,19 +401,66 @@ class SettingsPage(QWidget):
         root.addWidget(launch_box)
 
         # ── UI ───────────────────────────────────────────────────────────────
-        ui_box = QGroupBox("UI")
+        audio_heading = QWidget()
+        audio_heading.setProperty("deepSignal", True)
+        audio_heading_layout = QVBoxLayout(audio_heading)
+        audio_heading_layout.setContentsMargins(0, 4, 0, 0)
+        audio_heading_layout.setSpacing(3)
+        audio_eyebrow = QLabel("SHIPBOARD SYSTEMS")
+        audio_eyebrow.setProperty("class", "pageEyebrow")
+        audio_heading_layout.addWidget(audio_eyebrow)
+        audio_title = QLabel("AUDIO & VOICE")
+        audio_title.setObjectName("audioVoiceSectionTitle")
+        audio_title.setProperty("class", "pageTitle")
+        audio_heading_layout.addWidget(audio_title)
+        audio_subtitle = QLabel(
+            "Balance the bundled soundtrack and prerecorded LYRA announcements."
+        )
+        audio_subtitle.setProperty("class", "pageSubtitle")
+        audio_subtitle.setWordWrap(True)
+        audio_heading_layout.addWidget(audio_subtitle)
+        root.addWidget(audio_heading)
+
+        self.audio_panel_host = QWidget()
+        self.audio_panel_host.setObjectName("audioVoicePanelHost")
+        self.audio_panel_host.setProperty("deepSignal", True)
+        self.audio_panel_host.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+        self.audio_panel_grid = QGridLayout(self.audio_panel_host)
+        self.audio_panel_grid.setContentsMargins(0, 0, 0, 0)
+        self.audio_panel_grid.setHorizontalSpacing(12)
+        self.audio_panel_grid.setVerticalSpacing(12)
+        self.audio_mix_panel = self._build_audio_mix_panel()
+        self.audio_events_panel = self._build_audio_events_panel()
+        self.audio_identity_panel = self._build_audio_identity_panel()
+        self._sync_audio_panel_layout(1_100)
+        root.addWidget(self.audio_panel_host)
+
+        ui_box = QGroupBox("Visual Timing")
         ui_form = QFormLayout(ui_box)
         ui_form.setSpacing(10)
-
-        self.animations_toggle = ToggleSwitch()
-        ui_form.addRow("Animations:", self.animations_toggle)
 
         self.hero_interval_spin = FocusWheelSpinBox()
         self.hero_interval_spin.setRange(3, 30)
         self.hero_interval_spin.setSuffix(" s")
+        self.hero_interval_spin.setAccessibleName("Hero rotation interval")
         ui_form.addRow("Hero Rotation Interval:", self.hero_interval_spin)
+        self.hero_interval_help = self._make_help_label(
+            "Used by rotating hero content. Reduce Motion pauses optional UI motion."
+        )
+        ui_form.addRow("", self.hero_interval_help)
 
         root.addWidget(ui_box)
+        # Settings opens on the approved Audio & Voice composition.  Existing
+        # operational settings remain below it in their original relative order.
+        root.removeWidget(audio_heading)
+        root.removeWidget(self.audio_panel_host)
+        root.removeWidget(ui_box)
+        root.insertWidget(0, audio_heading)
+        root.insertWidget(1, self.audio_panel_host)
+        root.insertWidget(2, ui_box)
 
         # ── Updates ─────────────────────────────────────────────────────────
         updates_box = QGroupBox("Updates")
@@ -531,6 +613,503 @@ class SettingsPage(QWidget):
         root.addLayout(buttons)
         root.addStretch()
 
+    def _new_audio_panel(
+        self,
+        title: str,
+        description: str,
+        *,
+        identity: bool = False,
+    ) -> tuple[QFrame, QVBoxLayout]:
+        panel = QFrame()
+        panel.setProperty("class", "audioSettingsPanel")
+        panel.setProperty("identity", identity)
+        panel.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+        panel.setMinimumWidth(0)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        heading = QLabel(title.upper())
+        heading.setProperty("class", "panelTitle")
+        layout.addWidget(heading)
+        copy = QLabel(description)
+        copy.setProperty("class", "panelMeta")
+        copy.setWordWrap(True)
+        layout.addWidget(copy)
+        return panel, layout
+
+    @staticmethod
+    def _audio_divider() -> QFrame:
+        divider = QFrame()
+        divider.setProperty("audioDivider", True)
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setFixedHeight(1)
+        return divider
+
+    @staticmethod
+    def _new_audio_slider(
+        accessible_name: str,
+        minimum: int = 0,
+        maximum: int = 100,
+    ) -> FocusWheelSlider:
+        slider = FocusWheelSlider(Qt.Orientation.Horizontal)
+        slider.setRange(minimum, maximum)
+        slider.setSingleStep(1)
+        slider.setPageStep(5)
+        slider.setProperty("audioControl", True)
+        slider.setAccessibleName(accessible_name)
+        slider.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        return slider
+
+    def _make_audio_slider_control(
+        self,
+        title: str,
+        description: str,
+        slider: FocusWheelSlider,
+        value_label: QLabel,
+        toggle: ToggleSwitch | None,
+    ) -> QWidget:
+        control = QWidget()
+        control.setProperty("audioControlRow", True)
+        control.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+        layout = QVBoxLayout(control)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
+
+        heading_row = QHBoxLayout()
+        heading_row.setContentsMargins(0, 0, 0, 0)
+        name = QLabel(title.upper())
+        name.setProperty("class", "audioControlTitle")
+        heading_row.addWidget(name)
+        heading_row.addStretch()
+        if toggle is not None:
+            toggle.setAccessibleName(f"Enable {title.casefold()}")
+            toggle.setAccessibleDescription(description)
+            heading_row.addWidget(toggle)
+        layout.addLayout(heading_row)
+
+        help_label = QLabel(description)
+        help_label.setProperty("class", "audioControlHelp")
+        help_label.setWordWrap(True)
+        layout.addWidget(help_label)
+
+        slider_row = QHBoxLayout()
+        slider_row.setContentsMargins(0, 0, 0, 0)
+        slider_row.setSpacing(9)
+        slider.setAccessibleDescription(description)
+        slider_row.addWidget(slider, 1)
+        value_label.setProperty("class", "audioControlValue")
+        value_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        value_label.setFixedWidth(44)
+        slider_row.addWidget(value_label)
+        layout.addLayout(slider_row)
+        return control
+
+    def _make_audio_toggle_row(
+        self,
+        title: str,
+        description: str,
+        toggle: ToggleSwitch,
+    ) -> QWidget:
+        row = QWidget()
+        row.setProperty("audioToggleRow", True)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        copy = QVBoxLayout()
+        copy.setContentsMargins(0, 0, 0, 0)
+        copy.setSpacing(2)
+        name = QLabel(title.upper())
+        name.setProperty("class", "audioControlTitle")
+        copy.addWidget(name)
+        detail = QLabel(description)
+        detail.setProperty("class", "audioControlHelp")
+        detail.setWordWrap(True)
+        copy.addWidget(detail)
+        layout.addLayout(copy, 1)
+        toggle.setAccessibleName(title)
+        toggle.setAccessibleDescription(description)
+        layout.addWidget(toggle)
+        return row
+
+    def _build_audio_mix_panel(self) -> QFrame:
+        panel, layout = self._new_audio_panel(
+            "Mix & Access",
+            "Independent levels for music and the LYRA voice pack.",
+        )
+        panel.setObjectName("audioMixPanel")
+
+        self.music_enabled_toggle = ToggleSwitch()
+        self.music_volume_slider = self._new_audio_slider("Music volume")
+        self.music_volume_value = QLabel("50%")
+        layout.addWidget(
+            self._make_audio_slider_control(
+                "Background music",
+                "Volume for the bundled launcher soundtrack rotation.",
+                self.music_volume_slider,
+                self.music_volume_value,
+                self.music_enabled_toggle,
+            )
+        )
+
+        self.voice_enabled_toggle = ToggleSwitch()
+        self.voice_volume_slider = self._new_audio_slider("Voice volume")
+        self.voice_volume_value = QLabel("100%")
+        layout.addWidget(
+            self._make_audio_slider_control(
+                "Voice",
+                "Volume for bundled prerecorded LYRA announcements.",
+                self.voice_volume_slider,
+                self.voice_volume_value,
+                self.voice_enabled_toggle,
+            )
+        )
+
+        self.ducking_enabled_toggle = ToggleSwitch()
+        self.ducking_level_slider = self._new_audio_slider(
+            "Music level while voice is speaking"
+        )
+        self.ducking_level_value = QLabel("100%")
+        layout.addWidget(
+            self._make_audio_slider_control(
+                "Music while\nLYRA speaks",
+                "Defaults to 100%. Lower it only if you want LYRA to soften the music.",
+                self.ducking_level_slider,
+                self.ducking_level_value,
+                self.ducking_enabled_toggle,
+            )
+        )
+
+        layout.addWidget(self._audio_divider())
+        self.animations_toggle = ToggleSwitch(self)
+        self.animations_toggle.setObjectName("animationsEnabledCompatibilityToggle")
+        self.animations_toggle.hide()
+        self.reduce_motion_toggle = ToggleSwitch()
+        layout.addWidget(
+            self._make_audio_toggle_row(
+                "Reduce motion",
+                "Pauses optional interface motion and rotating hero content.",
+                self.reduce_motion_toggle,
+            )
+        )
+
+        for slider, label in (
+            (self.music_volume_slider, self.music_volume_value),
+            (self.voice_volume_slider, self.voice_volume_value),
+            (self.ducking_level_slider, self.ducking_level_value),
+        ):
+            slider.valueChanged.connect(
+                lambda value, target=label: target.setText(f"{value}%")
+            )
+        for toggle in (
+            self.music_enabled_toggle,
+            self.voice_enabled_toggle,
+            self.ducking_enabled_toggle,
+        ):
+            toggle.toggled.connect(self._sync_audio_control_states)
+        self.reduce_motion_toggle.toggled.connect(
+            self._on_reduce_motion_toggled
+        )
+        self.animations_toggle.toggled.connect(
+            self._on_animations_enabled_toggled
+        )
+        return panel
+
+    def _make_voice_event_row(
+        self,
+        title: str,
+        sample: str,
+    ) -> tuple[QWidget, QLabel]:
+        row = QWidget()
+        row.setProperty("audioEventRow", True)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 7, 0, 7)
+        layout.setSpacing(10)
+        indicator = QLabel("✓")
+        indicator.setProperty("class", "audioEventIndicator")
+        indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        indicator.setFixedSize(28, 28)
+        layout.addWidget(indicator)
+        copy = QVBoxLayout()
+        copy.setContentsMargins(0, 0, 0, 0)
+        copy.setSpacing(2)
+        name = QLabel(title.upper())
+        name.setProperty("class", "audioEventName")
+        copy.addWidget(name)
+        description = QLabel(sample)
+        description.setProperty("class", "audioEventDescription")
+        description.setWordWrap(True)
+        copy.addWidget(description)
+        layout.addLayout(copy, 1)
+        return row, indicator
+
+    def _build_audio_events_panel(self) -> QFrame:
+        panel, layout = self._new_audio_panel(
+            "Voice Events",
+            "Fixed prerecorded announcements used for launcher actions.",
+        )
+        panel.setObjectName("audioEventsPanel")
+        self.voice_event_status_label = QLabel("VOICE EVENTS ENABLED")
+        self.voice_event_status_label.setProperty("class", "audioAvailability")
+        self.voice_event_status_label.setProperty("state", "available")
+        layout.addWidget(self.voice_event_status_label)
+
+        self._voice_event_indicators: list[QLabel] = []
+        for title, sample in (
+            ("Stack launch", "“Launching server stack.”"),
+            ("Service ready", "“Server stack online.”"),
+            ("Character launch", "“Launching selected character.”"),
+            ("Failure & completion", "Optional launch result announcements."),
+        ):
+            row, indicator = self._make_voice_event_row(title, sample)
+            self._voice_event_indicators.append(indicator)
+            layout.addWidget(row)
+
+        layout.addWidget(self._audio_divider())
+        self.announce_results_toggle = ToggleSwitch()
+        layout.addWidget(
+            self._make_audio_toggle_row(
+                "Announce results",
+                "Speak completion and failure outcomes.",
+                self.announce_results_toggle,
+            )
+        )
+        layout.addStretch()
+        return panel
+
+    def _build_audio_identity_panel(self) -> QFrame:
+        panel, layout = self._new_audio_panel(
+            "Bundled LYRA Voice",
+            "A fixed, prerecorded launcher voice pack, distinct from EVE's Aura.",
+            identity=True,
+        )
+        panel.setObjectName("audioIdentityPanel")
+
+        identity_badge = QLabel("BUNDLED VOICE PACK")
+        identity_badge.setProperty("class", "signalPill")
+        identity_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        identity_badge.setMaximumWidth(156)
+        layout.addWidget(identity_badge)
+        identity_name = QLabel("LYRA")
+        identity_name.setObjectName("voiceIdentityName")
+        identity_name.setProperty("class", "audioIdentityName")
+        layout.addWidget(identity_name)
+        identity_line = QLabel(
+            "Natural prerecorded shipboard announcements · played locally"
+        )
+        identity_line.setProperty("class", "audioIdentityTagline")
+        identity_line.setWordWrap(True)
+        layout.addWidget(identity_line)
+
+        facts = QGridLayout()
+        facts.setContentsMargins(0, 3, 0, 3)
+        facts.setHorizontalSpacing(12)
+        facts.setVerticalSpacing(7)
+        fact_values: list[tuple[str, QLabel]] = []
+        self.voice_pack_source_value = QLabel("LYRA PRERECORDED VOICE")
+        self.voice_pack_language_value = QLabel("English (UK)")
+        self.voice_pack_profile_value = QLabel("Balanced Lift")
+        fact_values.extend(
+            (
+                ("Voice source", self.voice_pack_source_value),
+                ("Language", self.voice_pack_language_value),
+                ("Profile", self.voice_pack_profile_value),
+            )
+        )
+        for row, (name, value) in enumerate(fact_values):
+            key = QLabel(name)
+            key.setProperty("class", "audioIdentityKey")
+            value.setProperty("class", "audioIdentityValue")
+            value.setWordWrap(True)
+            facts.addWidget(key, row, 0)
+            facts.addWidget(value, row, 1)
+        facts.setColumnStretch(1, 1)
+        layout.addLayout(facts)
+
+        layout.addStretch()
+        self.preview_voice_btn = QPushButton("▶  PREVIEW LYRA")
+        self.preview_voice_btn.setObjectName("previewVoiceButton")
+        self.preview_voice_btn.setProperty("class", "signalSecondary")
+        self.preview_voice_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.preview_voice_btn.setAccessibleName("Preview LYRA voice")
+        self.preview_voice_btn.clicked.connect(self._request_voice_preview)
+        layout.addWidget(self.preview_voice_btn)
+        self.voice_preview_status_label = QLabel(self._voice_preview_reason)
+        self.voice_preview_status_label.setObjectName("voicePreviewStatus")
+        self.voice_preview_status_label.setProperty("class", "audioAvailability")
+        self.voice_preview_status_label.setProperty("state", "unavailable")
+        self.voice_preview_status_label.setWordWrap(True)
+        layout.addWidget(self.voice_preview_status_label)
+        return panel
+
+    def set_voice_preview_available(
+        self,
+        available: bool,
+        reason: str = "",
+    ) -> None:
+        """Publish whether the bundled prerecorded voice pack can be played.
+
+        The page owns presentation only. The audio controller remains the
+        authority for asset decoding and connects ``voice_preview_requested``.
+        """
+        self._voice_preview_available = bool(available)
+        if reason.strip():
+            self._voice_preview_reason = reason.strip()
+        elif available:
+            self._voice_preview_reason = "Bundled LYRA voice pack is ready."
+        else:
+            self._voice_preview_reason = "Bundled LYRA voice pack is unavailable."
+        self._sync_audio_control_states()
+
+    def audio_preview_settings(self) -> dict[str, object]:
+        """Return the visible unsaved audio draft without mutating persistence."""
+        state = self._form_state()
+        keys = (
+            "audio_voice_enabled",
+            "audio_voice_volume",
+        )
+        return {key: state[key] for key in keys}
+
+    def _request_voice_preview(self) -> None:
+        if (
+            self._voice_preview_available
+            and self.voice_enabled_toggle.isChecked()
+        ):
+            self.voice_preview_requested.emit()
+
+    @staticmethod
+    def _refresh_dynamic_style(widget: QWidget) -> None:
+        style = widget.style()
+        style.unpolish(widget)
+        style.polish(widget)
+        widget.update()
+
+    def _sync_audio_control_states(self, *_args: object) -> None:
+        music_enabled = self.music_enabled_toggle.isChecked()
+        voice_enabled = self.voice_enabled_toggle.isChecked()
+
+        self.music_volume_slider.setEnabled(music_enabled)
+        self.voice_volume_slider.setEnabled(voice_enabled)
+        ducking_available = music_enabled and voice_enabled
+        self.ducking_enabled_toggle.setEnabled(ducking_available)
+        self.ducking_level_slider.setEnabled(
+            ducking_available and self.ducking_enabled_toggle.isChecked()
+        )
+        self.announce_results_toggle.setEnabled(voice_enabled)
+
+        preview_enabled = voice_enabled and self._voice_preview_available
+        self.preview_voice_btn.setEnabled(preview_enabled)
+        if not self.voice_enabled_toggle.isChecked():
+            preview_status = "Voice announcements are disabled."
+            preview_state = "unavailable"
+        else:
+            preview_status = self._voice_preview_reason
+            preview_state = (
+                "available" if self._voice_preview_available else "unavailable"
+            )
+        self.voice_preview_status_label.setText(preview_status)
+        self.voice_preview_status_label.setToolTip(preview_status)
+        self.voice_preview_status_label.setAccessibleDescription(preview_status)
+        self.voice_preview_status_label.setProperty("state", preview_state)
+        self.preview_voice_btn.setToolTip(preview_status)
+        self.preview_voice_btn.setAccessibleDescription(preview_status)
+        self._refresh_dynamic_style(self.voice_preview_status_label)
+
+        self.voice_event_status_label.setText(
+            "VOICE EVENTS ENABLED" if voice_enabled else "VOICE EVENTS DISABLED"
+        )
+        self.voice_event_status_label.setProperty(
+            "state", "available" if voice_enabled else "unavailable"
+        )
+        self._refresh_dynamic_style(self.voice_event_status_label)
+        for indicator in self._voice_event_indicators:
+            indicator.setText("✓" if voice_enabled else "—")
+            indicator.setProperty("state", "available" if voice_enabled else "off")
+            self._refresh_dynamic_style(indicator)
+
+    def _set_animations_enabled(self, enabled: bool) -> None:
+        self._syncing_motion_toggles = True
+        try:
+            self.animations_toggle.setChecked(bool(enabled))
+            self.reduce_motion_toggle.setChecked(not bool(enabled))
+        finally:
+            self._syncing_motion_toggles = False
+        self.hero_interval_spin.setEnabled(bool(enabled))
+        self.hero_interval_help.setText(
+            "Used by rotating hero content. Reduce Motion pauses optional UI motion."
+            if enabled
+            else "Optional interface motion and rotating hero content are paused."
+        )
+
+    def _on_reduce_motion_toggled(self, reduced: bool) -> None:
+        if self._syncing_motion_toggles:
+            return
+        self._set_animations_enabled(not reduced)
+
+    def _on_animations_enabled_toggled(self, enabled: bool) -> None:
+        if self._syncing_motion_toggles:
+            return
+        self._set_animations_enabled(enabled)
+
+    def _sync_audio_panel_layout(self, width: int) -> None:
+        width = max(0, int(width))
+        if width >= 980:
+            mode = "wide"
+        elif width >= 700:
+            mode = "compact"
+        else:
+            mode = "single"
+        if mode == self._audio_layout_mode:
+            return
+
+        for panel in (
+            self.audio_mix_panel,
+            self.audio_events_panel,
+            self.audio_identity_panel,
+        ):
+            self.audio_panel_grid.removeWidget(panel)
+        for column in range(3):
+            self.audio_panel_grid.setColumnStretch(column, 0)
+
+        if mode == "wide":
+            self.audio_panel_grid.addWidget(self.audio_mix_panel, 0, 0)
+            self.audio_panel_grid.addWidget(self.audio_events_panel, 0, 1)
+            self.audio_panel_grid.addWidget(self.audio_identity_panel, 0, 2)
+            self.audio_panel_grid.setColumnStretch(0, 5)
+            self.audio_panel_grid.setColumnStretch(1, 4)
+            self.audio_panel_grid.setColumnStretch(2, 5)
+        elif mode == "compact":
+            self.audio_panel_grid.addWidget(self.audio_mix_panel, 0, 0)
+            self.audio_panel_grid.addWidget(self.audio_events_panel, 0, 1)
+            self.audio_panel_grid.addWidget(
+                self.audio_identity_panel, 1, 0, 1, 2
+            )
+            self.audio_panel_grid.setColumnStretch(0, 1)
+            self.audio_panel_grid.setColumnStretch(1, 1)
+        else:
+            self.audio_panel_grid.addWidget(self.audio_mix_panel, 0, 0)
+            self.audio_panel_grid.addWidget(self.audio_events_panel, 1, 0)
+            self.audio_panel_grid.addWidget(self.audio_identity_panel, 2, 0)
+            self.audio_panel_grid.setColumnStretch(0, 1)
+        self._audio_layout_mode = mode
+        self.audio_panel_host.updateGeometry()
+
+    def audio_layout_mode(self) -> str:
+        """Return the current responsive audio-panel arrangement."""
+        return self._audio_layout_mode
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._sync_audio_panel_layout(max(0, event.size().width() - 32))
+
     @staticmethod
     def _make_help_label(
         text: str,
@@ -639,8 +1218,33 @@ class SettingsPage(QWidget):
         self.auto_start_market_toggle.setChecked(bool(cfg.get("auto_start_market", False)))
         self.auto_login_toggle.setChecked(bool(cfg.get("auto_login_enabled", False)))
 
-        self.animations_toggle.setChecked(bool(cfg.get("animations_enabled", True)))
+        self.music_enabled_toggle.setChecked(
+            bool(cfg.get("audio_music_enabled", True))
+        )
+        self.music_volume_slider.setValue(
+            int(cfg.get("audio_music_volume", 50))
+        )
+        self.voice_enabled_toggle.setChecked(
+            bool(cfg.get("audio_voice_enabled", True))
+        )
+        self.voice_volume_slider.setValue(
+            int(cfg.get("audio_voice_volume", 100))
+        )
+        self.ducking_enabled_toggle.setChecked(
+            bool(cfg.get("audio_ducking_enabled", True))
+        )
+        self.ducking_level_slider.setValue(
+            int(cfg.get("audio_ducking_level", 100))
+        )
+        self.announce_results_toggle.setChecked(
+            bool(cfg.get("audio_announce_results", True))
+        )
+
+        self._set_animations_enabled(
+            bool(cfg.get("animations_enabled", True))
+        )
         self.hero_interval_spin.setValue(int(cfg.get("hero_rotation_interval_sec", 6)))
+        self._sync_audio_control_states()
 
         self.update_auto_check_toggle.setChecked(bool(cfg.get("update_auto_check", True)))
         self.update_interval_spin.setValue(int(cfg.get("update_check_interval_hours", 6)))
@@ -790,6 +1394,13 @@ class SettingsPage(QWidget):
                 self.auto_login_toggle.isEnabled()
                 and self.auto_login_toggle.isChecked()
             ),
+            "audio_music_enabled": self.music_enabled_toggle.isChecked(),
+            "audio_music_volume": self.music_volume_slider.value(),
+            "audio_voice_enabled": self.voice_enabled_toggle.isChecked(),
+            "audio_voice_volume": self.voice_volume_slider.value(),
+            "audio_announce_results": self.announce_results_toggle.isChecked(),
+            "audio_ducking_enabled": self.ducking_enabled_toggle.isChecked(),
+            "audio_ducking_level": self.ducking_level_slider.value(),
             "animations_enabled": self.animations_toggle.isChecked(),
             "hero_rotation_interval_sec": self.hero_interval_spin.value(),
             "update_auto_check": self.update_auto_check_toggle.isChecked(),

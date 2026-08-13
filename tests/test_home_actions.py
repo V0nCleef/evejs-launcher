@@ -1,11 +1,14 @@
 """Behavior tests for the operational Home dashboard."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 import pytest
 
+from src.constants import COLORS
 from src.core.service_status import RuntimeSnapshot, ServiceState
 from src.pages.home_page import HomePage
 
@@ -28,6 +31,143 @@ def test_services_card_renders_game_and_market_independently(
     assert page.services_card.game_row.detail_text == "PID 1200"
     assert page.services_card.market_row.state_text == "Failed"
     assert page.services_card.market_row.detail_text == "Market exited before readiness"
+    assert page.services_card.game_row._ring.state == "online"
+    assert page.services_card.market_row._ring.state == "failed"
+    assert page.overall_status_label.text() == "ATTENTION REQUIRED"
+
+
+def test_deep_signal_overall_status_uses_the_shared_snapshot(
+    qapp: QApplication,
+) -> None:
+    page = HomePage()
+
+    page.apply_runtime_snapshot(
+        RuntimeSnapshot(
+            game=ServiceState.ONLINE,
+            market=ServiceState.ONLINE,
+            running_clients=2,
+        )
+    )
+
+    assert page.overall_status_label.text() == "ALL SYSTEMS NOMINAL"
+    assert page.overall_status_label.property("state") == "online"
+    assert page.running_card.value_label.text() == "2"
+    assert page.running_card._ring.value == "2"
+    assert page.running_card._ring.state == "online"
+
+
+def test_game_market_and_zero_clients_are_red_then_return_green_online(
+    qapp: QApplication,
+) -> None:
+    page = HomePage()
+    offline = RuntimeSnapshot(
+        game=ServiceState.OFFLINE,
+        market=ServiceState.OFFLINE,
+        running_clients=0,
+    )
+
+    page.apply_runtime_snapshot(offline)
+
+    game = page.services_card.game_row
+    market = page.services_card.market_row
+    clients = page.running_card
+
+    assert game.property("statusState") == "offline"
+    assert game._ring.signal_color == COLORS["red"]
+    assert game._ring.progress == 0.72
+    assert COLORS["red"] in game._dot.styleSheet()
+    assert COLORS["red"] in game._state_label.styleSheet()
+
+    assert market.property("statusState") == "offline"
+    assert market._ring.signal_color == COLORS["red"]
+    assert market._ring.progress == 0.72
+    assert COLORS["red"] in market._dot.styleSheet()
+    assert COLORS["red"] in market._state_label.styleSheet()
+
+    assert clients.property("statusState") == "offline"
+    assert clients._ring.value == "0"
+    assert clients._ring.signal_color == COLORS["red"]
+    assert clients._ring.progress == 0.72
+    assert COLORS["red"] in clients._dot.styleSheet()
+    assert COLORS["red"] in clients._state_label.styleSheet()
+
+    page.apply_runtime_snapshot(
+        RuntimeSnapshot(
+            game=ServiceState.ONLINE,
+            market=ServiceState.ONLINE,
+            running_clients=3,
+        )
+    )
+
+    assert game.property("statusState") == "online"
+    assert game._ring.signal_color == COLORS["green"]
+    assert game._ring.progress == 1.0
+    assert COLORS["green"] in game._dot.styleSheet()
+    assert COLORS["green"] in game._state_label.styleSheet()
+
+    assert market.property("statusState") == "online"
+    assert market._ring.signal_color == COLORS["green"]
+    assert market._ring.progress == 1.0
+    assert COLORS["green"] in market._dot.styleSheet()
+    assert COLORS["green"] in market._state_label.styleSheet()
+
+    assert clients.property("statusState") == "online"
+    assert clients._ring.value == "3"
+    assert clients._ring.signal_color == COLORS["green"]
+    assert clients._ring.progress == 1.0
+    assert COLORS["green"] in clients._dot.styleSheet()
+    assert COLORS["green"] in clients._state_label.styleSheet()
+
+
+def test_recent_activity_records_only_truthful_snapshot_transitions(
+    qapp: QApplication,
+) -> None:
+    page = HomePage()
+    observed_at = datetime(2026, 8, 12, 12, 41, tzinfo=timezone.utc)
+    initial = RuntimeSnapshot(
+        game=ServiceState.OFFLINE,
+        market=ServiceState.OFFLINE,
+        running_clients=0,
+        checked_at=observed_at,
+    )
+    page.apply_runtime_snapshot(initial)
+    page.apply_runtime_snapshot(initial)
+
+    assert len(page.recent_activity.messages) == 1
+    assert page.recent_activity.messages[0] == "Game offline · Market offline · 0 clients"
+
+    page.apply_runtime_snapshot(
+        RuntimeSnapshot(
+            game=ServiceState.ONLINE,
+            market=ServiceState.STARTING,
+            running_clients=2,
+            checked_at=observed_at,
+        )
+    )
+
+    assert page.recent_activity.messages == (
+        "2 EVE clients running",
+        "Market launch sequence started",
+        "Game readiness signal online",
+        "Game offline · Market offline · 0 clients",
+    )
+    assert len(page.recent_activity.activity_rows) == 4
+    assert all(
+        row.message_label.property("class") == "activityMessage"
+        for row in page.recent_activity.activity_rows
+    )
+
+    page.apply_runtime_snapshot(
+        RuntimeSnapshot(
+            game=ServiceState.FAILED,
+            market=ServiceState.ONLINE,
+            running_clients=0,
+            checked_at=observed_at,
+        )
+    )
+    assert len(page.recent_activity.messages) == 4
+    assert page.recent_activity.messages[0] == "0 EVE clients running"
+    assert "Game service reported a failure" in page.recent_activity.messages
 
 
 def test_service_row_opens_the_matching_console_from_keyboard(

@@ -27,6 +27,7 @@ logs/
 # Temp
 *.tmp
 *.temp
+.test-appdata-*/
 
 # Environment
 .env

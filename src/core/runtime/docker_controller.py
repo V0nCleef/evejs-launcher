@@ -8,6 +8,7 @@ from typing import Any, Callable, Mapping
 
 from src.core.runtime.docker_cli import DockerCommandError, redact_docker_diagnostic
 from src.core.runtime.docker_compose import ComposeTarget, ContainerRecord
+from src.core.runtime.data import docker_project_identity
 from src.core.runtime.endpoints import Endpoint, probe_endpoint, probe_http_health
 from src.core.service_status import DockerControlPolicy, ServiceState
 
@@ -59,6 +60,7 @@ class DockerLifecycleResult:
     succeeded: bool
     records: Mapping[str, ContainerRecord] | None = None
     error: str | None = None
+    target_identity: str | None = None
 
 
 class ManagedComposeController:
@@ -72,6 +74,7 @@ class ManagedComposeController:
         sleep_fn: Callable[[float], None] = time.sleep,
         endpoint_probe: Callable[[Endpoint], bool] = probe_endpoint,
         http_probe: Callable[[Endpoint], bool] = probe_http_health,
+        expected_target_identity: str | None = None,
     ) -> None:
         if policy is not DockerControlPolicy.MANAGED:
             raise PermissionError("Docker lifecycle requires Managed control policy.")
@@ -85,6 +88,7 @@ class ManagedComposeController:
         self._interval, self._clock, self._sleep = max(0.0, float(poll_interval_sec)), clock_fn, sleep_fn
         self._endpoint_probe = endpoint_probe
         self._http_probe = http_probe
+        self._expected_target_identity = expected_target_identity
         self._config: Any | None = None
 
     def execute(self, action: DockerLifecycleAction) -> DockerLifecycleResult:
@@ -93,37 +97,79 @@ class ManagedComposeController:
             raise ValueError("Docker lifecycle action is not allowed.")
         preflight = self._inspector.preflight(self._target)
         if not preflight.ok or preflight.records is None:
-            return DockerLifecycleResult(action, False, error=_diagnostic(preflight.diagnostics))
+            return DockerLifecycleResult(
+                action,
+                False,
+                error=_diagnostic(preflight.diagnostics),
+                target_identity=self._expected_target_identity,
+            )
         self._config = getattr(preflight, "config", None)
+        target_identity = docker_project_identity(
+            self._target,
+            getattr(self._config, "project_name", None),
+            config=self._config,
+        )
+        if (
+            self._expected_target_identity is not None
+            and target_identity != self._expected_target_identity
+        ):
+            return DockerLifecycleResult(
+                action,
+                False,
+                error="Docker target changed before the lifecycle operation could run.",
+                target_identity=target_identity,
+            )
         if action is DockerLifecycleAction.STOP_MARKET and not _safely_stopped(preflight.records.get("server")):
             return DockerLifecycleResult(action, False, records=preflight.records,
-                                         error="Server state is not safely stopped; Market was not stopped.")
+                                         error="Server state is not safely stopped; Market was not stopped.",
+                                         target_identity=target_identity)
+        if docker_project_identity(
+            self._target,
+            getattr(self._config, "project_name", None),
+            config=self._config,
+        ) != target_identity:
+            return DockerLifecycleResult(
+                action,
+                False,
+                error="Docker target changed before the lifecycle operation could run.",
+                target_identity=target_identity,
+            )
         try:
             argv = self._target.compose_args(self._runner.executable, *_COMMANDS[action])
             self._runner.run(argv, cwd=self._target.project_directory,
                              timeout=self._command_timeouts[action])
         except DockerCommandError as exc:
-            return DockerLifecycleResult(action, False, error=_diagnostic(exc))
+            return DockerLifecycleResult(action, False, error=_diagnostic(exc),
+                                         target_identity=target_identity)
         except (OSError, ValueError) as exc:
             return DockerLifecycleResult(action, False,
-                                         error=_diagnostic(f"Docker lifecycle command failed: {exc}"))
-        return self._poll(action)
+                                         error=_diagnostic(f"Docker lifecycle command failed: {exc}"),
+                                         target_identity=target_identity)
+        return self._poll(action, target_identity)
 
-    def _poll(self, action: DockerLifecycleAction) -> DockerLifecycleResult:
+    def _poll(
+        self,
+        action: DockerLifecycleAction,
+        target_identity: str,
+    ) -> DockerLifecycleResult:
         deadline, last_records = self._clock() + self._timeout, None
         while True:
             try:
                 last_records = self._inspector.status(self._target)
             except DockerCommandError as exc:
-                return DockerLifecycleResult(action, False, error=_diagnostic(exc))
+                return DockerLifecycleResult(action, False, error=_diagnostic(exc),
+                                             target_identity=target_identity)
             except (OSError, ValueError) as exc:
                 return DockerLifecycleResult(action, False,
-                                             error=_diagnostic(f"Docker state inspection failed: {exc}"))
+                                             error=_diagnostic(f"Docker state inspection failed: {exc}"),
+                                             target_identity=target_identity)
             if self._desired(action, last_records):
-                return DockerLifecycleResult(action, True, records=last_records)
+                return DockerLifecycleResult(action, True, records=last_records,
+                                             target_identity=target_identity)
             if self._clock() >= deadline:
                 return DockerLifecycleResult(action, False, records=last_records,
-                    error="Docker lifecycle operation did not reach its desired state before the timeout.")
+                    error="Docker lifecycle operation did not reach its desired state before the timeout.",
+                    target_identity=target_identity)
             self._sleep(self._interval)
 
     def _desired(

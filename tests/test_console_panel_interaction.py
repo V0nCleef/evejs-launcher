@@ -123,6 +123,24 @@ def test_stream_mode_disables_notepad_preserves_ring_buffer_and_emits_closed(
     assert closed == [True]
 
 
+def test_console_deep_signal_header_reports_stream_completion(
+    qapp: QApplication,
+) -> None:
+    panel = ConsolePanel()
+
+    panel.begin_stream("Fixture service logs")
+
+    assert "LIVE" in panel._activity_label.text()
+    assert panel._copy_btn.accessibleName() == "Copy visible console output"
+    assert panel._header.height() == panel.HEADER_HEIGHT
+
+    panel.finish_stream("Fixture stream complete")
+
+    assert "COMPLETE" in panel._activity_label.text()
+    assert "Fixture stream complete" in panel._log.toPlainText()
+    panel.stop()
+
+
 def test_stream_mode_notepad_is_disabled_and_never_calls_platform_editor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

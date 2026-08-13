@@ -5,13 +5,26 @@ from pathlib import Path
 
 from PyQt6.QtCore import QThread, Qt, pyqtSlot
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QCheckBox, QComboBox, QLineEdit, QFileDialog, QStackedWidget,
-    QProgressBar, QWidget,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QStackedLayout,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from .config import load, save
-from .constants import COLORS as C
+from .constants import COLORS as C, SEMANTIC_COLORS as S, SPACING
 from .core.discovery import (
     find_client_path,
     resolve_client_tq_path,
@@ -26,6 +39,9 @@ from .core.runtime.docker_setup import (
     docker_draft_fingerprint,
 )
 from .workers.docker_preflight_worker import DockerPreflightWorker
+from .widgets.deep_signal_background import DeepSignalBackground
+from .widgets.glass_panel import GlassPanel
+from .widgets.page_header import PageHeader
 
 
 NATIVE_RUNTIME_HELP = (
@@ -62,30 +78,284 @@ DOCKER_TEST_HELP = (
 )
 
 
+def _wizard_qss() -> str:
+    """Return the self-contained Deep Signal treatment for first run.
+
+    The application theme is already installed in production, but the wizard
+    also appears in focused tests and maintenance tools.  Keeping the compact
+    dialog-specific rules here makes those entry points visually deterministic
+    while still consuming the same semantic colour contract as the main UI.
+    """
+    return f"""
+        QDialog#setupWizard {{
+            background-color: {S['background']};
+        }}
+        QWidget#setupWizardShell,
+        QWidget[deepSignal="true"],
+        QStackedWidget#wizardStack,
+        QScrollArea#wizardPageScroll,
+        QScrollArea#wizardPageScroll > QWidget > QWidget {{
+            background-color: transparent;
+        }}
+        QScrollArea#wizardPageScroll {{
+            border: none;
+        }}
+        QLabel {{
+            background-color: transparent;
+            color: {S['text_primary']};
+        }}
+        QFrame[class="glassPanel"] {{
+            background-color: rgba(8, 20, 31, 224);
+            border: 1px solid {S['border']};
+            border-radius: 12px;
+        }}
+        QFrame[class="glassPanel"][variant="quiet"] {{
+            background-color: rgba(7, 17, 29, 196);
+            border-color: rgba(52, 88, 106, 170);
+        }}
+        QLabel[class="pageEyebrow"] {{
+            color: {S['accent']};
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }}
+        QLabel[class="pageTitle"] {{
+            color: {S['text_primary']};
+            font-size: 25px;
+            font-weight: 600;
+        }}
+        QLabel[class="pageSubtitle"] {{
+            color: {S['text_secondary']};
+            font-size: 12px;
+        }}
+        QFrame[class="wizardSection"] {{
+            background-color: rgba(5, 14, 23, 178);
+            border: 1px solid {S['border']};
+            border-radius: 8px;
+        }}
+        QLabel[class="wizardSectionTitle"] {{
+            color: {S['accent']};
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }}
+        QLabel[class="wizardFieldLabel"] {{
+            color: {S['text_secondary']};
+            font-size: 11px;
+            font-weight: 600;
+        }}
+        QLabel[class="wizardHint"] {{
+            color: {S['text_muted']};
+            font-size: 11px;
+        }}
+        QLabel[class="wizardHint"][tone="warning"] {{
+            color: {S['warning']};
+        }}
+        QLabel[class="wizardStatus"] {{
+            color: {S['text_muted']};
+            font-size: 11px;
+            padding: 2px 0;
+        }}
+        QLabel[class="wizardStatus"][state="ready"] {{
+            color: {S['success']};
+        }}
+        QLabel[class="wizardStatus"][state="busy"],
+        QLabel[class="wizardStatus"][state="notice"] {{
+            color: {S['warning']};
+        }}
+        QLabel[class="wizardStatus"][state="error"] {{
+            color: {S['danger']};
+        }}
+        QLabel[class="wizardMilestone"] {{
+            background-color: rgba(7, 17, 29, 160);
+            border: 1px solid {S['border']};
+            border-radius: 7px;
+            color: {S['text_secondary']};
+            padding: 11px 13px;
+            font-size: 12px;
+        }}
+        QLabel[class="wizardReview"] {{
+            background-color: rgba(5, 14, 23, 190);
+            border: 1px solid {S['border_bright']};
+            border-radius: 8px;
+            color: {S['text_secondary']};
+            padding: 15px;
+            font-size: 12px;
+        }}
+        QLabel[class="wizardCheck"] {{
+            background-color: rgba(79, 224, 127, 18);
+            border: 1px solid rgba(79, 224, 127, 80);
+            border-radius: 7px;
+            color: {S['success']};
+            padding: 10px 13px;
+            font-size: 12px;
+            font-weight: 600;
+        }}
+        QLineEdit,
+        QComboBox {{
+            min-height: 24px;
+            background-color: rgba(5, 13, 22, 220);
+            border: 1px solid {S['border_bright']};
+            border-radius: 6px;
+            color: {S['text_primary']};
+            padding: 6px 10px;
+            selection-background-color: {S['accent_dim']};
+        }}
+        QLineEdit:hover,
+        QComboBox:hover {{
+            border-color: {S['accent_dim']};
+        }}
+        QLineEdit:focus,
+        QComboBox:focus {{
+            border-color: {S['accent']};
+        }}
+        QComboBox::drop-down {{
+            border: none;
+            width: 26px;
+        }}
+        QComboBox QAbstractItemView {{
+            background-color: {S['surface']};
+            border: 1px solid {S['border_bright']};
+            color: {S['text_primary']};
+            selection-background-color: {S['accent_dim']};
+            selection-color: {S['background']};
+        }}
+        QPushButton[class="signalPrimary"] {{
+            min-height: 20px;
+            background-color: {S['accent']};
+            border: 1px solid {S['accent']};
+            border-radius: 6px;
+            color: {S['background']};
+            padding: 8px 18px;
+            font-weight: 700;
+        }}
+        QPushButton[class="signalPrimary"]:hover {{
+            background-color: {S['text_primary']};
+            border-color: {S['text_primary']};
+        }}
+        QPushButton[class="signalSecondary"] {{
+            min-height: 20px;
+            background-color: rgba(7, 17, 29, 196);
+            border: 1px solid {S['border_bright']};
+            border-radius: 6px;
+            color: {S['text_primary']};
+            padding: 8px 15px;
+            font-weight: 600;
+        }}
+        QPushButton[class="signalSecondary"]:hover {{
+            background-color: rgba(22, 74, 87, 150);
+            border-color: {S['accent']};
+        }}
+        QPushButton[class="signalPrimary"]:disabled,
+        QPushButton[class="signalSecondary"]:disabled {{
+            background-color: {S['surface']};
+            border-color: {S['surface_elevated']};
+            color: {S['text_muted']};
+        }}
+        QCheckBox {{
+            color: {S['text_secondary']};
+            spacing: 8px;
+        }}
+        QCheckBox:disabled {{
+            color: {S['text_muted']};
+        }}
+        QCheckBox::indicator {{
+            width: 16px;
+            height: 16px;
+            background-color: {S['surface']};
+            border: 1px solid {S['border_bright']};
+            border-radius: 3px;
+        }}
+        QCheckBox::indicator:checked {{
+            background-color: {S['accent']};
+            border-color: {S['accent']};
+        }}
+        QFrame#wizardNavigation {{
+            background-color: rgba(4, 11, 18, 236);
+            border: none;
+            border-top: 1px solid {S['border']};
+        }}
+        QLabel#wizardStepLabel {{
+            color: {S['text_secondary']};
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }}
+        QProgressBar#wizardProgress {{
+            min-height: 5px;
+            max-height: 5px;
+            background-color: {S['surface_elevated']};
+            border: none;
+            border-radius: 2px;
+        }}
+        QProgressBar#wizardProgress::chunk {{
+            background-color: {S['accent']};
+            border-radius: 2px;
+        }}
+        QScrollBar:vertical {{
+            background: transparent;
+            width: 7px;
+            margin: 0;
+        }}
+        QScrollBar::handle:vertical {{
+            background: {S['border_bright']};
+            border-radius: 3px;
+            min-height: 24px;
+        }}
+        QScrollBar::add-line:vertical,
+        QScrollBar::sub-line:vertical {{
+            height: 0;
+        }}
+    """
+
+
 class _WizardPage(QWidget):
-    """A single page in the setup wizard."""
+    """A scroll-safe Deep Signal page with one focused glass surface."""
 
-    def __init__(self, title: str, subtitle: str = "", parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        title: str,
+        subtitle: str = "",
+        *,
+        eyebrow: str = "SETUP SEQUENCE",
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
+        self.setProperty("deepSignal", True)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(32, 24, 32, 24)
-        layout.setSpacing(12)
+        layout.setContentsMargins(
+            SPACING["xl"] + 8,
+            SPACING["xl"],
+            SPACING["xl"] + 8,
+            SPACING["lg"],
+        )
+        layout.setSpacing(SPACING["lg"])
 
-        tl = QLabel(title)
-        tl.setStyleSheet(f"font-size: 20px; font-weight: 700; color: {C['white']};")
-        layout.addWidget(tl)
+        self.header = PageHeader(title, subtitle, eyebrow)
+        layout.addWidget(self.header)
 
-        if subtitle:
-            sl = QLabel(subtitle)
-            sl.setStyleSheet(f"color: {C['grey']}; font-size: 13px;")
-            sl.setWordWrap(True)
-            layout.addWidget(sl)
+        self.scroll = QScrollArea()
+        self.scroll.setObjectName("wizardPageScroll")
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll.viewport().setAutoFillBackground(False)
 
-        layout.addSpacing(8)
-        self.content = QVBoxLayout()
-        self.content.setSpacing(8)
-        layout.addLayout(self.content)
-        layout.addStretch()
+        body = QWidget()
+        body.setProperty("deepSignal", True)
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, SPACING["xs"], 0)
+        body_layout.setSpacing(0)
+
+        self.panel = GlassPanel(variant="quiet", padding=SPACING["lg"])
+        self.content = self.panel.content_layout
+        self.content.setSpacing(SPACING["md"])
+        body_layout.addWidget(self.panel)
+        body_layout.addStretch(1)
+        self.scroll.setWidget(body)
+        layout.addWidget(self.scroll, 1)
 
 
 class SetupWizard(QDialog):
@@ -93,37 +363,15 @@ class SetupWizard(QDialog):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("setupWizard")
         self.setWindowTitle("EveJS Launcher — Setup")
-        self.resize(720, 680)
-        self.setMinimumSize(640, 600)
+        self.resize(820, 720)
+        # Native Windows font metrics need a little more room than Qt's
+        # offscreen backend.  Keep the declared minimum above the composed
+        # layout's size hint so the Deep Signal headings never elide.
+        self.setMinimumSize(700, 560)
         self.setWindowFlags(Qt.WindowType.Dialog)
-        self.setStyleSheet(f"""
-            QDialog {{ background-color: {C['bg']}; }}
-            QLabel {{ color: {C['white']}; }}
-            QLineEdit {{
-                background-color: {C['card']};
-                border: 1px solid {C['steel']};
-                padding: 8px;
-                color: {C['white']};
-                font-size: 13px;
-            }}
-            QLineEdit:focus {{ border: 1px solid {C['teal']}; }}
-            QPushButton {{
-                background-color: {C['card']};
-                border: 1px solid {C['steel']};
-                padding: 8px 20px;
-                color: {C['white']};
-                font-size: 13px;
-            }}
-            QPushButton:hover {{ background-color: {C['steel']}; }}
-            QProgressBar {{
-                border: 1px solid {C['steel']};
-                background: {C['card']};
-                height: 6px;
-                text-align: center;
-            }}
-            QProgressBar::chunk {{ background: {C['teal']}; }}
-        """)
+        self.setStyleSheet(_wizard_qss())
 
         self._evejs_root = ""
         self._client_path = ""
@@ -139,31 +387,69 @@ class SetupWizard(QDialog):
     # ── UI ────────────────────────────────────────────────────────────
 
     def _build(self) -> None:
-        root = QVBoxLayout(self)
+        layers = QStackedLayout(self)
+        layers.setContentsMargins(0, 0, 0, 0)
+        layers.setStackingMode(QStackedLayout.StackingMode.StackAll)
+
+        self._signal_background = DeepSignalBackground(self, seed=8_104)
+        layers.addWidget(self._signal_background)
+
+        shell = QWidget(self)
+        shell.setObjectName("setupWizardShell")
+        shell.setProperty("deepSignal", True)
+        root = QVBoxLayout(shell)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
+        layers.addWidget(shell)
+        layers.setCurrentWidget(shell)
 
         # Stacked pages
         self._stack = QStackedWidget()
+        self._stack.setObjectName("wizardStack")
 
         # Page 0: Welcome
         p0 = _WizardPage(
             "Welcome to EveJS Launcher",
             "This tool manages your local EveJS services and EVE clients.\n\n"
             "You will choose whether EveJS runs directly on Windows or through "
-            "Docker Desktop. The launcher never switches this choice automatically."
+            "Docker Desktop. The launcher never switches this choice automatically.",
+            eyebrow="DEEP SIGNAL // INITIALIZATION 01",
         )
+        welcome_intro = QLabel(
+            "Establish the launcher connection in three short checks. "
+            "Nothing is started or changed until setup is complete."
+        )
+        welcome_intro.setProperty("class", "wizardHint")
+        welcome_intro.setWordWrap(True)
+        self._allow_label_shrink(welcome_intro)
+        p0.content.addWidget(welcome_intro)
+        for milestone in (
+            "01   Choose the runtime that owns your EveJS services",
+            "02   Locate the project and optional copied EVE client",
+            "03   Verify the route, then save the launcher profile",
+        ):
+            item = QLabel(milestone)
+            item.setProperty("class", "wizardMilestone")
+            item.setWordWrap(True)
+            self._allow_label_shrink(item)
+            p0.content.addWidget(item)
         self._stack.addWidget(p0)
 
         # Page 1: runtime and path selection
         p1 = _WizardPage(
             "Choose Your EveJS Runtime",
-            "Choose how EveJS runs, then select the matching EveJS project folder."
+            "Choose how EveJS runs, then select the matching EveJS project folder.",
+            eyebrow="DEEP SIGNAL // RUNTIME ROUTE 02",
         )
 
+        p1.content.addWidget(self._make_section_label("RUNTIME MODE"))
+
         backend_row = QHBoxLayout()
-        backend_row.addWidget(QLabel("How should EveJS run?"))
+        backend_row.setSpacing(SPACING["md"])
+        backend_row.addWidget(self._make_field_label("How should EveJS run?"))
         self._backend_combo = QComboBox()
+        self._allow_control_shrink(self._backend_combo)
+        self._backend_combo.setAccessibleName("EveJS runtime")
         self._backend_combo.addItem(
             "Native — run directly on Windows",
             "native",
@@ -188,41 +474,62 @@ class SetupWizard(QDialog):
         self._runtime_data_notice.setObjectName("wizardRuntimeDataNotice")
         p1.content.addWidget(self._runtime_data_notice)
 
+        p1.content.addSpacing(SPACING["xs"])
+        p1.content.addWidget(self._make_section_label("PROJECT PATHS"))
+
         ph = QHBoxLayout()
-        ph.addWidget(QLabel("EveJS Root:"))
+        ph.setSpacing(SPACING["sm"])
+        ph.addWidget(self._make_field_label("EveJS Root:"))
         self._path_input = QLineEdit()
+        self._allow_control_shrink(self._path_input)
+        self._path_input.setAccessibleName("EveJS root folder")
         self._path_input.setPlaceholderText("Select your EveJS project folder")
         self._path_input.textChanged.connect(self._on_path_changed)
         ph.addWidget(self._path_input, 1)
 
         browse = QPushButton("Browse…")
+        browse.setProperty("class", "signalSecondary")
         browse.clicked.connect(self._browse)
         ph.addWidget(browse)
         p1.content.addLayout(ph)
 
         self._path_status = QLabel("Enter the path to your EveJS folder")
-        self._path_status.setStyleSheet(f"font-size: 12px; color: {C['grey']};")
+        self._path_status.setProperty("class", "wizardStatus")
+        self._path_status.setProperty("state", "idle")
+        self._path_status.setWordWrap(True)
+        self._allow_label_shrink(self._path_status)
         p1.content.addWidget(self._path_status)
 
         client_row = QHBoxLayout()
-        client_row.addWidget(QLabel("EVE Client:"))
+        client_row.setSpacing(SPACING["sm"])
+        client_row.addWidget(self._make_field_label("EVE Client:"))
         self._client_input = QLineEdit()
+        self._allow_control_shrink(self._client_input)
+        self._client_input.setAccessibleName("Copied EVE client folder")
         self._client_input.setPlaceholderText("Optional copied EVE client tq folder")
         self._client_input.textChanged.connect(self._invalidate_docker_preflight)
         client_row.addWidget(self._client_input, 1)
         client_browse = QPushButton("Browse…")
+        client_browse.setProperty("class", "signalSecondary")
         client_browse.clicked.connect(self._browse_client)
         client_row.addWidget(client_browse)
         p1.content.addLayout(client_row)
 
-        self._docker_fields = QWidget()
+        self._docker_fields = QFrame()
+        self._docker_fields.setProperty("class", "wizardSection")
         docker_layout = QVBoxLayout(self._docker_fields)
-        docker_layout.setContentsMargins(0, 0, 0, 0)
-        docker_layout.setSpacing(6)
+        docker_layout.setContentsMargins(
+            SPACING["md"], SPACING["md"], SPACING["md"], SPACING["md"]
+        )
+        docker_layout.setSpacing(SPACING["sm"])
+        docker_layout.addWidget(self._make_section_label("DOCKER LINK"))
 
         compose_row = QHBoxLayout()
-        compose_row.addWidget(QLabel("Compose File (optional):"))
+        compose_row.setSpacing(SPACING["sm"])
+        compose_row.addWidget(self._make_field_label("Compose File (optional):"))
         self._compose_input = QLineEdit()
+        self._allow_control_shrink(self._compose_input)
+        self._compose_input.setAccessibleName("Docker Compose file")
         self._compose_input.setPlaceholderText(
             "Leave blank to use <EveJS Root>\\compose.yaml"
         )
@@ -234,6 +541,7 @@ class SetupWizard(QDialog):
         self._compose_input.setAccessibleDescription(COMPOSE_FILE_HELP)
         compose_row.addWidget(self._compose_input, 1)
         compose_browse = QPushButton("Browse…")
+        compose_browse.setProperty("class", "signalSecondary")
         compose_browse.clicked.connect(self._browse_compose)
         compose_row.addWidget(compose_browse)
         docker_layout.addLayout(compose_row)
@@ -249,8 +557,11 @@ class SetupWizard(QDialog):
         docker_layout.addWidget(self._compose_resolved)
 
         policy_row = QHBoxLayout()
-        policy_row.addWidget(QLabel("Control Policy:"))
+        policy_row.setSpacing(SPACING["sm"])
+        policy_row.addWidget(self._make_field_label("Control Policy:"))
         self._policy_combo = QComboBox()
+        self._allow_control_shrink(self._policy_combo)
+        self._policy_combo.setAccessibleName("Docker control policy")
         self._policy_combo.addItem(
             "Connect only — observe an existing stack",
             "connect_only",
@@ -289,12 +600,18 @@ class SetupWizard(QDialog):
         docker_layout.addWidget(self._advanced_toggle)
 
         self._advanced_docker_fields = QWidget()
+        self._advanced_docker_fields.setProperty("deepSignal", True)
         advanced_layout = QVBoxLayout(self._advanced_docker_fields)
         advanced_layout.setContentsMargins(0, 0, 0, 0)
         advanced_layout.setSpacing(6)
         project_row = QHBoxLayout()
-        project_row.addWidget(QLabel("Compose Project Name (optional):"))
+        project_row.setSpacing(SPACING["sm"])
+        project_row.addWidget(
+            self._make_field_label("Compose Project Name (optional):")
+        )
         self._project_input = QLineEdit()
+        self._allow_control_shrink(self._project_input)
+        self._project_input.setAccessibleName("Docker Compose project name")
         self._project_input.setPlaceholderText(
             "Optional — example: evejs-local"
         )
@@ -310,13 +627,18 @@ class SetupWizard(QDialog):
         docker_layout.addWidget(self._advanced_docker_fields)
 
         self._test_docker_btn = QPushButton("Test Docker setup")
+        self._test_docker_btn.setProperty("class", "signalSecondary")
+        self._test_docker_btn.setAccessibleDescription(DOCKER_TEST_HELP)
         self._test_docker_btn.clicked.connect(self._start_docker_preflight)
         docker_layout.addWidget(self._test_docker_btn)
         self._test_docker_help = self._make_help_label(DOCKER_TEST_HELP)
         self._test_docker_help.setObjectName("wizardDockerTestHelp")
         docker_layout.addWidget(self._test_docker_help)
         self._docker_status = QLabel("")
+        self._docker_status.setProperty("class", "wizardStatus")
+        self._docker_status.setProperty("state", "idle")
         self._docker_status.setWordWrap(True)
+        self._allow_label_shrink(self._docker_status)
         docker_layout.addWidget(self._docker_status)
         self._docker_fields.hide()
         p1.content.addWidget(self._docker_fields)
@@ -325,21 +647,27 @@ class SetupWizard(QDialog):
         # Page 2: Validation
         p2 = _WizardPage(
             "Installation Verified",
-            "We found a working EveJS installation. Here's what was detected:"
+            "We found a working EveJS installation. Here's what was detected:",
+            eyebrow="DEEP SIGNAL // CONFIGURATION REVIEW 03",
         )
+        self._review_badge = QLabel("ROUTE VERIFIED")
+        self._review_badge.setProperty("class", "wizardSectionTitle")
+        p2.content.addWidget(self._review_badge)
         self._results = QLabel("")
-        self._results.setStyleSheet(
-            f"color: {C['grey']}; font-size: 12px; background-color: {C['card']};"
-            "padding: 12px; border-radius: 4px;"
-        )
+        self._results.setProperty("class", "wizardReview")
         self._results.setWordWrap(True)
+        self._allow_label_shrink(self._results)
+        self._results.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
         p2.content.addWidget(self._results)
         self._stack.addWidget(p2)
 
         # Page 3: Done
         p3 = _WizardPage(
             "Ready!",
-            "Setup is complete. The launcher will scan your accounts and show your characters."
+            "Setup is complete. The launcher will scan your accounts and show your characters.",
+            eyebrow="DEEP SIGNAL // CONNECTION READY 04",
         )
         for line in (
             "✓ EveJS project validated",
@@ -347,47 +675,87 @@ class SetupWizard(QDialog):
             "✓ Accounts will be loaded",
         ):
             check = QLabel(line)
-            check.setStyleSheet(f"color: {C['green']}; font-size: 13px;")
+            check.setProperty("class", "wizardCheck")
             p3.content.addWidget(check)
         self._stack.addWidget(p3)
 
         root.addWidget(self._stack, 1)
 
         # Bottom nav bar
-        nav = QWidget()
-        nav.setFixedHeight(56)
-        nav.setStyleSheet(f"background-color: {C['card']};")
+        nav = QFrame()
+        nav.setObjectName("wizardNavigation")
+        nav.setFixedHeight(76)
         nl = QHBoxLayout(nav)
-        nl.setContentsMargins(16, 8, 16, 8)
+        nl.setContentsMargins(32, 10, 32, 10)
+        nl.setSpacing(SPACING["sm"])
 
+        progress_copy = QVBoxLayout()
+        progress_copy.setContentsMargins(0, 0, 0, 0)
+        progress_copy.setSpacing(SPACING["xs"])
+        self._step_label = QLabel("STEP 01 / 04   WELCOME")
+        self._step_label.setObjectName("wizardStepLabel")
+        progress_copy.addWidget(self._step_label)
         self._progress = QProgressBar()
+        self._progress.setObjectName("wizardProgress")
+        self._progress.setFixedWidth(248)
         self._progress.setMaximum(3)
         self._progress.setValue(0)
         self._progress.setTextVisible(False)
-        nl.addWidget(self._progress)
+        self._progress.setAccessibleName("Setup progress")
+        progress_copy.addWidget(self._progress)
+        nl.addLayout(progress_copy)
         nl.addStretch()
 
         self._back_btn = QPushButton("← Back")
+        self._back_btn.setProperty("class", "signalSecondary")
         self._back_btn.clicked.connect(self._go_back)
         self._back_btn.setVisible(False)
         nl.addWidget(self._back_btn)
 
         self._next_btn = QPushButton("Next →")
-        self._next_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {C['teal']};
-                border: none;
-                color: {C['bg']};
-                font-weight: bold;
-                padding: 8px 20px;
-            }}
-            QPushButton:hover {{ background-color: #00D8F0; }}
-            QPushButton:disabled {{ background-color: {C['steel']}; color: {C['grey']}; }}
-        """)
+        self._next_btn.setProperty("class", "signalPrimary")
+        self._next_btn.setMinimumWidth(112)
         self._next_btn.clicked.connect(self._go_next)
         nl.addWidget(self._next_btn)
 
         root.addWidget(nav)
+
+    @staticmethod
+    def _make_section_label(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setProperty("class", "wizardSectionTitle")
+        label.setAccessibleName(text)
+        return label
+
+    @staticmethod
+    def _allow_control_shrink(control: QWidget) -> None:
+        """Keep long paths and combo copy from widening a scroll page."""
+        control.setMinimumWidth(96)
+        control.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Fixed,
+        )
+
+    @staticmethod
+    def _allow_label_shrink(label: QLabel) -> None:
+        """Let wrapped diagnostics contain long Windows paths without clipping."""
+        label.setMinimumWidth(0)
+        label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+
+    @staticmethod
+    def _make_field_label(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setProperty("class", "wizardFieldLabel")
+        label.setWordWrap(True)
+        label.setFixedWidth(168)
+        label.setSizePolicy(
+            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Preferred,
+        )
+        return label
 
     @staticmethod
     def _make_help_label(
@@ -398,11 +766,34 @@ class SetupWizard(QDialog):
         """Create one consistent inline explanation for setup choices."""
         label = QLabel(text)
         label.setWordWrap(True)
-        label.setStyleSheet(
-            f"color: {color or C['grey']}; font-size: 11px;"
+        SetupWizard._allow_label_shrink(label)
+        label.setProperty("class", "wizardHint")
+        label.setProperty(
+            "tone",
+            "warning" if color in {C["gold"], S["warning"]} else "default",
         )
         label.setAccessibleDescription(text)
         return label
+
+    @staticmethod
+    def _set_status(label: QLabel, text: str, state: str = "idle") -> None:
+        """Update status copy and its semantic visual state together."""
+        label.setText(text)
+        if label.property("state") == state:
+            return
+        label.setProperty("state", state)
+        style = label.style()
+        style.unpolish(label)
+        style.polish(label)
+        label.update()
+
+    def _sync_progress_chrome(self, index: int) -> None:
+        labels = ("WELCOME", "RUNTIME", "VERIFY", "READY")
+        safe_index = max(0, min(int(index), len(labels) - 1))
+        self._progress.setValue(safe_index)
+        self._step_label.setText(
+            f"STEP {safe_index + 1:02d} / 04   {labels[safe_index]}"
+        )
 
     # ── Navigation ────────────────────────────────────────────────────
 
@@ -450,18 +841,24 @@ class SetupWizard(QDialog):
                 self._path_status.setText(
                     "Docker project found. Run Test Docker setup to continue."
                 )
-                self._path_status.setStyleSheet(
-                    f"color: {C['grey']}; font-size: 12px;"
+                self._set_status(
+                    self._path_status,
+                    self._path_status.text(),
+                    "notice",
                 )
             elif text:
                 self._path_status.setText(f"Docker setup: {msg}")
-                self._path_status.setStyleSheet(
-                    f"color: {C['red']}; font-size: 12px;"
+                self._set_status(
+                    self._path_status,
+                    self._path_status.text(),
+                    "error",
                 )
             else:
                 self._path_status.setText("Enter the path to your EveJS folder")
-                self._path_status.setStyleSheet(
-                    f"color: {C['grey']}; font-size: 12px;"
+                self._set_status(
+                    self._path_status,
+                    self._path_status.text(),
+                    "idle",
                 )
             self._test_docker_btn.setEnabled(
                 valid and self._docker_preflight_thread is None
@@ -476,15 +873,27 @@ class SetupWizard(QDialog):
         valid, msg = validate_evejs_root(text)
         if valid:
             self._path_status.setText("✓ Valid EveJS installation")
-            self._path_status.setStyleSheet(f"color: {C['green']}; font-size: 12px;")
+            self._set_status(
+                self._path_status,
+                self._path_status.text(),
+                "ready",
+            )
             self._next_btn.setEnabled(True)
         elif text:
             self._path_status.setText(f"✗ {msg}")
-            self._path_status.setStyleSheet(f"color: {C['red']}; font-size: 12px;")
+            self._set_status(
+                self._path_status,
+                self._path_status.text(),
+                "error",
+            )
             self._next_btn.setEnabled(False)
         else:
             self._path_status.setText("Enter the path to your EveJS folder")
-            self._path_status.setStyleSheet(f"color: {C['grey']}; font-size: 12px;")
+            self._set_status(
+                self._path_status,
+                self._path_status.text(),
+                "idle",
+            )
             self._next_btn.setEnabled(False)
 
         compose = Path(text) / "compose.yaml" if text else None
@@ -561,6 +970,17 @@ class SetupWizard(QDialog):
             self._test_docker_btn.setEnabled(
                 valid and self._docker_preflight_thread is None
             )
+        if (
+            hasattr(self, "_docker_status")
+            and self._docker_mode()
+            and self._docker_preflight_thread is None
+            and self._docker_status.property("state") == "ready"
+        ):
+            self._set_status(
+                self._docker_status,
+                "Configuration changed. Run Test Docker setup again.",
+                "notice",
+            )
 
     def _start_docker_preflight(self) -> None:
         if not self._docker_mode() or self._docker_preflight_thread is not None:
@@ -596,8 +1016,11 @@ class SetupWizard(QDialog):
         self._docker_preflight_thread_finished = False
         self._test_docker_btn.setEnabled(False)
         self._next_btn.setEnabled(False)
-        self._docker_status.setText(
-            "Checking Docker CLI, engine, Compose, services, endpoints, and data state..."
+        self._set_status(
+            self._docker_status,
+            "Checking Docker CLI, engine, Compose, services, endpoints, "
+            "and data state...",
+            "busy",
         )
         thread.start()
 
@@ -610,13 +1033,17 @@ class SetupWizard(QDialog):
                 and result.report.ok
             ):
                 self._validated_docker_fingerprint = current
-                self._docker_status.setText(
-                    "Docker setup is valid. Runtime and data initialization remain separate."
+                self._set_status(
+                    self._docker_status,
+                    "Docker setup is valid. Runtime and data initialization remain separate.",
+                    "ready",
                 )
                 self._next_btn.setEnabled(True)
             elif result.draft_fingerprint != current:
-                self._docker_status.setText(
-                    "Docker fields changed during validation. Test again."
+                self._set_status(
+                    self._docker_status,
+                    "Docker fields changed during validation. Test again.",
+                    "notice",
                 )
             else:
                 diagnostic = (
@@ -624,7 +1051,7 @@ class SetupWizard(QDialog):
                     if result.report.diagnostics
                     else "Docker setup validation failed."
                 )
-                self._docker_status.setText(diagnostic)
+                self._set_status(self._docker_status, diagnostic, "error")
         self._docker_preflight_result_received = True
         self._finish_docker_preflight_if_complete()
 
@@ -657,7 +1084,7 @@ class SetupWizard(QDialog):
             return
         prev = cur - 1
         self._stack.setCurrentIndex(prev)
-        self._progress.setValue(prev)
+        self._sync_progress_chrome(prev)
         self._next_btn.setText("Next →")
         if prev == 1:
             self._on_path_changed(self._path_input.text())
@@ -689,8 +1116,10 @@ class SetupWizard(QDialog):
                         "✗ EVE Client must be the copied tq folder containing "
                         "start.ini and bin64\\exefile.exe."
                     )
-                    self._path_status.setStyleSheet(
-                        f"color: {C['red']}; font-size: 12px;"
+                    self._set_status(
+                        self._path_status,
+                        self._path_status.text(),
+                        "error",
                     )
                     return
                 self._client_path = str(resolved_client)
@@ -698,6 +1127,7 @@ class SetupWizard(QDialog):
             else:
                 self._client_path = ""
             if self._docker_mode():
+                self._review_badge.setText("DOCKER ROUTE VERIFIED")
                 explicit_compose = self._compose_input.text().strip()
                 compose_path = (
                     explicit_compose
@@ -723,6 +1153,7 @@ class SetupWizard(QDialog):
                     "Click Next to review completion."
                 )
             else:
+                self._review_badge.setText("NATIVE ROUTE VERIFIED")
                 self._results.setText(
                     "Runtime: Native — directly on Windows\n"
                     f"EveJS Root: {self._evejs_root}\n"
@@ -733,7 +1164,7 @@ class SetupWizard(QDialog):
         nxt = cur + 1
         if nxt < self._stack.count():
             self._stack.setCurrentIndex(nxt)
-            self._progress.setValue(nxt)
+            self._sync_progress_chrome(nxt)
             self._back_btn.setVisible(True)
 
             if nxt == self._stack.count() - 1:

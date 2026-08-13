@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QApplication
 from src import config
 from src import app as app_module
 from src.app import MainWindow
+from src.audio.events import VoiceEvent
 from src.constants import COLORS, Ports
 from src.core.service_status import ServiceState
 from src.workers.server_worker import ServiceProbe, ServiceStartResult
@@ -118,7 +119,9 @@ def test_offline_game_probe_updates_footer_and_home(
 
     assert window._status_bar.server_section.label.text() == "Server: Offline"
     assert window._home_page.server_card._state_label.text() == "Offline"
-    assert COLORS["grey"] in window._home_page.server_card._dot.styleSheet()
+    assert COLORS["red"] in window._home_page.server_card._dot.styleSheet()
+    assert COLORS["red"] in window._home_page.server_card._state_label.styleSheet()
+    assert window._home_page.server_card._ring.signal_color == COLORS["red"]
 
 
 def test_owned_live_process_reports_starting_everywhere(
@@ -268,6 +271,7 @@ def test_home_stop_stack_signal_routes_to_service_shutdown(
             "stop_game": True,
             "stop_market": True,
             "on_complete": None,
+            "voice_event": VoiceEvent.SERVER_STACK_STOPPING,
         }
     ]
 

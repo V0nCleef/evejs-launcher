@@ -197,6 +197,7 @@ class ManagedDockerToolController:
         target_identity = docker_project_identity(
             self._target,
             getattr(report.config, "project_name", None),
+            config=report.config,
         )
         if (
             self._expected_target_identity is not None

@@ -28,6 +28,10 @@ _MUTATED_TABLES = (
     "notifications",
 )
 _ACCOUNT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{2,31}$")
+_ECMASCRIPT_WHITESPACE_PATTERN = re.compile(
+    "[\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A"
+    "\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]+"
+)
 
 
 class CharacterCreationError(RuntimeError):
@@ -52,13 +56,35 @@ class CharacterCreationResult:
     backup_path: Path
 
 
+def normalize_character_name(value: object) -> str | None:
+    """Return the exact character-name form accepted by the JS helper.
+
+    JavaScript measures string length in UTF-16 code units and its ``\\s``
+    class includes U+FEFF but excludes U+200B.  Keep those protocol semantics
+    at every Python/UI boundary so a helper cannot reject a request after the
+    launcher has already stopped services.
+    """
+    if not isinstance(value, str):
+        return None
+    normalized = _ECMASCRIPT_WHITESPACE_PATTERN.sub(" ", value).strip(" ")
+    try:
+        utf16_units = len(normalized.encode("utf-16-le")) // 2
+    except UnicodeEncodeError:
+        return None
+    if not 3 <= utf16_units <= 37:
+        return None
+    if any(ord(character) < 0x20 or ord(character) == 0x7F for character in normalized):
+        return None
+    return normalized
+
+
 def normalize_creation_request(
     request: CharacterCreationRequest,
 ) -> CharacterCreationRequest:
     """Validate and normalize the values sent to EveJS internals."""
     root = Path(request.evejs_root).expanduser()
     username = request.username.strip()
-    character_name = " ".join(request.character_name.strip().split())
+    character_name = normalize_character_name(request.character_name)
     if not root.is_dir():
         raise CharacterCreationError("Select a valid EveJS root first.")
     if not _ACCOUNT_PATTERN.fullmatch(username):
@@ -66,12 +92,11 @@ def normalize_creation_request(
             "Account names must be 3-32 characters and use only letters, "
             "numbers, dots, dashes, or underscores."
         )
-    if not 3 <= len(character_name) <= 37:
+    if character_name is None:
         raise CharacterCreationError(
-            "Character names must contain between 3 and 37 characters."
+            "Character names must contain between 3 and 37 characters and "
+            "cannot contain control characters."
         )
-    if any(ord(character) < 32 for character in character_name):
-        raise CharacterCreationError("The character name contains invalid characters.")
     source_id = request.overview_source_character_id
     if source_id is not None and (
         isinstance(source_id, bool) or not isinstance(source_id, int) or source_id <= 0

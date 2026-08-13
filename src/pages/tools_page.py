@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.constants import SPACING
 from src.core.tool_catalog import (
     TOOL_CATEGORIES,
     ResolvedTool,
@@ -28,6 +29,7 @@ from src.core.tool_catalog import (
     resolve_tools,
 )
 from src.core.service_status import DockerControlPolicy, RuntimeBackend
+from src.widgets.page_header import PageHeader
 
 
 _ROOT_STATE_REASONS = {
@@ -54,7 +56,7 @@ class ToolCard(QFrame):
         # Keep the two-column layout shrinkable so the page receives a resize
         # event and can reflow before a hidden horizontal overflow develops.
         self.setMinimumWidth(240)
-        self.setMinimumHeight(214)
+        self.setMinimumHeight(222)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
 
         self._feedback_action_id = ""
@@ -203,7 +205,13 @@ class ToolCard(QFrame):
     def _action_class(action: ResolvedToolAction) -> str:
         if action.risk_level == "destructive":
             return "toolDanger"
-        if action.id == "preview":
+        if action.id in {
+            "preview",
+            "status",
+            "backups",
+            "presets",
+            "snapshot-info",
+        }:
             return "toolSecondary"
         return "toolPrimary"
 
@@ -275,6 +283,11 @@ class ToolCategorySection(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self.setProperty("deepSignal", True)
+        self.setAccessibleName("Tool Deck")
+        self.setAccessibleDescription(
+            "Search and launch reviewed utilities for the selected EveJS runtime."
+        )
         self.category = category
         self.cards = cards
         self.setObjectName(f"toolSection-{category.casefold().replace(' & ', '-').replace(' ', '-')}")
@@ -341,69 +354,92 @@ class ToolsPage(QWidget):
         self._sections: dict[str, ToolCategorySection] = {}
         self.card_column_count = 2
         self._build_ui()
+        self._update_context_presentation()
         self.refresh_tools()
 
     # ── UI construction ──────────────────────────────────────────────────────
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(12)
-
-        header = QHBoxLayout()
-        header.setSpacing(12)
-        titles = QVBoxLayout()
-        titles.setSpacing(2)
-        title = QLabel("TOOL DECK")
-        title.setProperty("class", "title")
-        titles.addWidget(title)
-        subtitle = QLabel("Standalone utilities from the configured EveJS installation")
-        subtitle.setProperty("class", "secondary")
-        subtitle.setWordWrap(True)
-        subtitle.setSizePolicy(
-            QSizePolicy.Policy.Ignored,
-            QSizePolicy.Policy.Preferred,
+        root.setContentsMargins(
+            SPACING["xl"],
+            SPACING["lg"],
+            SPACING["xl"],
+            SPACING["lg"],
         )
-        titles.addWidget(subtitle)
-        header.addLayout(titles, stretch=1)
+        root.setSpacing(SPACING["md"])
+
+        self.page_header = PageHeader(
+            "TOOL DECK",
+            "Reviewed utilities resolved against the selected EveJS runtime.",
+            "SYSTEM UTILITIES",
+            self,
+        )
+
+        self.runtime_context_label = QLabel()
+        self.runtime_context_label.setProperty("class", "toolRuntimePill")
+        self.runtime_context_label.setAccessibleName("Tool runtime context")
+        self.page_header.add_action(self.runtime_context_label)
 
         self.available_count_label = QLabel("0 available")
         self.available_count_label.setProperty("class", "toolAvailableCount")
-        header.addWidget(self.available_count_label)
+        self.available_count_label.setAccessibleName("Available tool count")
+        self.page_header.add_action(self.available_count_label)
 
-        self.refresh_button = QPushButton("Refresh")
-        self.refresh_button.setProperty("class", "compactGhost")
+        self.refresh_button = QPushButton("REFRESH")
+        self.refresh_button.setProperty("class", "signalSecondary")
         self.refresh_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.refresh_button.setAccessibleName("Refresh tools")
         self.refresh_button.setAccessibleDescription(
             "Rescan supported wrappers in the configured EveJS tools folder"
         )
         self.refresh_button.clicked.connect(lambda _checked=False: self.refresh_tools())
-        header.addWidget(self.refresh_button)
-        root.addLayout(header)
+        self.page_header.add_action(self.refresh_button)
+        root.addWidget(self.page_header)
 
-        filters = QHBoxLayout()
-        filters.setSpacing(10)
+        self.filter_rail = QFrame(self)
+        self.filter_rail.setProperty("class", "toolFilterRail")
+        filters = QHBoxLayout(self.filter_rail)
+        filters.setContentsMargins(14, 10, 14, 10)
+        filters.setSpacing(SPACING["md"])
+
+        search_block = QVBoxLayout()
+        search_block.setSpacing(3)
+        search_label = QLabel("SEARCH TELEMETRY")
+        search_label.setProperty("class", "toolFilterLabel")
+        search_block.addWidget(search_label)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Search tools…")
         self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.setMinimumWidth(0)
+        self.search_edit.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Fixed,
+        )
         self.search_edit.setAccessibleName("Search tools")
         self.search_edit.setAccessibleDescription(
             "Filter by tool name, description, category, or source folder"
         )
         self.search_edit.textChanged.connect(self._render_tools)
-        filters.addWidget(self.search_edit, stretch=1)
+        search_block.addWidget(self.search_edit)
+        filters.addLayout(search_block, stretch=1)
 
+        category_block = QVBoxLayout()
+        category_block.setSpacing(3)
+        category_label = QLabel("SYSTEM GROUP")
+        category_label.setProperty("class", "toolFilterLabel")
+        category_block.addWidget(category_label)
         self.category_combo = QComboBox()
         self.category_combo.addItem("All categories")
         self.category_combo.addItems(TOOL_CATEGORIES)
-        self.category_combo.setMinimumWidth(180)
+        self.category_combo.setMinimumWidth(164)
         self.category_combo.setAccessibleName("Tool category")
         self.category_combo.setAccessibleDescription(
             "Show all tools or one semantic tool category"
         )
         self.category_combo.currentTextChanged.connect(self._render_tools)
-        filters.addWidget(self.category_combo)
-        root.addLayout(filters)
+        category_block.addWidget(self.category_combo)
+        filters.addLayout(category_block)
+        root.addWidget(self.filter_rail)
 
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -414,6 +450,7 @@ class ToolsPage(QWidget):
         self.scroll_area.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
+        self.scroll_area.setAccessibleName("Reviewed tool catalog")
 
         self._content = QWidget()
         self._content_layout = QVBoxLayout(self._content)
@@ -441,7 +478,7 @@ class ToolsPage(QWidget):
         self.empty_message_label.setMaximumWidth(520)
         empty_layout.addWidget(self.empty_message_label)
         self.empty_settings_button = QPushButton("Open Settings")
-        self.empty_settings_button.setProperty("class", "secondary")
+        self.empty_settings_button.setProperty("class", "signalSecondary")
         self.empty_settings_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.empty_settings_button.setAccessibleName("Open Settings")
         self.empty_settings_button.setAccessibleDescription(
@@ -468,6 +505,20 @@ class ToolsPage(QWidget):
         self.scroll_area.setWidget(self._content)
         root.addWidget(self.scroll_area, stretch=1)
 
+    def _update_context_presentation(self) -> None:
+        if self._runtime_backend is RuntimeBackend.NATIVE:
+            text, state = "NATIVE HOST", "ready"
+        elif self._docker_policy is DockerControlPolicy.MANAGED:
+            text, state = "DOCKER · MANAGED", "online"
+        else:
+            text, state = "DOCKER · CONNECT ONLY", "idle"
+        self.runtime_context_label.setText(text)
+        self.runtime_context_label.setProperty("state", state)
+        style = self.runtime_context_label.style()
+        style.unpolish(self.runtime_context_label)
+        style.polish(self.runtime_context_label)
+        self.runtime_context_label.update()
+
     # ── Data and filtering ────────────────────────────────────────────────────
     def refresh_tools(self, evejs_root: str | Path | None = None) -> None:
         """Re-resolve availability without recreating the page itself."""
@@ -481,6 +532,14 @@ class ToolsPage(QWidget):
         )
         available = sum(tool.available for tool in resolved_tools)
         self.available_count_label.setText(f"{available} available")
+        self.available_count_label.setProperty(
+            "state",
+            "online" if available else "idle",
+        )
+        count_style = self.available_count_label.style()
+        count_style.unpolish(self.available_count_label)
+        count_style.polish(self.available_count_label)
+        self.available_count_label.update()
         if resolved_tools == self._resolved_tools:
             return
         self._resolved_tools = resolved_tools
@@ -505,6 +564,7 @@ class ToolsPage(QWidget):
         ):
             return
         self._runtime_backend, self._docker_policy, self._compose_file = context
+        self._update_context_presentation()
         self.refresh_tools()
 
     def _render_tools(self, *_args: object) -> None:

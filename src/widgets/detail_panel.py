@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QPainter, QPainterPath, QColor, QFont
 from PyQt6.QtWidgets import (
     QFrame,
+    QGridLayout,
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
@@ -16,7 +17,7 @@ from PyQt6.QtWidgets import (
     QStackedWidget,
 )
 
-from src.constants import COLORS as C
+from src.constants import COLORS as C, SEMANTIC_COLORS as S
 
 
 class BorderedPortraitLabel(QLabel):
@@ -24,7 +25,7 @@ class BorderedPortraitLabel(QLabel):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setFixedSize(256, 256)
+        self.setFixedSize(104, 104)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._pixmap: Optional[QPixmap] = None
         self._update_style()
@@ -32,11 +33,11 @@ class BorderedPortraitLabel(QLabel):
     def _update_style(self) -> None:
         if self._pixmap is None:
             self.setStyleSheet(
-                f"background-color: {C['steel']}; border: 2px solid {C['grey']}; border-radius: 4px;"
+                f"background-color: rgba(9, 24, 36, 235); border: 1px solid {S['border_bright']}; border-radius: 5px;"
             )
         else:
             self.setStyleSheet(
-                f"background-color: transparent; border: 2px solid {C['teal']}; border-radius: 4px;"
+                f"background-color: transparent; border: 1px solid {C['teal']}; border-radius: 5px;"
             )
 
     def set_portrait(self, pixmap: Optional[QPixmap]) -> None:
@@ -49,12 +50,12 @@ class BorderedPortraitLabel(QLabel):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         if self._pixmap is not None:
             scaled = self._pixmap.scaled(
-                252, 252,
+                102, 102,
                 Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                 Qt.TransformationMode.SmoothTransformation,
             )
-            x = (256 - scaled.width()) // 2
-            y = (256 - scaled.height()) // 2
+            x = (104 - scaled.width()) // 2
+            y = (104 - scaled.height()) // 2
             painter.drawPixmap(x, y, scaled)
         painter.end()
 
@@ -68,14 +69,22 @@ class DetailPanel(QFrame):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self.setObjectName("characterDetailPanel")
+        self.setProperty("deepSignal", True)
         self.setMinimumWidth(0)
-        self.setMaximumWidth(280)
+        self.setMaximumWidth(16_777_215)
+        self.setMinimumHeight(0)
+        self.setMaximumHeight(150)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         self.setStyleSheet(
             f"""
-            QFrame {{
-                background-color: {C['panel']};
-                border: 1px solid {C['steel']};
-                border-radius: 6px;
+            QFrame#characterDetailPanel {{
+                background-color: rgba(6, 17, 28, 238);
+                border: 1px solid {S['border_bright']};
+                border-radius: 7px;
             }}
             """
         )
@@ -92,6 +101,150 @@ class DetailPanel(QFrame):
         self.show_empty()
 
     def _setup_ui(self) -> None:
+        """Build the compact horizontal selected-character command pane."""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._stack = QStackedWidget()
+        layout.addWidget(self._stack)
+
+        empty_widget = QWidget()
+        empty_widget.setProperty("deepSignal", True)
+        empty_layout = QHBoxLayout(empty_widget)
+        empty_layout.setContentsMargins(18, 12, 18, 12)
+        empty_layout.addStretch()
+        empty_label = QLabel("Select a character to inspect capsule telemetry")
+        empty_label.setProperty("class", "pageSubtitle")
+        empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(empty_label)
+        empty_layout.addStretch()
+        self._stack.addWidget(empty_widget)
+
+        populated_widget = QWidget()
+        populated_widget.setProperty("deepSignal", True)
+        pop_layout = QHBoxLayout(populated_widget)
+        pop_layout.setContentsMargins(14, 12, 14, 12)
+        pop_layout.setSpacing(14)
+
+        self._portrait = BorderedPortraitLabel()
+        pop_layout.addWidget(
+            self._portrait,
+            alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+
+        identity = QWidget()
+        identity.setProperty("deepSignal", True)
+        identity.setMinimumWidth(124)
+        identity_layout = QVBoxLayout(identity)
+        identity_layout.setContentsMargins(0, 2, 0, 2)
+        identity_layout.setSpacing(3)
+        eyebrow = QLabel("SELECTED CAPSULEER")
+        eyebrow.setProperty("class", "pageEyebrow")
+        identity_layout.addWidget(eyebrow)
+        self._name_label = QLabel()
+        self._name_label.setStyleSheet(
+            f"color: {S['text_primary']}; font-size: 18px; font-weight: 700;"
+        )
+        self._name_label.setWordWrap(True)
+        identity_layout.addWidget(self._name_label)
+        self._account_label = QLabel()
+        self._account_label.setStyleSheet(
+            f"color: {S['accent']}; font-size: 11px;"
+        )
+        identity_layout.addWidget(self._account_label)
+        identity_layout.addStretch()
+        pop_layout.addWidget(identity, 2)
+
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.VLine)
+        divider.setStyleSheet(f"color: {S['border']};")
+        pop_layout.addWidget(divider)
+
+        stats_widget = QWidget()
+        stats_widget.setProperty("deepSignal", True)
+        stats_widget.setMinimumWidth(190)
+        stats_layout = QGridLayout(stats_widget)
+        stats_layout.setContentsMargins(0, 1, 0, 1)
+        stats_layout.setHorizontalSpacing(12)
+        stats_layout.setVerticalSpacing(5)
+        self._stat_rows: dict[str, tuple[QLabel, QLabel]] = {}
+        for row_index, label_text in enumerate(
+            ("ISK", "SP", "Ship", "Location", "Sec Status")
+        ):
+            label = QLabel(label_text.upper())
+            label.setStyleSheet(
+                f"color: {S['text_muted']}; font-size: 9px;"
+            )
+            value = QLabel("—")
+            value.setStyleSheet(
+                f"color: {S['text_primary']}; font-size: 11px; "
+                "font-family: 'Consolas', monospace;"
+            )
+            value.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
+            self._stat_rows[label_text] = (label, value)
+            stats_layout.addWidget(label, row_index, 0)
+            stats_layout.addWidget(value, row_index, 1)
+        stats_layout.setColumnStretch(1, 1)
+        pop_layout.addWidget(stats_widget, 3)
+
+        actions = QWidget()
+        actions.setProperty("deepSignal", True)
+        actions.setMinimumWidth(154)
+        actions_layout = QVBoxLayout(actions)
+        actions_layout.setContentsMargins(0, 1, 0, 1)
+        actions_layout.setSpacing(7)
+        self._launch_btn = QPushButton("LAUNCH")
+        self._launch_btn.setFixedHeight(44)
+        self._launch_btn.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        self._launch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._launch_btn.setStyleSheet(
+            f"QPushButton {{ background-color: rgba(105, 72, 0, 232); "
+            f"color: #FFE39A; border: 1px solid {C['gold']}; border-radius: 4px; "
+            "font-size: 15px; font-weight: 700; }}"
+            f"QPushButton:hover:enabled {{ background-color: {C['gold']}; "
+            f"color: {C['void_black']}; }}"
+            "QPushButton:focus { border: 2px solid #FFF2C3; }"
+            f"QPushButton:disabled {{ background-color: rgba(10, 22, 32, 210); "
+            f"color: {S['text_muted']}; border-color: {S['border']}; }}"
+        )
+        self._launch_btn.clicked.connect(self.launch_clicked.emit)
+        actions_layout.addWidget(self._launch_btn)
+
+        secondary_row = QHBoxLayout()
+        secondary_row.setContentsMargins(0, 0, 0, 0)
+        secondary_row.setSpacing(6)
+        secondary_style = (
+            f"QPushButton {{ background-color: rgba(7, 17, 29, 190); "
+            f"color: {S['text_secondary']}; border: 1px solid {S['border_bright']}; "
+            "border-radius: 4px; font-size: 9px; font-weight: 600; }}"
+            f"QPushButton:hover {{ color: {S['text_primary']}; border-color: {S['accent']}; }}"
+            f"QPushButton:focus {{ border: 2px solid {S['accent']}; }}"
+        )
+        self._hide_btn = QPushButton("HIDE")
+        self._hide_btn.setFixedHeight(30)
+        self._hide_btn.setStyleSheet(secondary_style)
+        self._hide_btn.setAccessibleName("Hide selected character")
+        self._hide_btn.clicked.connect(self.hide_clicked.emit)
+        secondary_row.addWidget(self._hide_btn)
+        self._log_btn = QPushButton("VIEW LOG")
+        self._log_btn.setFixedHeight(30)
+        self._log_btn.setStyleSheet(secondary_style)
+        self._log_btn.setAccessibleName("View selected character log")
+        self._log_btn.clicked.connect(self.log_clicked.emit)
+        secondary_row.addWidget(self._log_btn)
+        actions_layout.addLayout(secondary_row)
+        actions_layout.addStretch()
+        pop_layout.addWidget(actions, 2)
+
+        self._stack.addWidget(populated_widget)
+
+    def _setup_legacy_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -258,6 +411,8 @@ class DetailPanel(QFrame):
     def show_empty(self) -> None:
         """Show the empty state."""
         self._stack.setCurrentIndex(0)
+        self.setAccessibleName("Character details")
+        self.setAccessibleDescription("No character selected")
 
     def show_character(
         self,
@@ -276,6 +431,11 @@ class DetailPanel(QFrame):
         self._name_label.setText(char_name)
         self._account_label.setText(username)
         self._portrait.set_portrait(portrait_pixmap)
+        self._launch_btn.setAccessibleName(f"Launch {char_name}")
+        self.setAccessibleName(f"Details for {char_name}")
+        self.setAccessibleDescription(
+            f"Selected character on account {username}."
+        )
 
         # Populate stats
         for key, (_, val_label) in self._stat_rows.items():

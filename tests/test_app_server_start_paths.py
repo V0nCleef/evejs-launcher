@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QApplication, QMainWindow
 from src import app as app_module
 from src import config
 from src.app import MainWindow
+from src.audio.events import VoiceEvent
 from src.core.db import Account, Character
 from src.workers.server_worker import ServiceStartResult, ServiceStopResult
 
@@ -166,6 +167,7 @@ def test_manual_start_delegates_resolved_mode_to_background_sequence(
                 "mode": "vanilla",
                 "on_ready": None,
                 "error_title": "Game Server Error",
+                "voice_event": VoiceEvent.GAME_SERVER_LAUNCHING,
             },
         ),
     ]
@@ -275,6 +277,7 @@ def test_manual_market_start_delegates_to_background_sequence(
             "mode": None,
             "on_ready": None,
             "error_title": "Market Server Error",
+            "voice_event": VoiceEvent.MARKET_SERVER_LAUNCHING,
         }
     ]
 
@@ -349,6 +352,7 @@ def test_start_all_delegates_market_then_game_to_background_sequence(
                 "mode": "modded",
                 "on_ready": None,
                 "error_title": "Service Startup Failed",
+                "voice_event": VoiceEvent.SERVER_STACK_LAUNCHING,
             },
         ),
     ]
@@ -382,6 +386,7 @@ def test_owned_game_stop_delegates_wait_and_kill_to_background_sequence(
             "stop_game": True,
             "stop_market": False,
             "on_complete": None,
+            "voice_event": VoiceEvent.GAME_SERVER_STOPPING,
         }
     ]
 
@@ -414,6 +419,7 @@ def test_owned_market_stop_delegates_wait_and_kill_to_background_sequence(
             "stop_game": False,
             "stop_market": True,
             "on_complete": None,
+            "voice_event": VoiceEvent.MARKET_SERVER_STOPPING,
         }
     ]
 
@@ -445,6 +451,7 @@ def test_stop_all_delegates_one_ordered_background_sequence(
             "stop_game": True,
             "stop_market": True,
             "on_complete": None,
+            "voice_event": VoiceEvent.SERVER_STACK_STOPPING,
         }
     ]
 
@@ -892,11 +899,13 @@ def test_close_defers_window_acceptance_until_owned_service_stop_completes(
     event = CloseEvent()
     stop_requests: list[dict[str, object]] = []
     monitor_stops: list[str] = []
+    audio_stops: list[str] = []
     bare_window._tracker = IdleTracker()
     bare_window._server_proc = LiveProcess()
     bare_window._market_proc = None
     bare_window._service_thread = None
     bare_window._stop_service_monitor = lambda: monitor_stops.append("monitor")
+    bare_window._shutdown_audio_for_close = lambda: audio_stops.append("audio")
     bare_window._run_stop_sequence = (
         lambda **kwargs: stop_requests.append(kwargs) or True
     )
@@ -906,6 +915,7 @@ def test_close_defers_window_acceptance_until_owned_service_stop_completes(
     assert event.ignored is True
     assert event.accepted is False
     assert monitor_stops == []
+    assert audio_stops == []
     assert len(stop_requests) == 1
     assert stop_requests[0]["stop_game"] is True
     assert stop_requests[0]["stop_market"] is True
