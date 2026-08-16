@@ -676,3 +676,120 @@ def test_failed_inspection_does_not_expose_private_diagnostics(tmp_path: Path) -
     assert error.value.code == "docker_preflight_failed"
     assert private_value not in str(error.value)
     assert "/private/host/path" not in str(error.value)
+
+
+# ── Degraded export streams ──────────────────────────────────────────────────
+# A live EveJS deployment does not hand the launcher a pristine document.  A
+# character biomassed in game keeps its row with ``accountId`` cleared, and any
+# preload hook attached through ``NODE_OPTIONS`` writes to the same stdout the
+# export uses.  Neither may cost the user their entire roster.
+
+_RETIRED_CHARACTER_ID = 900000002
+_PRELOAD_BANNER = "[FixtureMod] v0.2 - Mod loader active, waiting for modules...\n"
+
+
+def _retired_player() -> dict[str, object]:
+    """One in-game biomassed character exactly as the export renders it."""
+    return {
+        "characterId": str(_RETIRED_CHARACTER_ID),
+        "characterName": "Retired Pilot",
+        "accountId": None,
+        "accountName": "Unknown account",
+        "banned": False,
+        "isGM": False,
+        "shipName": "Capsule",
+        "solarSystemName": "Fixture System",
+        "balance": 0,
+        "skillPoints": 0,
+        "securityStatus": 0.0,
+    }
+
+
+def test_retired_character_never_invalidates_the_live_roster(tmp_path: Path) -> None:
+    payload = _export_payload()
+    payload["players"] = [_retired_player(), *payload["players"]]
+    runner = FakeRunner([json.dumps(payload)])
+    source = _source(tmp_path, "running", runner)
+
+    accounts = source.load_accounts()
+
+    assert [account.username for account in accounts] == ["fixture-account"]
+    assert [character.char_id for character in accounts[0].characters] == [
+        _FIXTURE_CHARACTER_ID
+    ]
+
+
+def test_retired_character_matches_the_native_sqlite_reader(tmp_path: Path) -> None:
+    """Both readers must agree that a cleared ``accountId`` is not a pilot."""
+    payload = _export_payload()
+    payload["players"] = [_retired_player()]
+    runner = FakeRunner([json.dumps(payload)])
+
+    assert _source(tmp_path, "running", runner).load_accounts() == []
+
+
+def test_invalid_player_record_is_skipped_without_losing_the_others(
+    tmp_path: Path,
+) -> None:
+    payload = _export_payload()
+    payload["players"] = [
+        {"characterId": "0", "characterName": "", "accountId": 501},
+        *payload["players"],
+        {"characterId": str(_FIXTURE_CHARACTER_ID), "accountId": 501},
+    ]
+    runner = FakeRunner([json.dumps(payload)])
+    source = _source(tmp_path, "running", runner)
+
+    accounts = source.load_accounts()
+
+    assert len(accounts) == 1
+    assert [character.char_id for character in accounts[0].characters] == [
+        _FIXTURE_CHARACTER_ID
+    ]
+
+
+def test_export_document_survives_container_preload_output(tmp_path: Path) -> None:
+    runner = FakeRunner([_PRELOAD_BANNER + json.dumps(_export_payload(), indent=2)])
+    source = _source(tmp_path, "running", runner)
+
+    accounts = source.load_accounts()
+
+    assert [account.username for account in accounts] == ["fixture-account"]
+
+
+def test_export_document_is_found_after_unrelated_json_output(tmp_path: Path) -> None:
+    """A preload hook that logs its own JSON must not be read as the export."""
+    noise = json.dumps({"level": "info", "msg": "fixture mod ready"})
+    runner = FakeRunner(
+        [f"{noise}\n{json.dumps(_export_payload(), indent=2)}\ntrailing noise\n"]
+    )
+    source = _source(tmp_path, "running", runner)
+
+    accounts = source.load_accounts()
+
+    assert [account.username for account in accounts] == ["fixture-account"]
+
+
+def test_detail_read_survives_container_preload_output(tmp_path: Path) -> None:
+    runner = FakeRunner([_PRELOAD_BANNER + json.dumps(_export_payload())])
+    source = _source(tmp_path, "running", runner)
+
+    detail = source.get_character_detail(_FIXTURE_CHARACTER_ID)
+
+    assert detail == {
+        "characterName": "Fixture Pilot",
+        "balance": 1234.5,
+        "shipName": "Fixture Frigate",
+    }
+
+
+def test_stream_without_an_export_document_stays_malformed(tmp_path: Path) -> None:
+    private_value = "synthetic-private-value"
+    runner = FakeRunner([f"{_PRELOAD_BANNER}{private_value} was not JSON\n"])
+    source = _source(tmp_path, "running", runner)
+
+    with pytest.raises(DataSourceError) as error:
+        source.load_accounts()
+
+    assert error.value.code == "malformed_export"
+    assert private_value not in str(error.value)
