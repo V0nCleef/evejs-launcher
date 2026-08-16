@@ -2,6 +2,25 @@
 
 ## Changelog
 
+## v1.0.40 — 2026-08-16
+
+### Fixed
+- **Docker character roster loading** — an explicitly retired character with a cleared account reference no longer invalidates the exported roster. Docker now matches the Native reader by excluding retired records while retaining valid accounts and characters.
+- **Modded container export decoding** — preload banners, Node warnings, and unrelated JSON output without a player collection no longer make the Characters page appear empty.
+- **Visible data-load failures** — an unreadable roster now reports `DATA UNAVAILABLE` with a safe reason instead of looking like a valid game store containing zero characters. The warning clears immediately when the selected root, backend, project, or observed Docker target changes.
+
+### Safety and compatibility
+- Only records with an explicitly cleared account reference are treated as retired. Malformed active records, duplicate character IDs, and conflicting account metadata continue to fail closed.
+- Export discovery is bounded and accepts only a document with the expected player collection. Missing, oversized, and malformed exports remain private-safe failures, and diagnostics never include exported account or character data.
+- Character roster loading is read-only and does not modify EveJS game data.
+
+### Contributor
+- Thanks to Darius Tumas ([@Tokeiito](https://github.com/Tokeiito)) for reproducing, diagnosing, testing, and contributing the original fix. 🫡
+
+### Verification
+- **1,158 automated tests passed**, including retired-character exports, noisy preload output, competing JSON output, malformed active records, privacy boundaries, visible failure state, authority changes, and roster recovery.
+- Source compilation, dependency validation, the Foundation smoke suite, release-version consistency, packaged startup and shutdown, and ZIP integrity were verified before publication.
+
 ## v1.0.39 — 2026-08-14
 
 ### Fixed

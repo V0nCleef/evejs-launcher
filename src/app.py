@@ -4495,6 +4495,7 @@ class MainWindow(QMainWindow):
                 self._account_worker.request_cancel()
             self._cancel_detail_load()
             self._data_selection = None
+            self._clear_data_load_error()
             self._accounts = []
             self._group_target_identity = None
             self._group_state = TargetGroupState()
@@ -4669,7 +4670,7 @@ class MainWindow(QMainWindow):
         ):
             return
         self._data_selection = result.selection
-        self._data_load_error = ""
+        self._clear_data_load_error()
         self._accounts = list(result.accounts)
         self._sync_character_groups(result.selection.target_identity)
         self._refresh_character_views()
@@ -5059,6 +5060,17 @@ class MainWindow(QMainWindow):
         else:
             apply_launch_availability(True)
 
+    def _clear_data_load_error(self) -> None:
+        """Retire a roster failure when its data authority is no longer current."""
+        self._data_load_error = ""
+        setter = getattr(
+            self.__dict__.get("_characters_page"),
+            "set_data_error",
+            None,
+        )
+        if callable(setter):
+            setter("")
+
     def _current_portrait_target(self) -> PortraitTarget | None:
         selection = self._data_selection
         if selection is None:
@@ -5207,6 +5219,7 @@ class MainWindow(QMainWindow):
             if hasattr(self, "_account_thread"):
                 self._cancel_data_loads()
             self._data_selection = None
+            self._clear_data_load_error()
             self._accounts = []
             portrait_invalidate = getattr(
                 getattr(self, "_characters_page", None),
@@ -6227,6 +6240,7 @@ class MainWindow(QMainWindow):
             if hasattr(self, "_account_thread"):
                 self._cancel_data_loads()
             self._data_selection = None
+            self._clear_data_load_error()
             self._accounts = []
             self._group_target_identity = None
             self._group_state = TargetGroupState()

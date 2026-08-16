@@ -516,7 +516,7 @@ def _decode_export_payload(stdout: str) -> Mapping[str, object]:
             payload, _end = decoder.raw_decode(stdout, offset)
         except (ValueError, UnicodeError):
             continue
-        if isinstance(payload, Mapping) and "players" in payload:
+        if isinstance(payload, Mapping) and isinstance(payload.get("players"), list):
             return payload
     raise DataSourceError(
         "malformed_export",
@@ -534,26 +534,25 @@ def _parse_export_player(
     reader skips exactly those rows; skipping them here holds both readers to
     one contract instead of letting a retired pilot invalidate the roster.
     """
-    if not isinstance(player, Mapping) or player.get("accountId") is None:
+    if not isinstance(player, Mapping) or "accountId" not in player:
+        raise ValueError
+    if player["accountId"] is None:
         return None
-    try:
-        char_id = _positive_id(player.get("characterId"))
-        username = _required_text(player.get("accountName"))
-        account_id = _nonnegative_int(player.get("accountId"))
-        banned = _strict_bool(player.get("banned"))
-        role = "gm" if _strict_bool(player.get("isGM")) else "0"
-        character = Character(
-            char_id=char_id,
-            name=_required_text(player.get("characterName")),
-            isk=_number_as_int(player.get("balance", 0)),
-            skill_points=_number_as_int(player.get("skillPoints", 0)),
-            ship_name=_optional_text(player.get("shipName"), "—"),
-            ship_type_id=_number_as_int(player.get("shipTypeID", 0)),
-            location=_optional_text(player.get("solarSystemName"), "—"),
-            security_status=_finite_float(player.get("securityStatus", 0.0)),
-        )
-    except (TypeError, ValueError, OverflowError):
-        return None
+    char_id = _positive_id(player.get("characterId"))
+    username = _required_text(player.get("accountName"))
+    account_id = _nonnegative_int(player.get("accountId"))
+    banned = _strict_bool(player.get("banned"))
+    role = "gm" if _strict_bool(player.get("isGM")) else "0"
+    character = Character(
+        char_id=char_id,
+        name=_required_text(player.get("characterName")),
+        isk=_number_as_int(player.get("balance", 0)),
+        skill_points=_number_as_int(player.get("skillPoints", 0)),
+        ship_name=_optional_text(player.get("shipName"), "—"),
+        ship_type_id=_number_as_int(player.get("shipTypeID", 0)),
+        location=_optional_text(player.get("solarSystemName"), "—"),
+        security_status=_finite_float(player.get("securityStatus", 0.0)),
+    )
     return username, account_id, role, banned, character
 
 
@@ -567,33 +566,36 @@ def _map_export_accounts(payload: Mapping[str, object]) -> list[Account]:
 
     accounts: dict[tuple[str, int], Account] = {}
     character_ids: set[int] = set()
-    skipped = 0
-    for player in players:
-        parsed = _parse_export_player(player)
-        if parsed is None:
-            skipped += 1
-            continue
-        username, account_id, role, banned, character = parsed
-        if character.char_id in character_ids:
-            skipped += 1
-            continue
-        key = (username, account_id)
-        account = accounts.get(key)
-        if account is None:
-            account = Account(username, account_id, role, banned)
-            accounts[key] = account
-        elif account.role != role or account.banned is not banned:
-            skipped += 1
-            continue
-        character_ids.add(character.char_id)
-        account.characters.append(character)
+    retired = 0
+    try:
+        for player in players:
+            parsed = _parse_export_player(player)
+            if parsed is None:
+                retired += 1
+                continue
+            username, account_id, role, banned, character = parsed
+            if character.char_id in character_ids:
+                raise ValueError
+            key = (username, account_id)
+            account = accounts.get(key)
+            if account is None:
+                account = Account(username, account_id, role, banned)
+                accounts[key] = account
+            elif account.role != role or account.banned is not banned:
+                raise ValueError
+            character_ids.add(character.char_id)
+            account.characters.append(character)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise DataSourceError(
+            "malformed_export",
+            "Docker character export contains invalid player data.",
+        ) from exc
 
-    if skipped:
+    if retired:
         # Counts only — an export record can carry private character data.
         log.info(
-            "Skipped %s of %s exported character records that are retired or "
-            "failed validation",
-            skipped,
+            "Skipped %s of %s retired exported character records",
+            retired,
             len(players),
         )
 

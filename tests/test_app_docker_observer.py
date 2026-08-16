@@ -203,6 +203,7 @@ def test_observation_target_change_immediately_invalidates_old_runtime_state(
         monitor_generation=4,
     )
     docker_window._data_selection = object()
+    docker_window._data_load_error = "Old target roster failure"
     docker_window._accounts = [object()]
     docker_window._account_request_token = object()
     docker_window._pending_account_request = (object(), object())
@@ -225,7 +226,10 @@ def test_observation_target_change_immediately_invalidates_old_runtime_state(
         "Characters",
         (),
         {
-            "invalidate_portrait_target": lambda _self: events.append("portrait")
+            "invalidate_portrait_target": lambda _self: events.append("portrait"),
+            "set_data_error": lambda _self, message: events.append(
+                f"data-error:{message}"
+            ),
         },
     )()
     docker_window._stop_docker_log_stream = lambda: events.append("logs")
@@ -253,8 +257,16 @@ def test_observation_target_change_immediately_invalidates_old_runtime_state(
     assert docker_window._pending_account_request is None
     assert docker_window._pending_detail_request is None
     assert docker_window._data_selection is None
+    assert docker_window._data_load_error == ""
     assert docker_window._accounts == []
-    assert events == ["portrait", "logs", "views", "snapshot", "reload"]
+    assert events == [
+        "data-error:",
+        "portrait",
+        "logs",
+        "views",
+        "snapshot",
+        "reload",
+    ]
     assert docker_window._runtime_snapshot.target_identity == "docker:target-b"
 
 
@@ -426,6 +438,16 @@ def test_switching_docker_to_native_restores_native_snapshot_before_old_monitor_
         endpoints=_endpoints(),
     )
     docker_window._nav, docker_window._status_bar, docker_window._home_page = Nav(), Status(), Home()
+    error_clears: list[str] = []
+    docker_window._data_load_error = "Old Docker roster failure"
+    docker_window._characters_page = type(
+        "Characters",
+        (),
+        {
+            "invalidate_portrait_target": lambda _self: None,
+            "set_data_error": lambda _self, message: error_clears.append(message),
+        },
+    )()
     docker_window._apply_runtime_settings = lambda: None
     docker_window._refresh_characters = lambda: None
     scheduled: list[str] = []
@@ -444,6 +466,8 @@ def test_switching_docker_to_native_restores_native_snapshot_before_old_monitor_
     assert snapshot.endpoints is None
     assert docker_window._nav.btn_tools.enabled is True
     assert docker_window._nav.btn_tools.tooltip == ""
+    assert docker_window._data_load_error == ""
+    assert error_clears == [""]
     assert thread.wait_called is False
 
     docker_window._on_service_monitor_thread_finished(thread)
@@ -570,6 +594,7 @@ def test_docker_identity_change_publishes_clean_unknown_and_rejects_old_observat
         endpoints=_endpoints(),
         **_identity_fields(docker_window),
     )
+    docker_window._data_load_error = "Old settings roster failure"
     docker_window._apply_runtime_snapshot = lambda snapshot: setattr(docker_window, "published", snapshot)
     docker_window._service_thread = None
     page_refreshes: list[tuple[str, str]] = []
@@ -579,6 +604,7 @@ def test_docker_identity_change_publishes_clean_unknown_and_rejects_old_observat
     docker_window._refresh_characters = lambda: None
     docker_window._apply_runtime_settings = lambda: None
     portrait_invalidations: list[str] = []
+    error_clears: list[str] = []
     queue_cancellations: list[str] = []
     docker_window._launch_queue = type(
         "Queue",
@@ -591,7 +617,8 @@ def test_docker_identity_change_publishes_clean_unknown_and_rejects_old_observat
         {
             "invalidate_portrait_target": lambda _self: portrait_invalidations.append(
                 "portrait"
-            )
+            ),
+            "set_data_error": lambda _self, message: error_clears.append(message),
         },
     )()
     scheduled: list[str] = []
@@ -614,6 +641,8 @@ def test_docker_identity_change_publishes_clean_unknown_and_rejects_old_observat
     assert docker_window.published.game_container is None and docker_window.published.market_container is None
     assert docker_window.published.endpoints is None
     assert docker_window.published.target_identity is None
+    assert docker_window._data_load_error == ""
+    assert error_clears == [""]
     assert docker_window.published.settings_identity == _settings_identity(
         docker_window
     )

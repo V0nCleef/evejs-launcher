@@ -177,6 +177,31 @@ def test_stale_account_result_cannot_replace_current_accounts(
         _close_window(qapp, window)
 
 
+def test_clearing_the_evejs_root_retires_a_stale_data_error() -> None:
+    window = MainWindow.__new__(MainWindow)
+    window._close_in_progress = False
+    window._cfg = {"evejs_root": ""}
+    window._account_request_token = object()
+    window._pending_account_request = (object(), object())
+    window._account_start_scheduled = True
+    window._account_worker = None
+    window._data_selection = object()
+    window._data_load_error = "Old Docker roster failure"
+    window._accounts = [_account("Stale")]
+    window._group_target_identity = "docker:old-target"
+    window._cancel_detail_load = lambda: None
+    refreshes: list[str] = []
+    window._refresh_character_views = lambda: refreshes.append("views")
+
+    window._refresh_characters()
+
+    assert window._data_selection is None
+    assert window._data_load_error == ""
+    assert window._accounts == []
+    assert window._group_target_identity is None
+    assert refreshes == ["views"]
+
+
 def test_selected_character_detail_is_loaded_off_thread_and_applied(
     qapp: QApplication,
     monkeypatch: pytest.MonkeyPatch,

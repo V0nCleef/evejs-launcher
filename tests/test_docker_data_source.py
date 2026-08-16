@@ -728,24 +728,41 @@ def test_retired_character_matches_the_native_sqlite_reader(tmp_path: Path) -> N
     assert _source(tmp_path, "running", runner).load_accounts() == []
 
 
-def test_invalid_player_record_is_skipped_without_losing_the_others(
+@pytest.mark.parametrize(
+    "invalid_player",
+    [
+        {
+            "characterId": "900000003",
+            "characterName": "Fixture Missing Account",
+        },
+        {
+            **_export_payload()["players"][0],
+            "privateToken": "synthetic-private-value",
+        },
+        {
+            **_export_payload()["players"][0],
+            "characterId": "900000003",
+            "characterName": "Fixture Conflict",
+            "banned": True,
+            "privateToken": "synthetic-private-value",
+        },
+    ],
+    ids=["missing-account-id", "duplicate-character-id", "account-metadata-conflict"],
+)
+def test_non_retired_invalid_player_data_fails_closed(
     tmp_path: Path,
+    invalid_player: dict[str, object],
 ) -> None:
     payload = _export_payload()
-    payload["players"] = [
-        {"characterId": "0", "characterName": "", "accountId": 501},
-        *payload["players"],
-        {"characterId": str(_FIXTURE_CHARACTER_ID), "accountId": 501},
-    ]
+    payload["players"] = [*payload["players"], invalid_player]
     runner = FakeRunner([json.dumps(payload)])
     source = _source(tmp_path, "running", runner)
 
-    accounts = source.load_accounts()
+    with pytest.raises(DataSourceError) as error:
+        source.load_accounts()
 
-    assert len(accounts) == 1
-    assert [character.char_id for character in accounts[0].characters] == [
-        _FIXTURE_CHARACTER_ID
-    ]
+    assert error.value.code == "malformed_export"
+    assert "synthetic-private-value" not in str(error.value)
 
 
 def test_export_document_survives_container_preload_output(tmp_path: Path) -> None:
@@ -763,6 +780,17 @@ def test_export_document_is_found_after_unrelated_json_output(tmp_path: Path) ->
     runner = FakeRunner(
         [f"{noise}\n{json.dumps(_export_payload(), indent=2)}\ntrailing noise\n"]
     )
+    source = _source(tmp_path, "running", runner)
+
+    accounts = source.load_accounts()
+
+    assert [account.username for account in accounts] == ["fixture-account"]
+
+
+def test_export_document_ignores_non_list_players_candidate(tmp_path: Path) -> None:
+    private_value = "synthetic-private-value"
+    noise = json.dumps({"players": 2, "privateToken": private_value})
+    runner = FakeRunner([f"{noise}\n{json.dumps(_export_payload())}"])
     source = _source(tmp_path, "running", runner)
 
     accounts = source.load_accounts()
