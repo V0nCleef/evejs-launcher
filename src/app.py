@@ -450,6 +450,7 @@ class MainWindow(QMainWindow):
         self._cursor_override_active = False
         self._accounts: list[Account] = []
         self._data_selection: RuntimeDataSelection | None = None
+        self._data_load_error: str = ""
         self._group_target_identity: str | None = None
         self._group_state = TargetGroupState()
         self._launch_queue_group_name: str | None = None
@@ -4668,6 +4669,7 @@ class MainWindow(QMainWindow):
         ):
             return
         self._data_selection = result.selection
+        self._data_load_error = ""
         self._accounts = list(result.accounts)
         self._sync_character_groups(result.selection.target_identity)
         self._refresh_character_views()
@@ -4682,6 +4684,9 @@ class MainWindow(QMainWindow):
             return
         log.warning("Character account load failed (%s)", failure.code)
         self._data_selection = None
+        # An empty roster caused by a read failure must not look like an empty
+        # game store; keep the already-redacted reason for the Characters page.
+        self._data_load_error = failure.message or "Character data could not be loaded."
         self._accounts = []
         self._refresh_character_views()
 
@@ -4923,6 +4928,10 @@ class MainWindow(QMainWindow):
             setter = getattr(page, "set_group_state", None)
             if callable(setter):
                 setter(group_state)
+
+        error_setter = getattr(self._characters_page, "set_data_error", None)
+        if callable(error_setter):
+            error_setter(self._data_load_error)
 
         try:
             self._characters_page.refresh(

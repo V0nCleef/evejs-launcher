@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import logging
 import math
 from pathlib import Path, PureWindowsPath
 from typing import Callable, Mapping, Protocol
@@ -39,6 +40,12 @@ _DEFAULT_TIMEOUT = 20.0
 _DEFAULT_OUTPUT_LIMIT = 8 * 1024 * 1024
 _MAX_PLAYERS = 10_000
 _MAX_TEXT_LENGTH = 256
+# Bounded number of stdout positions probed for the export document before the
+# response is treated as malformed.
+_MAX_DOCUMENT_OFFSETS = 32
+
+
+log = logging.getLogger(__name__)
 
 
 class DataSourceError(RuntimeError):
@@ -177,19 +184,7 @@ class DockerExportDataSource:
                 "export_too_large",
                 "Docker character export exceeded the safe response limit.",
             )
-        try:
-            payload = json.loads(result.stdout)
-        except (json.JSONDecodeError, UnicodeError) as exc:
-            raise DataSourceError(
-                "malformed_export",
-                "Docker character export returned malformed JSON.",
-            ) from exc
-        if not isinstance(payload, Mapping):
-            raise DataSourceError(
-                "malformed_export",
-                "Docker character export returned an unsupported payload.",
-            )
-        return payload
+        return _decode_export_payload(result.stdout)
 
     def _command(self, char_id: int | None) -> tuple[str, ...]:
         raw_state = (self.server_record.raw_state or "").casefold()
@@ -490,6 +485,78 @@ def _command_failure(error: DockerCommandError) -> DataSourceError:
     )
 
 
+def _document_offsets(stdout: str) -> list[int]:
+    """Return bounded candidate start positions for the export document."""
+    offsets: list[int] = []
+    position = 0
+    while position <= len(stdout) and len(offsets) < _MAX_DOCUMENT_OFFSETS:
+        if stdout.startswith("{", position):
+            offsets.append(position)
+        newline = stdout.find("\n", position)
+        if newline < 0:
+            break
+        position = newline + 1
+        while stdout.startswith((" ", "\t", "\r"), position):
+            position += 1
+    return offsets
+
+
+def _decode_export_payload(stdout: str) -> Mapping[str, object]:
+    """Decode the export document from a stream that may carry other output.
+
+    Anything the container loads before the CLI — a mod preload hook attached
+    through ``NODE_OPTIONS``, a Node deprecation warning — writes to the same
+    stdout the export uses.  The document is the first complete JSON object
+    that carries the export's own player collection, so decode from there
+    instead of requiring the whole buffer to be the payload.
+    """
+    decoder = json.JSONDecoder()
+    for offset in _document_offsets(stdout):
+        try:
+            payload, _end = decoder.raw_decode(stdout, offset)
+        except (ValueError, UnicodeError):
+            continue
+        if isinstance(payload, Mapping) and "players" in payload:
+            return payload
+    raise DataSourceError(
+        "malformed_export",
+        "Docker character export returned malformed JSON.",
+    )
+
+
+def _parse_export_player(
+    player: object,
+) -> tuple[str, int, str, bool, Character] | None:
+    """Map one exported record, or ``None`` when it is not a live character.
+
+    A character biomassed in game keeps its row with ``accountId`` cleared, so
+    the export still lists it under a placeholder account.  The Native SQLite
+    reader skips exactly those rows; skipping them here holds both readers to
+    one contract instead of letting a retired pilot invalidate the roster.
+    """
+    if not isinstance(player, Mapping) or player.get("accountId") is None:
+        return None
+    try:
+        char_id = _positive_id(player.get("characterId"))
+        username = _required_text(player.get("accountName"))
+        account_id = _nonnegative_int(player.get("accountId"))
+        banned = _strict_bool(player.get("banned"))
+        role = "gm" if _strict_bool(player.get("isGM")) else "0"
+        character = Character(
+            char_id=char_id,
+            name=_required_text(player.get("characterName")),
+            isk=_number_as_int(player.get("balance", 0)),
+            skill_points=_number_as_int(player.get("skillPoints", 0)),
+            ship_name=_optional_text(player.get("shipName"), "—"),
+            ship_type_id=_number_as_int(player.get("shipTypeID", 0)),
+            location=_optional_text(player.get("solarSystemName"), "—"),
+            security_status=_finite_float(player.get("securityStatus", 0.0)),
+        )
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return username, account_id, role, banned, character
+
+
 def _map_export_accounts(payload: Mapping[str, object]) -> list[Account]:
     players = payload.get("players")
     if not isinstance(players, list) or len(players) > _MAX_PLAYERS:
@@ -500,42 +567,35 @@ def _map_export_accounts(payload: Mapping[str, object]) -> list[Account]:
 
     accounts: dict[tuple[str, int], Account] = {}
     character_ids: set[int] = set()
-    try:
-        for player in players:
-            if not isinstance(player, Mapping):
-                raise ValueError
-            char_id = _positive_id(player.get("characterId"))
-            if char_id in character_ids:
-                raise ValueError
-            character_ids.add(char_id)
-            username = _required_text(player.get("accountName"))
-            account_id = _nonnegative_int(player.get("accountId"))
-            banned = _strict_bool(player.get("banned"))
-            role = "gm" if _strict_bool(player.get("isGM")) else "0"
-            key = (username, account_id)
-            account = accounts.get(key)
-            if account is None:
-                account = Account(username, account_id, role, banned)
-                accounts[key] = account
-            elif account.role != role or account.banned is not banned:
-                raise ValueError
-            account.characters.append(
-                Character(
-                    char_id=char_id,
-                    name=_required_text(player.get("characterName")),
-                    isk=_number_as_int(player.get("balance", 0)),
-                    skill_points=_number_as_int(player.get("skillPoints", 0)),
-                    ship_name=_optional_text(player.get("shipName"), "—"),
-                    ship_type_id=_number_as_int(player.get("shipTypeID", 0)),
-                    location=_optional_text(player.get("solarSystemName"), "—"),
-                    security_status=_finite_float(player.get("securityStatus", 0.0)),
-                )
-            )
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise DataSourceError(
-            "malformed_export",
-            "Docker character export contains invalid player data.",
-        ) from exc
+    skipped = 0
+    for player in players:
+        parsed = _parse_export_player(player)
+        if parsed is None:
+            skipped += 1
+            continue
+        username, account_id, role, banned, character = parsed
+        if character.char_id in character_ids:
+            skipped += 1
+            continue
+        key = (username, account_id)
+        account = accounts.get(key)
+        if account is None:
+            account = Account(username, account_id, role, banned)
+            accounts[key] = account
+        elif account.role != role or account.banned is not banned:
+            skipped += 1
+            continue
+        character_ids.add(character.char_id)
+        account.characters.append(character)
+
+    if skipped:
+        # Counts only — an export record can carry private character data.
+        log.info(
+            "Skipped %s of %s exported character records that are retired or "
+            "failed validation",
+            skipped,
+            len(players),
+        )
 
     result = sorted(accounts.values(), key=lambda account: account.username.casefold())
     for account in result:

@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import QApplication
 from src.constants import COLORS, Status
 from src.core.db import Account, Character
 from src.core.process_tracker import ProcessTracker
-from src.pages.characters_page import CharactersPage
+from src.pages.characters_page import _ROSTER_SUBTITLE, CharactersPage
 
 
 def _accounts(count: int = 6) -> list[Account]:
@@ -239,5 +239,50 @@ def test_status_filter_and_keyboard_selection_preserve_public_contracts(
         qapp.processEvents()
         assert len(selection_spy) == 1
         assert ready_card.property("selected") is False
+    finally:
+        _close_page(qapp, page)
+
+
+def test_unreadable_roster_is_distinguished_from_an_empty_game_store(
+    qapp: QApplication,
+) -> None:
+    """A failed EveJS read must not render as a store with no characters."""
+    reason = "Docker character export returned malformed JSON."
+    page = _show_page(qapp, QSize(1146, 680), count=0)
+    try:
+        assert page.count_label.text() == "(0)"
+
+        page.set_data_error(reason)
+        qapp.processEvents()
+
+        assert page.count_label.text() == "DATA UNAVAILABLE"
+        assert page.count_label.toolTip() == reason
+        assert page.count_label.property("state") == "error"
+        assert page.page_header.subtitle_label.text() == reason
+
+        page.set_data_error("")
+        qapp.processEvents()
+
+        assert page.count_label.text() == "(0)"
+        assert page.count_label.property("state") == ""
+        assert page.page_header.subtitle_label.text() == _ROSTER_SUBTITLE
+    finally:
+        _close_page(qapp, page)
+
+
+def test_recovered_roster_reports_counts_instead_of_the_stale_failure(
+    qapp: QApplication,
+) -> None:
+    """Cards arriving after a failure retire the unavailable state."""
+    page = _show_page(qapp, QSize(1146, 680), count=0)
+    try:
+        page.set_data_error("Docker character export returned malformed JSON.")
+        qapp.processEvents()
+        assert page.count_label.text() == "DATA UNAVAILABLE"
+
+        page.refresh(_accounts(3), [], ProcessTracker())
+        qapp.processEvents()
+
+        assert page.count_label.text() == "(3)"
     finally:
         _close_page(qapp, page)

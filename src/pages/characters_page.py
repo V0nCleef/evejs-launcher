@@ -84,6 +84,7 @@ GRID_COLUMNS = 6
 GRID_SPACING = 10
 _SKELETON_COUNT = 6
 _DETAIL_HEIGHT = 150
+_ROSTER_SUBTITLE = "Inspect capsule telemetry, organise launch groups, and deploy a pilot."
 
 
 class _StaticCharacterScene(QWidget):
@@ -195,6 +196,7 @@ class CharactersPage(QWidget):
         self._launching_accounts: dict[str, str] = {}
         self._character_creation_available = True
         self._character_creation_reason = ""
+        self._data_error = ""
         self._group_state = TargetGroupState()
         self._group_launch_available = False
         self._group_launch_reason = "No visible accounts available"
@@ -229,7 +231,7 @@ class CharactersPage(QWidget):
 
         self.page_header = PageHeader(
             "CHARACTERS",
-            "Inspect capsule telemetry, organise launch groups, and deploy a pilot.",
+            _ROSTER_SUBTITLE,
             "DEEP SIGNAL // CAPSULE REGISTRY",
             self._foreground,
         )
@@ -987,6 +989,24 @@ class CharactersPage(QWidget):
         else:
             self.launch_group_requested.emit()
 
+    def set_data_error(self, message: str) -> None:
+        """Distinguish an unreadable roster from a genuinely empty one.
+
+        Without this, a failed EveJS read renders exactly like a store with no
+        characters, so the launcher appears to have lost pilots that are still
+        present.  The message is already bounded and redacted by the worker.
+        """
+        message = str(message or "").strip()
+        if message == self._data_error:
+            return
+        self._data_error = message
+        self.count_label.setToolTip(message)
+        self.count_label.setProperty("state", "error" if message else "")
+        self.count_label.style().unpolish(self.count_label)
+        self.count_label.style().polish(self.count_label)
+        self.page_header.set_subtitle(message or _ROSTER_SUBTITLE)
+        self._apply_filter(self.search_edit.text())
+
     def set_character_creation_available(
         self,
         enabled: bool,
@@ -1272,7 +1292,9 @@ class CharactersPage(QWidget):
             if group_member_ids is None
             else sum(card.char_id in group_member_ids for card in self._cards.values())
         )
-        if needle or status_filter is not None:
+        if self._data_error and not self._cards:
+            self.count_label.setText("DATA UNAVAILABLE")
+        elif needle or status_filter is not None:
             self.count_label.setText(f"({visible} / {group_total})")
         elif group_member_ids is not None:
             self.count_label.setText(f"({group_total} of {total})")
