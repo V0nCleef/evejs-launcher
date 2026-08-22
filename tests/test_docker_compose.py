@@ -1,22 +1,40 @@
 """Read-only Compose discovery, parsing, and preflight tests."""
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
+import subprocess
 
 import pytest
 
-from src.core.runtime.docker_cli import DockerCommandError, DockerCommandResult
+from src.core.runtime.docker_cli import (
+    DockerCommandError,
+    DockerCommandResult,
+    DockerCommandRunner,
+)
 from src.core.runtime.docker_compose import (
     ComposeInspector,
     ComposeTarget,
     ComposeValidationError,
+    ContainerRecord,
     PreflightFailureKind,
+    docker_container_runtime_identity,
     parse_compose_config,
     parse_ps_output,
     resolve_mount,
 )
 from src.core.service_status import ServiceState
+
+
+class ParsedRunnerMixin:
+    """Minimal trusted-parser contract for focused inspector test doubles."""
+
+    def run_parsed(self, args, *, cwd, parser, timeout=10.0):
+        result = self.run(args, cwd=cwd, timeout=timeout)
+        if result.truncated:
+            raise ValueError("structured fixture output was truncated")
+        return parser(result.stdout)
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "docker"
@@ -90,6 +108,7 @@ def test_config_parser_resolves_remapped_loopback_endpoints_and_nested_mount() -
                 "ports": ["127.0.0.1:32600:26000", "127.0.0.1:32601:26001", "127.0.0.1:32602:26002", "127.0.0.1:34443:26003", "127.0.0.1:35222:5222"],
                 "healthcheck": {"test": ["CMD", "true"]}, "depends_on": {"market": {"condition": "service_healthy"}},
                 "stop_grace_period": "45s",
+                "environment": {"NODE_OPTIONS": "--require /app/mods/alpha/loader.js"},
                 "volumes": [{"type": "volume", "source": "data", "target": "/var/lib/evejs"}, {"type": "bind", "source": "C:/Fixture Space/EveJS/_local/gameStore", "target": "/var/lib/evejs/gameStore"}],
             },
             "market-tools": {},
@@ -108,8 +127,36 @@ def test_config_parser_resolves_remapped_loopback_endpoints_and_nested_mount() -
     assert parsed.endpoints.market.service == "market"
     assert parsed.endpoints.game.protocol == "tcp"
     assert parsed.capabilities.init and parsed.capabilities.market_tools
+    assert parsed.server_node_options_sha256 == hashlib.sha256(
+        b"--require /app/mods/alpha/loader.js"
+    ).hexdigest()
     assert parsed.services["server"].has_healthcheck
     assert resolve_mount(parsed.services["server"].mounts, "/var/lib/evejs/gameStore/private.db").source == "C:/Fixture Space/EveJS/_local/gameStore"
+
+
+def test_config_parser_distinguishes_empty_and_missing_node_options() -> None:
+    services = {
+        "market": {"ports": ["127.0.0.1:40110:40110"]},
+        "server": {
+            "ports": [
+                "127.0.0.1:32600:26000",
+                "127.0.0.1:32601:26001",
+                "127.0.0.1:32602:26002",
+                "127.0.0.1:34443:26003",
+                "127.0.0.1:35222:5222",
+            ],
+        },
+    }
+
+    missing = parse_compose_config({"services": services})
+    empty_services = {
+        **services,
+        "server": {**services["server"], "environment": {"NODE_OPTIONS": ""}},
+    }
+    empty = parse_compose_config({"services": empty_services})
+
+    assert missing.server_node_options_sha256 is None
+    assert empty.server_node_options_sha256 == hashlib.sha256(b"").hexdigest()
 
 
 def test_config_parser_treats_explicitly_disabled_healthcheck_as_absent() -> None:
@@ -192,7 +239,7 @@ def test_preflight_classifies_stopped_daemon_with_actionable_diagnostic(
     compose_file.write_text("services: {}\n", encoding="utf-8")
     calls: list[tuple[str, ...]] = []
 
-    class Runner:
+    class Runner(ParsedRunnerMixin):
         executable = "docker"
 
         def run(
@@ -222,7 +269,7 @@ def test_preflight_classifies_windows_container_engine_mode(tmp_path: Path) -> N
     compose_file = tmp_path / "compose.yaml"
     compose_file.write_text("services: {}\n", encoding="utf-8")
 
-    class Runner:
+    class Runner(ParsedRunnerMixin):
         executable = "docker"
 
         def run(
@@ -248,7 +295,7 @@ def test_preflight_classifies_missing_compose_plugin(tmp_path: Path) -> None:
     compose_file = tmp_path / "compose.yaml"
     compose_file.write_text("services: {}\n", encoding="utf-8")
 
-    class Runner:
+    class Runner(ParsedRunnerMixin):
         executable = "docker"
 
         def run(
@@ -277,7 +324,7 @@ def test_preflight_classifies_invalid_compose_configuration(tmp_path: Path) -> N
     compose_file = tmp_path / "compose.yaml"
     compose_file.write_text("services: {}\n", encoding="utf-8")
 
-    class Runner:
+    class Runner(ParsedRunnerMixin):
         executable = "docker"
 
         def run(
@@ -309,7 +356,7 @@ def test_preflight_classifies_invalid_compose_configuration(tmp_path: Path) -> N
 def test_preflight_classifies_missing_compose_file_without_running_cli(
     tmp_path: Path,
 ) -> None:
-    class Runner:
+    class Runner(ParsedRunnerMixin):
         executable = "docker"
 
         def run(self, *_args, **_kwargs):
@@ -329,7 +376,7 @@ def test_preflight_classifies_malformed_effective_config_json(tmp_path: Path) ->
     compose_file = tmp_path / "compose.yaml"
     compose_file.write_text("services: {}\n", encoding="utf-8")
 
-    class Runner:
+    class Runner(ParsedRunnerMixin):
         executable = "docker"
 
         def run(
@@ -368,7 +415,7 @@ def test_preflight_classifies_missing_required_service_set(tmp_path: Path) -> No
     compose_file = tmp_path / "compose.yaml"
     compose_file.write_text("services: {}\n", encoding="utf-8")
 
-    class Runner:
+    class Runner(ParsedRunnerMixin):
         executable = "docker"
 
         def run(
@@ -412,7 +459,7 @@ def test_preflight_classifies_service_status_inspection_failure(tmp_path: Path) 
         },
     })
 
-    class Runner:
+    class Runner(ParsedRunnerMixin):
         executable = "docker"
 
         def run(
@@ -458,7 +505,7 @@ def test_read_only_preflight_command_order_and_allowlist(tmp_path: Path) -> None
     compose_file.write_text("name: fixture\n", encoding="utf-8")
     config = json.dumps({"name": "fixture", "services": {"init": {}, "market": {"ports": ["127.0.0.1:40110:40110"]}, "server": {"ports": ["127.0.0.1:32600:26000", "127.0.0.1:32601:26001", "127.0.0.1:32602:26002", "127.0.0.1:34443:26003", "127.0.0.1:35222:5222"]}}})
 
-    class Runner:
+    class Runner(ParsedRunnerMixin):
         executable = "docker"
         def run(self, args: tuple[str, ...], *, cwd: Path, timeout: float = 10.0) -> DockerCommandResult:
             calls.append(args)
@@ -498,6 +545,87 @@ def test_read_only_preflight_command_order_and_allowlist(tmp_path: Path) -> None
         report.records["other"] = report.records["server"]  # type: ignore[index]
 
 
+def test_preflight_parses_secret_bearing_config_inside_real_runner(
+    tmp_path: Path,
+) -> None:
+    """Effective config must be parsed before textual redaction can alter it."""
+
+    compose_file = tmp_path / "compose.yaml"
+    compose_file.write_text("name: fixture\n", encoding="utf-8")
+    private_node_options = (
+        "--require /app/mods/alpha/loader.js password=CANARY_CONFIG_SECRET"
+    )
+    config_payload = {
+        "name": "fixture",
+        "services": {
+            "market": {"ports": ["127.0.0.1:40110:40110"]},
+            "server": {
+                "environment": {
+                    "NODE_OPTIONS": private_node_options,
+                    "DATABASE_PASSWORD": "CANARY_DATABASE_SECRET",
+                },
+                "ports": [
+                    "127.0.0.1:32600:26000",
+                    "127.0.0.1:32601:26001",
+                    "127.0.0.1:32602:26002",
+                    "127.0.0.1:34443:26003",
+                    "127.0.0.1:35222:5222",
+                ],
+            },
+        },
+    }
+    config_stdout = json.dumps(config_payload, separators=(",", ":"))
+
+    def execute(
+        argv: tuple[str, ...],
+        _cwd: Path,
+        _timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        args = argv[1:]
+        stdout = {
+            ("version", "--format", "{{.Server.Os}}|{{.Server.Version}}"): (
+                "linux|29.5.2"
+            ),
+            ("compose", "version", "--format", "{{.Version}}"): "5.1.3",
+        }.get(args)
+        if stdout is None and args[-4:] == (
+            "--profile",
+            "tools",
+            "config",
+            "--services",
+        ):
+            stdout = "market\nserver\n"
+        elif stdout is None and args[-2:] == ("config", "--services"):
+            stdout = "market\nserver\n"
+        elif stdout is None and args[-3:] == ("config", "--format", "json"):
+            stdout = config_stdout
+        elif stdout is None and args[-4:] == (
+            "ps",
+            "--all",
+            "--format",
+            "json",
+        ):
+            stdout = "[]"
+        assert stdout is not None
+        return subprocess.CompletedProcess(argv, 0, stdout, "")
+
+    runner = DockerCommandRunner(executable="docker", execute=execute)
+    report = ComposeInspector(runner).preflight(
+        ComposeTarget(compose_file, tmp_path)
+    )
+
+    assert report.ok
+    assert report.config is not None
+    assert report.config.server_node_options_sha256 == hashlib.sha256(
+        private_node_options.encode("utf-8")
+    ).hexdigest()
+    assert report.config.effective_config_digest == parse_compose_config(
+        config_payload
+    ).effective_config_digest
+    assert "CANARY_CONFIG_SECRET" not in repr(report)
+    assert "CANARY_DATABASE_SECRET" not in repr(report)
+
+
 def test_preflight_discovers_profile_gated_market_tools_with_tools_profile(
     tmp_path: Path,
 ) -> None:
@@ -519,7 +647,7 @@ def test_preflight_discovers_profile_gated_market_tools_with_tools_profile(
         },
     })
 
-    class Runner:
+    class Runner(ParsedRunnerMixin):
         executable = "docker"
 
         def run(
@@ -572,7 +700,7 @@ def test_preflight_discovers_profile_gated_market_tools_with_tools_profile(
     ("compose", "config", "--format", "yaml"), ("compose", "ps", "--format", "json"),
 ])
 def test_read_only_allowlist_rejects_every_unrecognized_shape_before_runner(args: tuple[str, ...], tmp_path: Path) -> None:
-    class Runner:
+    class Runner(ParsedRunnerMixin):
         executable = "docker"
         def run(self, *args: object, **kwargs: object) -> DockerCommandResult:
             raise AssertionError("unrecognized command reached runner")
@@ -580,3 +708,57 @@ def test_read_only_allowlist_rejects_every_unrecognized_shape_before_runner(args
     inspector = ComposeInspector(Runner())
     with pytest.raises(RuntimeError, match="allowlist"):
         inspector._run(args, ComposeTarget(tmp_path / "compose.yaml", tmp_path))
+
+
+def test_runtime_inspection_hash_changes_when_same_container_restarts(
+    tmp_path: Path,
+) -> None:
+    full_id = "a" * 64
+    starts = iter(
+        (
+            "2026-08-22T10:20:30.123456789Z",
+            "2026-08-22T10:21:31.987654321Z",
+        )
+    )
+
+    class Runner(ParsedRunnerMixin):
+        executable = "docker"
+
+        def run(self, args, *, cwd):
+            started_at = next(starts)
+            return DockerCommandResult(
+                args,
+                0,
+                f"{full_id}\t{started_at}\ttrue\n",
+                "",
+                False,
+                False,
+            )
+
+    target = ComposeTarget(tmp_path / "compose.yaml", tmp_path)
+    record = ContainerRecord(
+        "server",
+        "fixture-server",
+        "a" * 12,
+        ServiceState.ONLINE,
+        "healthy",
+        None,
+        (),
+        raw_state="running",
+    )
+    inspector = ComposeInspector(Runner())
+
+    first = inspector.container_runtime_identity(target, record)
+    second = inspector.container_runtime_identity(target, record)
+
+    assert first == docker_container_runtime_identity(
+        full_id,
+        "2026-08-22T10:20:30.123456789Z",
+        expected_short_id="a" * 12,
+    )
+    assert second == docker_container_runtime_identity(
+        full_id,
+        "2026-08-22T10:21:31.987654321Z",
+        expected_short_id="a" * 12,
+    )
+    assert first != second

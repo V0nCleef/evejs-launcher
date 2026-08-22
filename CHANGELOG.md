@@ -2,6 +2,43 @@
 
 ## Changelog
 
+## v1.0.45 — 2026-08-22
+
+### Added
+- **Launcher-managed mods** — schema-v2 manifests let the launcher discover supported mods, show them under **Mods**, and enable or disable them without uninstalling their files or deleting their state.
+- **Native and Docker activation contracts** — Native loader/source-integrated mods and Managed Docker loader mods now share one fail-closed lifecycle, including durable activation intent, cross-process locking, restart requirements, and runtime verification.
+- **Temp NPC 0.4.2 support** — Temp NPC is recognized as a Native mod and can be toggled from the launcher. When disabled, its bootstrap exits before loading EveJS or mod state, so it is functionally absent from the running game.
+- **Launcher-native mod removal** — compatible source-integrated mod installers can use registration schema 2 and the `inno-user-v2` provider to enroll a separately verified removal kit and post-removal inventory, allowing an installed mod to be removed directly from its row under **Mods**.
+- **Explicit saved-data choice** — removal defaults to keeping mod data, with an advanced quarantine option only when the mod's installer supports it. Shared EveJS and GameStore database records are never presented as mod-owned data.
+- **Complete mod-author contract** — `docs/MOD_AUTHORING.md` documents loader and source-integrated layouts, the strict schema-v2 manifest, disabled-state boundaries, runtime attestation, installer transactions, launcher-managed removal, upgrade rules, verification, and the distinction between the launcher framework and a future upstream EveJS plugin API.
+
+### Safety and compatibility
+- Unknown, malformed, or unsupported mod contracts are never guessed at and remain unavailable. A successful toggle changes configured state; it is not reported as runtime-effective until launch-time verification confirms the exact expected state. Source-integrated mods provide that evidence through their Game-server attestation markers. Mismatches trigger a corrective stop instead of leaving an ambiguous server running.
+- Mod files and persistent state remain installed while disabled. GameStore, Market, character, account, item, and profile data are not purged or migrated by mod toggles.
+- Native startup attestation reads at most 2 MiB of stable Game-server stdout evidence. Oversized, malformed, duplicate, stale-PID, missing, or state-mismatched evidence fails closed.
+- Docker activation uses an exact launcher-rendered override and a durable prior/desired-hash transaction marker. Ordinary lifecycle attachment fails closed after an interrupted Apply; explicitly applying the same visible selection can resume the exact stranded transaction. Sensitive environment values stay outside the structured status parser.
+- The launcher stops Game and Market processes it owns before removal, refuses to alter live files beneath externally started services, keeps the interface responsive, and leaves the stack stopped afterward.
+- Removal authority is not accepted from the runtime mod manifest. The launcher validates a fixed installer registration, exact EveJS root, package/helper/current-journal/removal-inventory/`unins000.exe`/`unins000.dat` hashes, matching Windows uninstall metadata, and safe non-reparse paths. After a zero-exit uninstall it verifies every enrolled integration path is absent or restored to its exact original hash, then proves the journal, registrations, and complete uninstall kit are gone.
+- Registry enrollment is checked explicitly across 32-bit and 64-bit Windows views. Ambiguous or tampered registrations fail closed and appear as needing repair instead of executing an untrusted command.
+- The v2 installer provider holds a per-AppId Windows mutex across Setup/removal and uses a one-use launcher authorization mutex for the verified uninstaller. The child also requires exact three-way agreement between the launcher's validated root and both provider registry roots before changing files. This closes executable, metadata, and target-root validation-to-execution swap windows without allowing concurrent compatible operations.
+- The v2 installer provider supports one installation of a given mod per Windows user. Its Setup must refuse a second EveJS root until the first installation is removed.
+- Managed removal v2 requires a source-integrated schema-v2 manifest and package version. Legacy loader-only mods remain toggleable but cannot enroll this removal provider.
+
+### Changed
+- Mod rows now distinguish launcher-managed removal from externally installed mods. An external mod remains toggleable when its activation contract is supported; running its matching compatible Setup once adds the **Remove** action.
+- Mod-management actions now use scoped Deep Signal styling: a restrained destructive treatment for **Remove**, amber for **Repair**, and a neutral read-only state for **External**, including dedicated hover, pressed, focus, disabled, and cursor behavior.
+- Windows **Installed apps** remains a fallback for compatible Setup packages, not the normal EveJS workflow.
+
+### Fixed
+- **Client launch certificate discovery** — the launcher and EveJS v0.12.6 certificate helper now inspect only the four documented `bin64`/`bin` certificate-bundle locations instead of recursively walking the entire copied EVE client. Healthy bundles bypass PowerShell bundle discovery, first-time repairs remain reverified, and profile junction creation now has an explicit timeout.
+- **Accurate client launch state** — each tracked process now owns its own time-based launch grace period, with an exact GUI refresh at expiry. A different EVE window can no longer leave another character card stuck on **LAUNCHING**.
+- **Exited clients no longer remain stuck as running** — status reads can no longer consume the process-exit event before the UI refresh sees it. Exact-PID window tracking retires lingering EVE processes after their visible client closes, and the selected character panel now uses the same `RUNNING`, `WAITING`, and ready state as its card.
+- **Launch-worker recovery and lifecycle gating** — thread-start exceptions and workers that exit without a terminal result release their exact pending request and queue slot. Native client spawning is also blocked while a server or mod lifecycle owns the runtime, closing the race with managed mod removal.
+
+### Verification
+- **1,570 automated launcher tests passed** with 4 skipped. Focused Windows PowerShell 5.1 probes verified bounded certificate discovery against both a decoy fixture and the live copied client; the live lookup returned its two exact `bin64` bundles in 10 ms. Character lifecycle regressions cover status-read ordering, exact-PID window ownership, lingering processes, multi-client isolation, and card/detail-panel agreement. Mod regressions include strict activation/runtime parsing, transactional Docker restart recovery, exact managed-removal inventory proof, worker-failure recovery, external-service race refusal, and launcher-to-uninstaller root binding.
+- Temp NPC completed **193 automated tests** and its package validation, including a real isolated Setup/generated-uninstaller cycle and a two-root registry-drift refusal with byte-identical targets. A live Native disable/enable cycle reported exact disabled and running attestations, stopped gracefully both times, and finished enabled with no pending activation intent. A real client check then confirmed NPCs spawn while enabled and do not spawn after disabling the mod and restarting the stack.
+
 ## v1.0.44 — 2026-08-21
 
 ### Fixed

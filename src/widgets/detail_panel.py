@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QStackedWidget,
 )
 
-from src.constants import COLORS as C, SEMANTIC_COLORS as S
+from src.constants import COLORS as C, SEMANTIC_COLORS as S, Status
 
 
 class BorderedPortraitLabel(QLabel):
@@ -96,6 +96,7 @@ class DetailPanel(QFrame):
         self._launch_available = True
         self._launch_unavailable_reason = ""
         self._launch_pending = False
+        self._character_status = Status.READY
 
         self._setup_ui()
         self.show_empty()
@@ -464,14 +465,43 @@ class DetailPanel(QFrame):
         self._launch_pending = bool(pending)
         self._apply_launch_button_state()
 
+    def set_character_status(self, status: Status) -> None:
+        """Mirror the selected card's per-account launch state."""
+        self._character_status = status
+        self._apply_launch_button_state()
+
     def _apply_launch_button_state(self) -> None:
-        if self._launch_pending:
+        if self._launch_pending or self._character_status is Status.LAUNCHING:
             self._launch_btn.setEnabled(False)
             self._launch_btn.setText("LAUNCHING...")
             self._launch_btn.setToolTip("Preparing the profile and starting EVE")
             return
-        self._launch_btn.setEnabled(self._launch_available)
-        self._launch_btn.setText("LAUNCH" if self._launch_available else "VIEW ONLY")
-        self._launch_btn.setToolTip(
-            "" if self._launch_available else self._launch_unavailable_reason
-        )
+        if not self._launch_available:
+            self._launch_btn.setEnabled(False)
+            self._launch_btn.setText("VIEW ONLY")
+            self._launch_btn.setToolTip(self._launch_unavailable_reason)
+            return
+        blocked = {
+            Status.RUNNING: (
+                "RUNNING",
+                "This character's EVE client is already running.",
+            ),
+            Status.SAME_ACCOUNT_ONLINE: (
+                "WAITING",
+                "Another character on this account is already running.",
+            ),
+            Status.BANNED: (
+                "BANNED",
+                "This account is banned and cannot launch a character.",
+            ),
+        }
+        blocked_state = blocked.get(self._character_status)
+        if blocked_state is not None:
+            text, tooltip = blocked_state
+            self._launch_btn.setEnabled(False)
+            self._launch_btn.setText(text)
+            self._launch_btn.setToolTip(tooltip)
+            return
+        self._launch_btn.setEnabled(True)
+        self._launch_btn.setText("LAUNCH")
+        self._launch_btn.setToolTip("")

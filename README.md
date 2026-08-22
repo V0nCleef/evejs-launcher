@@ -96,7 +96,13 @@ The character card menu can hide a character without touching game data, assign 
 
 ![Mod Manager page](screenshots/mods.png)
 
-The Mod Manager scans the configured `mods` folder and shows the active state of each discovered mod. Changes take effect after the game server restarts. **Apply & Restart Server** routes through the same server-mode selection used by every other start path.
+The Mod Manager scans reviewed loader and source-integration contracts and shows each discovered mod's configured and verified runtime state. A successful toggle changes configuration only; it is not reported as runtime-effective until the restarted Game server provides the exact expected evidence. **Apply & Restart Server** routes through the same server-mode selection used by every other start path.
+
+A source-integrated mod installed by a launcher-compatible Setup also has **Remove** on its row. The v2 provider binds the exact `unins000.exe`, `unins000.dat`, recovery bundle, helper, active journal, and post-removal inventory by SHA-256. Removal is serialized against compatible Setup and direct uninstall runs, stops launcher-owned Game and Market processes, then runs the verified uninstaller with an explicit choice to keep saved data or quarantine local mod data. The launcher checks every enrolled integration path before reporting success, and the stack remains stopped afterward. Source-integrated mods installed another way are marked **External**; run that mod's matching compatible Setup once to enroll its removal kit. Legacy loader-only mods remain toggleable but cannot enroll the current removal provider. Windows **Installed apps** is only a fallback, not the normal removal path.
+
+The current v2 installer provider supports one installation of a given mod per Windows user. Launcher removal binds the verified child to the exact selected EveJS root and refuses divergent provider registry roots before touching files. To move that mod to another EveJS root, remove it from the original root first, select the other root in the launcher, and run Setup again.
+
+Mod authors should use the complete [EveJS Launcher mod authoring and integration guide](docs/MOD_AUTHORING.md). It documents supported layouts, the schema-v2 manifest, disabled-state boundary, runtime attestation, installer transactions, launcher-managed removal, testing, and the current limits of EveJS's upstream extension mechanisms.
 
 ### Tools
 
@@ -139,7 +145,7 @@ Settings covers the EveJS root, EVE client path, proxy address, Native/Docker ru
 | EVE clients | Creates account-specific profiles, launches clients through the local proxy, optionally performs verified local auto-login, and tracks running state. |
 | Bulk launch | Launches all visible characters or a selected user-defined group serially with a configurable delay; remaining queued launches can be cancelled. |
 | Characters | Reads character data and current portraits; supports search, hiding, grouping, Native creation with optional GM/overview copy, and backup-first deletion. |
-| Mods | Discovers mods, toggles their loader state, and restarts Game when requested. |
+| Mods | Discovers reviewed activation contracts, toggles state, removes installer-enrolled mods, and restarts Game when requested. |
 | Tools | Resolves 11 reviewed external utility wrappers with prerequisite and risk information. |
 | Audio and voice | Plays the bundled Deep Signal soundscape and local prerecorded LYRA announcements with separate volume, event, ducking, and preview controls. |
 | Updates | Checks GitHub Releases, downloads the release ZIP, shows progress, stages replacement, restarts, and cleans validated update artifacts. |
@@ -250,11 +256,17 @@ For the exact supported Native EVE client build 3396210, Settings can enable **A
 
 ## Mod handling
 
-A mod is discovered from the configured EveJS `mods` directory. Its active state is derived from its loader file. Toggling a row changes that loader state on disk; it does not hot-reload the running game server.
+The launcher supports two explicit contracts. Loader mods are discovered under `<evejs>/mods` and toggle by renaming their preload. Source-integrated schema-v2 mods are discovered under `<evejs>/server/mods` and toggle through a validated top-level Boolean in `<evejs>/config/mods`. Arbitrary source patches are not guessed at or presented as safely toggleable.
 
-Use **Apply & Restart Server** when the new mod state should take effect. The restart uses the same saved or prompted vanilla/modded selection as Home, client-triggered auto-start, and the navigation controls.
+This is a launcher-side management framework around existing EveJS loading mechanisms, not a universal upstream EveJS plugin API. Disabled loader code is not loaded; a disabled source-integrated mod keeps only its tiny configuration/status gate active and must return before loading gameplay code or touching state.
+
+Use **Apply & Restart Server** when the new configured mod state should become effective. The restart uses the same saved or prompted vanilla/modded selection as Home, client-triggered auto-start, and the navigation controls. Configured enabled does not by itself prove that the current Game server loaded the mod.
 
 In Managed Docker mode, Apply & Restart instead regenerates the launcher-owned Compose override from the visible ordered selection and recreates Game with those preloads. Connect-only mode never changes loader or Compose state.
+
+Managed Docker writes a durable transaction marker before replacing its exact launcher-owned override. If the launcher or computer stops during that handoff, ordinary Docker start/restart operations fail closed instead of consuming an uncertain override. Return to **Mods**, keep the same visible toggle selection, and press **Apply & Restart Server** again to resume the exact transaction. If the override no longer matches either its enrolled prior or desired hash, leave the launcher-owned files untouched and repair the artifact; the launcher deliberately refuses to guess.
+
+See the [mod authoring and integration guide](docs/MOD_AUTHORING.md) for the complete compatibility and packaging contract.
 
 ## Tool Deck catalogue
 
@@ -370,7 +382,7 @@ Connect-only mode deliberately disables all container, mod, and Docker Tool Deck
 <details>
 <summary>Why did a mod change not take effect?</summary>
 
-Mod toggles change files on disk. Restart the game server after changing them. **Apply & Restart Server** performs that restart through the normal server-mode resolver.
+Mod toggles change configured state on disk; they do not change an already-running Game server. **Apply & Restart Server** performs the required restart and runtime verification through the normal server-mode resolver. In Managed Docker mode, an interrupted Apply leaves ordinary lifecycle operations blocked: keep the same visible toggles and press **Apply & Restart Server** again to resume the exact transaction.
 
 </details>
 

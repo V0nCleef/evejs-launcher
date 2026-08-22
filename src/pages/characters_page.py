@@ -63,7 +63,7 @@ from src.constants import COLORS as C, SEMANTIC_COLORS as S, Status
 from src.core.dashboard import visible_character_rows
 from src.core.db import Account, Character, _fmt_isk, _fmt_sp
 from src.core.groups import TargetGroupState
-from src.core.process_tracker import ProcessTracker
+from src.core.process_tracker import CLIENT_LAUNCH_GRACE_SECONDS, ProcessTracker
 from src.core.runtime.data import native_data_selection
 from src.core.runtime.portraits import (
     PortraitImageResult,
@@ -182,6 +182,11 @@ class CharactersPage(QWidget):
         self._reflow_timer.setSingleShot(True)
         self._reflow_timer.setInterval(0)
         self._reflow_timer.timeout.connect(self._perform_deferred_reflow)
+        self._launch_grace_seconds = CLIENT_LAUNCH_GRACE_SECONDS
+        self._launch_status_timer = QTimer(self)
+        self._launch_status_timer.setSingleShot(True)
+        self._launch_status_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._launch_status_timer.timeout.connect(self._refresh_launch_statuses)
 
         self._portrait_threads: dict[
             QThread,
@@ -663,6 +668,9 @@ class CharactersPage(QWidget):
         # (e.g. hidden or removed), clear selection.
         elif self._selected_key not in desired_keys:
             self.clear_selection()
+        else:
+            self._sync_selected_detail_status()
+        self._schedule_launch_status_refresh()
 
     def _remove_skeletons(self) -> None:
         """Delete any SkeletonCard placeholders left in the grid."""
@@ -697,12 +705,74 @@ class CharactersPage(QWidget):
         running_char = self._tracker.get_running_character(username)
         if running_char == char.name:
             # Still in the launch window (EVE takes 10-15s to show its window)
-            if self._tracker.is_account_launching(username):
+            if self._tracker.is_account_launching(
+                username,
+                self._launch_grace_seconds,
+            ):
                 return Status.LAUNCHING
             return Status.RUNNING
         if running_char is not None:
             return Status.SAME_ACCOUNT_ONLINE
         return Status.READY
+
+    def _schedule_launch_status_refresh(self) -> None:
+        """Refresh at the next exact process-grace boundary on the GUI thread."""
+        self._launch_status_timer.stop()
+        if self._tracker is None:
+            return
+
+        remaining_values = []
+        seen_accounts: set[str] = set()
+        for username, _character in self._rotation_pool:
+            if username in seen_accounts or username in self._launching_accounts:
+                continue
+            seen_accounts.add(username)
+            remaining = self._tracker.account_launch_grace_remaining(
+                username,
+                self._launch_grace_seconds,
+            )
+            if remaining is not None and remaining > 0.0:
+                remaining_values.append(remaining)
+
+        if remaining_values:
+            delay_ms = max(1, int(min(remaining_values) * 1_000) + 1)
+            self._launch_status_timer.start(delay_ms)
+
+    @pyqtSlot()
+    def _refresh_launch_statuses(self) -> None:
+        """Apply launch-grace transitions without waiting for unrelated polling."""
+        self.refresh_process_states()
+
+    def refresh_process_states(self) -> bool:
+        """Reconcile cards and selected detail against current tracked clients."""
+        changed = False
+        for (username, char_id), card in self._cards.items():
+            character = self._find_character(username, char_id)
+            if character is not None:
+                status = self._status_for(username, character)
+                changed = changed or card._status is not status
+                card.set_status(status)
+        self._sync_selected_detail_status()
+        if self.status_combo.currentData() is not None:
+            self._apply_filter(self.search_edit.text())
+        # Timers may legally wake a fraction early. Re-arm against the exact
+        # remaining duration instead of trusting one wall-clock sample.
+        self._schedule_launch_status_refresh()
+        return changed
+
+    def _sync_selected_detail_status(self) -> None:
+        if self._selected_key is None:
+            return
+        username, char_id = self._selected_key
+        character = self._find_character(username, char_id)
+        if character is None:
+            return
+        self.detail_panel.set_character_status(
+            self._status_for(username, character)
+        )
+        self.detail_panel.set_launch_pending(
+            self._launching_accounts.get(username) == character.name
+        )
 
     def _relayout_grid(self) -> None:
         """Re-position visible cards using the current viewport width."""
@@ -1036,14 +1106,10 @@ class CharactersPage(QWidget):
                 if char is not None:
                     card.set_status(self._status_for(card_username, char))
 
-        selected_username, selected_character, _char_id = (
-            self.detail_panel.get_character()
-        )
-        self.detail_panel.set_launch_pending(
-            self._launching_accounts.get(selected_username) == selected_character
-        )
+        self._sync_selected_detail_status()
         if self.status_combo.currentData() is not None:
             self._apply_filter(self.search_edit.text())
+        self._schedule_launch_status_refresh()
 
     # ── Grid transition animation ─────────────────────────────────────────────
 
@@ -1362,9 +1428,7 @@ class CharactersPage(QWidget):
                 "Sec Status": card.sec_status if card is not None else "—",
             },
         )
-        self.detail_panel.set_launch_pending(
-            self._launching_accounts.get(username) == char.name
-        )
+        self._sync_selected_detail_status()
 
     def apply_character_detail(
         self,
@@ -1410,9 +1474,7 @@ class CharactersPage(QWidget):
             card._portrait_pixmap,
             stats,
         )
-        self.detail_panel.set_launch_pending(
-            self._launching_accounts.get(username) == char.name
-        )
+        self._sync_selected_detail_status()
         return True
 
     def _find_character(self, username: str, char_id: int) -> Character | None:

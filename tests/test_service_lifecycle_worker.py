@@ -74,6 +74,88 @@ def test_start_worker_waits_for_market_before_starting_game() -> None:
     assert observed[0].game_process.pid == 1002
 
 
+def test_start_worker_verifies_mod_runtime_after_game_readiness() -> None:
+    events: list[object] = []
+    snapshot = object()
+
+    def probe(port: int) -> bool:
+        events.append(("probe", port))
+        return True
+
+    def validate(process: FakeProcess) -> object:
+        events.append(("verify", process.pid))
+        return snapshot
+
+    worker = ServiceStartWorker(
+        "C:/Games/EveJS",
+        mode="modded",
+        start_market=False,
+        start_game=True,
+        probe=probe,
+        start_game_fn=lambda _root, *, mode: FakeProcess(1002),
+        game_runtime_validator=validate,
+    )
+    observed = []
+    worker.completed.connect(observed.append)
+
+    worker.run()
+
+    assert events == [("probe", int(Ports.GAME_TCP)), ("verify", 1002)]
+    assert observed[0].game_ready is True
+    assert observed[0].mod_runtime_snapshot is snapshot
+    assert observed[0].mod_runtime_error is None
+    assert observed[0].succeeded is True
+
+
+def test_start_worker_reports_mod_runtime_verification_failure() -> None:
+    def fail_validation(_process: FakeProcess) -> object:
+        raise RuntimeError("missing disabled marker")
+
+    worker = ServiceStartWorker(
+        "C:/Games/EveJS",
+        mode="modded",
+        start_market=False,
+        start_game=True,
+        probe=lambda _port: True,
+        start_game_fn=lambda _root, *, mode: FakeProcess(1002),
+        game_runtime_validator=fail_validation,
+    )
+    observed = []
+    worker.completed.connect(observed.append)
+
+    worker.run()
+
+    assert observed[0].game_process.pid == 1002
+    assert observed[0].game_ready is True
+    assert observed[0].game_error is None
+    assert "missing disabled marker" in str(observed[0].mod_runtime_error)
+    assert observed[0].succeeded is False
+
+
+def test_start_worker_does_not_publish_ready_after_mod_verification_failure() -> None:
+    phases: list[tuple[str, str]] = []
+    worker = ServiceStartWorker(
+        "C:/Games/EveJS",
+        mode="modded",
+        start_market=False,
+        start_game=True,
+        probe=lambda _port: True,
+        start_game_fn=lambda _root, *, mode: FakeProcess(1002),
+        game_runtime_validator=lambda _process: None,
+    )
+    observed = []
+    worker.phase_changed.connect(lambda service, phase: phases.append((service, phase)))
+    worker.completed.connect(observed.append)
+
+    worker.run()
+
+    assert ("game", "verification_failed") in phases
+    assert ("game", "ready") not in phases
+    assert observed[0].game_ready is True
+    assert "returned no evidence" in str(observed[0].mod_runtime_error)
+    assert observed[0].succeeded is False
+
+
 def test_start_worker_allows_slow_first_market_build_without_extending_game_timeout() -> None:
     now = [0.0]
     game_started_at: list[float] = []
@@ -505,6 +587,56 @@ def test_stop_worker_force_kills_exact_process_when_graceful_request_fails() -> 
         "may be incomplete."
     )
     assert observed[0].succeeded is False
+
+
+def test_stop_worker_never_force_kills_when_operation_disallows_it() -> None:
+    game = FakeProcess(4242)
+    forced: list[int] = []
+    observed = []
+    worker = ServiceStopWorker(
+        game,
+        None,
+        graceful_game_stop_fn=lambda _process: False,
+        force_kill_fn=lambda process: forced.append(process.pid) is None,
+        allow_force_game_kill=False,
+    )
+    worker.completed.connect(observed.append)
+
+    worker.run()
+
+    assert forced == []
+    assert game.poll() is None
+    assert observed[0].game_stopped is False
+    assert observed[0].game_error == (
+        "Service rejected the graceful shutdown request."
+    )
+
+
+def test_stop_worker_never_force_kills_after_mod_restart_timeout() -> None:
+    game = FakeProcess(4242)
+    forced: list[int] = []
+    observed = []
+    worker = ServiceStopWorker(
+        game,
+        None,
+        game_graceful_timeout_sec=0.01,
+        poll_interval_sec=0,
+        graceful_game_stop_fn=lambda _process: True,
+        force_kill_fn=lambda process: forced.append(process.pid) is None,
+        allow_force_game_kill=False,
+        clock_fn=iter((0.0, 1.0)).__next__,
+    )
+    worker.completed.connect(observed.append)
+
+    worker.run()
+
+    assert forced == []
+    assert game.poll() is None
+    assert observed[0].game_stopped is False
+    assert observed[0].game_error == (
+        "Service did not exit before the graceful shutdown deadline; "
+        "forced shutdown is disabled for this operation."
+    )
 
 
 def test_stop_worker_allows_game_cleanup_to_finish_after_full_hook_budget() -> None:

@@ -14,6 +14,9 @@ from src.core.runtime.docker_mods import (
     attach_docker_mod_override,
     build_docker_mod_override,
     docker_mod_override_path,
+    docker_mod_transaction_path,
+    finalize_docker_mod_override,
+    rollback_docker_mod_override,
 )
 from src.core.service_status import DockerControlPolicy
 
@@ -57,6 +60,42 @@ def test_override_output_and_hash_are_deterministic_in_selected_preload_order(
     assert first.content.endswith("\n")
 
 
+def test_empty_override_explicitly_clears_inherited_node_options(
+    tmp_path: Path,
+) -> None:
+    override = build_docker_mod_override(tmp_path, ())
+
+    assert override.selected_mods == ()
+    assert override.node_options == ""
+    assert _json_scalar(override.content, "NODE_OPTIONS") == ""
+    assert "volumes:" not in override.content
+    assert override.content_hash == hashlib.sha256(
+        override.content.encode("utf-8")
+    ).hexdigest()
+
+
+def test_owned_override_normalizes_over_limit_json_integer(tmp_path: Path) -> None:
+    rendered = build_docker_mod_override(tmp_path, ()).content
+    lines = rendered.splitlines()
+    index = next(
+        index
+        for index, line in enumerate(lines)
+        if line.lstrip().startswith("NODE_OPTIONS: ")
+    )
+    indentation = lines[index][: len(lines[index]) - len(lines[index].lstrip())]
+    lines[index] = indentation + "NODE_OPTIONS: " + ("9" * 5000)
+    path = docker_mod_override_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    with pytest.raises(DockerModBridgeError, match="NODE_OPTIONS value is invalid"):
+        apply_docker_mod_override(
+            tmp_path,
+            (),
+            policy=DockerControlPolicy.MANAGED,
+        )
+
+
 def test_compose_target_appends_launcher_override_after_existing_files(
     tmp_path: Path,
 ) -> None:
@@ -65,11 +104,12 @@ def test_compose_target_appends_launcher_override_after_existing_files(
     base.write_text("services: {}\n", encoding="utf-8")
     existing.write_text("services: {}\n", encoding="utf-8")
     _loader(tmp_path, "alpha")
-    apply_docker_mod_override(
+    result = apply_docker_mod_override(
         tmp_path,
         ("alpha",),
         policy=DockerControlPolicy.MANAGED,
     )
+    finalize_docker_mod_override(result, policy=DockerControlPolicy.MANAGED)
 
     original = ComposeTarget(base, tmp_path.resolve(), "fixture", (existing,))
     merged = attach_docker_mod_override(original)
@@ -92,7 +132,7 @@ def test_compose_target_appends_launcher_override_after_existing_files(
     )
 
 
-def test_apply_detects_recreation_changes_and_empty_mods_remove_owned_override(
+def test_apply_detects_changes_and_empty_mods_keep_a_clearing_override(
     tmp_path: Path,
 ) -> None:
     _loader(tmp_path, "alpha")
@@ -103,6 +143,7 @@ def test_apply_detects_recreation_changes_and_empty_mods_remove_owned_override(
         ("alpha", "beta"),
         policy=DockerControlPolicy.MANAGED,
     )
+    finalize_docker_mod_override(first, policy=DockerControlPolicy.MANAGED)
     unchanged = apply_docker_mod_override(
         tmp_path,
         ("alpha", "beta"),
@@ -113,11 +154,13 @@ def test_apply_detects_recreation_changes_and_empty_mods_remove_owned_override(
         ("beta", "alpha"),
         policy=DockerControlPolicy.MANAGED,
     )
+    finalize_docker_mod_override(reordered, policy=DockerControlPolicy.MANAGED)
     emptied = apply_docker_mod_override(
         tmp_path,
         (),
         policy=DockerControlPolicy.MANAGED,
     )
+    finalize_docker_mod_override(emptied, policy=DockerControlPolicy.MANAGED)
     empty_again = apply_docker_mod_override(
         tmp_path,
         (),
@@ -129,8 +172,10 @@ def test_apply_detects_recreation_changes_and_empty_mods_remove_owned_override(
     assert reordered.changed and reordered.requires_recreation
     assert first.content_hash != reordered.content_hash
     assert emptied.changed and emptied.requires_recreation
-    assert emptied.content_hash is None
-    assert not docker_mod_override_path(tmp_path).exists()
+    assert emptied.content_hash == build_docker_mod_override(tmp_path, ()).content_hash
+    assert docker_mod_override_path(tmp_path).read_text(encoding="utf-8") == (
+        build_docker_mod_override(tmp_path, ()).content
+    )
     assert not empty_again.changed and not empty_again.requires_recreation
 
 
@@ -156,7 +201,10 @@ def test_apply_validates_loaders_and_connect_only_rejects_before_mutation(
     assert not docker_mod_override_path(tmp_path).exists()
 
 
-@pytest.mark.parametrize("mod_name", ["../escape", "nested/mod", "nested\\mod", ".", ""])
+@pytest.mark.parametrize(
+    "mod_name",
+    ["../escape", "nested/mod", "nested\\mod", ".", "", " leading", "trailing "],
+)
 def test_mod_names_cannot_escape_the_single_mods_bind(tmp_path: Path, mod_name: str) -> None:
     with pytest.raises(DockerModBridgeError):
         build_docker_mod_override(tmp_path, (mod_name,))
@@ -176,3 +224,269 @@ def test_fixture_proves_expected_node_options_and_writable_mod_bind() -> None:
     assert _json_scalar(bridge.content, "source") == server["volumes"][0]["source"]
     assert 'target: "/app/mods"' in bridge.content
     assert "read_only: false" in bridge.content
+
+
+def test_attach_rejects_header_spoof_with_extra_compose_semantics(
+    tmp_path: Path,
+) -> None:
+    _loader(tmp_path, "alpha")
+    base = (tmp_path / "compose.yaml").resolve()
+    base.write_text("services: {}\n", encoding="utf-8")
+    path = docker_mod_override_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    material = build_docker_mod_override(tmp_path, ("alpha",)).content
+    path.write_bytes(
+        (
+            material
+            + "  server:\n"
+            + "    command: [\"definitely-not-the-game-server\"]\n"
+        ).encode("utf-8")
+    )
+    target = ComposeTarget(base, tmp_path.resolve(), "fixture")
+
+    with pytest.raises(DockerModBridgeError, match="exact launcher renderer"):
+        attach_docker_mod_override(target)
+
+
+def test_attach_rejects_override_symlink_even_when_target_is_exact(
+    tmp_path: Path,
+) -> None:
+    _loader(tmp_path, "alpha")
+    base = (tmp_path / "compose.yaml").resolve()
+    base.write_text("services: {}\n", encoding="utf-8")
+    material = build_docker_mod_override(tmp_path, ("alpha",)).content
+    target_file = tmp_path / "outside.yaml"
+    target_file.write_bytes(material.encode("utf-8"))
+    path = docker_mod_override_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    try:
+        path.symlink_to(target_file)
+    except OSError as exc:
+        pytest.skip(f"file symlinks unavailable: {exc}")
+
+    with pytest.raises(DockerModBridgeError, match="safe regular file"):
+        attach_docker_mod_override(
+            ComposeTarget(base, tmp_path.resolve(), "fixture")
+        )
+
+
+def test_attach_rejects_unsafe_override_parent_link(tmp_path: Path) -> None:
+    _loader(tmp_path, "alpha")
+    base = (tmp_path / "compose.yaml").resolve()
+    base.write_text("services: {}\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "compose.mods.yaml").write_bytes(
+        build_docker_mod_override(tmp_path, ("alpha",)).content.encode("utf-8")
+    )
+    parent = tmp_path / ".evejs-launcher"
+    try:
+        parent.symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlinks unavailable: {exc}")
+
+    with pytest.raises(DockerModBridgeError, match="directory.*unsafe"):
+        attach_docker_mod_override(
+            ComposeTarget(base, tmp_path.resolve(), "fixture")
+        )
+
+
+def test_disabled_loader_blocks_attach_but_apply_can_commit_empty_selection(
+    tmp_path: Path,
+) -> None:
+    _loader(tmp_path, "alpha")
+    base = (tmp_path / "compose.yaml").resolve()
+    base.write_text("services: {}\n", encoding="utf-8")
+    applied = apply_docker_mod_override(
+        tmp_path,
+        ("alpha",),
+        policy=DockerControlPolicy.MANAGED,
+    )
+    finalize_docker_mod_override(applied, policy=DockerControlPolicy.MANAGED)
+    loader = tmp_path / "mods" / "alpha" / "loader.js"
+    loader.rename(loader.with_name("loader.js.disabled"))
+    target = ComposeTarget(base, tmp_path.resolve(), "fixture")
+
+    with pytest.raises(DockerModBridgeError, match="active loader"):
+        attach_docker_mod_override(target)
+
+    emptied = apply_docker_mod_override(
+        tmp_path,
+        (),
+        policy=DockerControlPolicy.MANAGED,
+    )
+    assert emptied.changed
+    finalize_docker_mod_override(emptied, policy=DockerControlPolicy.MANAGED)
+    assert attach_docker_mod_override(target).override_files == (
+        docker_mod_override_path(tmp_path),
+    )
+
+
+def test_empty_clearing_override_attaches_without_a_mods_directory(
+    tmp_path: Path,
+) -> None:
+    base = (tmp_path / "compose.yaml").resolve()
+    base.write_text("services: {}\n", encoding="utf-8")
+    applied = apply_docker_mod_override(
+        tmp_path,
+        (),
+        policy=DockerControlPolicy.MANAGED,
+    )
+    finalize_docker_mod_override(applied, policy=DockerControlPolicy.MANAGED)
+
+    merged = attach_docker_mod_override(
+        ComposeTarget(base, tmp_path.resolve(), "fixture")
+    )
+
+    assert merged.override_files == (docker_mod_override_path(tmp_path),)
+
+
+def test_rollback_restores_exact_prior_bytes_and_removes_first_write(
+    tmp_path: Path,
+) -> None:
+    _loader(tmp_path, "alpha")
+    _loader(tmp_path, "beta")
+    first = apply_docker_mod_override(
+        tmp_path,
+        ("alpha",),
+        policy=DockerControlPolicy.MANAGED,
+    )
+    finalize_docker_mod_override(first, policy=DockerControlPolicy.MANAGED)
+    first_bytes = docker_mod_override_path(tmp_path).read_bytes()
+    second = apply_docker_mod_override(
+        tmp_path,
+        ("beta",),
+        policy=DockerControlPolicy.MANAGED,
+    )
+
+    rollback_docker_mod_override(
+        second,
+        policy=DockerControlPolicy.MANAGED,
+    )
+    assert docker_mod_override_path(tmp_path).read_bytes() == first_bytes
+
+    other_root = tmp_path / "other"
+    other_root.mkdir()
+    _loader(other_root, "alpha")
+    only = apply_docker_mod_override(
+        other_root,
+        ("alpha",),
+        policy=DockerControlPolicy.MANAGED,
+    )
+    rollback_docker_mod_override(
+        only,
+        policy=DockerControlPolicy.MANAGED,
+    )
+    assert not docker_mod_override_path(other_root).exists()
+    assert not docker_mod_transaction_path(other_root).exists()
+    assert first.previous_content is None
+
+
+def test_rollback_refuses_to_overwrite_post_apply_drift(tmp_path: Path) -> None:
+    _loader(tmp_path, "alpha")
+    result = apply_docker_mod_override(
+        tmp_path,
+        ("alpha",),
+        policy=DockerControlPolicy.MANAGED,
+    )
+    path = docker_mod_override_path(tmp_path)
+    drifted = result.committed_content + b"# drift\n"
+    path.write_bytes(drifted)
+
+    with pytest.raises(DockerModBridgeError):
+        rollback_docker_mod_override(
+            result,
+            policy=DockerControlPolicy.MANAGED,
+        )
+
+    assert path.read_bytes() == drifted
+
+
+def test_pending_transaction_blocks_ordinary_and_wrong_token_attach(
+    tmp_path: Path,
+) -> None:
+    _loader(tmp_path, "alpha")
+    base = (tmp_path / "compose.yaml").resolve()
+    base.write_text("services: {}\n", encoding="utf-8")
+    result = apply_docker_mod_override(
+        tmp_path,
+        ("alpha",),
+        policy=DockerControlPolicy.MANAGED,
+    )
+    target = ComposeTarget(base, tmp_path.resolve(), "fixture")
+
+    assert docker_mod_transaction_path(tmp_path).is_file()
+    with pytest.raises(DockerModBridgeError, match="unfinished"):
+        attach_docker_mod_override(target)
+    with pytest.raises(DockerModBridgeError, match="unfinished"):
+        attach_docker_mod_override(target, transaction_token="0" * 64)
+
+    authorized = attach_docker_mod_override(
+        target,
+        transaction_token=result.transaction_token,
+    )
+    assert authorized.override_files == (docker_mod_override_path(tmp_path),)
+    assert docker_mod_transaction_path(tmp_path).is_file()
+
+    finalize_docker_mod_override(result, policy=DockerControlPolicy.MANAGED)
+    assert not docker_mod_transaction_path(tmp_path).exists()
+    assert attach_docker_mod_override(target).override_files == (
+        docker_mod_override_path(tmp_path),
+    )
+    with pytest.raises(DockerModBridgeError, match="stale"):
+        attach_docker_mod_override(
+            target,
+            transaction_token=result.transaction_token,
+        )
+
+
+def test_authorized_attach_rejects_missing_or_changed_transaction_override(
+    tmp_path: Path,
+) -> None:
+    _loader(tmp_path, "alpha")
+    base = (tmp_path / "compose.yaml").resolve()
+    base.write_text("services: {}\n", encoding="utf-8")
+    result = apply_docker_mod_override(
+        tmp_path,
+        ("alpha",),
+        policy=DockerControlPolicy.MANAGED,
+    )
+    target = ComposeTarget(base, tmp_path.resolve(), "fixture")
+    path = docker_mod_override_path(tmp_path)
+    path.unlink()
+
+    with pytest.raises(DockerModBridgeError, match="no longer matches"):
+        attach_docker_mod_override(
+            target,
+            transaction_token=result.transaction_token,
+        )
+
+    path.write_bytes(build_docker_mod_override(tmp_path, ()).content.encode("utf-8"))
+    with pytest.raises(DockerModBridgeError, match="no longer matches"):
+        attach_docker_mod_override(
+            target,
+            transaction_token=result.transaction_token,
+        )
+
+
+def test_explicit_apply_resumes_exact_stranded_desired_transaction(
+    tmp_path: Path,
+) -> None:
+    _loader(tmp_path, "alpha")
+    first = apply_docker_mod_override(
+        tmp_path,
+        ("alpha",),
+        policy=DockerControlPolicy.MANAGED,
+    )
+
+    resumed = apply_docker_mod_override(
+        tmp_path,
+        ("alpha",),
+        policy=DockerControlPolicy.MANAGED,
+    )
+
+    assert resumed.changed and resumed.requires_recreation
+    assert resumed.transaction_token == first.transaction_token
+    assert resumed.committed_content == first.committed_content
+    finalize_docker_mod_override(resumed, policy=DockerControlPolicy.MANAGED)
+    assert not docker_mod_transaction_path(tmp_path).exists()

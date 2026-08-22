@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import threading
+import time
 from typing import Callable, Mapping
 
 from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal, pyqtSlot
@@ -43,9 +44,12 @@ class DockerObservation:
     settings_identity: str | None = None
     monitor_generation: int | None = None
     checked_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    game_runtime_identity: str | None = None
+    sample_started_monotonic_ns: int = field(default_factory=time.monotonic_ns)
 
     def equality_key(self) -> tuple[object, ...]:
         return (self.game, self.market, self.game_identity, self.market_identity,
+                self.game_runtime_identity,
                 self.game_health, self.market_health, self.game_error,
                 self.market_error, self.endpoints, self.target_identity,
                 self.settings_identity, self.monitor_generation)
@@ -55,6 +59,7 @@ class DockerMonitor(QObject):
     """Run target construction and preflight in a worker, then Compose ``ps`` only."""
 
     observation_changed = pyqtSignal(object)
+    observation_sampled = pyqtSignal(object)
 
     def __init__(self, target_factory: Callable[[], ComposeTarget], *,
                  inspector_factory: Callable[[], ComposeInspector],
@@ -113,6 +118,7 @@ class DockerMonitor(QObject):
     def observe_now(self) -> None:
         if self._shutdown_requested.is_set():
             return
+        sample_started_monotonic_ns = time.monotonic_ns()
         try:
             if self._target is None:
                 self._target = self._target_factory()
@@ -130,7 +136,8 @@ class DockerMonitor(QObject):
                     self._emit_unknown(
                         preflight_failure_diagnostic(
                             PreflightFailureKind.CLI_MISSING
-                        )
+                        ),
+                        sample_started_monotonic_ns=sample_started_monotonic_ns,
                     )
                     return
             if not self._preflight_ok:
@@ -138,7 +145,12 @@ class DockerMonitor(QObject):
                 if self._shutdown_requested.is_set():
                     return
                 if not report.ok:
-                    self._emit_unknown(report.diagnostics[0] if report.diagnostics else "Docker is unavailable.")
+                    self._emit_unknown(
+                        report.diagnostics[0]
+                        if report.diagnostics
+                        else "Docker is unavailable.",
+                        sample_started_monotonic_ns=sample_started_monotonic_ns,
+                    )
                     return
                 self._preflight_ok = True
                 self._endpoints = (
@@ -166,14 +178,29 @@ class DockerMonitor(QObject):
             else:
                 records = self._inspector.status(self._target)
             if not self._shutdown_requested.is_set():
-                self._emit_records(records)
+                self._emit_records(
+                    records,
+                    sample_started_monotonic_ns=sample_started_monotonic_ns,
+                )
         except Exception as exc:
             if not self._shutdown_requested.is_set():
-                self._emit_unknown(_safe_diagnostic(exc))
+                self._emit_unknown(
+                    _safe_diagnostic(exc),
+                    sample_started_monotonic_ns=sample_started_monotonic_ns,
+                )
 
-    def _emit_records(self, records: Mapping[str, ContainerRecord]) -> None:
+    def _emit_records(
+        self,
+        records: Mapping[str, ContainerRecord],
+        *,
+        sample_started_monotonic_ns: int,
+    ) -> None:
         game = records.get("server", ContainerRecord.absent("server"))
         market = records.get("market", ContainerRecord.absent("market"))
+        game_runtime_identity = self._inspector.container_runtime_identity(
+            self._target,
+            game,
+        )
         game_endpoint = self._endpoints.game if self._endpoints is not None else None
         market_endpoint = (
             self._endpoints.market if self._endpoints is not None else None
@@ -186,13 +213,15 @@ class DockerMonitor(QObject):
         )
         self._emit(DockerObservation(game=game_state, market=market_state,
                    game_identity=game.short_id, market_identity=market.short_id,
+                   game_runtime_identity=game_runtime_identity,
                    game_health=game.health, market_health=market.health,
                    game_error=game_probe_error or _record_error(game),
                    market_error=market_probe_error or _record_error(market),
                    endpoints=self._endpoints,
                    target_identity=self._target_identity,
                    settings_identity=self._settings_identity,
-                   monitor_generation=self._monitor_generation))
+                   monitor_generation=self._monitor_generation,
+                   sample_started_monotonic_ns=sample_started_monotonic_ns))
 
     def _effective_service_state(
         self,
@@ -236,14 +265,20 @@ class DockerMonitor(QObject):
             return ServiceState.STARTING, "Endpoint verification failed."
         return ServiceState.ONLINE, None
 
-    def _emit_unknown(self, diagnostic: str) -> None:
+    def _emit_unknown(
+        self,
+        diagnostic: str,
+        *,
+        sample_started_monotonic_ns: int,
+    ) -> None:
         self._preflight_ok = False
         self._endpoints = None
         self._emit(DockerObservation(ServiceState.UNKNOWN, ServiceState.UNKNOWN,
                    game_error=diagnostic, market_error=diagnostic, endpoints=None,
                    target_identity=self._target_identity,
                    settings_identity=self._settings_identity,
-                   monitor_generation=self._monitor_generation))
+                   monitor_generation=self._monitor_generation,
+                   sample_started_monotonic_ns=sample_started_monotonic_ns))
 
     def _emit(self, observation: DockerObservation) -> None:
         if self._shutdown_requested.is_set():
@@ -252,6 +287,11 @@ class DockerMonitor(QObject):
         if key != self._last_key:
             self._last_key = key
             self.observation_changed.emit(observation)
+        # The app can complete verification and begin a corrective lifecycle
+        # from this signal. Emit it only after presentation consumed the same
+        # sample, so a delayed ``observation_changed`` cannot overwrite the
+        # corrective STOPPING transition with the rejected runtime state.
+        self.observation_sampled.emit(observation)
 
     @pyqtSlot()
     def stop(self) -> None:

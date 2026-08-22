@@ -678,6 +678,54 @@ QLabel[class="modState"][state="error"] {{
     border-color: {s['danger']};
     color: {s['danger']};
 }}
+QPushButton[class="modManagementAction"] {{
+    background-color: rgba(7, 17, 29, 176);
+    border: 1px solid {s['border_bright']};
+    border-radius: 7px;
+    color: {s['text_secondary']};
+    padding: 0 12px;
+    font-family: '{header}';
+    font-size: 10px;
+    font-weight: 700;
+}}
+QPushButton[class="modManagementAction"][managementRole="remove"] {{
+    background-color: rgba(224, 79, 79, 18);
+    border-color: rgba(224, 79, 79, 118);
+    color: #F07A7A;
+}}
+QPushButton[class="modManagementAction"][managementRole="remove"]:hover {{
+    background-color: rgba(224, 79, 79, 48);
+    border-color: {s['danger']};
+    color: {s['text_primary']};
+}}
+QPushButton[class="modManagementAction"][managementRole="remove"]:pressed {{
+    background-color: rgba(224, 79, 79, 82);
+    border-color: #F07A7A;
+}}
+QPushButton[class="modManagementAction"][managementRole="remove"]:focus {{
+    border: 2px solid #F07A7A;
+}}
+QPushButton[class="modManagementAction"][managementRole="repair"] {{
+    background-color: rgba(255, 184, 0, 16);
+    border-color: rgba(255, 184, 0, 112);
+    color: {s['warning']};
+}}
+QPushButton[class="modManagementAction"][managementRole="repair"]:hover {{
+    background-color: rgba(255, 184, 0, 42);
+    border-color: {s['warning']};
+    color: {s['text_primary']};
+}}
+QPushButton[class="modManagementAction"][managementRole="repair"]:pressed {{
+    background-color: rgba(255, 184, 0, 72);
+}}
+QPushButton[class="modManagementAction"][managementRole="repair"]:focus {{
+    border: 2px solid {s['warning']};
+}}
+QPushButton[class="modManagementAction"]:disabled {{
+    background-color: rgba(7, 17, 29, 116);
+    border-color: {s['border']};
+    color: {s['text_muted']};
+}}
 QFrame[class="modsEmptyState"] {{
     background-color: rgba(4, 12, 20, 120);
     border: 1px dashed {s['border']};

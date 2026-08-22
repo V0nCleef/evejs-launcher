@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,11 @@ from src import app as app_module
 from src.app import MainWindow
 from src.audio.events import VoiceEvent
 from src.constants import COLORS, Ports
+from src.core.mod_runtime_state import (
+    NATIVE_BACKEND,
+    RUNTIME_SNAPSHOT_SCHEMA_VERSION,
+    ModRuntimeSnapshot,
+)
 from src.core.service_status import ServiceState
 from src.workers.server_worker import ServiceProbe, ServiceStartResult
 
@@ -27,6 +33,24 @@ def _window_config() -> dict:
         }
     )
     return cfg
+
+
+def _native_runtime_snapshot(*, pid: int) -> ModRuntimeSnapshot:
+    return ModRuntimeSnapshot(
+        schema_version=RUNTIME_SNAPSHOT_SCHEMA_VERSION,
+        root=Path("C:/Games/EveJS"),
+        backend=NATIVE_BACKEND,
+        mode="modded",
+        runtime_identity="native-runtime-fixture",
+        plan_sha256="a" * 64,
+        docker_override_path=None,
+        docker_override_sha256=None,
+        docker_node_options_sha256=None,
+        selected_loader_ids=(),
+        pid=pid,
+        observed_at=datetime.now(timezone.utc),
+        mods=(),
+    )
 
 
 @pytest.fixture
@@ -149,9 +173,10 @@ def test_owned_live_process_reports_starting_everywhere(
 def test_native_start_immediately_reports_starting_before_worker_returns(
     status_window: tuple[MainWindow, dict[str, bool]],
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     window, _probes = status_window
-    window._cfg["evejs_root"] = "C:/Games/EveJS"
+    window._cfg["evejs_root"] = str(tmp_path)
     workers: list[object] = []
     monkeypatch.setattr(
         window,
@@ -202,6 +227,39 @@ def test_service_probe_fans_out_game_and_market_without_another_socket_probe(
     assert window._nav.btn_server.isEnabled() is False
     assert window._nav.btn_market.isEnabled() is False
     assert window._home_page.btn_start_servers.text() == "Managed Externally"
+
+
+@pytest.mark.parametrize(
+    ("owned_pid", "owned_return_code"),
+    [
+        (4321, 1),
+        (9876, None),
+    ],
+    ids=("owned-process-exited", "owned-process-replaced"),
+)
+def test_stable_native_observation_clears_stale_process_bound_mod_evidence(
+    status_window: tuple[MainWindow, dict[str, bool]],
+    owned_pid: int,
+    owned_return_code: int | None,
+) -> None:
+    window, _probes = status_window
+
+    class OwnedProcess:
+        pid = owned_pid
+
+        @staticmethod
+        def poll() -> int | None:
+            return owned_return_code
+
+    window._server_proc = OwnedProcess()
+    window._service_reachability = (True, False)
+    window._current_mod_runtime_snapshot = _native_runtime_snapshot(pid=4321)
+
+    window._on_native_service_observation(
+        ServiceProbe(game_reachable=True, market_reachable=False)
+    )
+
+    assert window._current_mod_runtime_snapshot is None
 
 
 def test_failed_game_start_is_retained_as_failed(

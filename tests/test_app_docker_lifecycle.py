@@ -1,6 +1,8 @@
 """Acceptance contracts for Docker lifecycle presentation without a daemon."""
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from PyQt6.QtWidgets import QMainWindow, QMessageBox
 
@@ -11,6 +13,7 @@ from src.core.runtime.docker_controller import (
     DockerLifecycleAction,
     DockerLifecycleResult,
 )
+from src.core.runtime.endpoints import Endpoint, RuntimeEndpoints
 from src.core.service_status import (
     DockerControlPolicy,
     RuntimeBackend,
@@ -20,7 +23,7 @@ from src.core.service_status import (
 from src.pages.home_page import HomePage
 from src.widgets.nav_panel import NavPanel
 from src.widgets.status_bar import StatusBar
-from src.workers.docker_monitor import DockerMonitor
+from src.workers.docker_monitor import DockerMonitor, DockerObservation
 
 
 class _Tracker:
@@ -51,6 +54,30 @@ class _FinishedThread:
 
     def deleteLater(self) -> None:
         self.deleted = True
+
+
+class _ModsBusyState:
+    def __init__(self) -> None:
+        self.busy = True
+        self.changes: list[bool] = []
+
+    def set_lifecycle_busy(self, busy: bool) -> None:
+        self.busy = bool(busy)
+        self.changes.append(self.busy)
+
+
+def _endpoints() -> RuntimeEndpoints:
+    def endpoint(service: str, target: int, port: int) -> Endpoint:
+        return Endpoint(service, "127.0.0.1", port, target, "tcp")
+
+    return RuntimeEndpoints(
+        game=endpoint("server", 26000, 32600),
+        image=endpoint("server", 26001, 32601),
+        proxy=endpoint("server", 26002, 32602),
+        assets=endpoint("server", 26003, 34443),
+        xmpp=endpoint("server", 5222, 35222),
+        market=endpoint("market", 40110, 40110),
+    )
 
 
 def _record(
@@ -112,6 +139,13 @@ def _bare_docker_window(tmp_path, snapshot: RuntimeSnapshot | None = None) -> Ma
     window._docker_lifecycle_generation = None
     window._docker_lifecycle_target = None
     window._docker_lifecycle_action = None
+    window._pending_docker_mod_plan = None
+    window._pending_docker_mods = ()
+    window._pending_docker_mod_lifecycle_result = None
+    window._pending_docker_mod_observation_token = None
+    window._pending_docker_mod_observation_floor_ns = None
+    window._pending_docker_mod_observation_completion = None
+    window._docker_mod_quarantined_targets = {}
     window._docker_close_pending = False
     window._docker_close_stop_started = False
     window._docker_close_stop_succeeded = False
@@ -261,6 +295,7 @@ def test_docker_controller_factory_shares_one_runner_and_is_deferred(qapp, monke
     }
     window._lifecycle_thread = None
     window._monitor_generation = 0
+    window._docker_mod_quarantined_targets = {}
     window._runtime_snapshot = RuntimeSnapshot(ServiceState.OFFLINE, ServiceState.OFFLINE, 0)
     window._tracker = type("Tracker", (), {"running_count": 0})()
     window._apply_runtime_snapshot = lambda _snapshot: None
@@ -451,6 +486,32 @@ def test_active_lifecycle_slot_serializes_before_worker_or_presentation_changes(
     window.deleteLater()
 
 
+def test_quarantined_target_blocks_start_until_another_target_is_authoritative(
+    qapp,
+    tmp_path,
+) -> None:
+    window = _bare_docker_window(tmp_path, _docker_snapshot())
+    window._docker_mod_quarantined_targets["docker:rejected-target"] = 1
+    denials: list[str] = []
+    window._docker_unavailable = denials.append
+
+    assert not window._begin_docker_lifecycle(
+        DockerLifecycleAction.START_GAME
+    )
+    assert denials and "unverified" in denials[0]
+    assert window._captured_lifecycle is None
+
+    window._runtime_snapshot = replace(
+        window._runtime_snapshot,
+        target_identity="docker:different-target",
+        settings_identity=window._docker_monitor_settings_identity(),
+        monitor_generation=window._monitor_generation,
+    )
+    assert window._begin_docker_lifecycle(DockerLifecycleAction.START_GAME)
+    assert window._captured_lifecycle is not None
+    window.deleteLater()
+
+
 def test_record_success_renders_container_state_and_requests_one_observation(
     qapp,
     tmp_path,
@@ -486,6 +547,479 @@ def test_record_success_renders_container_state_and_requests_one_observation(
     assert rendered.game_error is None and rendered.market_error is None
     assert window._applied_snapshots == [rendered]
     assert observed == ["observe"]
+    window.deleteLater()
+
+
+def test_recreate_result_stamps_exact_runtime_identity_before_monitor_poll(
+    qapp,
+    tmp_path,
+) -> None:
+    window = _bare_docker_window(
+        tmp_path,
+        _docker_snapshot(
+            ServiceState.ONLINE,
+            ServiceState.ONLINE,
+            target_identity="docker:old-target",
+            game_runtime_identity="a" * 64,
+        ),
+    )
+    assert window._begin_docker_lifecycle(DockerLifecycleAction.RECREATE_GAME)
+    records = {
+        "server": _record(
+            "server",
+            ServiceState.STARTING,
+            raw_state="running",
+            identity="new-game-id",
+            health=None,
+        ),
+        "market": _record(
+            "market",
+            ServiceState.ONLINE,
+            raw_state="running",
+            identity="market-id",
+            health="healthy",
+        ),
+    }
+
+    window._on_docker_lifecycle_completed(
+        DockerLifecycleResult(
+            DockerLifecycleAction.RECREATE_GAME,
+            True,
+            records=records,
+            target_identity="docker:new-target",
+            game_runtime_identity="b" * 64,
+        )
+    )
+
+    assert window._runtime_snapshot.game is ServiceState.ONLINE
+    assert window._runtime_snapshot.game_container == "new-game-id"
+    assert window._runtime_snapshot.target_identity == "docker:new-target"
+    assert window._runtime_snapshot.game_runtime_identity == "b" * 64
+    window.deleteLater()
+
+
+@pytest.mark.parametrize(
+    ("changed_field", "changed_value"),
+    [
+        ("target_identity", "docker:observed-target-b"),
+        ("game_runtime_identity", "c" * 64),
+    ],
+)
+def test_newer_monitor_binding_before_recreate_result_is_not_overwritten(
+    qapp,
+    tmp_path,
+    changed_field: str,
+    changed_value: str,
+) -> None:
+    prior = _docker_snapshot(
+        ServiceState.ONLINE,
+        ServiceState.ONLINE,
+        target_identity="docker:prior-target",
+        game_container="prior-game",
+        game_runtime_identity="a" * 64,
+    )
+    window = _bare_docker_window(tmp_path, prior)
+    completion_outcomes: list[bool] = []
+    assert window._begin_docker_lifecycle(
+        DockerLifecycleAction.RECREATE_GAME,
+        on_complete=completion_outcomes.append,
+    )
+    observed = _docker_snapshot(
+        ServiceState.ONLINE,
+        ServiceState.ONLINE,
+        target_identity="docker:result-target",
+        game_container="result-game",
+        game_runtime_identity="b" * 64,
+    )
+    observed = replace(observed, **{changed_field: changed_value})
+    window._runtime_snapshot = observed
+    records = {
+        "server": _record(
+            "server",
+            ServiceState.ONLINE,
+            raw_state="running",
+            identity="result-game",
+            health="healthy",
+        )
+    }
+
+    window._on_docker_lifecycle_completed(
+        DockerLifecycleResult(
+            DockerLifecycleAction.RECREATE_GAME,
+            True,
+            records=records,
+            target_identity="docker:result-target",
+            game_runtime_identity="b" * 64,
+        )
+    )
+
+    assert window._runtime_snapshot == observed
+    assert getattr(window._runtime_snapshot, changed_field) == changed_value
+    assert callable(window._lifecycle_after_thread_callback)
+    window._lifecycle_after_thread_callback()
+    assert completion_outcomes == [False]
+    window.deleteLater()
+
+
+def test_mod_recreate_waits_for_fresh_exact_observation_and_keeps_controls_gated(
+    qapp,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prior = _docker_snapshot(
+        ServiceState.ONLINE,
+        ServiceState.ONLINE,
+        target_identity="docker:prior-target",
+        game_container="prior-game",
+        game_runtime_identity="a" * 64,
+        endpoints=_endpoints(),
+    )
+    window = _bare_docker_window(tmp_path, prior)
+    settings_identity = window._docker_monitor_settings_identity()
+    window._runtime_snapshot = replace(
+        window._runtime_snapshot,
+        settings_identity=settings_identity,
+        monitor_generation=window._monitor_generation,
+    )
+    window._pending_docker_mod_plan = object()
+    window._mods_page = _ModsBusyState()
+    window._settings_page = _ModsBusyState()
+    completion_outcomes: list[bool] = []
+    timeout_callbacks: list[object] = []
+    monkeypatch.setattr(
+        app_module.QTimer,
+        "singleShot",
+        lambda _delay, callback: timeout_callbacks.append(callback),
+    )
+
+    assert window._begin_docker_lifecycle(
+        DockerLifecycleAction.RECREATE_GAME,
+        on_complete=completion_outcomes.append,
+    )
+    lifecycle_thread = _FinishedThread()
+    window._lifecycle_thread = lifecycle_thread
+    # A poll can observe the force-recreate removal gap while the worker is
+    # still inspecting the replacement. This must not defeat its later result.
+    window._runtime_snapshot = replace(
+        window._runtime_snapshot,
+        game=ServiceState.UNKNOWN,
+        target_identity="docker:transient-target",
+        game_container=None,
+        game_runtime_identity=None,
+    )
+    result = DockerLifecycleResult(
+        DockerLifecycleAction.RECREATE_GAME,
+        True,
+        records={
+            "server": _record(
+                "server",
+                ServiceState.ONLINE,
+                raw_state="running",
+                identity="result-game",
+                health="healthy",
+            )
+        },
+        target_identity="docker:result-target",
+        server_node_options_sha256="d" * 64,
+        game_runtime_identity="b" * 64,
+    )
+
+    window._on_docker_lifecycle_completed(result)
+    floor_ns = window._pending_docker_mod_observation_floor_ns
+    assert type(floor_ns) is int
+    assert window._runtime_snapshot.target_identity == "docker:result-target"
+    assert window._runtime_snapshot.game_runtime_identity == "b" * 64
+    assert window._runtime_snapshot.game is ServiceState.STARTING
+    assert completion_outcomes == []
+    assert len(timeout_callbacks) == 1
+
+    # QThread teardown alone must not release the lifecycle slot. Otherwise a
+    # Home action can race the pending runtime verification (yes, really).
+    window._on_lifecycle_thread_finished()
+    assert window._lifecycle_active()
+    assert not lifecycle_thread.deleted
+    assert window._mods_page.busy
+    assert window._settings_page.busy
+    captured_lifecycle = window._captured_lifecycle
+    assert not window._begin_docker_lifecycle(DockerLifecycleAction.STOP_GAME)
+    assert window._captured_lifecycle == captured_lifecycle
+    client_continuations: list[bool] = []
+    launch_denials: list[str] = []
+    window._docker_unavailable = launch_denials.append
+    assert not window._ensure_server_if_needed(
+        lambda: client_continuations.append(True)
+    )
+    assert client_continuations == []
+    assert launch_denials and "being verified" in launch_denials[0]
+
+    # This sample started before the attestation floor but reached the GUI
+    # afterward. Its mismatch is stale and must be ignored completely.
+    stale = DockerObservation(
+        ServiceState.UNKNOWN,
+        ServiceState.ONLINE,
+        target_identity="docker:stale-target",
+        settings_identity=settings_identity,
+        monitor_generation=window._monitor_generation,
+        sample_started_monotonic_ns=floor_ns,
+    )
+    window._on_docker_mod_runtime_observation_sample(
+        stale,
+        window._monitor_generation,
+    )
+    # The monitor also emits its deduplicated presentation signal for this
+    # same poll. That second queued path must obey the attestation floor too.
+    window._on_docker_observation(stale, window._monitor_generation)
+    assert window._lifecycle_active()
+    assert completion_outcomes == []
+    assert window._runtime_snapshot.target_identity == "docker:result-target"
+
+    fresh = DockerObservation(
+        ServiceState.ONLINE,
+        ServiceState.ONLINE,
+        game_identity="result-game",
+        game_runtime_identity="b" * 64,
+        target_identity="docker:result-target",
+        endpoints=_endpoints(),
+        settings_identity=settings_identity,
+        monitor_generation=window._monitor_generation,
+        sample_started_monotonic_ns=floor_ns + 1,
+    )
+    # Model retrying Apply after an earlier corrective stop failed. The exact
+    # current result is allowed to supersede only its own target quarantine.
+    window._docker_mod_quarantined_targets["docker:result-target"] = 1
+    applied_before_fresh = len(window._applied_snapshots)
+    window._on_docker_mod_runtime_observation_sample(
+        fresh,
+        window._monitor_generation,
+    )
+
+    assert completion_outcomes == [True]
+    assert not window._lifecycle_active()
+    assert lifecycle_thread.deleted
+    assert not window._mods_page.busy
+    assert not window._settings_page.busy
+    assert window._mods_page.changes == [False]
+    assert window._settings_page.changes == [False]
+    assert len(window._applied_snapshots) == applied_before_fresh + 2
+    assert "docker:result-target" not in window._docker_mod_quarantined_targets
+    context, reason = window._resolve_client_launch_context()
+    assert context is not None and reason == ""
+    # The bounded timeout is tokenized; a late callback cannot complete twice.
+    timeout_callbacks[0]()
+    assert completion_outcomes == [True]
+    window.deleteLater()
+
+
+def test_mod_recreate_rejects_post_attestation_container_replacement(
+    qapp,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = _bare_docker_window(
+        tmp_path,
+        _docker_snapshot(
+            ServiceState.ONLINE,
+            ServiceState.ONLINE,
+            target_identity="docker:prior-target",
+            game_container="prior-game",
+            game_runtime_identity="a" * 64,
+        ),
+    )
+    settings_identity = window._docker_monitor_settings_identity()
+    window._runtime_snapshot = replace(
+        window._runtime_snapshot,
+        settings_identity=settings_identity,
+        monitor_generation=window._monitor_generation,
+    )
+    window._pending_docker_mod_plan = object()
+    completion_outcomes: list[bool] = []
+
+    def complete_recreate(succeeded: bool) -> None:
+        completion_outcomes.append(succeeded)
+        if not succeeded:
+            assert window._begin_docker_lifecycle(
+                DockerLifecycleAction.STOP_GAME
+            )
+
+    monkeypatch.setattr(app_module.QTimer, "singleShot", lambda *_args: None)
+    assert window._begin_docker_lifecycle(
+        DockerLifecycleAction.RECREATE_GAME,
+        on_complete=complete_recreate,
+    )
+    lifecycle_thread = _FinishedThread()
+    window._lifecycle_thread = lifecycle_thread
+    result = DockerLifecycleResult(
+        DockerLifecycleAction.RECREATE_GAME,
+        True,
+        records={
+            "server": _record(
+                "server",
+                ServiceState.ONLINE,
+                raw_state="running",
+                identity="result-game",
+                health="healthy",
+            )
+        },
+        target_identity="docker:result-target",
+        server_node_options_sha256="d" * 64,
+        game_runtime_identity="b" * 64,
+    )
+    window._on_docker_lifecycle_completed(result)
+    floor_ns = window._pending_docker_mod_observation_floor_ns
+    assert type(floor_ns) is int
+    window._on_lifecycle_thread_finished()
+    corrective_thread = _FinishedThread()
+
+    def begin_corrective(worker, handler) -> None:
+        window._captured_lifecycle = (worker, handler)
+        window._lifecycle_thread = corrective_thread
+
+    window._begin_lifecycle_worker = begin_corrective
+
+    replaced = DockerObservation(
+        ServiceState.ONLINE,
+        ServiceState.ONLINE,
+        game_identity="replacement-game",
+        game_runtime_identity="c" * 64,
+        target_identity="docker:result-target",
+        settings_identity=settings_identity,
+        monitor_generation=window._monitor_generation,
+        sample_started_monotonic_ns=floor_ns + 1,
+    )
+    # DockerMonitor emits presentation first and verification second. Driving
+    # both paths here prevents a regression where a late duplicate ONLINE
+    # presentation overwrites the corrective STOPPING transition.
+    window._on_docker_observation(replaced, window._monitor_generation)
+    window._on_docker_mod_runtime_observation_sample(
+        replaced,
+        window._monitor_generation,
+    )
+
+    assert completion_outcomes == [False]
+    assert window._lifecycle_active()
+    assert lifecycle_thread.deleted
+    assert window._lifecycle_thread is corrective_thread
+    assert window._runtime_snapshot.game is ServiceState.STOPPING
+    assert window._runtime_snapshot.game_container == "replacement-game"
+    assert window._runtime_snapshot.game_runtime_identity == "c" * 64
+    window._lifecycle_thread = None
+    window.deleteLater()
+
+
+def test_mod_recreate_observation_timeout_fails_closed_and_releases_gate(
+    qapp,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = _bare_docker_window(
+        tmp_path,
+        _docker_snapshot(
+            ServiceState.ONLINE,
+            ServiceState.ONLINE,
+            target_identity="docker:prior-target",
+            game_container="prior-game",
+            game_runtime_identity="a" * 64,
+        ),
+    )
+    window._runtime_snapshot = replace(
+        window._runtime_snapshot,
+        settings_identity=window._docker_monitor_settings_identity(),
+        monitor_generation=window._monitor_generation,
+    )
+    window._pending_docker_mod_plan = object()
+    completion_outcomes: list[bool] = []
+
+    def complete_recreate(succeeded: bool) -> None:
+        completion_outcomes.append(succeeded)
+        if not succeeded:
+            assert window._begin_docker_lifecycle(
+                DockerLifecycleAction.STOP_GAME
+            )
+
+    timeout_callbacks: list[object] = []
+    monkeypatch.setattr(
+        app_module.QTimer,
+        "singleShot",
+        lambda _delay, callback: timeout_callbacks.append(callback),
+    )
+    assert window._begin_docker_lifecycle(
+        DockerLifecycleAction.RECREATE_GAME,
+        on_complete=complete_recreate,
+    )
+    lifecycle_thread = _FinishedThread()
+    window._lifecycle_thread = lifecycle_thread
+    window._on_docker_lifecycle_completed(
+        DockerLifecycleResult(
+            DockerLifecycleAction.RECREATE_GAME,
+            True,
+            records={
+                "server": _record(
+                    "server",
+                    ServiceState.ONLINE,
+                    raw_state="running",
+                    identity="result-game",
+                    health="healthy",
+                )
+            },
+            target_identity="docker:result-target",
+            server_node_options_sha256="d" * 64,
+            game_runtime_identity="b" * 64,
+        )
+    )
+    window._on_lifecycle_thread_finished()
+
+    assert window._lifecycle_active()
+    assert completion_outcomes == []
+    assert len(timeout_callbacks) == 1
+    corrective_thread = _FinishedThread()
+
+    def begin_corrective(worker, handler) -> None:
+        window._captured_lifecycle = (worker, handler)
+        window._lifecycle_thread = corrective_thread
+
+    window._begin_lifecycle_worker = begin_corrective
+    timeout_callbacks[0]()
+
+    assert completion_outcomes == [False]
+    assert window._lifecycle_active()
+    assert lifecycle_thread.deleted
+    assert window._lifecycle_thread is corrective_thread
+    assert window._runtime_snapshot.game is ServiceState.STOPPING
+    quarantine_floor_ns = window._docker_mod_quarantined_targets[
+        "docker:result-target"
+    ]
+    assert window._pending_docker_mod_observation_token is None
+    late_online = DockerObservation(
+        ServiceState.ONLINE,
+        ServiceState.ONLINE,
+        game_identity="result-game",
+        game_runtime_identity="b" * 64,
+        target_identity="docker:result-target",
+        settings_identity=window._docker_monitor_settings_identity(),
+        monitor_generation=window._monitor_generation,
+        sample_started_monotonic_ns=quarantine_floor_ns + 1,
+    )
+    window._on_docker_observation(late_online, window._monitor_generation)
+    window._on_docker_mod_runtime_observation_sample(
+        late_online,
+        window._monitor_generation,
+    )
+    assert window._runtime_snapshot.game is ServiceState.STOPPING
+    assert "docker:result-target" in window._docker_mod_quarantined_targets
+    late_stopped = replace(
+        late_online,
+        game=ServiceState.OFFLINE,
+        game_identity=None,
+        game_runtime_identity=None,
+        sample_started_monotonic_ns=quarantine_floor_ns + 2,
+    )
+    window._on_docker_mod_runtime_observation_sample(
+        late_stopped,
+        window._monitor_generation,
+    )
+    assert window._runtime_snapshot.game is ServiceState.OFFLINE
+    assert "docker:result-target" not in window._docker_mod_quarantined_targets
+    window._lifecycle_thread = None
     window.deleteLater()
 
 

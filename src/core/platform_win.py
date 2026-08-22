@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 import ctypes
+import logging
 import os
 import re
 import subprocess
@@ -17,6 +18,9 @@ import time
 from ctypes import wintypes
 from pathlib import Path
 from typing import Callable
+
+
+log = logging.getLogger(__name__)
 
 # ── Native Win32 API handles (loaded once at module level) ────────────────
 user32 = ctypes.windll.user32
@@ -32,6 +36,7 @@ _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9
 _WAIT_OBJECT_0 = 0x00000000
 _WAIT_ABANDONED = 0x00000080
 _WAIT_TIMEOUT = 0x00000102
+_DIRECTORY_LINK_TIMEOUT_SECONDS = 10
 _CONSOLE_SIGNAL_LOCK = threading.Lock()
 _CONSOLE_CTRL_HANDLER = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
 
@@ -112,6 +117,11 @@ kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
 kernel32.WaitForSingleObject.restype = wintypes.DWORD
 kernel32.ReleaseMutex.argtypes = [wintypes.HANDLE]
 kernel32.ReleaseMutex.restype = wintypes.BOOL
+user32.GetWindowThreadProcessId.argtypes = [
+    wintypes.HWND,
+    ctypes.POINTER(wintypes.DWORD),
+]
+user32.GetWindowThreadProcessId.restype = wintypes.DWORD
 ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
 ntdll.NtResumeProcess.restype = wintypes.LONG
 
@@ -198,27 +208,31 @@ def serialize_evejs_client_trust_and_spawn(
 
 
 def _client_certificate_bundle_paths(client: Path) -> tuple[Path, ...]:
-    """Return every EVE certifi bundle that the official installer manages."""
+    """Return existing bundles from the official installer's bounded locations."""
+    started_at = time.perf_counter()
     fixed = (
         client / "bin64" / "cacert.pem",
         client / "bin64" / "packages" / "certifi" / "cacert.pem",
         client / "bin" / "cacert.pem",
         client / "bin" / "packages" / "certifi" / "cacert.pem",
     )
-    candidates = [path for path in fixed if path.is_file()]
-    try:
-        candidates.extend(client.rglob("cacert.pem"))
-    except OSError:
-        pass
-
     unique: dict[str, Path] = {}
-    for path in candidates:
+    for path in fixed:
+        if not path.is_file():
+            continue
         try:
             resolved = path.resolve(strict=True)
         except OSError:
             continue
         unique.setdefault(os.path.normcase(str(resolved)), resolved)
-    return tuple(unique.values())
+    bundles = tuple(unique.values())
+    log.debug(
+        "Checked %d bounded EVE certificate bundle paths; found %d in %.3fs",
+        len(fixed),
+        len(bundles),
+        time.perf_counter() - started_at,
+    )
+    return bundles
 
 
 def _normalize_pem_text(value: str) -> str:
@@ -326,6 +340,10 @@ def prepare_evejs_client_certificate_trust(
         "-ClientPath",
         str(client),
     ]
+    if client_bundles_are_current:
+        # The official script still verifies and repairs CurrentUser trust, but
+        # must not rediscover or rewrite already-verified client bundles.
+        command.append("-SkipClientBundles")
     try:
         completed = subprocess.run(
             command,
@@ -627,6 +645,7 @@ def create_directory_link(target: Path, link: Path) -> None:
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
+        timeout=_DIRECTORY_LINK_TIMEOUT_SECONDS,
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -705,6 +724,33 @@ def _get_window_rect(hwnd: int) -> tuple[int, int, int, int]:
     rect = wintypes.RECT()
     user32.GetWindowRect(hwnd, ctypes.byref(rect))
     return rect.left, rect.top, rect.right, rect.bottom
+
+
+def has_visible_window_for_pid(pid: int) -> bool:
+    """Return whether one process owns a visible application-sized window."""
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        raise ValueError("Window lookup requires a positive process ID.")
+
+    found = False
+
+    def _callback(hwnd: int, _lparam: int) -> bool:
+        nonlocal found
+        if found:
+            return False
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        owner_pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner_pid))
+        if int(owner_pid.value) != pid:
+            return True
+        left, top, right, bottom = _get_window_rect(hwnd)
+        if (right - left) > 200 and (bottom - top) > 200:
+            found = True
+            return False
+        return True
+
+    user32.EnumWindows(_WNDENUMPROC(_callback), 0)
+    return found
 
 
 def find_eve_window(title: str = "EVE") -> bool:

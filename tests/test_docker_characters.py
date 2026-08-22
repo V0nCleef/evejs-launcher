@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QCoreApplication, QEvent
+from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QMainWindow
 
 from src.app import MainWindow
+from src.core import process_tracker as process_tracker_module
 from src.core.db import Account, Character
 from src.core.process_tracker import ProcessTracker
 from src.core.runtime.data import docker_settings_identity
@@ -71,6 +73,23 @@ class _Characters:
 
     def set_launch_available(self, enabled: bool, reason: str = "") -> None:
         self.calls.append((enabled, reason))
+
+
+class _AliveProcess:
+    pid = 4242
+
+    @staticmethod
+    def poll() -> int | None:
+        return None
+
+
+class _MutableProcess:
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+        self.alive = True
+
+    def poll(self) -> int | None:
+        return None if self.alive else 0
 
 
 def _endpoints() -> RuntimeEndpoints:
@@ -179,6 +198,128 @@ def test_characters_page_shows_launching_immediately_and_preserves_it_on_refresh
         assert card._launch_btn.text() == "LAUNCH"
         assert card._launch_btn.isEnabled() is True
         assert page.detail_panel._launch_btn.text() == "LAUNCH"
+    finally:
+        page.deleteLater()
+        qapp.processEvents()
+
+
+def test_process_tracker_launch_grace_does_not_use_a_global_eve_window(
+    monkeypatch,
+) -> None:
+    tracker = ProcessTracker()
+    tracker.add("fixture-account", "Fixture Character", _AliveProcess())
+    monkeypatch.setattr(
+        process_tracker_module,
+        "_eve_window_exists",
+        lambda: False,
+        raising=False,
+    )
+
+    assert tracker.is_account_launching("fixture-account", 1.0) is True
+
+
+def test_process_tracker_status_reads_do_not_consume_exit_event() -> None:
+    process = _MutableProcess(4242)
+    tracker = ProcessTracker(window_probe=lambda _pid: False)
+    tracker.add("fixture-account", "Fixture Character", process)
+
+    process.alive = False
+
+    assert tracker.running_count == 0
+    assert tracker.get_running_character("fixture-account") is None
+    assert tracker.prune_dead() == 1
+
+
+def test_process_tracker_retires_only_the_pid_whose_seen_window_closed() -> None:
+    visible = {4242: False, 4343: True}
+    tracker = ProcessTracker(
+        window_probe=lambda pid: visible.get(pid, False),
+        window_close_grace_seconds=0,
+    )
+    first = _MutableProcess(4242)
+    second = _MutableProcess(4343)
+    tracker.add("first-account", "First Character", first)
+    tracker.add("second-account", "Second Character", second)
+
+    assert tracker.prune_dead() == 0
+    visible[4242] = True
+    assert tracker.prune_dead() == 0
+
+    visible[4242] = False
+
+    assert tracker.prune_dead() == 1
+    assert tracker.get_running_character("first-account") is None
+    assert tracker.get_running_character("second-account") == "Second Character"
+
+
+def test_characters_page_refreshes_when_process_launch_grace_expires(
+    qapp: QApplication,
+) -> None:
+    page = CharactersPage()
+    page._launch_grace_seconds = 0.05
+    tracker = ProcessTracker()
+    tracker.add("fixture-account", "Fixture Character", _AliveProcess())
+    try:
+        page.refresh([_account()], [], tracker)
+        card = page._cards[("fixture-account", 9001)]
+        assert card._launch_btn.text() == "LAUNCHING..."
+
+        QTest.qWait(120)
+
+        assert card._launch_btn.text() == "RUNNING"
+        assert card._launch_btn.isEnabled() is False
+        assert page._launch_status_timer.isActive() is False
+    finally:
+        page.deleteLater()
+        qapp.processEvents()
+
+
+def test_prune_repairs_card_and_detail_after_an_earlier_status_read(
+    qapp: QApplication,
+) -> None:
+    page = CharactersPage()
+    page._launch_grace_seconds = 0
+    process = _MutableProcess(4242)
+    tracker = ProcessTracker(window_probe=lambda _pid: False)
+    tracker.add("fixture-account", "Fixture Character", process)
+    try:
+        page.refresh([_account()], [], tracker)
+        page._on_card_selected(
+            "fixture-account",
+            "Fixture Character",
+            9001,
+        )
+        card = page._cards[("fixture-account", 9001)]
+        assert card._launch_btn.text() == "RUNNING"
+        assert not card._launch_btn.isEnabled()
+        assert page.detail_panel._launch_btn.text() == "RUNNING"
+        assert not page.detail_panel._launch_btn.isEnabled()
+
+        process.alive = False
+        # This used to delete the tracker entry before the prune timer could
+        # observe it, permanently stranding the existing card as RUNNING.
+        assert tracker.running_count == 0
+
+        window = MainWindow.__new__(MainWindow)
+        window._tracker = tracker
+        window._characters_page = page
+        events: list[str] = []
+
+        def refresh_views() -> None:
+            events.append("views")
+            page.refresh_process_states()
+
+        window._refresh_character_views = refresh_views
+        window._refresh_characters = lambda: events.append("reload")
+        window._update_status_bar = lambda: events.append("status")
+
+        window._prune_and_update()
+
+        assert events == ["views", "reload", "status"]
+        assert card._launch_btn.text() == "LAUNCH"
+        assert card._launch_btn.isEnabled()
+        assert page.detail_panel._launch_btn.text() == "LAUNCH"
+        assert page.detail_panel._launch_btn.isEnabled()
     finally:
         page.deleteLater()
         qapp.processEvents()

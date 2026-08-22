@@ -117,7 +117,9 @@ def test_root_change_refreshes_tools_alongside_other_root_dependent_views(
     tools_window._on_settings_saved({"evejs_root": str(new_root)})
 
     assert tools_calls == [str(new_root)]
-    assert mods_calls == [True]
+    # Withdraw target-bound runtime evidence immediately, then rescan once the
+    # Mods page has switched to the replacement root.
+    assert mods_calls == [True, True]
     assert cache_calls == ["systems", "portraits"]
 
 

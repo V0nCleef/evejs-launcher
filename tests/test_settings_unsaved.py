@@ -117,6 +117,79 @@ def test_invalid_client_path_blocks_settings_save(
     qapp.processEvents()
 
 
+def test_lifecycle_busy_blocks_direct_settings_persistence(
+    qapp: QApplication,
+    isolated_config: Path,
+) -> None:
+    page = SettingsPage()
+    outcomes: list[bool] = []
+    saved: list[dict] = []
+    page.save_finished.connect(outcomes.append)
+    page.settings_saved.connect(saved.append)
+    page.proxy_url_edit.setText("http://127.0.0.1:26099")
+
+    page.set_lifecycle_busy(True)
+    page.save_settings()
+
+    assert not page.save_btn.isEnabled()
+    assert outcomes == [False]
+    assert saved == []
+    assert page.is_dirty()
+    assert not isolated_config.exists()
+    page.set_lifecycle_busy(False)
+    assert page.save_btn.isEnabled()
+    page.deleteLater()
+    qapp.processEvents()
+
+
+def test_lifecycle_busy_cancels_pending_docker_preflight_save(
+    qapp: QApplication,
+    isolated_config: Path,
+    tmp_path: Path,
+) -> None:
+    page = SettingsPage()
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services: {}\n", encoding="utf-8")
+    page.runtime_backend_combo.setCurrentIndex(
+        page.runtime_backend_combo.findData("docker_compose")
+    )
+    page.docker_compose_edit.setText(str(compose))
+    requests: list[object] = []
+    outcomes: list[bool] = []
+    saved: list[dict] = []
+    page.docker_preflight_requested.connect(requests.append)
+    page.save_finished.connect(outcomes.append)
+    page.settings_saved.connect(saved.append)
+
+    page.save_settings()
+    assert len(requests) == 1
+    request = requests[0]
+    assert page._save_after_docker_preflight
+
+    # A lifecycle can begin after the read-only worker starts but before its
+    # queued result returns. That must permanently revoke this save intent.
+    page.set_lifecycle_busy(True)
+    assert outcomes == [False]
+    assert not page._save_after_docker_preflight
+    page.apply_docker_preflight_result(
+        DockerPreflightResult(
+            request.token,
+            request.draft_fingerprint,
+            PreflightReport(True, ("ready",)),
+        )
+    )
+
+    assert saved == []
+    assert outcomes == [False]
+    assert not isolated_config.exists()
+    assert not page.save_btn.isEnabled()
+    page.set_lifecycle_busy(False)
+    assert page.save_btn.isEnabled()
+    assert page.is_dirty()
+    page.deleteLater()
+    qapp.processEvents()
+
+
 @pytest.fixture
 def settings_window(
     qapp: QApplication,

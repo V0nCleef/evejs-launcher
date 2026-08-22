@@ -1361,6 +1361,7 @@ def test_close_stops_optional_audio_before_other_lifecycle_checks() -> None:
         _server_process_alive=lambda: False,
         _stop_service_monitor=lambda: True,
         _has_running_update_checker=lambda: False,
+        _release_mod_lifecycle_lease=lambda: None,
     )
 
     MainWindow.closeEvent(window, Event())

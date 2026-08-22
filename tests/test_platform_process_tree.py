@@ -320,6 +320,37 @@ def _certificate_fixture(tmp_path: Path) -> tuple[Path, Path, Path, str]:
     return root, client, bundle, ca_text
 
 
+def test_certificate_bundle_discovery_is_bounded_to_documented_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = tmp_path / "client" / "tq"
+    documented = (
+        client / "bin64" / "cacert.pem",
+        client / "bin64" / "packages" / "certifi" / "cacert.pem",
+        client / "bin" / "cacert.pem",
+        client / "bin" / "packages" / "certifi" / "cacert.pem",
+    )
+    for bundle in documented:
+        bundle.parent.mkdir(parents=True, exist_ok=True)
+        bundle.write_text("SYSTEM CERTIFICATES\n", encoding="utf-8")
+    unmanaged = client / "res" / "unexpected" / "cacert.pem"
+    unmanaged.parent.mkdir(parents=True)
+    unmanaged.write_text("UNMANAGED CERTIFICATE\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        Path,
+        "rglob",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Certificate discovery must not recursively scan the EVE client"
+        ),
+    )
+
+    assert platform_win._client_certificate_bundle_paths(client) == tuple(
+        bundle.resolve(strict=True) for bundle in documented
+    )
+
+
 def test_certificate_trust_skips_older_root_without_official_installer(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -349,18 +380,22 @@ def test_certificate_trust_current_ca_still_runs_official_health_check(
         "is_eve_client_running",
         lambda: pytest.fail("A current CA must not probe or block live clients"),
     )
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda argv, **_kwargs: subprocess.CompletedProcess(
+    captured: dict[str, object] = {}
+
+    def fake_run(argv, **kwargs):  # type: ignore[no-untyped-def]
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(
             argv,
             0,
             stdout="already healthy",
             stderr="",
-        ),
-    )
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     assert platform_win.prepare_evejs_client_certificate_trust(root, client)
+    assert captured["argv"][-1] == "-SkipClientBundles"  # type: ignore[index]
 
 
 def test_certificate_trust_blocks_ca_rotation_while_eve_is_running(
@@ -489,3 +524,62 @@ def test_certificate_trust_rejects_false_success_without_bundle_update(
 
     with pytest.raises(RuntimeError, match="still missing"):
         platform_win.prepare_evejs_client_certificate_trust(root, client)
+
+
+def test_create_directory_link_uses_a_short_explicit_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "target"
+    link = tmp_path / "link"
+    captured: dict[str, object] = {}
+
+    def fake_run(argv, **kwargs):  # type: ignore[no-untyped-def]
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    platform_win.create_directory_link(target, link)
+
+    assert captured["argv"] == [
+        "cmd",
+        "/c",
+        "mklink",
+        "/J",
+        str(link),
+        str(target),
+    ]
+    assert captured["kwargs"] == {
+        "stdin": subprocess.DEVNULL,
+        "capture_output": True,
+        "text": True,
+        "timeout": 10,
+    }
+
+
+def test_create_directory_link_propagates_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "target"
+    link = tmp_path / "link"
+
+    def time_out(argv, **kwargs):  # type: ignore[no-untyped-def]
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", time_out)
+
+    with pytest.raises(subprocess.TimeoutExpired) as raised:
+        platform_win.create_directory_link(target, link)
+
+    assert raised.value.cmd == [
+        "cmd",
+        "/c",
+        "mklink",
+        "/J",
+        str(link),
+        str(target),
+    ]
+    assert raised.value.timeout == 10

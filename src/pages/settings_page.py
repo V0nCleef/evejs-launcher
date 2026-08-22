@@ -144,6 +144,7 @@ class SettingsPage(QWidget):
         self._pending_docker_request: DockerPreflightRequest | None = None
         self._validated_docker_fingerprint: str | None = None
         self._save_after_docker_preflight = False
+        self._lifecycle_busy = False
         self._settings_baseline: dict[str, object] | None = None
         self._voice_preview_available = False
         self._voice_preview_reason = (
@@ -1272,7 +1273,7 @@ class SettingsPage(QWidget):
         self._save_after_docker_preflight = False
         self._update_runtime_visibility()
         self._update_auto_login_status()
-        self.save_btn.setEnabled(True)
+        self._sync_save_enabled()
         self.test_docker_setup_btn.setEnabled(True)
         self._settings_baseline = self._form_state()
 
@@ -1292,7 +1293,7 @@ class SettingsPage(QWidget):
         self._pending_docker_request = None
         self._save_after_docker_preflight = False
         self._validated_docker_fingerprint = None
-        self.save_btn.setEnabled(True)
+        self._sync_save_enabled()
         self.test_docker_setup_btn.setEnabled(True)
         self.load_settings()
         if cancelled_save:
@@ -1326,6 +1327,9 @@ class SettingsPage(QWidget):
 
     def save_settings(self) -> None:
         """Persist Native immediately or preflight the exact Docker draft."""
+        if self._lifecycle_busy:
+            self._reject_lifecycle_busy_save()
+            return
         if not self._normalize_client_path_for_save():
             self.save_finished.emit(False)
             return
@@ -1431,6 +1435,9 @@ class SettingsPage(QWidget):
 
     def _persist_settings(self, cfg: dict) -> None:
         """Write one already-validated settings draft exactly once."""
+        if self._lifecycle_busy:
+            self._reject_lifecycle_busy_save()
+            return
         try:
             config.save(cfg)
         except OSError:
@@ -1462,6 +1469,9 @@ class SettingsPage(QWidget):
         self._request_docker_preflight(save_after=False)
 
     def _request_docker_preflight(self, *, save_after: bool) -> None:
+        if save_after and self._lifecycle_busy:
+            self._reject_lifecycle_busy_save()
+            return
         self._docker_preflight_token += 1
         request = create_preflight_request(
             self._collect_docker_draft(),
@@ -1469,7 +1479,7 @@ class SettingsPage(QWidget):
         )
         self._pending_docker_request = request
         self._save_after_docker_preflight = save_after
-        self.save_btn.setEnabled(False)
+        self._sync_save_enabled()
         self.test_docker_setup_btn.setEnabled(False)
         self.docker_preflight_result_label.setText(
             "Checking Docker CLI, engine, Compose, services, endpoints, and data state..."
@@ -1489,7 +1499,7 @@ class SettingsPage(QWidget):
         save_after = self._save_after_docker_preflight
         self._pending_docker_request = None
         self._save_after_docker_preflight = False
-        self.save_btn.setEnabled(True)
+        self._sync_save_enabled()
         self.test_docker_setup_btn.setEnabled(True)
         self._show_docker_preflight_message(message, success=False)
         if save_after:
@@ -1511,7 +1521,7 @@ class SettingsPage(QWidget):
 
         save_after = self._save_after_docker_preflight
         self._pending_docker_request = None
-        self.save_btn.setEnabled(True)
+        self._sync_save_enabled()
         self.test_docker_setup_btn.setEnabled(True)
         current_fingerprint = docker_draft_fingerprint(
             self._collect_docker_draft()
@@ -1547,6 +1557,48 @@ class SettingsPage(QWidget):
         self._save_after_docker_preflight = False
         if save_after:
             self._persist_settings(self._collect_settings())
+
+    def set_lifecycle_busy(self, busy: bool) -> None:
+        """Block persistence while a service/mod lifecycle owns its target."""
+
+        busy = bool(busy)
+        if busy == self._lifecycle_busy:
+            self._sync_save_enabled()
+            return
+        self._lifecycle_busy = busy
+        cancelled_save = bool(
+            busy
+            and self._pending_docker_request is not None
+            and self._save_after_docker_preflight
+        )
+        if cancelled_save:
+            # The read-only preflight may finish, but it no longer owns a save
+            # continuation. The lifecycle could otherwise change/recreate the
+            # exact target between validation and persistence.
+            self._save_after_docker_preflight = False
+            self._show_save_feedback(
+                "Save cancelled while a server lifecycle is in progress. Try again when it finishes.",
+                success=False,
+            )
+        self._sync_save_enabled()
+        if cancelled_save:
+            self.save_finished.emit(False)
+
+    def _sync_save_enabled(self) -> None:
+        """Derive Save availability from preflight and lifecycle ownership."""
+
+        self.save_btn.setEnabled(
+            not self._lifecycle_busy and self._pending_docker_request is None
+        )
+
+    def _reject_lifecycle_busy_save(self) -> None:
+        """Reject even programmatic Save attempts at the persistence boundary."""
+
+        self._show_save_feedback(
+            "Settings cannot be saved while a server lifecycle is in progress.",
+            success=False,
+        )
+        self.save_finished.emit(False)
 
     def _invalidate_docker_preflight(self, *_args: object) -> None:
         self._validated_docker_fingerprint = None

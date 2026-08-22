@@ -1,6 +1,9 @@
 # Build artifacts
 build/
 dist/
+output/
+.codex-stage/
+tmp/
 *.spec
 __pycache__/
 *.pyc
@@ -28,6 +31,7 @@ logs/
 *.tmp
 *.temp
 .test-appdata-*/
+.test-pycache-*/
 
 # Environment
 .env

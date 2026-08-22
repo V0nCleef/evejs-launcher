@@ -8,9 +8,13 @@ import json
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 from types import MappingProxyType
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping, TypeVar
 
-from src.core.runtime.docker_cli import DockerCommandError, DockerCommandResult
+from src.core.runtime.docker_cli import (
+    DockerCommandError,
+    DockerCommandResult,
+    DockerStructuredOutputError,
+)
 from src.core.runtime.endpoints import Endpoint, RuntimeEndpoints
 from src.core.service_status import ServiceState
 
@@ -25,6 +29,13 @@ _ENDPOINTS = {
 _DAEMON_VERSION = ("version", "--format", "{{.Server.Os}}|{{.Server.Version}}")
 _COMPOSE_VERSION = ("compose", "version", "--format", "{{.Version}}")
 _TOOLS_PROFILE_SERVICES = ("--profile", "tools", "config", "--services")
+_CONTAINER_ID = re.compile(r"[0-9a-f]{64}\Z")
+_CONTAINER_SHORT_ID = re.compile(r"[0-9a-f]{12,64}\Z")
+_CONTAINER_STARTED_AT = re.compile(r"[^\t\r\n]{1,128}\Z")
+_CONTAINER_RUNTIME_INSPECT_FORMAT = (
+    "{{.Id}}\t{{.State.StartedAt}}\t{{.State.Running}}"
+)
+ParsedOutput = TypeVar("ParsedOutput")
 
 
 class ComposeValidationError(ValueError):
@@ -153,6 +164,9 @@ class ComposeConfig:
     # Hash only: the effective JSON can contain secrets from Compose
     # interpolation and must never be retained beyond parsing.
     effective_config_digest: str | None = None
+    # Retain only the exact effective server NODE_OPTIONS digest for mod
+    # attestation. The environment value itself may contain private material.
+    server_node_options_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -243,8 +257,13 @@ class ComposeInspector:
                 for line in profile_services_result.stdout.splitlines()
                 if line.strip()
             }
-            config_result = self._compose(target, "config", "--format", "json")
-            config = parse_compose_config(json.loads(config_result.stdout))
+            config = self._compose_parsed(
+                target,
+                "config",
+                "--format",
+                "json",
+                parser=_parse_compose_config_output,
+            )
             config = replace(
                 config,
                 capabilities=ComposeCapabilities(
@@ -261,15 +280,20 @@ class ComposeInspector:
             diagnostics.append("Safe local endpoints and effective mounts validated.")
 
             try:
-                ps_result = self._compose(
-                    target, "ps", "--all", "--format", "json"
-                )
                 found = {
                     record.service: record
-                    for record in parse_ps_output(ps_result.stdout)
+                    for record in self._compose_parsed(
+                        target,
+                        "ps",
+                        "--all",
+                        "--format",
+                        "json",
+                        parser=parse_ps_output,
+                    )
                 }
             except (
                 DockerCommandError,
+                DockerStructuredOutputError,
                 ComposeValidationError,
                 json.JSONDecodeError,
             ):
@@ -289,6 +313,7 @@ class ComposeInspector:
             return PreflightReport(True, tuple(diagnostics), config, records)
         except (
             DockerCommandError,
+            DockerStructuredOutputError,
             ComposeValidationError,
             json.JSONDecodeError,
             OSError,
@@ -300,14 +325,64 @@ class ComposeInspector:
 
     def status(self, target: ComposeTarget) -> Mapping[str, ContainerRecord]:
         """Read only current records after a successful cached preflight."""
-        result = self._compose(target, "ps", "--all", "--format", "json")
-        found = {record.service: record for record in parse_ps_output(result.stdout)}
+        records = self._compose_parsed(
+            target,
+            "ps",
+            "--all",
+            "--format",
+            "json",
+            parser=parse_ps_output,
+        )
+        found = {record.service: record for record in records}
         record_services = set(found) | _REQUIRED_SERVICES
         return MappingProxyType(
             {
                 service: found.get(service, ContainerRecord.absent(service))
                 for service in record_services
             }
+        )
+
+    def container_runtime_identity(
+        self,
+        target: ComposeTarget,
+        record: ContainerRecord,
+    ) -> str | None:
+        """Return a privacy-safe identity for one currently running container."""
+
+        if record.raw_state != "running" or not record.exists:
+            return None
+        short_id = record.short_id
+        if (
+            not isinstance(short_id, str)
+            or not _CONTAINER_SHORT_ID.fullmatch(short_id.casefold())
+        ):
+            raise ComposeValidationError(
+                "The running container identity is unavailable."
+            )
+        result = self._run(
+            (
+                "inspect",
+                "--type",
+                "container",
+                "--format",
+                _CONTAINER_RUNTIME_INSPECT_FORMAT,
+                short_id,
+            ),
+            target,
+        )
+        if result.truncated:
+            raise ComposeValidationError(
+                "The running container inspection was truncated."
+            )
+        parts = result.stdout.rstrip("\r\n").split("\t", 2)
+        if len(parts) != 3 or parts[2] != "true":
+            raise ComposeValidationError(
+                "The running container inspection is malformed."
+            )
+        return docker_container_runtime_identity(
+            parts[0],
+            parts[1],
+            expected_short_id=short_id,
         )
 
     def _run(self, args: tuple[str, ...], target: ComposeTarget) -> DockerCommandResult:
@@ -317,6 +392,29 @@ class ComposeInspector:
     def _compose(self, target: ComposeTarget, *command: str) -> DockerCommandResult:
         args = target.compose_args(self._runner.executable, *command)
         return self._run(args, target)
+
+    def _run_parsed(
+        self,
+        args: tuple[str, ...],
+        target: ComposeTarget,
+        *,
+        parser: Callable[[str], ParsedOutput],
+    ) -> ParsedOutput:
+        self._assert_read_only(args, target)
+        return self._runner.run_parsed(
+            args,
+            cwd=target.project_directory,
+            parser=parser,
+        )
+
+    def _compose_parsed(
+        self,
+        target: ComposeTarget,
+        *command: str,
+        parser: Callable[[str], ParsedOutput],
+    ) -> ParsedOutput:
+        args = target.compose_args(self._runner.executable, *command)
+        return self._run_parsed(args, target, parser=parser)
 
     @staticmethod
     def _assert_read_only(args: tuple[str, ...], target: ComposeTarget) -> None:
@@ -328,8 +426,40 @@ class ComposeInspector:
             target.compose_args("docker", "config", "--format", "json"),
             target.compose_args("docker", "ps", "--all", "--format", "json"),
         }
-        if args not in allowed:
+        inspect_allowed = (
+            len(args) == 6
+            and args[:5]
+            == (
+                "inspect",
+                "--type",
+                "container",
+                "--format",
+                _CONTAINER_RUNTIME_INSPECT_FORMAT,
+            )
+            and isinstance(args[5], str)
+            and bool(_CONTAINER_SHORT_ID.fullmatch(args[5].casefold()))
+        )
+        if args not in allowed and not inspect_allowed:
             raise RuntimeError("Docker command is outside the Phase 2A read-only allowlist.")
+
+
+def docker_container_runtime_identity(
+    full_id: str,
+    started_at: str,
+    *,
+    expected_short_id: str,
+) -> str:
+    """Hash Docker's immutable id plus start epoch without retaining either."""
+
+    normalized_short_id = expected_short_id.casefold()
+    if (
+        not _CONTAINER_SHORT_ID.fullmatch(normalized_short_id)
+        or not _CONTAINER_ID.fullmatch(full_id)
+        or not full_id.startswith(normalized_short_id)
+        or not _CONTAINER_STARTED_AT.fullmatch(started_at)
+    ):
+        raise ComposeValidationError("The running container identity is malformed.")
+    return hashlib.sha256(f"{full_id}\0{started_at}".encode("utf-8")).hexdigest()
 
 
 def parse_ps_output(text: str) -> tuple[ContainerRecord, ...]:
@@ -345,6 +475,17 @@ def parse_ps_output(text: str) -> tuple[ContainerRecord, ...]:
     if not all(isinstance(value, Mapping) for value in values):
         raise ComposeValidationError("Compose ps output did not contain service records.")
     return tuple(_container_record(value) for value in values)
+
+
+def _parse_compose_config_output(text: str) -> ComposeConfig:
+    """Project effective Compose JSON into the retained secret-free model."""
+
+    payload = json.loads(text)
+    if not isinstance(payload, Mapping):
+        raise ComposeValidationError(
+            "Effective Compose config must be a JSON object."
+        )
+    return parse_compose_config(payload)
 
 
 def _records_from_json(value: Any) -> list[Any]:
@@ -448,13 +589,48 @@ def parse_compose_config(payload: Mapping[str, Any]) -> ComposeConfig:
             sort_keys=True,
         ).encode("utf-8")
     ).hexdigest()
+    server_node_options_sha256 = _server_node_options_sha256(raw_services)
     return ComposeConfig(
         _string_or_none(payload.get("name")),
         MappingProxyType(services),
         endpoints,
         ComposeCapabilities("init" in services, "market-tools" in services),
         effective_config_digest,
+        server_node_options_sha256,
     )
+
+
+def _server_node_options_sha256(
+    raw_services: Mapping[str, Any],
+) -> str | None:
+    """Hash the exact effective server NODE_OPTIONS without retaining it."""
+
+    server = raw_services.get("server")
+    if not isinstance(server, Mapping):
+        return None
+    environment = server.get("environment")
+    value: object | None = None
+    if isinstance(environment, Mapping):
+        value = environment.get("NODE_OPTIONS")
+    elif isinstance(environment, list):
+        matches = [
+            item.partition("=")[2]
+            for item in environment
+            if isinstance(item, str) and item.partition("=")[0] == "NODE_OPTIONS"
+        ]
+        if len(matches) > 1:
+            raise ComposeValidationError(
+                "Effective server NODE_OPTIONS is declared more than once."
+            )
+        if matches:
+            value = matches[0]
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ComposeValidationError(
+            "Effective server NODE_OPTIONS must resolve to a string."
+        )
+    return hashlib.sha256(value.encode("utf-8", errors="strict")).hexdigest()
 
 
 def _dependencies(value: Any) -> tuple[str, ...]:

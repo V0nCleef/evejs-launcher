@@ -18,8 +18,8 @@ from src.core import db
 from src.core.db import Account, Character
 from src.core.runtime.docker_cli import (
     DockerCommandError,
-    DockerCommandResult,
     DockerCommandRunner,
+    DockerStructuredOutputError,
 )
 from src.core.runtime.docker_compose import (
     ComposeConfig,
@@ -75,6 +75,14 @@ class RuntimeDataSelection:
     target_identity: str
     settings_identity: str | None = None
     monitor_generation: int | None = None
+
+
+@dataclass(frozen=True)
+class _ExportProjection:
+    """Secret-free result crossing the structured Docker parser boundary."""
+
+    status: str
+    value: object | None = None
 
 
 class NativeDataSource:
@@ -138,22 +146,44 @@ class DockerExportDataSource:
         self.output_limit = int(output_limit)
 
     def load_accounts(self) -> list[Account]:
-        payload = self._load_export(None)
-        return _map_export_accounts(payload)
+        value = self._load_export(None, _map_export_accounts)
+        if not isinstance(value, list):
+            raise DataSourceError(
+                "malformed_export",
+                "Docker character export returned an invalid account projection.",
+            )
+        return value
 
     def get_character_detail(self, char_id: int) -> dict | None:
         requested_id = _positive_id(char_id)
-        payload = self._load_export(requested_id)
-        return _map_export_detail(payload, requested_id)
+        value = self._load_export(
+            requested_id,
+            lambda payload: _map_export_detail(payload, requested_id),
+        )
+        if value is not None and not isinstance(value, dict):
+            raise DataSourceError(
+                "malformed_export",
+                "Docker character export returned an invalid character projection.",
+            )
+        return value
 
-    def _load_export(self, char_id: int | None) -> Mapping[str, object]:
+    def _load_export(
+        self,
+        char_id: int | None,
+        projector: Callable[[Mapping[str, object]], object],
+    ) -> object | None:
         command = self._command(char_id)
         args = self.target.compose_args(self.runner.executable, *command)
         self._assert_allowlisted(args, char_id)
         try:
-            result = self.runner.run(
+            projection = self.runner.run_parsed(
                 args,
                 cwd=self.target.project_directory,
+                parser=lambda stdout: _project_export_stdout(
+                    stdout,
+                    output_limit=self.output_limit,
+                    projector=projector,
+                ),
                 timeout=self.timeout,
             )
         except FileNotFoundError as exc:
@@ -163,28 +193,38 @@ class DockerExportDataSource:
             ) from exc
         except DockerCommandError as exc:
             raise _command_failure(exc) from exc
+        except DockerStructuredOutputError as exc:
+            if exc.code == "too_large":
+                raise DataSourceError(
+                    "export_too_large",
+                    "Docker character export exceeded the safe response limit.",
+                ) from None
+            raise DataSourceError(
+                "malformed_export",
+                "Docker character export returned malformed JSON.",
+            ) from None
         except OSError as exc:
             raise DataSourceError(
                 "docker_cli_unavailable",
                 "Docker character data is unavailable because the Docker CLI could not start.",
             ) from exc
 
-        if not isinstance(result, DockerCommandResult):
+        if not isinstance(projection, _ExportProjection):
             raise DataSourceError(
                 "export_failed",
-                "Docker character export returned an unsupported command result.",
+                "Docker character export returned an unsupported parsed result.",
             )
-        if not result.ok:
-            raise DataSourceError(
-                "export_failed",
-                "Docker character export did not complete successfully.",
-            )
-        if result.truncated or len(result.stdout.encode("utf-8")) > self.output_limit:
+        if projection.status == "too_large":
             raise DataSourceError(
                 "export_too_large",
                 "Docker character export exceeded the safe response limit.",
             )
-        return _decode_export_payload(result.stdout)
+        if projection.status != "ok":
+            raise DataSourceError(
+                "malformed_export",
+                "Docker character export returned malformed JSON.",
+            )
+        return projection.value
 
     def _command(self, char_id: int | None) -> tuple[str, ...]:
         raw_state = (self.server_record.raw_state or "").casefold()
@@ -499,6 +539,24 @@ def _document_offsets(stdout: str) -> list[int]:
         while stdout.startswith((" ", "\t", "\r"), position):
             position += 1
     return offsets
+
+
+def _project_export_stdout(
+    stdout: str,
+    *,
+    output_limit: int,
+    projector: Callable[[Mapping[str, object]], object],
+) -> _ExportProjection:
+    """Parse raw export JSON and release only its validated safe projection."""
+
+    if len(stdout.encode("utf-8")) > output_limit:
+        return _ExportProjection("too_large")
+    try:
+        payload = _decode_export_payload(stdout)
+        value = projector(payload)
+    except DataSourceError:
+        return _ExportProjection("invalid")
+    return _ExportProjection("ok", value)
 
 
 def _decode_export_payload(stdout: str) -> Mapping[str, object]:

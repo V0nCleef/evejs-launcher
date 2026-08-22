@@ -4,7 +4,9 @@ Both processes redirect their stdout/stderr to temp log files so the
 launcher's built-in console panel can tail them for a 1:1 mirror of
 what would normally appear in a CMD window.
 """
+from dataclasses import dataclass
 from datetime import datetime
+import hashlib
 import json
 import os
 import sqlite3
@@ -17,6 +19,14 @@ from pathlib import Path
 
 from ..constants import Ports
 from ..config import CONFIG_DIR
+from .mod_manager import active_loader_mods, scan_mods
+from .mod_runtime_state import (
+    ModRuntimePlan,
+    ModRuntimeStateError,
+    NATIVE_BACKEND,
+    native_mod_preload_paths,
+    validate_mod_runtime_plan,
+)
 from .platform import (
     get_graceful_server_process_flags,
     get_hidden_process_flags,
@@ -43,6 +53,15 @@ _BETTER_SQLITE3_PROBE_SCRIPT = (
 )
 
 
+@dataclass(frozen=True)
+class NativeModRuntimeLaunchReceipt:
+    """Immutable binding between one plan-bound launch and its raw evidence."""
+
+    plan_sha256: str
+    runtime_identity: str
+    status_log_path: Path
+
+
 def get_server_log_path(evejs_root: str) -> Path:
     """Return path to the server's own log file (written by EveJS internally)."""
     return Path(evejs_root) / "server" / "logs" / "server.log"
@@ -51,6 +70,26 @@ def get_server_log_path(evejs_root: str) -> Path:
 def get_server_console_log() -> Path:
     """Return the path to the live server console log (1:1 stdout mirror)."""
     return SERVER_CONSOLE_LOG
+
+
+def get_native_mod_status_log(evejs_root: str | Path) -> Path:
+    """Return the stable raw-stdout evidence path for one canonical root.
+
+    Only a SHA-256 root identity is present in the launcher-owned filename, so
+    a private installation path is never copied into the log namespace.  The
+    file is reused and truncated for each Native start rather than accumulated
+    as one unbounded file per launch attempt.
+    """
+
+    try:
+        root = Path(evejs_root).resolve(strict=True)
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("The EveJS root is unavailable.") from exc
+    if not root.is_dir():
+        raise ValueError("The EveJS root is not a directory.")
+    root_identity = os.path.normcase(str(root))
+    digest = hashlib.sha256(root_identity.encode("utf-8")).hexdigest()
+    return _LOGS_DIR / "native_mod_status" / f"{digest}.log"
 
 
 def get_market_console_log() -> Path:
@@ -136,35 +175,87 @@ def native_market_database_status(
 
 # ── Pipe reader thread ────────────────────────────────────────────────
 
-def _pipe_to_file(pipe, path: Path, mode: str = "a") -> None:
-    """Read lines from *pipe* into *path* in a daemon thread."""
+def _pipe_to_files(
+    pipe,
+    paths: tuple[Path, ...],
+    mode: str = "a",
+) -> None:
+    """Mirror one child pipe byte-for-byte to every destination in one read."""
+
+    streams = []
     try:
-        with open(path, mode, encoding="utf-8", errors="replace") as f:
-            for line in iter(pipe.readline, b""):
-                try:
-                    text = line.decode("utf-8", errors="replace")
-                except Exception:
-                    text = line.decode("latin-1", errors="replace")
-                f.write(text)
-                f.flush()
+        binary_mode = mode if "b" in mode else f"{mode}b"
+        for path in paths:
+            streams.append(open(path, binary_mode))
+        while True:
+            line = pipe.readline()
+            if line == b"" or line == "":
+                break
+            if isinstance(line, str):
+                line = line.encode("utf-8", errors="strict")
+            for stream in streams:
+                stream.write(line)
+                stream.flush()
     except (OSError, ValueError):
         pass  # pipe closed
+    finally:
+        for stream in streams:
+            try:
+                stream.close()
+            except OSError:
+                pass
+
+
+def _pipe_to_file(pipe, path: Path, mode: str = "a") -> None:
+    """Mirror child stdout bytes exactly to one destination."""
+
+    _pipe_to_files(pipe, (path,), mode)
 
 
 # ── Mod discovery ──────────────────────────────────────────────────────
 
 def _find_mod_preloads(evejs_root: str) -> list[str]:
-    """Scan mods/*/loader.js and return --require flags for active mods."""
-    mods_dir = Path(evejs_root) / "mods"
-    args = []
-    if mods_dir.is_dir():
-        for item in sorted(mods_dir.iterdir()):
-            if item.is_dir() and (item / "loader.js").exists():
-                args.extend(["--require", str(item / "loader.js")])
+    """Return only validated active loader paths for Node ``--require``."""
+    args: list[str] = []
+    for mod in active_loader_mods(scan_mods(evejs_root)):
+        args.extend(["--require", str(mod.path / "loader.js")])
     return args
 
 
-def build_game_server_command(evejs_root: str | Path, mode: str) -> list[str]:
+def _native_plan_preloads(
+    evejs_root: str | Path,
+    mode: str,
+    plan: ModRuntimePlan,
+) -> tuple[Path, ...]:
+    """Validate and freeze the only loader paths authorized for this launch."""
+
+    validate_mod_runtime_plan(plan, backend=NATIVE_BACKEND)
+    try:
+        root = Path(evejs_root).resolve(strict=True)
+    except (OSError, TypeError, ValueError) as exc:
+        raise ModRuntimeStateError("The Native launch root is unavailable.") from exc
+    if not root.is_dir():
+        raise ModRuntimeStateError("The Native launch root is not a directory.")
+    if plan.root != root:
+        raise ModRuntimeStateError(
+            "The Native runtime plan belongs to a different EveJS root."
+        )
+    if plan.mode != mode:
+        raise ModRuntimeStateError(
+            "The Native runtime plan mode does not match the requested launch mode."
+        )
+
+    # Keep the empty result as an explicit frozen selection.  Falling back to
+    # discovery here would let a loader added after planning enter the process.
+    return tuple(native_mod_preload_paths(plan))
+
+
+def build_game_server_command(
+    evejs_root: str | Path,
+    mode: str,
+    *,
+    mod_runtime_plan: ModRuntimePlan | None = None,
+) -> list[str]:
     """Build the direct-Node game-server command for an explicit mode."""
     if mode not in {"vanilla", "modded"}:
         raise ValueError(f"Unsupported server mode: {mode}")
@@ -175,8 +266,17 @@ def build_game_server_command(evejs_root: str | Path, mode: str) -> list[str]:
         "--report-dir=./logs/node-reports",
         "--max-old-space-size=8192",
     ]
-    if mode == "modded":
-        command.extend(_find_mod_preloads(str(evejs_root)))
+    if mod_runtime_plan is None:
+        if mode == "modded":
+            command.extend(_find_mod_preloads(str(evejs_root)))
+    else:
+        frozen_preloads = _native_plan_preloads(
+            evejs_root,
+            mode,
+            mod_runtime_plan,
+        )
+        for preload in frozen_preloads:
+            command.extend(["--require", str(preload)])
     command.append(".")
     return command
 
@@ -589,7 +689,12 @@ def _prepare_native_game_store_environment(
         env["EVEJS_GAMESTORE_DATA_DIR"] = str(canonical_data.resolve())
 
 
-def start_game_server(evejs_root: str, mode: str) -> subprocess.Popen:
+def start_game_server(
+    evejs_root: str,
+    mode: str,
+    *,
+    mod_runtime_plan: ModRuntimePlan | None = None,
+) -> subprocess.Popen:
     """Start the game server by launching Node.js directly.
 
     Stdout and stderr are piped to a temp log file so the launcher's
@@ -612,7 +717,21 @@ def start_game_server(evejs_root: str, mode: str) -> subprocess.Popen:
     env["EVEJS_PROXY_LOCAL_INTERCEPT"] = "1"
     _prepare_native_game_store_environment(Path(evejs_root), server_dir, env)
 
-    cmd = build_game_server_command(evejs_root, mode)
+    if mod_runtime_plan is None:
+        cmd = build_game_server_command(evejs_root, mode)
+    else:
+        cmd = build_game_server_command(
+            evejs_root,
+            mode,
+            mod_runtime_plan=mod_runtime_plan,
+        )
+
+    # Dependency checks and legacy-store migration can write arbitrary launcher
+    # diagnostics to the normal Game console.  The attestation input begins
+    # here, immediately before Node is spawned, and contains child bytes only.
+    mod_status_log = get_native_mod_status_log(evejs_root)
+    mod_status_log.parent.mkdir(parents=True, exist_ok=True)
+    mod_status_log.write_bytes(b"")
 
     proc = subprocess.Popen(
         cmd,
@@ -624,10 +743,22 @@ def start_game_server(evejs_root: str, mode: str) -> subprocess.Popen:
         **get_graceful_server_process_flags(),
     )
 
-    # Start a daemon thread that writes stdout to the console log file
+    if mod_runtime_plan is not None:
+        setattr(
+            proc,
+            "mod_runtime_receipt",
+            NativeModRuntimeLaunchReceipt(
+                plan_sha256=mod_runtime_plan.plan_sha256,
+                runtime_identity=mod_runtime_plan.runtime_identity,
+                status_log_path=mod_status_log,
+            ),
+        )
+
+    # One reader owns the pipe.  Two readers would split lines nondeterministically
+    # and make both the human console and runtime evidence incomplete.
     threading.Thread(
-        target=_pipe_to_file,
-        args=(proc.stdout, SERVER_CONSOLE_LOG, "a"),
+        target=_pipe_to_files,
+        args=(proc.stdout, (SERVER_CONSOLE_LOG, mod_status_log), "a"),
         daemon=True,
     ).start()
 

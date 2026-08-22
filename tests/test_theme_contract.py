@@ -54,6 +54,22 @@ def test_theme_exposes_tool_deck_roles_and_focus_states() -> None:
     assert "QComboBox:focus" in qss
 
 
+def test_theme_exposes_mod_management_action_roles_and_interaction_states() -> None:
+    qss = build_qss({"header": "Segoe UI", "body": "Segoe UI", "mono": "Consolas"})
+
+    for role in (
+        'QPushButton[class="modManagementAction"]',
+        'QPushButton[class="modManagementAction"][managementRole="remove"]',
+        'QPushButton[class="modManagementAction"][managementRole="repair"]',
+    ):
+        assert role in qss
+    assert '[managementRole="remove"]:hover' in qss
+    assert '[managementRole="remove"]:pressed' in qss
+    assert '[managementRole="remove"]:focus' in qss
+    assert '[managementRole="repair"]:hover' in qss
+    assert 'QPushButton[class="modManagementAction"]:disabled' in qss
+
+
 def test_theme_exposes_cinematic_operations_roles() -> None:
     qss = build_qss({"header": "Segoe UI", "body": "Segoe UI", "mono": "Consolas"})
 

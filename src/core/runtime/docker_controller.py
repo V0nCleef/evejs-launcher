@@ -3,11 +3,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import hashlib
+import json
 import time
 from typing import Any, Callable, Mapping
 
-from src.core.runtime.docker_cli import DockerCommandError, redact_docker_diagnostic
-from src.core.runtime.docker_compose import ComposeTarget, ContainerRecord
+from src.core.runtime.docker_cli import (
+    DockerCommandError,
+    redact_docker_diagnostic,
+)
+from src.core.runtime.docker_compose import (
+    ComposeTarget,
+    ContainerRecord,
+    docker_container_runtime_identity,
+)
 from src.core.runtime.data import docker_project_identity
 from src.core.runtime.endpoints import Endpoint, probe_endpoint, probe_http_health
 from src.core.service_status import DockerControlPolicy, ServiceState
@@ -50,6 +59,9 @@ _COMMAND_TIMEOUTS: Mapping[DockerLifecycleAction, float] = {
     DockerLifecycleAction.RESTART_GAME: 75.0,
     DockerLifecycleAction.RECREATE_GAME: 180.0,
 }
+_MOD_RUNTIME_INSPECT_FORMAT = (
+    "{{.Id}}\t{{.State.StartedAt}}\t{{.State.Running}}\t{{json .Config.Env}}"
+)
 
 
 @dataclass(frozen=True)
@@ -61,6 +73,8 @@ class DockerLifecycleResult:
     records: Mapping[str, ContainerRecord] | None = None
     error: str | None = None
     target_identity: str | None = None
+    server_node_options_sha256: str | None = None
+    game_runtime_identity: str | None = None
 
 
 class ManagedComposeController:
@@ -164,13 +178,70 @@ class ManagedComposeController:
                                              error=_diagnostic(f"Docker state inspection failed: {exc}"),
                                              target_identity=target_identity)
             if self._desired(action, last_records):
-                return DockerLifecycleResult(action, True, records=last_records,
-                                             target_identity=target_identity)
+                node_options_sha256 = getattr(
+                    self._config,
+                    "server_node_options_sha256",
+                    None,
+                )
+                game_runtime_identity = None
+                if action is DockerLifecycleAction.RECREATE_GAME:
+                    try:
+                        (
+                            node_options_sha256,
+                            game_runtime_identity,
+                        ) = self._inspect_recreated_game_runtime(
+                            last_records.get("server")
+                        )
+                    except (DockerCommandError, OSError, TypeError, ValueError):
+                        return DockerLifecycleResult(
+                            action,
+                            False,
+                            records=last_records,
+                            error=(
+                                "The recreated server reached readiness, but its "
+                                "effective mod environment could not be verified."
+                            ),
+                            target_identity=target_identity,
+                        )
+                return DockerLifecycleResult(
+                    action,
+                    True,
+                    records=last_records,
+                    target_identity=target_identity,
+                    server_node_options_sha256=node_options_sha256,
+                    game_runtime_identity=game_runtime_identity,
+                )
             if self._clock() >= deadline:
                 return DockerLifecycleResult(action, False, records=last_records,
                     error="Docker lifecycle operation did not reach its desired state before the timeout.",
                     target_identity=target_identity)
             self._sleep(self._interval)
+
+    def _inspect_recreated_game_runtime(
+        self,
+        record: ContainerRecord | None,
+    ) -> tuple[str | None, str]:
+        """Bind mod evidence to the recreated container's actual environment."""
+
+        short_id = getattr(record, "short_id", None)
+        if not isinstance(short_id, str) or not short_id:
+            raise ValueError("The recreated server container id is unavailable.")
+        return self._runner.run_parsed(
+            (
+                "inspect",
+                "--type",
+                "container",
+                "--format",
+                _MOD_RUNTIME_INSPECT_FORMAT,
+                short_id,
+            ),
+            cwd=self._target.project_directory,
+            parser=lambda stdout: _parse_recreated_game_runtime(
+                stdout,
+                expected_short_id=short_id,
+            ),
+            timeout=15.0,
+        )
 
     def _desired(
         self,
@@ -241,6 +312,44 @@ class ManagedComposeController:
 def _safely_stopped(record: ContainerRecord | None) -> bool:
     """Fail closed: absent, created, exited, and dead are the only stop states."""
     return record is None or not record.exists or record.raw_state in {"created", "exited", "dead"}
+
+
+def _parse_recreated_game_runtime(
+    stdout: str,
+    *,
+    expected_short_id: str,
+) -> tuple[str | None, str]:
+    """Project secret-bearing inspect JSON into digests inside the runner."""
+
+    parts = stdout.rstrip("\r\n").split("\t", 3)
+    if len(parts) != 4:
+        raise ValueError("The recreated server inspection is malformed.")
+    full_id, started_at, running, raw_environment = parts
+    if running != "true":
+        raise ValueError("The recreated server identity is malformed.")
+    environment = json.loads(raw_environment)
+    if not isinstance(environment, list) or not all(
+        isinstance(item, str) for item in environment
+    ):
+        raise ValueError("The recreated server environment is malformed.")
+    node_options = [
+        item[len("NODE_OPTIONS=") :]
+        for item in environment
+        if item.startswith("NODE_OPTIONS=")
+    ]
+    if len(node_options) > 1:
+        raise ValueError("The recreated server NODE_OPTIONS is ambiguous.")
+    node_options_sha256 = (
+        hashlib.sha256(node_options[0].encode("utf-8")).hexdigest()
+        if node_options
+        else None
+    )
+    runtime_identity = docker_container_runtime_identity(
+        full_id,
+        started_at,
+        expected_short_id=expected_short_id,
+    )
+    return node_options_sha256, runtime_identity
 
 
 def _diagnostic(values: object) -> str:

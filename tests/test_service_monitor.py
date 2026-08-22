@@ -68,6 +68,33 @@ def test_monitor_change_detects_later_endpoint_observations(
         monitor.stop()
 
 
+def test_monitor_observes_stable_reachability_without_reemitting_change(
+    qapp: QApplication,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        server_worker.server_launcher,
+        "is_server_running",
+        lambda **_kwargs: True,
+    )
+    observations = []
+    changes = []
+    monitor = ServiceMonitor(interval_ms=10_000)
+    monitor.probe_observed.connect(observations.append)
+    monitor.probe_changed.connect(changes.append)
+
+    monitor.start()
+    try:
+        qapp.processEvents()
+        monitor.probe_now()
+
+        assert len(observations) == 2
+        assert all(probe.game_reachable for probe in observations)
+        assert len(changes) == 1
+    finally:
+        monitor.stop()
+
+
 def test_monitor_probes_market_rpc_not_game_market_proxy(
     qapp: QApplication,
     monkeypatch,

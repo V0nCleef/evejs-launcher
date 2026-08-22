@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from src import config
 from src.app import MainWindow
 from src.constants import Page
 from src.core.launcher import ClientLaunchContext
+from src.core.mod_runtime_state import DOCKER_BACKEND, ModRuntimeSnapshot
 from src.core.runtime.data import docker_settings_identity
 from src.core.runtime.endpoints import Endpoint, RuntimeEndpoints
 from src.core.service_status import DockerControlPolicy, RuntimeBackend, RuntimeSnapshot, ServiceState
@@ -54,6 +56,24 @@ def _identity_fields(window: MainWindow) -> dict[str, object]:
         "settings_identity": _settings_identity(window),
         "monitor_generation": window._monitor_generation,
     }
+
+
+def _docker_mod_snapshot(root: Path, runtime_identity: str) -> ModRuntimeSnapshot:
+    return ModRuntimeSnapshot(
+        schema_version=1,
+        root=root,
+        backend=DOCKER_BACKEND,
+        mode="modded",
+        runtime_identity=runtime_identity,
+        plan_sha256="a" * 64,
+        docker_override_path=root / ".evejs-launcher" / "mods.compose.yaml",
+        docker_override_sha256="b" * 64,
+        docker_node_options_sha256="c" * 64,
+        selected_loader_ids=(),
+        pid=None,
+        observed_at=datetime.now(timezone.utc),
+        mods=(),
+    )
 
 
 class _Button:
@@ -143,6 +163,59 @@ def test_docker_observation_propagates_exact_effective_endpoints(
         docker_window
     )
     assert docker_window.published.monitor_generation == 4
+
+
+def test_same_container_id_with_new_runtime_digest_clears_mod_evidence(
+    docker_window: MainWindow,
+    tmp_path: Path,
+) -> None:
+    docker_window._monitor_generation = 4
+    settings_identity = _settings_identity(docker_window)
+    docker_window._runtime_snapshot = RuntimeSnapshot(
+        ServiceState.ONLINE,
+        ServiceState.ONLINE,
+        0,
+        backend=RuntimeBackend.DOCKER_COMPOSE,
+        game_container="server-id",
+        target_identity="docker:fixture-target",
+        settings_identity=settings_identity,
+        monitor_generation=4,
+        game_runtime_identity="a" * 64,
+    )
+    docker_window._current_mod_runtime_snapshot = _docker_mod_snapshot(
+        tmp_path,
+        "a" * 64,
+    )
+    docker_window._attested_docker_target_identity = "docker:fixture-target"
+    docker_window._attested_docker_container_id = "server-id"
+    published: list[object] = []
+    docker_window._mods_page = type(
+        "Mods",
+        (),
+        {
+            "set_mod_runtime_snapshot": lambda _self, snapshot: published.append(
+                snapshot
+            )
+        },
+    )()
+    docker_window._apply_runtime_snapshot = lambda _snapshot: None
+
+    docker_window._on_docker_observation(
+        DockerObservation(
+            ServiceState.ONLINE,
+            ServiceState.ONLINE,
+            game_identity="server-id",
+            game_runtime_identity="b" * 64,
+            target_identity="docker:fixture-target",
+            settings_identity=settings_identity,
+            monitor_generation=4,
+        ),
+        4,
+    )
+
+    assert docker_window._runtime_snapshot.game_runtime_identity == "b" * 64
+    assert docker_window._current_mod_runtime_snapshot is None
+    assert published == [None]
 
 
 def test_docker_observation_rejects_wrong_embedded_generation_or_settings(
@@ -395,6 +468,87 @@ def test_async_docker_monitor_finish_schedules_exactly_one_replacement_without_w
     docker_window._on_service_monitor_thread_finished(thread)
     docker_window._on_service_monitor_thread_finished(thread)
     assert scheduled == ["start"]
+
+
+def test_current_monitor_finish_clears_runtime_mod_evidence(
+    docker_window: MainWindow,
+    tmp_path: Path,
+) -> None:
+    class Thread:
+        def deleteLater(self) -> None:
+            return None
+
+    class Monitor(DockerMonitor):
+        def __init__(self) -> None:
+            super().__init__(lambda: object(), inspector_factory=lambda: object())
+
+    thread = Thread()
+    docker_window._service_thread = thread
+    docker_window._service_monitor = Monitor()
+    docker_window._current_mod_runtime_snapshot = _docker_mod_snapshot(
+        tmp_path,
+        "a" * 64,
+    )
+    published: list[object] = []
+    docker_window._mods_page = type(
+        "Mods",
+        (),
+        {
+            "set_mod_runtime_snapshot": lambda _self, snapshot: published.append(
+                snapshot
+            )
+        },
+    )()
+
+    docker_window._on_service_monitor_thread_finished(thread)  # type: ignore[arg-type]
+
+    assert docker_window._current_mod_runtime_snapshot is None
+    assert published == [None]
+
+
+@pytest.mark.parametrize(
+    "changed_setting",
+    [
+        {"docker_compose_file": "C:/EveJS/alternate-compose.yaml"},
+        {"docker_project_name": "replacement-project"},
+    ],
+)
+def test_docker_target_setting_change_clears_mod_evidence_immediately(
+    docker_window: MainWindow,
+    changed_setting: dict[str, str],
+) -> None:
+    published: list[object] = []
+    docker_window._current_mod_runtime_snapshot = object()
+    docker_window._attested_docker_target_identity = "docker:old-target"
+    docker_window._attested_docker_container_id = "old-container"
+    docker_window._mods_page = type(
+        "Mods",
+        (),
+        {
+            "set_mod_runtime_snapshot": lambda _self, snapshot: published.append(
+                snapshot
+            )
+        },
+    )()
+    docker_window._apply_runtime_snapshot = lambda _snapshot: None
+    docker_window._apply_runtime_settings = lambda: None
+    docker_window._refresh_characters = lambda: None
+    docker_window._home_page = type(
+        "Home",
+        (),
+        {"set_server_mode": lambda *_args: None},
+    )()
+    docker_window._stop_service_monitor = lambda: True
+    docker_window._schedule_service_monitor_start = lambda: None
+
+    docker_window._on_settings_saved(
+        {**docker_window._cfg, **changed_setting}
+    )
+
+    assert docker_window._current_mod_runtime_snapshot is None
+    assert docker_window._attested_docker_target_identity is None
+    assert docker_window._attested_docker_container_id is None
+    assert published == [None]
 
 
 def test_switching_docker_to_native_restores_native_snapshot_before_old_monitor_finishes(

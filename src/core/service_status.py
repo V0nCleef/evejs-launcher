@@ -66,6 +66,9 @@ class RuntimeSnapshot:
     settings_identity: str | None = None
     monitor_generation: int | None = None
     checked_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # Privacy-safe SHA-256 of Docker's full container ID plus StartedAt.
+    # Raw container identity/timestamps never cross the inspection boundary.
+    game_runtime_identity: str | None = None
 
 
 def derive_service_state(

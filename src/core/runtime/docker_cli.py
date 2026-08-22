@@ -9,7 +9,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from typing import BinaryIO, Callable
+from typing import BinaryIO, Callable, TypeVar, cast
 
 from src.core import platform
 
@@ -60,6 +60,28 @@ class DockerCommandError(RuntimeError):
 
 RawExecutor = Callable[[tuple[str, ...], Path, float], subprocess.CompletedProcess[str]]
 RawInputExecutor = Callable[[tuple[str, ...], Path, float, bytes], subprocess.CompletedProcess[str]]
+ParsedOutput = TypeVar("ParsedOutput")
+
+
+class DockerStructuredOutputError(ValueError):
+    """Static diagnostic for rejected structured stdout.
+
+    The originating parser exception is deliberately discarded because JSON
+    exceptions retain the complete source document on their ``doc`` field.
+    """
+
+    _MESSAGES = {
+        "invalid": "Docker structured output could not be validated.",
+        "too_large": (
+            "Docker structured output was invalid or exceeded its bounded limit."
+        ),
+    }
+
+    def __init__(self, code: str) -> None:
+        if code not in self._MESSAGES:
+            raise ValueError("Unknown Docker structured-output failure code.")
+        self.code = code
+        super().__init__(self._MESSAGES[code])
 
 
 class DockerCommandRunner:
@@ -116,6 +138,103 @@ class DockerCommandRunner:
             safe_result = DockerCommandResult(command, completed.returncode, "", "", result.truncated, False)
             raise DockerCommandError(args[0], safe_result)
         return result
+
+    def run_parsed(
+        self,
+        args: tuple[str, ...],
+        *,
+        cwd: Path,
+        parser: Callable[[str], ParsedOutput],
+        timeout: float = 10.0,
+    ) -> ParsedOutput:
+        """Consume bounded raw stdout inside one trusted parser callback.
+
+        Ordinary :meth:`run` redacts text before returning it.  Redacting JSON
+        before parsing can silently change effective configuration values, so
+        secret-bearing structured commands use this narrower boundary instead.
+        The callback must return only a privacy-safe projection; raw stdout,
+        stderr, and parser exceptions never cross this method boundary.
+        """
+
+        if not args:
+            raise ValueError("Docker command arguments are required")
+        if not callable(parser):
+            raise TypeError("parser must be callable")
+        if timeout <= 0:
+            raise ValueError("timeout must be positive")
+
+        command = (self.executable, *args)
+        (
+            status,
+            parsed,
+            returncode,
+            truncated,
+            timed_out,
+        ) = self._consume_parsed_output(command, cwd, timeout, parser)
+        if status == "command_failed":
+            safe_result = DockerCommandResult(
+                command,
+                returncode,
+                "",
+                "",
+                truncated,
+                timed_out,
+            )
+            raise DockerCommandError(args[0], safe_result)
+        if status != "ok":
+            raise DockerStructuredOutputError(status) from None
+        return cast(ParsedOutput, parsed)
+
+    def _consume_parsed_output(
+        self,
+        command: tuple[str, ...],
+        cwd: Path,
+        timeout: float,
+        parser: Callable[[str], ParsedOutput],
+    ) -> tuple[str, ParsedOutput | None, int | None, bool, bool]:
+        """Own all secret-bearing objects until only a safe outcome remains.
+
+        No exception is allowed to leave this frame: an exception traceback
+        retains its frame locals, which would otherwise keep raw stdout alive
+        even when the public exception message was static.
+        """
+
+        try:
+            completed = self._execute(command, cwd, timeout)
+        except subprocess.TimeoutExpired:
+            return "command_failed", None, None, False, True
+        except OSError:
+            return "command_failed", None, None, False, False
+
+        raw_stdout = completed.stdout
+        raw_stderr = completed.stderr
+        stdout_valid = isinstance(raw_stdout, str)
+        stderr_valid = raw_stderr is None or isinstance(raw_stderr, str)
+        stdout_truncated = stdout_valid and len(raw_stdout) > self._output_limit
+        stderr_truncated = (
+            isinstance(raw_stderr, str)
+            and len(raw_stderr) > self._output_limit
+        )
+        truncated = bool(stdout_truncated or stderr_truncated)
+        if completed.returncode != 0:
+            return (
+                "command_failed",
+                None,
+                completed.returncode,
+                truncated,
+                False,
+            )
+        if not stdout_valid or not stderr_valid:
+            return "invalid", None, completed.returncode, truncated, False
+        if truncated:
+            return "too_large", None, completed.returncode, True, False
+        try:
+            parsed = parser(raw_stdout)
+        except Exception:
+            # JSONDecodeError retains its full input in ``doc``.  Collapse it
+            # to a safe status before this frame returns.
+            return "invalid", None, completed.returncode, False, False
+        return "ok", parsed, completed.returncode, False, False
 
     def run_with_input(
         self,

@@ -117,13 +117,15 @@ class _LiveProcess:
 
 
 @pytest.fixture
-def announcement_window(qapp) -> MainWindow:
+def announcement_window(qapp, tmp_path) -> MainWindow:
     window = MainWindow.__new__(MainWindow)
     QMainWindow.__init__(window)
     window._cfg = deepcopy(config.DEFAULT_CONFIG)
     window._audio_controller = _RecordingAudio()
     window._close_in_progress = False
+    window._fixture_evejs_root = tmp_path
     yield window
+    window._release_mod_lifecycle_lease()
     window.deleteLater()
 
 
@@ -328,7 +330,7 @@ def _prepare_native_start(window: MainWindow) -> None:
     window._cfg.update(
         {
             "runtime_backend": "native",
-            "evejs_root": "C:/Fixture/EveJS",
+            "evejs_root": str(window._fixture_evejs_root),
         }
     )
     window._server_proc = None

@@ -53,10 +53,16 @@ class ServiceStartResult:
     game_ready: bool = False
     market_error: str | None = None
     game_error: str | None = None
+    mod_runtime_snapshot: object | None = None
+    mod_runtime_error: str | None = None
 
     @property
     def succeeded(self) -> bool:
-        return self.market_error is None and self.game_error is None
+        return (
+            self.market_error is None
+            and self.game_error is None
+            and self.mod_runtime_error is None
+        )
 
 
 @dataclass(frozen=True)
@@ -93,6 +99,7 @@ class ServiceStartWorker(QObject):
         probe: Callable[[int], bool] | None = None,
         start_market_fn: Callable[[str], ManagedProcess] | None = None,
         start_game_fn: Callable[[str], ManagedProcess] | None = None,
+        game_runtime_validator: Callable[[ManagedProcess], object] | None = None,
         sleep_fn: Callable[[float], None] = time.sleep,
         clock_fn: Callable[[], float] = time.monotonic,
         parent: QObject | None = None,
@@ -115,6 +122,7 @@ class ServiceStartWorker(QObject):
         self._probe = probe or self._default_probe
         self._start_market_fn = start_market_fn or server_launcher.start_market_server
         self._start_game_fn = start_game_fn or server_launcher.start_game_server
+        self._game_runtime_validator = game_runtime_validator
         self._sleep = sleep_fn
         self._clock = clock_fn
 
@@ -161,6 +169,8 @@ class ServiceStartWorker(QObject):
         game_process: ManagedProcess | None = None
         market_ready = False
         market_error: str | None = None
+        mod_runtime_snapshot: object | None = None
+        mod_runtime_error: str | None = None
 
         if self._start_market:
             self.phase_changed.emit("market", "starting")
@@ -252,7 +262,19 @@ class ServiceStartWorker(QObject):
                     )
                 )
                 return
-            self.phase_changed.emit("game", "ready")
+            if self._game_runtime_validator is not None:
+                self.phase_changed.emit("game", "verifying_mods")
+                try:
+                    mod_runtime_snapshot = self._game_runtime_validator(game_process)
+                    if mod_runtime_snapshot is None:
+                        raise RuntimeError(
+                            "The mod runtime validator returned no evidence."
+                        )
+                except Exception as exc:  # noqa: BLE001 - reported as lifecycle state
+                    mod_runtime_error = f"Mod runtime verification failed: {exc}"
+                    self.phase_changed.emit("game", "verification_failed")
+            if mod_runtime_error is None:
+                self.phase_changed.emit("game", "ready")
 
         self.completed.emit(
             ServiceStartResult(
@@ -261,6 +283,8 @@ class ServiceStartWorker(QObject):
                 market_ready=market_ready,
                 game_ready=game_process is not None,
                 market_error=market_error,
+                mod_runtime_snapshot=mod_runtime_snapshot,
+                mod_runtime_error=mod_runtime_error,
             )
         )
 
@@ -280,6 +304,7 @@ class ServiceStopWorker(QObject):
         poll_interval_sec: float = 0.25,
         force_kill_fn: Callable[[ManagedProcess], bool] | None = None,
         graceful_game_stop_fn: Callable[[ManagedProcess], bool] | None = None,
+        allow_force_game_kill: bool = True,
         sleep_fn: Callable[[float], None] = time.sleep,
         clock_fn: Callable[[], float] = time.monotonic,
         parent: QObject | None = None,
@@ -304,6 +329,7 @@ class ServiceStopWorker(QObject):
         self._graceful_game_stop = (
             graceful_game_stop_fn or self._default_graceful_game_stop
         )
+        self._allow_force_game_kill = bool(allow_force_game_kill)
         self._sleep = sleep_fn
         self._clock = clock_fn
 
@@ -335,6 +361,7 @@ class ServiceStopWorker(QObject):
         graceful_timeout_sec: float,
         require_clean_exit: bool = False,
         forced_shutdown_error: str | None = None,
+        allow_force_kill: bool = True,
     ) -> tuple[bool, str | None]:
         if process is None or process.poll() is not None:
             return True, None
@@ -373,6 +400,15 @@ class ServiceStopWorker(QObject):
         if process.poll() is not None:
             return True, forced_shutdown_error or request_error
 
+        if not allow_force_kill:
+            if request_error:
+                return False, request_error
+            return (
+                False,
+                "Service did not exit before the graceful shutdown deadline; "
+                "forced shutdown is disabled for this operation.",
+            )
+
         try:
             forced = self._force_kill(process)
         except Exception as exc:  # noqa: BLE001 - process adapters can vary
@@ -401,6 +437,7 @@ class ServiceStopWorker(QObject):
                 "Game service stopped without verified graceful cleanup; "
                 "persisted state may be incomplete."
             ),
+            allow_force_kill=self._allow_force_game_kill,
         )
         market_stopped, market_error = self._stop_process(
             self._market_process,
@@ -420,6 +457,7 @@ class ServiceStopWorker(QObject):
 class ServiceMonitor(QObject):
     """Probe Game and Market endpoints in its owning thread."""
 
+    probe_observed = pyqtSignal(object)
     probe_changed = pyqtSignal(object)
 
     def __init__(self, interval_ms: int = 5_000, parent: QObject | None = None) -> None:
@@ -464,7 +502,7 @@ class ServiceMonitor(QObject):
 
     @pyqtSlot()
     def probe_now(self) -> None:
-        """Probe semantic endpoints and emit only the first or changed result."""
+        """Probe endpoints, publishing every observation and changed state."""
         game_reachable = server_launcher.is_server_running(
             port=int(Ports.GAME_TCP)
         )
@@ -472,15 +510,19 @@ class ServiceMonitor(QObject):
             port=int(Ports.MARKET_RPC)
         )
         reachability = (game_reachable, market_reachable)
+        probe = ServiceProbe(
+            game_reachable=game_reachable,
+            market_reachable=market_reachable,
+        )
+        # Runtime identity can change while reachability remains stable (for
+        # example, an externally replaced process binds the same port).  Keep
+        # the de-duplicated status signal, but expose every completed probe so
+        # the GUI owner can periodically validate its process-bound evidence.
+        self.probe_observed.emit(probe)
         if reachability == self._last_reachability:
             return
         self._last_reachability = reachability
-        self.probe_changed.emit(
-            ServiceProbe(
-                game_reachable=game_reachable,
-                market_reachable=market_reachable,
-            )
-        )
+        self.probe_changed.emit(probe)
 
     @pyqtSlot()
     def stop(self) -> None:

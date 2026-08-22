@@ -1,13 +1,20 @@
-"""Managed Docker Compose lifecycle policy tests (fakes only)."""
+"""Managed Docker Compose lifecycle policy and attestation tests."""
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
+import subprocess
 
 import pytest
 
-from src.core.runtime.docker_cli import DockerCommandResult
+from src.core.runtime.docker_cli import DockerCommandResult, DockerCommandRunner
 from src.core.runtime.data import docker_project_identity
-from src.core.runtime.docker_compose import ComposeTarget, ContainerRecord
+from src.core.runtime.docker_compose import (
+    ComposeTarget,
+    ContainerRecord,
+    docker_container_runtime_identity,
+)
 from src.core.runtime.endpoints import Endpoint, RuntimeEndpoints
 from src.core.service_status import DockerControlPolicy, ServiceState
 from src.core.runtime.docker_controller import DockerLifecycleAction, ManagedComposeController
@@ -31,12 +38,31 @@ class FakeInspector:
 class FakeRunner:
     executable = "docker"
 
-    def __init__(self) -> None:
+    def __init__(self, *, inspect_node_options: str = "") -> None:
         self.calls: list[tuple[tuple[str, ...], Path, float]] = []
+        self.inspect_node_options = inspect_node_options
 
     def run(self, args: tuple[str, ...], *, cwd: Path, timeout: float = 10.0) -> DockerCommandResult:
         self.calls.append((args, cwd, timeout))
+        if args and args[0] == "inspect":
+            environment = json.dumps(
+                [f"NODE_OPTIONS={self.inspect_node_options}"],
+                separators=(",", ":"),
+            )
+            stdout = (
+                ("a" * 64)
+                + "\t2026-08-22T10:20:30.123456789Z\ttrue\t"
+                + environment
+                + "\n"
+            )
+            return DockerCommandResult(args, 0, stdout, "", False, False)
         return DockerCommandResult(args, 0, "", "", False, False)
+
+    def run_parsed(self, args, *, cwd, parser, timeout=10.0):
+        result = self.run(args, cwd=cwd, timeout=timeout)
+        if result.truncated:
+            raise ValueError("structured fixture output was truncated")
+        return parser(result.stdout)
 
 
 class SequenceInspector(FakeInspector):
@@ -56,7 +82,16 @@ class SequenceInspector(FakeInspector):
 
 
 def record(service: str, state: ServiceState, *, raw: str = "exited", health: str | None = None) -> ContainerRecord:
-    return ContainerRecord(service, None, None, state, health, None, (), raw_state=raw)
+    return ContainerRecord(
+        service,
+        None,
+        "a" * 12,
+        state,
+        health,
+        None,
+        (),
+        raw_state=raw,
+    )
 
 
 @pytest.mark.parametrize(("action", "tail"), [
@@ -93,6 +128,145 @@ def test_managed_exact_argv_matrix_and_explicit_target(action: DockerLifecycleAc
     assert runner.calls[0][1] == tmp_path.resolve()
     assert "-f" in runner.calls[0][0] and "--project-directory" in runner.calls[0][0] and "-p" in runner.calls[0][0]
     assert not set(runner.calls[0][0]).intersection({"down", "rm", "kill", "start", "run", "exec", "build", "pull"})
+
+
+def test_success_returns_privacy_safe_effective_node_options_digest(
+    tmp_path: Path,
+) -> None:
+    target = ComposeTarget(tmp_path / "compose.yaml", tmp_path, "fixture")
+    records = {
+        "server": record("server", ServiceState.ONLINE, raw="running"),
+        "market": record("market", ServiceState.ONLINE, raw="running"),
+    }
+    digest = hashlib.sha256(b"--require /app/mods/alpha/loader.js").hexdigest()
+
+    class Inspector(FakeInspector):
+        def preflight(self, _target: ComposeTarget):
+            self.preflights += 1
+            config = type(
+                "Config",
+                (),
+                {"project_name": "fixture", "server_node_options_sha256": digest},
+            )()
+            return type(
+                "Report",
+                (),
+                {
+                    "ok": True,
+                    "diagnostics": (),
+                    "records": self.records,
+                    "config": config,
+                },
+            )()
+
+    runner = FakeRunner(
+        inspect_node_options="--require /app/mods/alpha/loader.js"
+    )
+    controller = ManagedComposeController(
+        target,
+        Inspector(records),
+        runner,
+        policy=DockerControlPolicy.MANAGED,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    result = controller.execute(DockerLifecycleAction.RECREATE_GAME)
+
+    assert result.succeeded
+    assert result.server_node_options_sha256 == digest
+    assert result.game_runtime_identity == docker_container_runtime_identity(
+        "a" * 64,
+        "2026-08-22T10:20:30.123456789Z",
+        expected_short_id="a" * 12,
+    )
+    assert runner.calls[-1][0][0] == "inspect"
+
+
+def test_recreate_parses_raw_secret_bearing_inspect_only_inside_real_runner(
+    tmp_path: Path,
+) -> None:
+    """Redaction must not alter the value hashed for runtime attestation."""
+
+    private_node_options = (
+        "--require /app/mods/alpha/loader.js password=CANARY_INSPECT_SECRET"
+    )
+    raw_environment = json.dumps(
+        [
+            f"NODE_OPTIONS={private_node_options}",
+            "DATABASE_PASSWORD=CANARY_DATABASE_SECRET",
+        ],
+        separators=(",", ":"),
+    )
+
+    def execute(
+        argv: tuple[str, ...],
+        _cwd: Path,
+        _timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        if len(argv) > 1 and argv[1] == "inspect":
+            stdout = (
+                ("a" * 64)
+                + "\t2026-08-22T10:20:30.123456789Z\ttrue\t"
+                + raw_environment
+                + "\n"
+            )
+            return subprocess.CompletedProcess(argv, 0, stdout, "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    records = {
+        "server": record("server", ServiceState.ONLINE, raw="running"),
+        "market": record("market", ServiceState.ONLINE, raw="running"),
+    }
+    runner = DockerCommandRunner(executable="docker", execute=execute)
+    controller = ManagedComposeController(
+        ComposeTarget(tmp_path / "compose.yaml", tmp_path),
+        FakeInspector(records),
+        runner,
+        policy=DockerControlPolicy.MANAGED,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    result = controller.execute(DockerLifecycleAction.RECREATE_GAME)
+
+    assert result.succeeded
+    assert result.server_node_options_sha256 == hashlib.sha256(
+        private_node_options.encode("utf-8")
+    ).hexdigest()
+    assert result.game_runtime_identity == docker_container_runtime_identity(
+        "a" * 64,
+        "2026-08-22T10:20:30.123456789Z",
+        expected_short_id="a" * 12,
+    )
+    assert "CANARY_INSPECT_SECRET" not in repr(result)
+    assert "CANARY_DATABASE_SECRET" not in repr(result)
+
+
+def test_recreate_fails_closed_when_actual_container_environment_is_unreadable(
+    tmp_path: Path,
+) -> None:
+    records = {
+        "server": record("server", ServiceState.ONLINE, raw="running"),
+        "market": record("market", ServiceState.ONLINE, raw="running"),
+    }
+
+    class BadInspectRunner(FakeRunner):
+        def run(self, args, *, cwd, timeout=10.0):
+            if args and args[0] == "inspect":
+                return DockerCommandResult(args, 0, "malformed\n", "", False, False)
+            return super().run(args, cwd=cwd, timeout=timeout)
+
+    controller = ManagedComposeController(
+        ComposeTarget(tmp_path / "compose.yaml", tmp_path),
+        FakeInspector(records),
+        BadInspectRunner(),
+        policy=DockerControlPolicy.MANAGED,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    result = controller.execute(DockerLifecycleAction.RECREATE_GAME)
+
+    assert not result.succeeded
+    assert "environment could not be verified" in (result.error or "")
 
 
 def test_policy_and_arbitrary_actions_reject_before_mutation(tmp_path: Path) -> None:

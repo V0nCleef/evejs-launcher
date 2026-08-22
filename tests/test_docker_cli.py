@@ -1,13 +1,19 @@
 """Focused tests for the bounded, argv-only Docker CLI runner."""
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 import subprocess
 
 import pytest
 
 from src.core import platform
-from src.core.runtime.docker_cli import DockerCommandError, DockerCommandRunner
+from src.core.runtime.docker_cli import (
+    DockerCommandError,
+    DockerCommandRunner,
+    DockerStructuredOutputError,
+)
 
 
 CANARY = "CANARY_SECRET_VALUE"
@@ -226,6 +232,103 @@ def test_runner_timeout_is_structured_and_does_not_expose_output() -> None:
     assert CANARY not in str(raised.value)
     assert CANARY not in raised.value.result.stdout
     assert CANARY not in raised.value.result.stderr
+
+
+def test_structured_runner_hashes_unredacted_json_without_returning_it() -> None:
+    raw = json.dumps(
+        {
+            "NODE_OPTIONS": f"--require /mods/loader.js password={CANARY}",
+            "DATABASE_PASSWORD": "SECOND_PRIVATE_VALUE",
+        },
+        separators=(",", ":"),
+    )
+
+    def execute(
+        argv: tuple[str, ...],
+        _cwd: Path,
+        _timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, raw, "ignored stderr")
+
+    runner = DockerCommandRunner(executable="docker", execute=execute)
+    projection = runner.run_parsed(
+        ("inspect",),
+        cwd=Path("C:/Fixture"),
+        parser=lambda stdout: hashlib.sha256(
+            json.loads(stdout)["NODE_OPTIONS"].encode("utf-8")
+        ).hexdigest(),
+    )
+
+    assert projection == hashlib.sha256(
+        f"--require /mods/loader.js password={CANARY}".encode("utf-8")
+    ).hexdigest()
+    assert CANARY not in projection
+    assert "SECOND_PRIVATE_VALUE" not in projection
+
+
+def test_structured_runner_drops_raw_json_from_parser_failure_context() -> None:
+    raw = f'{{"password":"{CANARY}"'
+
+    def execute(
+        argv: tuple[str, ...],
+        _cwd: Path,
+        _timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, raw, CANARY)
+
+    runner = DockerCommandRunner(executable="docker", execute=execute)
+    with pytest.raises(DockerStructuredOutputError) as raised:
+        runner.run_parsed(
+            ("inspect",),
+            cwd=Path("C:/Fixture"),
+            parser=json.loads,
+        )
+
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    assert CANARY not in str(raised.value)
+    assert CANARY not in repr(raised.value)
+    traceback = raised.value.__traceback__
+    runner_frames = []
+    while traceback is not None:
+        name = traceback.tb_frame.f_code.co_name
+        if name in {"run_parsed", "_consume_parsed_output"}:
+            runner_frames.append((name, repr(traceback.tb_frame.f_locals)))
+        traceback = traceback.tb_next
+    assert [name for name, _locals in runner_frames] == ["run_parsed"]
+    assert all(CANARY not in locals_repr for _name, locals_repr in runner_frames)
+
+
+def test_structured_runner_rejects_truncation_before_parser() -> None:
+    parser_called = False
+
+    def execute(
+        argv: tuple[str, ...],
+        _cwd: Path,
+        _timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, CANARY * 4, "")
+
+    def parser(_stdout: str) -> str:
+        nonlocal parser_called
+        parser_called = True
+        return "unsafe"
+
+    runner = DockerCommandRunner(
+        executable="docker",
+        execute=execute,
+        output_limit=8,
+    )
+    with pytest.raises(DockerStructuredOutputError) as raised:
+        runner.run_parsed(
+            ("inspect",),
+            cwd=Path("C:/Fixture"),
+            parser=parser,
+        )
+
+    assert raised.value.code == "too_large"
+    assert not parser_called
+    assert CANARY not in str(raised.value)
 
 
 def test_bounded_runner_assigns_suspended_process_to_job_before_resume(

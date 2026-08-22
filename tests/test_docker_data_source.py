@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import sqlite3
+import subprocess
 from types import MappingProxyType
 
 import pytest
@@ -17,7 +18,12 @@ from src.core.runtime.data import (
     docker_settings_identity,
     select_docker_data_source,
 )
-from src.core.runtime.docker_cli import DockerCommandError, DockerCommandResult
+from src.core.runtime.docker_cli import (
+    DockerCommandError,
+    DockerCommandResult,
+    DockerCommandRunner,
+    DockerStructuredOutputError,
+)
 from src.core.runtime.docker_compose import (
     ComposeTarget,
     ContainerRecord,
@@ -61,6 +67,14 @@ class FakeRunner:
             False,
             False,
         )
+
+    def run_parsed(self, args, *, cwd, parser, timeout=10.0):
+        result = self.run(args, cwd=cwd, timeout=timeout)
+        if result.truncated:
+            raise DockerStructuredOutputError("too_large")
+        if not result.ok:
+            raise DockerCommandError(args[0], result)
+        return parser(result.stdout)
 
 
 def _target(tmp_path: Path, project_name: str = "fixture-world") -> ComposeTarget:
@@ -153,7 +167,7 @@ def _config_payload(mounts: list[dict[str, object]]) -> dict[str, object]:
 def _source(
     tmp_path: Path,
     raw_state: str,
-    runner: FakeRunner,
+    runner: object,
     *,
     output_limit: int = 1024 * 1024,
     control_policy: DockerControlPolicy = DockerControlPolicy.CONNECT_ONLY,
@@ -231,6 +245,36 @@ def test_running_container_read_uses_exact_allowlisted_exec(tmp_path: Path) -> N
         "Fixture Frigate",
         "Fixture System",
     )
+
+
+def test_real_runner_preserves_secret_pattern_in_valid_export_text(
+    tmp_path: Path,
+) -> None:
+    """Account text is data; pre-parse diagnostic redaction must not mutate it."""
+
+    payload = _export_payload()
+    payload["players"][0]["accountName"] = "pilot-token=CANARY_ACCOUNT_TEXT"  # type: ignore[index]
+    payload["players"][0]["privateToken"] = (  # type: ignore[index]
+        "password=CANARY_PRIVATE_EXPORT_VALUE"
+    )
+    raw = json.dumps(payload, separators=(",", ":"))
+
+    def execute(
+        argv: tuple[str, ...],
+        _cwd: Path,
+        _timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, raw, "")
+
+    runner = DockerCommandRunner(
+        executable="docker.exe",
+        execute=execute,
+        output_limit=1024 * 1024,
+    )
+    accounts = _source(tmp_path, "running", runner).load_accounts()
+
+    assert accounts[0].username == "pilot-token=CANARY_ACCOUNT_TEXT"
+    assert "CANARY_PRIVATE_EXPORT_VALUE" not in repr(accounts)
 
 
 @pytest.mark.parametrize("raw_state", ["created", "exited"])

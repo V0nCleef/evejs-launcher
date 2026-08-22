@@ -1,15 +1,14 @@
 """Process tracker — monitors launched EVE client processes."""
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 import subprocess
 
-from .platform import find_eve_window
+from .platform import has_visible_window_for_pid
 
-
-def _eve_window_exists() -> bool:
-    """Return True if an EVE client window is currently visible on screen."""
-    return find_eve_window()
+CLIENT_LAUNCH_GRACE_SECONDS = 20.0
+CLIENT_WINDOW_CLOSE_GRACE_SECONDS = 2.0
 
 
 @dataclass
@@ -20,6 +19,8 @@ class LaunchedClient:
     character_name: str
     started_at: datetime = field(default_factory=datetime.now)
     process: Optional[subprocess.Popen] = None
+    has_seen_window: bool = False
+    window_missing_since: datetime | None = None
 
     @property
     def uptime_seconds(self) -> float:
@@ -46,8 +47,18 @@ class LaunchedClient:
 class ProcessTracker:
     """Tracks all launched EVE clients."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        window_probe: Callable[[int], bool] | None = None,
+        window_close_grace_seconds: float = CLIENT_WINDOW_CLOSE_GRACE_SECONDS,
+    ):
         self._clients: list[LaunchedClient] = []
+        self._window_probe = window_probe or has_visible_window_for_pid
+        self._window_close_grace_seconds = max(
+            0.0,
+            float(window_close_grace_seconds),
+        )
 
     def add(self, username: str, character_name: str, proc: subprocess.Popen) -> LaunchedClient:
         """Register a newly launched client."""
@@ -89,16 +100,41 @@ class ProcessTracker:
         return killed
 
     def prune_dead(self) -> int:
-        """Remove processes that have exited. Returns number removed."""
+        """Remove exited or post-window cleanup processes.
+
+        This is the tracker's sole deletion boundary. Read APIs deliberately
+        filter dead processes without consuming them so the UI cannot miss the
+        removal event when an unrelated status poll wins a timer race.
+        """
         before = len(self._clients)
-        self._clients = [c for c in self._clients if c.is_running]
+        self._clients = [c for c in self._clients if self._retain_client(c)]
         return before - len(self._clients)
+
+    def _retain_client(self, client: LaunchedClient) -> bool:
+        if not client.is_running:
+            return False
+        try:
+            window_visible = bool(self._window_probe(client.pid))
+        except Exception:
+            # A failed observation must never make a live client launchable.
+            return True
+        if window_visible:
+            client.has_seen_window = True
+            client.window_missing_since = None
+            return True
+        if not client.has_seen_window:
+            # EVE legitimately has no top-level window during startup.
+            return True
+        now = datetime.now()
+        if client.window_missing_since is None:
+            client.window_missing_since = now
+        missing_seconds = (now - client.window_missing_since).total_seconds()
+        return missing_seconds < self._window_close_grace_seconds
 
     @property
     def running(self) -> list[LaunchedClient]:
         """Return list of currently running clients."""
-        self.prune_dead()
-        return list(self._clients)
+        return [client for client in self._clients if client.is_running]
 
     @property
     def running_count(self) -> int:
@@ -111,25 +147,35 @@ class ProcessTracker:
                 return True
         return False
 
-    def is_account_launching(self, username: str, window_delay_sec: int = 20) -> bool:
-        """Check if any client from this account was recently launched.
+    def account_launch_grace_remaining(
+        self,
+        username: str,
+        window_delay_sec: float = CLIENT_LAUNCH_GRACE_SECONDS,
+    ) -> float | None:
+        """Return seconds left in one tracked account's launch grace period.
 
-        Returns True while the client is alive but the EVE window hasn't had
-        enough time to materialize (default 20 seconds after subprocess spawn).
-
-        Also returns False if the EVE window is no longer present (user closed
-        the client), even if the OS process hasn't fully terminated yet.
+        A process PID is attributable to its exact launcher request; a global
+        EVE window is not.  Keep this state process- and time-based until a
+        per-process HWND mapping exists.
         """
+        delay = max(0.0, float(window_delay_sec))
         for c in self.running:
             if c.username == username:
                 elapsed = (datetime.now() - c.started_at).total_seconds()
-                if elapsed < window_delay_sec:
-                    # Window-gone check: the process may still be alive but the
-                    # user already closed the EVE client, so stop showing LAUNCHING.
-                    if not _eve_window_exists():
-                        return False
-                    return True
-        return False
+                return max(0.0, delay - elapsed)
+        return None
+
+    def is_account_launching(
+        self,
+        username: str,
+        window_delay_sec: float = CLIENT_LAUNCH_GRACE_SECONDS,
+    ) -> bool:
+        """Return whether an attributed live process is still in launch grace."""
+        remaining = self.account_launch_grace_remaining(
+            username,
+            window_delay_sec,
+        )
+        return remaining is not None and remaining > 0.0
 
     def get_running_character(self, username: str) -> str | None:
         """Get the character name running on this account, if any."""

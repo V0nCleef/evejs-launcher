@@ -31,6 +31,17 @@ class _FakeProcess:
         return None
 
 
+class _FailingStartThread(QThread):
+    def start(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise RuntimeError("fixture QThread start failure")
+
+
+class _ImmediateFinishThread(QThread):
+    def run(self) -> None:
+        return
+
+
 def _request(tmp_path: Path) -> ClientLaunchRequest:
     return ClientLaunchRequest(
         username="fixture-account",
@@ -297,6 +308,108 @@ def test_failed_async_launch_clears_pending_and_allows_retry(
         window.deleteLater()
 
 
+def test_thread_start_failure_releases_launch_ownership_without_pending_state(
+    qapp: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = _bare_launch_window(qapp, tmp_path)
+    monkeypatch.setattr(app_module, "QThread", _FailingStartThread)
+
+    try:
+        assert not window._start_client_launch(
+            "fixture-account",
+            "Fixture Character",
+            show_errors=False,
+        )
+        assert window._client_launch_thread is None
+        assert window._client_launch_worker is None
+        assert window._client_launch_request is None
+        assert window._pending_client_launches == set()
+        assert window._characters_page.states == []
+    finally:
+        window.deleteLater()
+        qapp.processEvents()
+
+
+def test_thread_finished_without_result_clears_only_its_pending_request(
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    window = _bare_launch_window(qapp, tmp_path)
+    request = _request(tmp_path)
+    thread = _ImmediateFinishThread(window)
+    thread.finished.connect(
+        window._on_client_launch_thread_finished,
+        Qt.ConnectionType.QueuedConnection,
+    )
+    window._client_launch_thread = thread
+    window._client_launch_worker = object()
+    window._client_launch_request = request
+    window._client_launch_thread_finished = False
+    window._client_launch_result_received = False
+    window._pending_client_launches.add("unrelated-account")
+    window._set_client_launch_pending(request, True)
+    window._announce_shipboard = lambda *_args, **_kwargs: None
+
+    try:
+        thread.start()
+        _wait_for_launch_teardown(qapp, window)
+
+        assert window._client_launch_request is None
+        assert window._pending_client_launches == {"unrelated-account"}
+        assert window._characters_page.states[-1] == (
+            "fixture-account",
+            "Fixture Character",
+            False,
+        )
+    finally:
+        window.deleteLater()
+        qapp.processEvents()
+
+
+def test_native_character_launch_is_blocked_during_mod_lifecycle(
+    qapp: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = _bare_launch_window(qapp, tmp_path)
+    messages: list[tuple[str, str]] = []
+    window._lifecycle_thread = object()
+    window._ensure_server_if_needed = lambda _callback: pytest.fail(
+        "server readiness must not run during mod lifecycle"
+    )
+    monkeypatch.setattr(
+        app_module.QMessageBox,
+        "information",
+        lambda _parent, title, message: messages.append((title, message)),
+    )
+
+    try:
+        window._on_character_launch(
+            "fixture-account",
+            "Fixture Character",
+        )
+
+        assert messages == [
+            (
+                "Runtime Change In Progress",
+                "Wait for the active server or mod operation to finish before "
+                "launching an EVE client.",
+            )
+        ]
+        assert window._pending_client_launches == set()
+        assert not window._start_client_launch(
+            "fixture-account",
+            "Fixture Character",
+            show_errors=False,
+        )
+        assert window._client_launch_thread is None
+    finally:
+        window.deleteLater()
+        qapp.processEvents()
+
+
 def test_launch_queue_completion_surfaces_first_worker_failure(
     qapp: QApplication,
     tmp_path: Path,
@@ -408,3 +521,40 @@ def test_perform_launch_keeps_manual_mode_argument_free(
     app_module._perform_client_launch(request)
 
     assert captured["auto_login"] is None
+
+
+def test_perform_launch_logs_bounded_preparation_stages(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path)
+    (request.profiles_root / request.username / "tq").mkdir(parents=True)
+    messages: list[str] = []
+    monkeypatch.setattr(app_module, "profile_exists", lambda _username: True)
+    monkeypatch.setattr(app_module, "prefill_username", lambda _username: None)
+    monkeypatch.setattr(
+        app_module,
+        "configure_profile_game_endpoint",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "launch_client",
+        lambda **_kwargs: _FakeProcess(),
+    )
+    monkeypatch.setattr(
+        app_module.log,
+        "info",
+        lambda message, *args: messages.append(message % args),
+    )
+
+    app_module._perform_client_launch(request)
+
+    stages = [
+        message for message in messages if "Client launch stage=" in message
+    ]
+    assert stages == [
+        "Client launch stage=profile_ready account=fixture-account",
+        "Client launch stage=settings_ready account=fixture-account",
+        "Client launch stage=certificate_and_spawn account=fixture-account",
+    ]

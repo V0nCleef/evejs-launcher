@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+import secrets
 import subprocess
 import sys
 import threading
@@ -82,6 +83,41 @@ from .core.character_deletion import (
     CharacterDeletionScope,
 )
 from .core.launcher import ClientLaunchContext, launch_client
+from .core.mod_lifecycle_lock import (
+    ModLifecycleBusyError,
+    ModLifecycleLease,
+    acquire_mod_lifecycle_lease,
+)
+from .core.mod_manager import ActivationKind, Mod, active_loader_names, scan_mods
+from .core.mod_management import (
+    ManagedModRegistration,
+    ManagedModRemovalRequest,
+    ManagedModRemovalResult,
+    ModDataPolicy,
+    ModManagementError,
+    read_managed_mod_registration,
+)
+from .core.mod_activation_state import (
+    ActivationPhase,
+    ModActivationStateError,
+    clear_confirmed_mod_activations,
+    fail_mod_activation,
+    read_mod_activation_state,
+)
+from .core.mod_runtime_state import (
+    DOCKER_BACKEND,
+    NATIVE_BACKEND,
+    ModRuntimePlan,
+    ModRuntimeSnapshot,
+    ModRuntimeStateError,
+    ModStatusProtocolError,
+    build_docker_mod_runtime_snapshot,
+    build_mod_runtime_plan,
+    build_native_mod_runtime_snapshot,
+    read_server_console_bytes,
+    validate_mod_runtime_plan,
+    write_mod_runtime_snapshot,
+)
 from .core.overview_patch import (
     OverviewPatchState,
     inspect_overview_patch,
@@ -106,6 +142,7 @@ from .core.profiles import (
     profile_exists,
 )
 from .core.server_launcher import (
+    get_native_mod_status_log,
     get_server_console_log,
     get_market_console_log,
     get_server_log_path,
@@ -146,9 +183,14 @@ from .core.runtime.docker_tools import (
     ManagedDockerToolController,
 )
 from .core.runtime.docker_mods import (
+    DockerModApplyResult,
     DockerModBridgeError,
     apply_docker_mod_override,
     attach_docker_mod_override,
+    build_docker_mod_override,
+    finalize_docker_mod_override,
+    has_pending_docker_mod_transaction,
+    rollback_docker_mod_override,
 )
 from .core.runtime.data import (
     RuntimeDataSelection,
@@ -187,6 +229,7 @@ from .workers.docker_log_worker import DockerLogWorker
 from .workers.docker_monitor import DockerMonitor, DockerObservation
 from .workers.docker_preflight_worker import DockerPreflightWorker
 from .workers.docker_tool_worker import DockerToolWorker
+from .workers.mod_management_worker import ManagedModRemovalWorker
 from .workers.db_worker import (
     AccountLoadResult,
     AccountLoader,
@@ -231,6 +274,10 @@ from .updater.progress_dialog import UpdateProgressDialog
 
 log = setup_logger(__name__)
 
+_NATIVE_MOD_ATTESTATION_TIMEOUT_SEC = 3.0
+_NATIVE_MOD_ATTESTATION_POLL_SEC = 0.05
+_DOCKER_MOD_POST_RESULT_OBSERVATION_TIMEOUT_MS = 20_000
+
 
 @dataclass(frozen=True)
 class _DataRequestToken:
@@ -269,6 +316,7 @@ def _perform_client_launch(request: ClientLaunchRequest) -> LaunchedProcess:
     profile_path = request.profiles_root / request.username / "tq"
     if not profile_path.exists():
         raise FileNotFoundError("Profile junction not found.")
+    log.info("Client launch stage=profile_ready account=%s", request.username)
 
     # Refresh the account and endpoint settings immediately before every spawn.
     prefill_username(request.username)
@@ -278,6 +326,7 @@ def _perform_client_launch(request: ClientLaunchRequest) -> LaunchedProcess:
         host=request.launch_context.game_host,
         port=request.launch_context.game_port,
     )
+    log.info("Client launch stage=settings_ready account=%s", request.username)
     auto_login = None
     if request.auto_login_enabled:
         if request.character_id is None:
@@ -286,6 +335,10 @@ def _perform_client_launch(request: ClientLaunchRequest) -> LaunchedProcess:
             username=request.username,
             character_id=request.character_id,
         )
+    log.info(
+        "Client launch stage=certificate_and_spawn account=%s",
+        request.username,
+    )
     return launch_client(
         evejs_root=request.evejs_root,
         profile_tq_path=profile_path,
@@ -382,6 +435,24 @@ class MainWindow(QMainWindow):
         self._lifecycle_after_thread_callback: Callable[[], None] | None = None
         self._lifecycle_result_received = False
         self._lifecycle_thread_finished = False
+        self._mod_lifecycle_lease: ModLifecycleLease | None = None
+        self._mod_lifecycle_lease_token: object | None = None
+        self._mod_lifecycle_handoff: str | None = None
+        self._release_mod_lease_after_lifecycle = False
+        self._native_mod_runtime_plan: ModRuntimePlan | None = None
+        self._pending_docker_mod_plan: ModRuntimePlan | None = None
+        self._pending_docker_mod_apply_result: DockerModApplyResult | None = None
+        self._pending_docker_mods: tuple[object, ...] = ()
+        self._pending_docker_mod_lifecycle_result: object | None = None
+        self._pending_docker_mod_observation_token: object | None = None
+        self._pending_docker_mod_observation_floor_ns: int | None = None
+        self._pending_docker_mod_observation_completion: (
+            Callable[[bool], None] | None
+        ) = None
+        self._docker_mod_quarantined_targets: dict[str, int] = {}
+        self._current_mod_runtime_snapshot: ModRuntimeSnapshot | None = None
+        self._attested_docker_target_identity: str | None = None
+        self._attested_docker_container_id: str | None = None
         self._close_after_lifecycle = False
         # Docker close coordination is separate from the proven Native flow.
         self._docker_close_pending = False
@@ -535,6 +606,7 @@ class MainWindow(QMainWindow):
         self._characters_page.hide_character.connect(self._on_hide_character)
         self._characters_page.portrait_loads_idle.connect(self._resume_close_after_data)
         self._mods_page.apply_restart_clicked.connect(self._on_mods_apply_restart)
+        self._mods_page.remove_mod_requested.connect(self._on_mod_remove_requested)
         self._tools_page.open_settings_requested.connect(self._open_settings_page)
         self._tools_page.launch_requested.connect(self._on_tool_launch_requested)
 
@@ -1112,8 +1184,29 @@ class MainWindow(QMainWindow):
     def _docker_unavailable(self, message: str) -> None:
         QMessageBox.information(self, "Docker Compose", message)
 
-    def _docker_lifecycle_target_factory(self) -> Callable[[], ComposeTarget]:
-        return self._docker_log_target_factory()
+    def _docker_lifecycle_target_factory(
+        self,
+        *,
+        docker_mod_apply_result: DockerModApplyResult | None = None,
+    ) -> Callable[[], ComposeTarget]:
+        if docker_mod_apply_result is None:
+            return self._docker_log_target_factory()
+        draft = self._docker_setup_draft()
+
+        def target_factory() -> ComposeTarget:
+            target = attach_docker_mod_override(
+                build_compose_target(draft),
+                transaction_token=docker_mod_apply_result.transaction_token,
+            )
+            # This runs in the lifecycle worker after exact marker/override
+            # validation and before controller construction or any Docker CLI.
+            finalize_docker_mod_override(
+                docker_mod_apply_result,
+                policy=DockerControlPolicy.MANAGED,
+            )
+            return target
+
+        return target_factory
 
     def _docker_setup_draft(self) -> DockerSetupDraft:
         """Capture the selected target once before worker-thread validation."""
@@ -1147,12 +1240,59 @@ class MainWindow(QMainWindow):
         expected_target_identity: str | None = None,
         on_complete: Callable[[bool], None] | None = None,
         suppress_failure_dialog: bool = False,
+        docker_mod_apply_result: DockerModApplyResult | None = None,
     ) -> bool:
         if not self._docker_managed():
             self._docker_unavailable(self._docker_control_reason())
             return False
         if self._lifecycle_active():
             return False
+        quarantined_targets = getattr(
+            self,
+            "_docker_mod_quarantined_targets",
+            {},
+        )
+        observed_target = self._current_observed_docker_target_identity()
+        quarantined_recovery = bool(
+            action in {
+                DockerLifecycleAction.STOP_GAME,
+                DockerLifecycleAction.STOP_ALL,
+            }
+            or (
+                action is DockerLifecycleAction.RECREATE_GAME
+                and getattr(self, "_pending_docker_mod_plan", None) is not None
+            )
+        )
+        if (
+            quarantined_targets
+            and (
+                observed_target is None
+                or observed_target in quarantined_targets
+            )
+            and not quarantined_recovery
+        ):
+            self._docker_unavailable(
+                "This Docker target has an unverified Game runtime. Stop Game "
+                "or reapply Mods before starting another lifecycle action."
+            )
+            return False
+        previous_mod_runtime = self.__dict__.get("_current_mod_runtime_snapshot")
+        previous_attested_target = self.__dict__.get(
+            "_attested_docker_target_identity"
+        )
+        previous_attested_container = self.__dict__.get(
+            "_attested_docker_container_id"
+        )
+        if action in {
+            DockerLifecycleAction.START_GAME,
+            DockerLifecycleAction.START_STACK,
+            DockerLifecycleAction.STOP_GAME,
+            DockerLifecycleAction.STOP_ALL,
+            DockerLifecycleAction.RESTART_GAME,
+            DockerLifecycleAction.RECREATE_GAME,
+        }:
+            self._publish_mod_runtime_snapshot(None)
+
         def controller_factory(target: ComposeTarget) -> ManagedComposeController:
             # This factory runs only after DockerLifecycleWorker has moved to
             # its worker thread. Inspector and controller intentionally share
@@ -1164,8 +1304,14 @@ class MainWindow(QMainWindow):
                 expected_target_identity=expected_target_identity,
             )
 
+        if docker_mod_apply_result is None:
+            target_factory = self._docker_lifecycle_target_factory()
+        else:
+            target_factory = self._docker_lifecycle_target_factory(
+                docker_mod_apply_result=docker_mod_apply_result,
+            )
         worker = DockerLifecycleWorker(
-            self._docker_lifecycle_target_factory(),
+            target_factory,
             controller_factory,
             action,
             policy=DockerControlPolicy.MANAGED,
@@ -1202,7 +1348,22 @@ class MainWindow(QMainWindow):
         self._runtime_snapshot = replace(snapshot, game=game, market=market)
         self._apply_runtime_snapshot(self._runtime_snapshot)
         launching_event = self._docker_start_voice_event(action)
-        self._begin_lifecycle_worker(worker, self._on_docker_lifecycle_completed)
+        try:
+            self._begin_lifecycle_worker(worker, self._on_docker_lifecycle_completed)
+        except Exception:
+            self._docker_lifecycle_snapshot = None
+            self._docker_lifecycle_generation = None
+            self._docker_lifecycle_target = None
+            self._docker_lifecycle_action = None
+            self._docker_lifecycle_observed_target = None
+            self._docker_lifecycle_completion = None
+            self._docker_lifecycle_suppress_failure_dialog = False
+            self._runtime_snapshot = snapshot
+            self._publish_mod_runtime_snapshot(previous_mod_runtime)
+            self._attested_docker_target_identity = previous_attested_target
+            self._attested_docker_container_id = previous_attested_container
+            self._apply_runtime_snapshot(snapshot)
+            raise
         if launching_event is not None:
             self._announce_shipboard(launching_event)
         stopping_event = self._docker_stop_voice_event(action)
@@ -1236,6 +1397,11 @@ class MainWindow(QMainWindow):
         close_stop_result = (
             self._docker_close_pending and self._docker_close_stop_started
         )
+        pending_mod_recreate = bool(
+            expected_action is DockerLifecycleAction.RECREATE_GAME
+            and getattr(self, "_pending_docker_mod_plan", None) is not None
+        )
+        game_runtime_observation_conflict = False
         if isinstance(result, DockerLifecycleResult) and self._docker_managed() and current:
             launching_event = self._docker_start_voice_event(expected_action)
             if launching_event is not None:
@@ -1257,10 +1423,68 @@ class MainWindow(QMainWindow):
             records = result.records or {}
             game_record, market_record = records.get("server"), records.get("market")
             affected_game, affected_market = self._docker_lifecycle_scope(result.action)
-            if game_record is not None:
+            lifecycle_snapshot = getattr(self, "_docker_lifecycle_snapshot", None)
+            prior_game_runtime_binding = (
+                getattr(lifecycle_snapshot, "target_identity", None),
+                getattr(lifecycle_snapshot, "game_container", None),
+                getattr(lifecycle_snapshot, "game_runtime_identity", None),
+            )
+            observed_game_runtime_binding = (
+                snapshot.target_identity,
+                snapshot.game_container,
+                snapshot.game_runtime_identity,
+            )
+            result_game_runtime_binding = (
+                result.target_identity,
+                getattr(game_record, "short_id", None),
+                result.game_runtime_identity,
+            )
+            game_runtime_observation_conflict = bool(
+                result.succeeded
+                and result.action is DockerLifecycleAction.RECREATE_GAME
+                and result.game_runtime_identity is not None
+                and not pending_mod_recreate
+                and observed_game_runtime_binding
+                not in {
+                    prior_game_runtime_binding,
+                    result_game_runtime_binding,
+                }
+            )
+            if game_runtime_observation_conflict:
+                log.warning(
+                    "Docker Game runtime changed while a recreate result was "
+                    "crossing the GUI boundary; preserving newer observation"
+                )
+            if game_record is not None and not game_runtime_observation_conflict:
+                game_state = self._docker_lifecycle_record_state(game_record)
+                if (
+                    result.succeeded
+                    and result.action is DockerLifecycleAction.RECREATE_GAME
+                ):
+                    # ManagedComposeController has already proven semantic
+                    # readiness for no-healthcheck targets at this boundary. A
+                    # mod recreation remains STARTING until one fresh monitor
+                    # sample independently confirms the exact runtime binding.
+                    game_state = (
+                        ServiceState.STARTING
+                        if pending_mod_recreate
+                        else ServiceState.ONLINE
+                    )
                 snapshot = replace(
-                    snapshot, game=self._docker_lifecycle_record_state(game_record),
+                    snapshot, game=game_state,
                     game_container=game_record.short_id, game_health=game_record.health,
+                    target_identity=(
+                        result.target_identity or snapshot.target_identity
+                    ),
+                    game_runtime_identity=(
+                        result.game_runtime_identity
+                        if affected_game and result.succeeded
+                        else (
+                            snapshot.game_runtime_identity
+                            if not affected_game
+                            else None
+                        )
+                    ),
                     game_error=None if result.succeeded else (
                         result.error if affected_game else snapshot.game_error
                     ), game_pid=None, game_owned=False,
@@ -1309,13 +1533,40 @@ class MainWindow(QMainWindow):
             isinstance(result, DockerLifecycleResult)
             and current
             and result.succeeded
+            and not game_runtime_observation_conflict
+        )
+        if (
+            expected_action is DockerLifecycleAction.RECREATE_GAME
+            and getattr(self, "_pending_docker_mod_plan", None) is not None
+        ):
+            self._pending_docker_mod_lifecycle_result = (
+                result
+                if current and not game_runtime_observation_conflict
+                else None
+            )
+        post_result_mod_observation = bool(
+            pending_mod_recreate
+            and completion_succeeded
+            and callable(completion)
+            and isinstance(result, DockerLifecycleResult)
+            and result.target_identity
+            and result.game_runtime_identity
+            and result.server_node_options_sha256
+            and getattr(
+                (result.records or {}).get("server"),
+                "short_id",
+                None,
+            )
         )
         if callable(completion):
-            self._lifecycle_after_thread_callback = (
-                lambda callback=completion, succeeded=completion_succeeded: callback(
-                    succeeded
+            if post_result_mod_observation:
+                self._pending_docker_mod_observation_completion = completion
+            else:
+                self._lifecycle_after_thread_callback = (
+                    lambda callback=completion, succeeded=completion_succeeded: callback(
+                        succeeded
+                    )
                 )
-            )
         self._docker_lifecycle_snapshot = None
         self._docker_lifecycle_generation = None
         self._docker_lifecycle_target = None
@@ -1323,6 +1574,128 @@ class MainWindow(QMainWindow):
         self._docker_lifecycle_observed_target = None
         self._docker_lifecycle_completion = None
         self._docker_lifecycle_suppress_failure_dialog = False
+        if post_result_mod_observation:
+            self._begin_docker_mod_post_result_observation()
+            return
+        self._lifecycle_result_received = True
+        self._finish_lifecycle_if_complete()
+
+    def _begin_docker_mod_post_result_observation(self) -> None:
+        """Hold the lifecycle slot until one fresh monitor sample rebinds runtime."""
+
+        token = object()
+        self._pending_docker_mod_observation_token = token
+        self._pending_docker_mod_observation_floor_ns = time.monotonic_ns()
+        QTimer.singleShot(
+            _DOCKER_MOD_POST_RESULT_OBSERVATION_TIMEOUT_MS,
+            lambda current_token=token: self._on_docker_mod_observation_timeout(
+                current_token
+            ),
+        )
+        self._docker_observe_requested.emit()
+
+    def _on_docker_mod_runtime_observation_sample(
+        self,
+        observation: DockerObservation,
+        generation: int | None = None,
+    ) -> None:
+        """Consume only a monitor poll that began after the recreate result."""
+
+        token = getattr(self, "_pending_docker_mod_observation_token", None)
+        quarantined_targets = getattr(
+            self,
+            "_docker_mod_quarantined_targets",
+            {},
+        )
+        if token is None:
+            if observation.target_identity in quarantined_targets:
+                # ``observation_changed`` is deduplicated; sampled must also be
+                # able to recognize a late, authoritative stopped state.
+                self._on_docker_observation(observation, generation)
+            return
+        floor_ns = getattr(
+            self,
+            "_pending_docker_mod_observation_floor_ns",
+            None,
+        )
+        sample_started_ns = getattr(
+            observation,
+            "sample_started_monotonic_ns",
+            None,
+        )
+        current_generation = getattr(self, "_monitor_generation", 0)
+        if (
+            type(floor_ns) is not int
+            or type(sample_started_ns) is not int
+            or sample_started_ns <= floor_ns
+            or self._close_in_progress
+            or not self._docker_mode()
+            or (generation is not None and generation != current_generation)
+            or observation.monitor_generation != current_generation
+            or observation.settings_identity
+            != self._docker_monitor_settings_identity()
+        ):
+            return
+
+        result = getattr(self, "_pending_docker_mod_lifecycle_result", None)
+        records = getattr(result, "records", None) or {}
+        expected_container_id = getattr(records.get("server"), "short_id", None)
+        exact_runtime = bool(
+            observation.game is ServiceState.ONLINE
+            and observation.target_identity == getattr(result, "target_identity", None)
+            and observation.game_identity == expected_container_id
+            and observation.game_runtime_identity
+            == getattr(result, "game_runtime_identity", None)
+        )
+        if exact_runtime:
+            quarantined_targets.pop(observation.target_identity, None)
+        # Apply only after an exact retry has removed this target's quarantine.
+        # A mismatch remains suppressed and follows the corrective-stop path.
+        self._on_docker_observation(observation, generation)
+        self._complete_docker_mod_post_result_observation(token, exact_runtime)
+
+    def _on_docker_mod_observation_timeout(self, token: object) -> None:
+        """Fail closed when no post-result monitor sample arrives in time."""
+
+        self._complete_docker_mod_post_result_observation(token, False)
+
+    def _complete_docker_mod_post_result_observation(
+        self,
+        token: object,
+        succeeded: bool,
+    ) -> None:
+        """Release the retained lifecycle result only once for one wait token."""
+
+        if token is not getattr(
+            self,
+            "_pending_docker_mod_observation_token",
+            None,
+        ):
+            return
+        completion = getattr(
+            self,
+            "_pending_docker_mod_observation_completion",
+            None,
+        )
+        self._pending_docker_mod_observation_token = None
+        self._pending_docker_mod_observation_floor_ns = None
+        self._pending_docker_mod_observation_completion = None
+        result = getattr(self, "_pending_docker_mod_lifecycle_result", None)
+        result_target = getattr(result, "target_identity", None)
+        quarantined_targets = getattr(
+            self,
+            "_docker_mod_quarantined_targets",
+            {},
+        )
+        if isinstance(result_target, str) and result_target:
+            if succeeded:
+                quarantined_targets.pop(result_target, None)
+            else:
+                quarantined_targets[result_target] = time.monotonic_ns()
+        if callable(completion):
+            self._lifecycle_after_thread_callback = (
+                lambda callback=completion, outcome=bool(succeeded): callback(outcome)
+            )
         self._lifecycle_result_received = True
         self._finish_lifecycle_if_complete()
 
@@ -1507,6 +1880,316 @@ class MainWindow(QMainWindow):
         """Return whether a lifecycle operation still owns the continuation slot."""
         return getattr(self, "_lifecycle_thread", None) is not None
 
+    def _acquire_game_mod_lifecycle_lease(
+        self,
+        evejs_root: str,
+        *,
+        error_title: str,
+    ) -> bool:
+        """Own the installer-compatible lock before a Game/mod transaction."""
+
+        existing = getattr(self, "_mod_lifecycle_lease", None)
+        if existing is not None and not getattr(existing, "released", False):
+            try:
+                requested_root = Path(evejs_root).resolve(strict=True)
+            except OSError:
+                requested_root = Path(evejs_root)
+            if (
+                getattr(self, "_mod_lifecycle_lease_token", None) is None
+                and existing.root == requested_root
+            ):
+                # A mod restart deliberately carries this lease across the
+                # completed stop worker into the new start worker.
+                return True
+            message = (
+                "Another Game or mod lifecycle already owns the mod lock. "
+                "Wait for it to finish and retry."
+            )
+        else:
+            if existing is not None:
+                self._release_mod_lifecycle_lease()
+            try:
+                self._mod_lifecycle_lease = acquire_mod_lifecycle_lease(
+                    evejs_root
+                )
+                self._mod_lifecycle_lease_token = None
+                self._mod_lifecycle_handoff = None
+                self._release_mod_lease_after_lifecycle = False
+                return True
+            except ModLifecycleBusyError as exc:
+                message = str(exc)
+
+        self._server_error = message
+        log.warning("Game/mod operation blocked by mod lifecycle lock: %s", message)
+        QMessageBox.warning(
+            self,
+            error_title,
+            message + "\n\nWait for the mod operation to finish, then retry.",
+        )
+        return False
+
+    def _release_mod_lifecycle_lease(self) -> None:
+        """Release any retained lease without letting cleanup mask the result."""
+
+        lease = getattr(self, "_mod_lifecycle_lease", None)
+        self._mod_lifecycle_lease = None
+        self._mod_lifecycle_lease_token = None
+        self._mod_lifecycle_handoff = None
+        self._release_mod_lease_after_lifecycle = False
+        if lease is None:
+            return
+        try:
+            lease.release()
+        except Exception:
+            # Closing the underlying handle still releases the Windows lock;
+            # keep shutdown/result handling alive if the explicit unlock call
+            # itself reported an OS error.
+            log.exception("Failed to cleanly release the mod lifecycle lease")
+
+    def _release_unbound_mod_lifecycle_lease(self) -> None:
+        """Release only a between-workers handoff, never an active start's."""
+
+        if getattr(self, "_mod_lifecycle_lease_token", None) is None:
+            self._release_mod_lifecycle_lease()
+
+    def _retain_mod_lifecycle_lease_for_continuation(self) -> bool:
+        """Carry a Game-start lease into one immediate lifecycle continuation.
+
+        Runtime attestation can discover a bad mod state only after Game has
+        reached its endpoint.  In that case the start result handler must keep
+        this same lease and hand it directly to a graceful corrective stop.
+        The stop result path releases an unbound lease at its own final QThread
+        boundary, whether that stop succeeds or fails.
+        """
+
+        lease = getattr(self, "_mod_lifecycle_lease", None)
+        if lease is None or getattr(lease, "released", False):
+            return False
+        self._mod_lifecycle_lease_token = None
+        self._mod_lifecycle_handoff = "start_to_stop"
+        self._release_mod_lease_after_lifecycle = False
+        return True
+
+    @staticmethod
+    def _applicable_runtime_mods(
+        evejs_root: str,
+        *,
+        backend: str,
+    ) -> tuple[Mod, ...]:
+        """Return one complete valid backend-specific discovery or fail closed."""
+
+        discovered = tuple(scan_mods(evejs_root))
+        invalid = tuple(mod for mod in discovered if not mod.valid)
+        if invalid:
+            names = ", ".join(sorted({mod.name for mod in invalid}))
+            raise ModRuntimeStateError(
+                "Installed mod metadata is invalid"
+                + (f": {names}." if names else ".")
+            )
+        support_name = "docker" if backend == DOCKER_BACKEND else "native"
+        applicable = tuple(
+            mod for mod in discovered if mod.supports_backend(support_name)
+        )
+        if backend == DOCKER_BACKEND:
+            applicable = tuple(
+                mod
+                for mod in applicable
+                if mod.activation_kind is ActivationKind.LOADER_RENAME
+            )
+        return applicable
+
+    def _publish_mod_runtime_snapshot(
+        self,
+        snapshot: ModRuntimeSnapshot | None,
+    ) -> None:
+        """Publish current evidence without letting an optional page leak a lease."""
+
+        self._current_mod_runtime_snapshot = snapshot
+        if snapshot is None:
+            self._attested_docker_target_identity = None
+            self._attested_docker_container_id = None
+        setter = getattr(
+            self.__dict__.get("_mods_page"),
+            "set_mod_runtime_snapshot",
+            None,
+        )
+        if not callable(setter):
+            return
+        try:
+            setter(snapshot)
+        except Exception:
+            log.exception("Could not publish the current mod runtime snapshot")
+
+    @staticmethod
+    def _mark_matching_mod_activations_failed(
+        evejs_root: str,
+        mods: tuple[Mod, ...],
+        error_code: str,
+    ) -> None:
+        """Fail only current prepared/pending operations without masking cause."""
+
+        try:
+            state = read_mod_activation_state(evejs_root)
+        except ModActivationStateError:
+            log.exception("Could not read the mod activation journal after failure")
+            return
+        for mod in mods:
+            intent = state.for_mod(mod.id)
+            if (
+                intent is None
+                or intent.phase
+                not in {ActivationPhase.PREPARED, ActivationPhase.PENDING_RESTART}
+                or intent.desired is not mod.active
+            ):
+                continue
+            try:
+                fail_mod_activation(mod, intent.desired, error_code)
+            except ModActivationStateError:
+                log.exception(
+                    "Could not mark activation failure for mod %s",
+                    mod.id,
+                )
+
+    def _build_native_mod_runtime_plan(
+        self,
+        evejs_root: str,
+        mode: str,
+    ) -> tuple[ModRuntimePlan, tuple[Mod, ...]]:
+        """Freeze the exact Native mod contracts consumed by one Game start."""
+
+        mods = self._applicable_runtime_mods(
+            evejs_root,
+            backend=NATIVE_BACKEND,
+        )
+        selected = active_loader_names(mods) if mode == "modded" else ()
+        plan = build_mod_runtime_plan(
+            evejs_root,
+            mods,
+            backend=NATIVE_BACKEND,
+            mode=mode,
+            runtime_identity=f"native:{secrets.token_hex(32)}",
+            selected_loader_ids=selected,
+        )
+        validate_mod_runtime_plan(plan, backend=NATIVE_BACKEND)
+        return plan, mods
+
+    def _verify_native_mod_runtime(
+        self,
+        plan: ModRuntimePlan,
+        process: object,
+    ) -> ModRuntimeSnapshot:
+        """Attest one ready Native process and commit evidence under its lease."""
+
+        pid = getattr(process, "pid", None)
+        if type(pid) is not int or pid < 1:
+            raise ModRuntimeStateError(
+                "The launched Game process has no valid runtime identity."
+            )
+        receipt = getattr(process, "mod_runtime_receipt", None)
+        if (
+            receipt is None
+            or getattr(receipt, "plan_sha256", None) != plan.plan_sha256
+            or getattr(receipt, "runtime_identity", None) != plan.runtime_identity
+        ):
+            raise ModRuntimeStateError(
+                "The launched Game command is not bound to its mod runtime plan."
+            )
+
+        integrated = any(
+            entry.activation_kind is ActivationKind.JSON_BOOLEAN
+            for entry in plan.mods
+        )
+        deadline = time.monotonic() + _NATIVE_MOD_ATTESTATION_TIMEOUT_SEC
+        last_protocol_error: ModStatusProtocolError | None = None
+        current_mods: tuple[Mod, ...] = ()
+        try:
+            while True:
+                if getattr(process, "poll")() is not None:
+                    raise ModRuntimeStateError(
+                        "Game exited before mod runtime verification completed."
+                    )
+                current_mods = self._applicable_runtime_mods(
+                    str(plan.root),
+                    backend=NATIVE_BACKEND,
+                )
+                try:
+                    stdout = (
+                        read_server_console_bytes(
+                            get_native_mod_status_log(plan.root)
+                        )
+                        if integrated
+                        else b""
+                    )
+                    snapshot = build_native_mod_runtime_snapshot(
+                        plan,
+                        current_mods,
+                        stdout,
+                        pid=pid,
+                    )
+                except ModStatusProtocolError as exc:
+                    last_protocol_error = exc
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(_NATIVE_MOD_ATTESTATION_POLL_SEC)
+                    continue
+                if getattr(process, "poll")() is not None:
+                    raise ModRuntimeStateError(
+                        "Game exited while mod runtime evidence was being committed."
+                    )
+                write_mod_runtime_snapshot(snapshot)
+                clear_confirmed_mod_activations(
+                    plan.root,
+                    snapshot,
+                    current_mods,
+                )
+                return snapshot
+        except Exception:
+            if not current_mods:
+                try:
+                    current_mods = self._applicable_runtime_mods(
+                        str(plan.root),
+                        backend=NATIVE_BACKEND,
+                    )
+                except ModRuntimeStateError:
+                    current_mods = ()
+            self._mark_matching_mod_activations_failed(
+                str(plan.root),
+                current_mods,
+                "runtime-verification-failed",
+            )
+            if last_protocol_error is not None:
+                log.warning(
+                    "Native mod status protocol did not verify PID %s: %s",
+                    pid,
+                    last_protocol_error,
+                )
+            raise
+
+    @staticmethod
+    def _snapshot_matches_native_plan(
+        snapshot: object,
+        plan: ModRuntimePlan,
+        process: object | None,
+    ) -> bool:
+        """Validate the worker result again at the GUI ownership boundary."""
+
+        if not isinstance(snapshot, ModRuntimeSnapshot) or process is None:
+            return False
+        try:
+            validate_mod_runtime_plan(plan, backend=NATIVE_BACKEND)
+            return (
+                getattr(process, "poll")() is None
+                and snapshot.root.resolve(strict=True) == plan.root
+                and snapshot.backend == NATIVE_BACKEND
+                and snapshot.mode == plan.mode
+                and snapshot.runtime_identity == plan.runtime_identity
+                and snapshot.plan_sha256 == plan.plan_sha256
+                and snapshot.pid == getattr(process, "pid", None)
+                and snapshot.selected_loader_ids == plan.selected_loader_ids
+            )
+        except (OSError, ModRuntimeStateError, TypeError, ValueError):
+            return False
+
     def _publish_cached_runtime(self) -> None:
         """Render already-known service state without doing GUI-thread socket I/O."""
         if self._docker_mode():
@@ -1582,7 +2265,16 @@ class MainWindow(QMainWindow):
         self._docker_preflight_worker = worker
         self._docker_preflight_result_received = False
         self._docker_preflight_thread_finished = False
-        thread.start()
+        try:
+            thread.start()
+        except Exception:
+            if self._docker_preflight_thread is thread:
+                self._docker_preflight_thread = None
+                self._docker_preflight_worker = None
+                self._docker_preflight_result_received = False
+                self._docker_preflight_thread_finished = False
+            thread.deleteLater()
+            raise
 
     @pyqtSlot(object)
     def _on_docker_preflight_completed(self, result: object) -> None:
@@ -1641,7 +2333,32 @@ class MainWindow(QMainWindow):
         self._lifecycle_worker = worker
         self._lifecycle_result_received = False
         self._lifecycle_thread_finished = False
-        thread.start()
+        for page_name in ("_mods_page", "_settings_page"):
+            set_lifecycle_busy = getattr(
+                getattr(self, page_name, None),
+                "set_lifecycle_busy",
+                None,
+            )
+            if callable(set_lifecycle_busy):
+                set_lifecycle_busy(True)
+        try:
+            thread.start()
+        except Exception:
+            if self._lifecycle_thread is thread:
+                self._lifecycle_thread = None
+                self._lifecycle_worker = None
+                self._lifecycle_result_received = False
+                self._lifecycle_thread_finished = False
+                for page_name in ("_mods_page", "_settings_page"):
+                    set_lifecycle_busy = getattr(
+                        getattr(self, page_name, None),
+                        "set_lifecycle_busy",
+                        None,
+                    )
+                    if callable(set_lifecycle_busy):
+                        set_lifecycle_busy(False)
+            thread.deleteLater()
+            raise
 
     @pyqtSlot()
     def _on_lifecycle_thread_finished(self) -> None:
@@ -1650,6 +2367,42 @@ class MainWindow(QMainWindow):
             return
         self._lifecycle_thread_finished = True
         self._finish_lifecycle_if_complete()
+        worker = getattr(self, "_lifecycle_worker", None)
+        if (
+            isinstance(worker, ManagedModRemovalWorker)
+            and not getattr(self, "_lifecycle_result_received", False)
+        ):
+            # Let an already-queued completed signal win first. If the worker
+            # died without it, synthesize one terminal failure next event turn
+            # so the shared lifecycle slot and UI cannot remain wedged forever.
+            QTimer.singleShot(
+                0,
+                lambda expected_worker=worker: self._recover_missing_mod_removal_result(
+                    expected_worker
+                ),
+            )
+
+    def _recover_missing_mod_removal_result(
+        self,
+        expected_worker: ManagedModRemovalWorker,
+    ) -> None:
+        if (
+            getattr(self, "_lifecycle_worker", None) is not expected_worker
+            or not getattr(self, "_lifecycle_thread_finished", False)
+            or getattr(self, "_lifecycle_result_received", False)
+        ):
+            return
+        self._on_managed_mod_removal_completed(
+            ManagedModRemovalResult(
+                request=expected_worker.request,
+                success=False,
+                message=(
+                    "The background removal worker exited without a terminal "
+                    "result. Removal state is unverified; refresh Mods and "
+                    "inspect the uninstall log before retrying."
+                ),
+            )
+        )
 
     def _finish_lifecycle_if_complete(self) -> None:
         """Run the continuation only after result handling and thread teardown."""
@@ -1666,8 +2419,44 @@ class MainWindow(QMainWindow):
         self._lifecycle_after_thread_callback = None
         if thread is not None:
             thread.deleteLater()
+        if getattr(self, "_release_mod_lease_after_lifecycle", False):
+            # ServiceStartWorker has reported readiness/failure and its QThread
+            # is now gone.  Runtime mod verification in the result handler has
+            # therefore completed while this lease was still held.
+            self._release_mod_lifecycle_lease()
         if callback is not None:
-            callback()
+            try:
+                callback()
+            except Exception:
+                # Mod restart and attestation correction both leave an
+                # unbound lease between workers.  Do not strand it if the
+                # continuation fails before the next lifecycle can own it.
+                self._release_unbound_mod_lifecycle_lease()
+                raise
+        if not self._lifecycle_active():
+            for page_name in ("_mods_page", "_settings_page"):
+                set_lifecycle_busy = getattr(
+                    getattr(self, page_name, None),
+                    "set_lifecycle_busy",
+                    None,
+                )
+                if callable(set_lifecycle_busy):
+                    set_lifecycle_busy(False)
+            current_runtime = getattr(self, "_runtime_snapshot", None)
+            if self._docker_mode() and isinstance(current_runtime, RuntimeSnapshot):
+                # Fan-out while the slot was owned deliberately kept client
+                # launch disabled. Refresh once the final lifecycle actually
+                # releases; identical later monitor polls may be deduplicated.
+                apply_runtime_snapshot = self.__dict__.get(
+                    "_apply_runtime_snapshot"
+                )
+                if (
+                    not callable(apply_runtime_snapshot)
+                    and getattr(self, "_status_bar", None) is not None
+                ):
+                    apply_runtime_snapshot = self._apply_runtime_snapshot
+                if callable(apply_runtime_snapshot):
+                    apply_runtime_snapshot(current_runtime)
         if (
             getattr(self, "_docker_close_pending", False)
             and getattr(self, "_docker_close_stop_started", False)
@@ -1689,17 +2478,56 @@ class MainWindow(QMainWindow):
     ) -> bool:
         """Start requested services in a worker, waiting Market → Game readiness."""
         if self._docker_mode():
+            self._release_unbound_mod_lifecycle_lease()
             self._docker_unavailable(self._docker_control_reason())
             return False
         if self._lifecycle_active():
             log.info("Ignored service start while another lifecycle operation is active")
             return False
         if not start_market and not start_game:
+            self._release_unbound_mod_lifecycle_lease()
             log.info("Ignored empty service-start request")
             return False
         evejs_root = str(self._cfg.get("evejs_root", ""))
         if not evejs_root:
+            self._release_unbound_mod_lifecycle_lease()
             return False
+
+        if start_game:
+            if not self._acquire_game_mod_lifecycle_lease(
+                evejs_root,
+                error_title=error_title,
+            ):
+                self._release_unbound_mod_lifecycle_lease()
+                return False
+            try:
+                if mode not in {"vanilla", "modded"}:
+                    raise ModRuntimeStateError(
+                        "Game start requires an exact vanilla or modded mode."
+                    )
+                mod_plan, _planned_mods = self._build_native_mod_runtime_plan(
+                    evejs_root,
+                    mode,
+                )
+            except (ModRuntimeStateError, OSError, TypeError, ValueError) as exc:
+                self._native_mod_runtime_plan = None
+                self._release_mod_lifecycle_lease()
+                self._server_error = str(exc)
+                log.exception("Native Game mod plan could not be frozen")
+                QMessageBox.critical(
+                    self,
+                    error_title,
+                    "The installed mod state could not be validated before Game "
+                    "startup. No Game process was started.\n\n"
+                    + str(exc),
+                )
+                return False
+            self._native_mod_runtime_plan = mod_plan
+            self._publish_mod_runtime_snapshot(None)
+        else:
+            # Market-only starts deliberately do not participate in the Game
+            # mod transaction, nor should they inherit a stranded handoff.
+            self._release_unbound_mod_lifecycle_lease()
 
         if start_market:
             self._market_intent = ServiceState.STARTING
@@ -1710,32 +2538,88 @@ class MainWindow(QMainWindow):
         self._lifecycle_start_scope = (start_market, start_game)
         start_token = object()
         self._lifecycle_start_token = start_token
+        if start_game:
+            self._mod_lifecycle_lease_token = start_token
+            self._mod_lifecycle_handoff = None
+            self._release_mod_lease_after_lifecycle = True
         self._lifecycle_start_voice_event = voice_event
         self._lifecycle_ready_callback = on_ready
         self._lifecycle_error_title = error_title
-        worker = ServiceStartWorker(
-            evejs_root,
-            mode=mode,
-            start_market=start_market,
-            start_game=start_game,
-            continue_game_after_market_failure=start_market and start_game,
-            start_market_fn=start_market_server,
-            start_game_fn=start_game_server,
-            market_readiness_timeout_sec=MARKET_READINESS_TIMEOUT_SEC,
-        )
-        log.info(
-            "Starting Native services: market=%s game=%s mode=%s",
-            start_market,
-            start_game,
-            mode or "none",
-        )
-        self._begin_lifecycle_worker(
-            worker,
-            lambda result, token=start_token: self._on_service_start_completed_for_token(
-                result,
-                token,
-            ),
-        )
+        try:
+            if start_game:
+                plan = self._native_mod_runtime_plan
+                assert plan is not None
+
+                def start_planned_game(
+                    root: str,
+                    *,
+                    mode: str,
+                    frozen_plan: ModRuntimePlan = plan,
+                ) -> object:
+                    return start_game_server(
+                        root,
+                        mode,
+                        mod_runtime_plan=frozen_plan,
+                    )
+
+                def validate_planned_game(
+                    process: object,
+                    frozen_plan: ModRuntimePlan = plan,
+                ) -> ModRuntimeSnapshot:
+                    return self._verify_native_mod_runtime(
+                        frozen_plan,
+                        process,
+                    )
+            else:
+                start_planned_game = start_game_server
+                validate_planned_game = None
+            worker = ServiceStartWorker(
+                evejs_root,
+                mode=mode,
+                start_market=start_market,
+                start_game=start_game,
+                continue_game_after_market_failure=start_market and start_game,
+                start_market_fn=start_market_server,
+                start_game_fn=start_planned_game,
+                game_runtime_validator=validate_planned_game,
+                market_readiness_timeout_sec=MARKET_READINESS_TIMEOUT_SEC,
+            )
+            log.info(
+                "Starting Native services: market=%s game=%s mode=%s",
+                start_market,
+                start_game,
+                mode or "none",
+            )
+            self._begin_lifecycle_worker(
+                worker,
+                lambda result, token=start_token: self._on_service_start_completed_for_token(
+                    result,
+                    token,
+                ),
+            )
+        except Exception:
+            self._lifecycle_start_scope = (False, False)
+            self._lifecycle_start_token = None
+            self._lifecycle_ready_callback = None
+            if start_game:
+                self._server_intent = None
+                self._native_mod_runtime_plan = None
+                self._release_mod_lifecycle_lease()
+            if start_market:
+                self._market_intent = None
+            log.exception("Could not start the Native service lifecycle worker")
+            QMessageBox.critical(
+                self,
+                error_title,
+                "The service startup worker could not be started.",
+            )
+            return False
+        if start_game and not self._lifecycle_active():
+            # Defensive cleanup for a worker launcher that failed to retain its
+            # QThread.  Production _begin_lifecycle_worker always retains it;
+            # this also keeps injected test adapters from leaking OS handles.
+            self._release_mod_lifecycle_lease()
+            self._native_mod_runtime_plan = None
         self._publish_cached_runtime()
         if voice_event is not None:
             self._announce_shipboard(voice_event)
@@ -1765,6 +2649,29 @@ class MainWindow(QMainWindow):
             "_service_reachability",
             (False, False),
         )
+        mod_plan = getattr(self, "_native_mod_runtime_plan", None)
+        if (
+            start_game
+            and result.game_ready
+            and result.mod_runtime_error is None
+            and mod_plan is not None
+            and not self._snapshot_matches_native_plan(
+                result.mod_runtime_snapshot,
+                mod_plan,
+                result.game_process,
+            )
+        ):
+            result = replace(
+                result,
+                mod_runtime_snapshot=None,
+                mod_runtime_error=(
+                    "Mod runtime verification failed: the worker returned "
+                    "evidence for a different launch plan."
+                ),
+            )
+        mod_attestation_failed = bool(
+            start_game and result.game_ready and result.mod_runtime_error
+        )
 
         if start_market:
             if result.market_process is not None:
@@ -1781,10 +2688,14 @@ class MainWindow(QMainWindow):
         if start_game:
             if result.game_process is not None:
                 self._server_proc = result.game_process
-            if result.game_ready:
+            if result.game_ready and not mod_attestation_failed:
                 game_reachable = True
                 self._server_intent = None
                 self._server_error = None
+            elif mod_attestation_failed:
+                game_reachable = True
+                self._server_intent = ServiceState.STOPPING
+                self._server_error = result.mod_runtime_error
             elif result.game_error:
                 game_reachable = False
                 self._server_intent = ServiceState.STARTING
@@ -1793,6 +2704,7 @@ class MainWindow(QMainWindow):
         self._service_reachability = (game_reachable, market_reachable)
         self._lifecycle_start_scope = (False, False)
         self._lifecycle_start_token = None
+        self._native_mod_runtime_plan = None
         callback = getattr(self, "_lifecycle_ready_callback", None)
         self._lifecycle_ready_callback = None
         launching_event = getattr(self, "_lifecycle_start_voice_event", None)
@@ -1803,6 +2715,7 @@ class MainWindow(QMainWindow):
             and result.market_error
             and result.game_ready
             and not result.game_error
+            and not result.mod_runtime_error
         )
         continuation_ready = result.succeeded or partial_game_ready
         if launching_event is not None:
@@ -1814,20 +2727,38 @@ class MainWindow(QMainWindow):
             )
         diagnostics = [
             message
-            for message in (result.market_error, result.game_error)
+            for message in (
+                result.market_error,
+                result.game_error,
+                result.mod_runtime_error,
+            )
             if message
         ]
-        if continuation_ready:
+        if mod_attestation_failed:
+            self._publish_mod_runtime_snapshot(None)
+            self._lifecycle_after_thread_callback = None
+            if self._retain_mod_lifecycle_lease_for_continuation():
+                self._lifecycle_after_thread_callback = lambda: self._run_stop_sequence(
+                    stop_game=True,
+                    stop_market=False,
+                    on_complete=None,
+                    allow_force_game_kill=False,
+                )
+        elif continuation_ready:
             self._lifecycle_after_thread_callback = callback
         else:
             self._lifecycle_after_thread_callback = None
         if result.succeeded:
+            if isinstance(result.mod_runtime_snapshot, ModRuntimeSnapshot):
+                self._publish_mod_runtime_snapshot(result.mod_runtime_snapshot)
             log.info(
                 "Native service startup completed: market_ready=%s game_ready=%s",
                 result.market_ready,
                 result.game_ready,
             )
         elif partial_game_ready:
+            if isinstance(result.mod_runtime_snapshot, ModRuntimeSnapshot):
+                self._publish_mod_runtime_snapshot(result.mod_runtime_snapshot)
             log.warning(
                 "Native Game started without optional Market: %s",
                 " | ".join(diagnostics),
@@ -1839,7 +2770,22 @@ class MainWindow(QMainWindow):
                 + "\n\nGame is online and remains usable without the optional "
                 "Market service. Use the Market Console button on Home for details.",
             )
+        elif mod_attestation_failed:
+            log.error(
+                "Native Game mod attestation failed; corrective stop queued: %s",
+                " | ".join(diagnostics),
+            )
+            QMessageBox.critical(
+                self,
+                getattr(self, "_lifecycle_error_title", "Mod Verification Failed"),
+                "Game reached its endpoint, but the launcher could not prove "
+                "the requested mod state. The Game server is being stopped "
+                "gracefully and will not be left running in an unknown state.\n\n"
+                + "\n\n".join(diagnostics),
+            )
         else:
+            if start_game:
+                self._publish_mod_runtime_snapshot(None)
             log.error("Native service startup failed: %s", " | ".join(diagnostics))
             QMessageBox.critical(
                 self,
@@ -1858,12 +2804,20 @@ class MainWindow(QMainWindow):
         stop_market: bool,
         on_complete: Callable[[], None] | None,
         voice_event: VoiceEvent | None = None,
+        allow_force_game_kill: bool = True,
     ) -> bool:
         """Stop launcher-owned Game then Market processes in a worker."""
+        corrective_mod_stop = (
+            getattr(self, "_mod_lifecycle_handoff", None) == "start_to_stop"
+        )
         if self._docker_mode():
+            if corrective_mod_stop:
+                self._release_unbound_mod_lifecycle_lease()
             self._docker_unavailable(self._docker_control_reason())
             return False
         if self._lifecycle_active():
+            if corrective_mod_stop:
+                self._release_unbound_mod_lifecycle_lease()
             log.info("Ignored service stop while another lifecycle operation is active")
             return False
         game_process = (
@@ -1879,9 +2833,15 @@ class MainWindow(QMainWindow):
             else None
         )
         if game_process is None and market_process is None:
+            if corrective_mod_stop:
+                self._release_unbound_mod_lifecycle_lease()
             if on_complete is not None:
                 on_complete()
             return True
+
+        if corrective_mod_stop:
+            self._mod_lifecycle_handoff = None
+            self._release_mod_lease_after_lifecycle = True
 
         if game_process is not None:
             self._server_intent = ServiceState.STOPPING
@@ -1901,8 +2861,17 @@ class MainWindow(QMainWindow):
                 (False, True): VoiceEvent.MARKET_SERVER_STOPPING,
             }[self._lifecycle_stop_scope]
         self._lifecycle_stop_voice_event = voice_event
-        worker = ServiceStopWorker(game_process, market_process)
-        self._begin_lifecycle_worker(worker, self._on_service_stop_completed)
+        try:
+            worker = ServiceStopWorker(
+                game_process,
+                market_process,
+                allow_force_game_kill=allow_force_game_kill,
+            )
+            self._begin_lifecycle_worker(worker, self._on_service_stop_completed)
+        except Exception:
+            if corrective_mod_stop:
+                self._release_unbound_mod_lifecycle_lease()
+            raise
         self._publish_cached_runtime()
         if voice_event is not None:
             self._announce_shipboard(voice_event)
@@ -1928,6 +2897,7 @@ class MainWindow(QMainWindow):
                 self._server_intent = None
                 self._server_error = None
                 game_reachable = False
+                self._publish_mod_runtime_snapshot(None)
             else:
                 self._server_intent = None
                 self._server_error = result.game_error
@@ -1947,6 +2917,14 @@ class MainWindow(QMainWindow):
         self._lifecycle_stop_voice_event = None
         callback = getattr(self, "_lifecycle_stop_callback", None)
         self._lifecycle_stop_callback = None
+        if (
+            getattr(self, "_mod_lifecycle_lease", None) is not None
+            and getattr(self, "_mod_lifecycle_lease_token", None) is None
+            and (not result.succeeded or callback is None)
+        ):
+            # A continuous mod restart owns an unbound lease during its stop
+            # phase.  Only a successful start continuation may retain it.
+            self._release_mod_lease_after_lifecycle = True
         if stopping_event is not None:
             self._announce_shipboard(
                 service_stop_result_event(
@@ -2057,10 +3035,257 @@ class MainWindow(QMainWindow):
             voice_event=VoiceEvent.GAME_SERVER_STOPPING,
         )
 
+    @pyqtSlot(object)
+    def _on_mod_remove_requested(self, candidate: object) -> None:
+        """Confirm and serialize launcher-native removal for one installed mod."""
+
+        if not isinstance(candidate, Mod):
+            log.error("Ignored invalid mod removal request: %r", candidate)
+            return
+        if self._docker_mode():
+            QMessageBox.information(
+                self,
+                "Mod Removal Unavailable",
+                "Switch to the Native backend before removing an installed mod.",
+            )
+            return
+        if self._lifecycle_active() or self._mod_removal_conflict_active():
+            QMessageBox.information(
+                self,
+                "Mod Removal Busy",
+                "Another server, maintenance, client-launch, or update operation is "
+                "still running. Try again when it finishes.",
+            )
+            return
+
+        try:
+            registration = read_managed_mod_registration(candidate)
+        except ModManagementError as exc:
+            QMessageBox.critical(
+                self,
+                "Mod Removal Needs Repair",
+                "The launcher could not verify this mod's removal kit. Nothing was removed.\n\n"
+                + (str(exc) or "Unknown launcher registration error."),
+            )
+            self._mods_page.refresh_mods()
+            return
+
+        owns_game = self._server_process_alive()
+        owns_market = (
+            self._market_proc is not None and self._market_proc.poll() is None
+        )
+        external_game = not owns_game and is_server_running(port=int(Ports.GAME_TCP))
+        external_market = not owns_market and is_server_running(
+            port=int(Ports.MARKET_RPC)
+        )
+        if external_game or external_market:
+            services = []
+            if external_game:
+                services.append("Game")
+            if external_market:
+                services.append("Market")
+            service_label = " and ".join(services)
+            service_noun = "servers were" if len(services) > 1 else "server was"
+            service_pronoun = "them" if len(services) > 1 else "it"
+            QMessageBox.warning(
+                self,
+                "Stop External EveJS Services",
+                f"The {service_label} {service_noun} started outside this launcher.\n\n"
+                f"Stop {service_pronoun} from the original console, then remove the mod from the Mods page. "
+                "The launcher will not alter live files underneath a server it does not own.",
+            )
+            return
+
+        policy = self._ask_mod_removal_policy(registration)
+        if policy is None:
+            return
+        request = ManagedModRemovalRequest(
+            registration=registration,
+            policy=policy,
+        )
+
+        def remove_after_stop() -> None:
+            self._begin_managed_mod_removal(request)
+
+        try:
+            began = self._run_stop_sequence(
+                stop_game=owns_game,
+                stop_market=owns_market,
+                on_complete=remove_after_stop,
+                allow_force_game_kill=False,
+            )
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Mod Removal Failed",
+                "The server shutdown sequence could not be started. Nothing was removed.\n\n"
+                + (str(exc) or "Unknown shutdown error."),
+            )
+            return
+        if not began:
+            QMessageBox.warning(
+                self,
+                "Mod Removal Not Started",
+                "The launcher could not reserve the server lifecycle. Nothing was removed.",
+            )
+
+    def _mod_removal_conflict_active(self) -> bool:
+        """Return whether another operation could race removal or restore services."""
+
+        return any(
+            (
+                getattr(self, "_character_creation_thread", None) is not None,
+                getattr(self, "_character_creation_request", None) is not None,
+                getattr(self, "_character_deletion_thread", None) is not None,
+                getattr(self, "_character_deletion_request", None) is not None,
+                getattr(self, "_docker_character_request", None) is not None,
+                getattr(self, "_overview_patch_thread", None) is not None,
+                getattr(self, "_client_launch_thread", None) is not None,
+                getattr(self, "_client_launch_request", None) is not None,
+                getattr(self, "_launch_queue", None) is not None,
+                getattr(self, "_docker_preflight_thread", None) is not None,
+                getattr(self, "_docker_tool_request", None) is not None,
+                getattr(self, "_update_install_worker", None) is not None,
+            )
+        )
+
+    def _ask_mod_removal_policy(
+        self,
+        registration: ManagedModRegistration,
+    ) -> ModDataPolicy | None:
+        """Ask one explicit data-policy question with the safe choice selected."""
+
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setWindowTitle(f"Remove {registration.display_name}")
+        dialog.setText(
+            f"Remove {registration.display_name} {registration.package_version} "
+            "from this EveJS server?"
+        )
+        dialog.setInformativeText(
+            "Any Game and Market servers started by this launcher will be stopped "
+            "first and will stay stopped after removal.\n\n"
+            "Choose what happens to this mod's local saved data. Shared EveJS or "
+            "GameStore database records are not deleted."
+        )
+        keep_button = dialog.addButton(
+            "Remove && Keep Data",
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        quarantine_button = None
+        if registration.supports_purge_state:
+            quarantine_button = dialog.addButton(
+                "Remove && Quarantine Local Data",
+                QMessageBox.ButtonRole.DestructiveRole,
+            )
+        cancel_button = dialog.addButton(QMessageBox.StandardButton.Cancel)
+        dialog.setDefaultButton(keep_button)
+        dialog.setEscapeButton(cancel_button)
+        dialog.exec()
+        clicked = dialog.clickedButton()
+        if clicked is keep_button:
+            return ModDataPolicy.KEEP
+        if quarantine_button is not None and clicked is quarantine_button:
+            return ModDataPolicy.QUARANTINE
+        return None
+
+    def _begin_managed_mod_removal(
+        self,
+        request: ManagedModRemovalRequest,
+    ) -> None:
+        """Start the verified mod uninstaller without blocking the Qt event loop."""
+
+        if self._lifecycle_active() or self._mod_removal_conflict_active():
+            QMessageBox.warning(
+                self,
+                "Mod Removal Busy",
+                "Another lifecycle, client-launch, maintenance, or update operation "
+                "took ownership before removal could start. Nothing was removed.",
+            )
+            return
+        reachable_services = []
+        if is_server_running(port=int(Ports.GAME_TCP)):
+            reachable_services.append("Game")
+        if is_server_running(port=int(Ports.MARKET_RPC)):
+            reachable_services.append("Market")
+        if reachable_services:
+            service_label = " and ".join(reachable_services)
+            service_noun = "servers are" if len(reachable_services) > 1 else "server is"
+            QMessageBox.warning(
+                self,
+                "Stop External EveJS Services",
+                f"The {service_label} {service_noun} reachable again. Nothing was removed.\n\n"
+                "Stop the live service from its original console, then retry Remove. "
+                "The launcher will not alter files underneath a running server.",
+            )
+            return
+        factory = getattr(self, "_managed_mod_removal_worker_factory", None)
+        worker = (
+            factory(request)
+            if callable(factory)
+            else ManagedModRemovalWorker(request)
+        )
+        try:
+            self._begin_lifecycle_worker(worker, self._on_managed_mod_removal_completed)
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Mod Removal Failed",
+                "The background removal worker could not start. Nothing was removed.\n\n"
+                + (str(exc) or "Unknown worker error."),
+            )
+
+    @pyqtSlot(object)
+    def _on_managed_mod_removal_completed(self, result: object) -> None:
+        """Publish only the verified terminal result from the removal worker."""
+
+        if not isinstance(result, ManagedModRemovalResult):
+            log.error("Mod removal worker returned an invalid result: %r", result)
+            QMessageBox.critical(
+                self,
+                "Mod Removal Failed",
+                "The removal worker returned an invalid result. Refresh Mods before retrying.",
+            )
+        elif result.success:
+            self._publish_mod_runtime_snapshot(None)
+            self._mods_page.refresh_mods()
+            details = result.message
+            if result.warning:
+                details += "\n\n" + result.warning
+            if result.log_path is not None:
+                details += f"\n\nLog: {result.log_path}"
+            if result.warning:
+                QMessageBox.warning(self, "Mod Removed with Warning", details)
+            else:
+                QMessageBox.information(self, "Mod Removed", details)
+        else:
+            self._mods_page.refresh_mods()
+            details = result.message or "The registered mod uninstaller failed."
+            if result.log_path is not None:
+                details += f"\n\nLog: {result.log_path}"
+            QMessageBox.critical(self, "Mod Removal Failed", details)
+        self._lifecycle_result_received = True
+        self._finish_lifecycle_if_complete()
+
     def _on_mods_apply_restart(self) -> None:
         """Apply the selected backend's truthful mod activation contract."""
         if not self._docker_mode():
-            self._restart_server()
+            if self._lifecycle_active():
+                QMessageBox.information(
+                    self,
+                    "Mod Restart Busy",
+                    "Another service operation is still running. Try again when it finishes.",
+                )
+                return
+            self._restart_server(
+                allow_force_game_kill=False,
+                on_ready=None,
+                continuous_mod_lifecycle=True,
+                # A Mods Apply always uses the mod-aware launch path. The
+                # lock-owned discovery in _start_service_sequence freezes the
+                # exact active loader set, including an empty set.
+                mode_override="modded",
+            )
             return
         if not self._docker_managed():
             self._docker_unavailable(
@@ -2084,31 +3309,372 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
+        evejs_root = str(self._cfg.get("evejs_root", ""))
+        if not evejs_root or not self._acquire_game_mod_lifecycle_lease(
+            evejs_root,
+            error_title="Docker Mods Failed",
+        ):
+            return
+        mods: tuple[Mod, ...] = ()
+        result = None
+        rollback_failure = ""
         try:
+            mods = self._applicable_runtime_mods(
+                evejs_root,
+                backend=DOCKER_BACKEND,
+            )
+            selected = active_loader_names(mods)
+            # Reject a missing/invalid base Compose target before publishing a
+            # transaction marker or changing the launcher-owned override.
+            build_compose_target(self._docker_setup_draft())
+            runtime_identity = f"docker:{secrets.token_hex(32)}"
+            desired_override = build_docker_mod_override(evejs_root, selected)
+            candidate_plan = build_mod_runtime_plan(
+                evejs_root,
+                mods,
+                backend=DOCKER_BACKEND,
+                mode="modded" if selected else "vanilla",
+                runtime_identity=runtime_identity,
+                selected_loader_ids=selected,
+                docker_override_material=desired_override,
+            )
+            validate_mod_runtime_plan(candidate_plan, backend=DOCKER_BACKEND)
             result = apply_docker_mod_override(
-                str(self._cfg.get("evejs_root", "")),
-                self._mods_page.selected_mod_names(),
+                evejs_root,
+                selected,
                 policy=DockerControlPolicy.MANAGED,
             )
-        except (DockerModBridgeError, OSError):
+            plan = build_mod_runtime_plan(
+                evejs_root,
+                mods,
+                backend=DOCKER_BACKEND,
+                mode="modded" if selected else "vanilla",
+                runtime_identity=runtime_identity,
+                selected_loader_ids=result.selected_mods,
+            )
+            validate_mod_runtime_plan(plan, backend=DOCKER_BACKEND)
+            if plan != candidate_plan:
+                raise ModRuntimeStateError(
+                    "Docker mod contracts changed while the override was committed."
+                )
+        except (
+            DockerModBridgeError,
+            ModRuntimeStateError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            if result is not None and result.changed:
+                try:
+                    rollback_docker_mod_override(
+                        result,
+                        policy=DockerControlPolicy.MANAGED,
+                    )
+                except Exception as rollback_exc:
+                    log.exception("Docker mod override rollback failed")
+                    rollback_failure = (
+                        "\n\nThe just-written override could not be rolled back "
+                        "safely. Docker lifecycle operations are blocked until "
+                        "the override is repaired.\n\n"
+                        + (str(rollback_exc) or "Unknown rollback error.")
+                    )
+            self._mark_matching_mod_activations_failed(
+                evejs_root,
+                mods,
+                "docker-override-failed",
+            )
+            self._release_mod_lifecycle_lease()
             QMessageBox.critical(
                 self,
                 "Docker Mods Failed",
-                "The Docker mod preload configuration could not be updated safely.",
+                "The Docker mod preload configuration could not be frozen and "
+                "updated safely. The server container was not recreated.\n\n"
+                + str(exc)
+                + rollback_failure,
             )
             return
 
-        if not result.requires_recreation:
-            QMessageBox.information(
+        self._pending_docker_mod_plan = plan
+        self._pending_docker_mod_apply_result = result
+        self._pending_docker_mods = mods
+        self._pending_docker_mod_lifecycle_result = None
+        if result.requires_recreation:
+            self._restart_docker_monitor_for_compose_change()
+        else:
+            # The override can already contain the desired state because a
+            # previous container recreation failed.  File equality is not
+            # evidence that the running container consumed that override.
+            log.info(
+                "Docker mod override is unchanged; recreating Game to commit runtime state"
+            )
+        lifecycle_error = ""
+        try:
+            lifecycle_started = self._begin_docker_lifecycle(
+                DockerLifecycleAction.RECREATE_GAME,
+                on_complete=self._on_docker_mod_recreate_completed,
+                suppress_failure_dialog=True,
+                docker_mod_apply_result=result,
+            )
+        except Exception as exc:
+            log.exception("Docker mod recreation worker could not be started")
+            lifecycle_started = False
+            lifecycle_error = str(exc) or "Unknown lifecycle startup error."
+        if lifecycle_started:
+            return
+        rollback_succeeded = True
+        if result.changed:
+            try:
+                rollback_docker_mod_override(
+                    result,
+                    policy=DockerControlPolicy.MANAGED,
+                )
+            except Exception as exc:
+                rollback_succeeded = False
+                log.exception("Docker mod override rollback after start failure failed")
+                rollback_failure = (
+                    "\n\nThe just-written override could not be rolled back "
+                    "safely. Docker lifecycle operations are blocked until "
+                    "the override is repaired.\n\n"
+                    + (str(exc) or "Unknown rollback error.")
+                )
+        self._mark_matching_mod_activations_failed(
+            evejs_root,
+            mods,
+            "docker-recreation-not-started",
+        )
+        self._clear_pending_docker_mod_operation()
+        self._release_mod_lifecycle_lease()
+        QMessageBox.critical(
+            self,
+            "Docker Mods Failed",
+            (
+                "Server recreation could not be started. The exact prior "
+                "override was restored."
+                if rollback_succeeded
+                else "Server recreation could not be started, and the new "
+                "override could not be withdrawn safely."
+            )
+            + ("\n\n" + lifecycle_error if lifecycle_error else "")
+            + rollback_failure,
+        )
+
+    def _on_docker_mod_recreate_completed(self, succeeded: bool) -> None:
+        """Commit displayed mod state only after verified container recreation."""
+
+        plan = getattr(self, "_pending_docker_mod_plan", None)
+        apply_result = getattr(self, "_pending_docker_mod_apply_result", None)
+        planned_mods = tuple(getattr(self, "_pending_docker_mods", ()))
+        result = getattr(self, "_pending_docker_mod_lifecycle_result", None)
+        failure = ""
+        if not succeeded:
+            failure = "Docker did not recreate the Game server successfully."
+        elif not isinstance(plan, ModRuntimePlan):
+            failure = "The Docker mod runtime plan was lost before verification."
+        elif (
+            result is None
+            or not getattr(result, "server_node_options_sha256", None)
+            or not getattr(result, "game_runtime_identity", None)
+            or not getattr(result, "target_identity", None)
+            or getattr(result, "records", None) is None
+            or getattr(result.records.get("server"), "short_id", None) is None
+        ):
+            failure = (
+                "The recreated container did not return exact runtime mod evidence."
+            )
+        if not failure:
+            current_runtime = getattr(self, "_runtime_snapshot", None)
+            server_record = result.records.get("server")
+            if (
+                not isinstance(current_runtime, RuntimeSnapshot)
+                or current_runtime.backend is not RuntimeBackend.DOCKER_COMPOSE
+                or current_runtime.game is not ServiceState.ONLINE
+                or current_runtime.target_identity != result.target_identity
+                or current_runtime.game_container != server_record.short_id
+                or current_runtime.game_runtime_identity
+                != result.game_runtime_identity
+            ):
+                failure = (
+                    "The recreated Game container changed before mod runtime "
+                    "verification could be committed."
+                )
+        if not failure:
+            try:
+                current_mods = self._applicable_runtime_mods(
+                    str(plan.root),
+                    backend=DOCKER_BACKEND,
+                )
+                snapshot = build_docker_mod_runtime_snapshot(
+                    plan,
+                    current_mods,
+                    effective_node_options_sha256=(
+                        result.server_node_options_sha256
+                    ),
+                    runtime_identity=result.game_runtime_identity,
+                )
+                write_mod_runtime_snapshot(snapshot)
+                clear_confirmed_mod_activations(
+                    plan.root,
+                    snapshot,
+                    current_mods,
+                )
+            except Exception as exc:
+                log.exception("Docker mod runtime verification failed")
+                failure = str(exc) or "Docker mod runtime verification failed."
+            else:
+                self._attested_docker_target_identity = result.target_identity
+                self._attested_docker_container_id = result.records["server"].short_id
+                self._publish_mod_runtime_snapshot(snapshot)
+                self._clear_pending_docker_mod_operation()
+                self._release_mod_lifecycle_lease()
+                return
+
+        if (
+            not succeeded
+            and isinstance(apply_result, DockerModApplyResult)
+            and apply_result.changed
+        ):
+            try:
+                transaction_pending = has_pending_docker_mod_transaction(apply_result)
+            except Exception as exc:
+                log.exception("Docker mod transaction ownership check failed")
+                failure += (
+                    "\n\nThe durable override transaction could not be "
+                    "validated: "
+                    + (str(exc) or "Unknown transaction error.")
+                )
+                transaction_pending = False
+            if transaction_pending:
+                try:
+                    rollback_docker_mod_override(
+                        apply_result,
+                        policy=DockerControlPolicy.MANAGED,
+                    )
+                except Exception as exc:
+                    log.exception("Failed Docker target construction rollback failed")
+                    failure += (
+                        "\n\nThe unconsumed override could not be rolled back "
+                        "safely: "
+                        + (str(exc) or "Unknown rollback error.")
+                    )
+                else:
+                    root = str(plan.root) if isinstance(plan, ModRuntimePlan) else str(
+                        self._cfg.get("evejs_root", "")
+                    )
+                    self._mark_matching_mod_activations_failed(
+                        root,
+                        tuple(mod for mod in planned_mods if isinstance(mod, Mod)),
+                        "docker-recreation-target-failed",
+                    )
+                    self._publish_mod_runtime_snapshot(None)
+                    self._restart_docker_monitor_for_compose_change()
+                    self._clear_pending_docker_mod_operation()
+                    self._release_mod_lifecycle_lease()
+                    QMessageBox.critical(
+                        self,
+                        "Docker Mods Failed",
+                        failure
+                        + "\n\nNo authorized Docker command consumed the new "
+                        "override. Its exact prior state was restored.",
+                    )
+                    return
+
+        root = str(plan.root) if isinstance(plan, ModRuntimePlan) else str(
+            self._cfg.get("evejs_root", "")
+        )
+        self._mark_matching_mod_activations_failed(
+            root,
+            tuple(mod for mod in planned_mods if isinstance(mod, Mod)),
+            "docker-runtime-verification-failed",
+        )
+        self._publish_mod_runtime_snapshot(None)
+        QMessageBox.critical(
+            self,
+            "Docker Mod Verification Failed",
+            failure
+            + "\n\nThe Game server is being stopped so it is not left "
+            "running with an unknown mod state.",
+        )
+        corrective_apply_result = None
+        if isinstance(apply_result, DockerModApplyResult):
+            try:
+                if has_pending_docker_mod_transaction(apply_result):
+                    corrective_apply_result = apply_result
+            except Exception:
+                log.exception(
+                    "Docker corrective stop could not validate pending mod transaction"
+                )
+        corrective_start_error = ""
+        try:
+            corrective_started = self._begin_docker_lifecycle(
+                DockerLifecycleAction.STOP_GAME,
+                expected_target_identity=getattr(result, "target_identity", None),
+                on_complete=self._on_docker_mod_corrective_stop_completed,
+                suppress_failure_dialog=True,
+                docker_mod_apply_result=corrective_apply_result,
+            )
+        except Exception as exc:
+            log.exception("Could not start Docker mod corrective stop worker")
+            corrective_started = False
+            corrective_start_error = str(exc) or "Unknown worker startup error."
+        if corrective_started:
+            return
+        self._clear_pending_docker_mod_operation()
+        self._release_mod_lifecycle_lease()
+        QMessageBox.critical(
+            self,
+            "Docker Corrective Stop Failed",
+            "The launcher could not start the corrective Game stop. Check "
+            "Docker state before allowing clients to reconnect."
+            + (
+                "\n\nWorker error: " + corrective_start_error
+                if corrective_start_error
+                else ""
+            ),
+        )
+
+    def _on_docker_mod_corrective_stop_completed(self, succeeded: bool) -> None:
+        """Release the mod transaction only after the corrective stop settles."""
+
+        if succeeded:
+            result = getattr(self, "_pending_docker_mod_lifecycle_result", None)
+            result_target = getattr(result, "target_identity", None)
+            quarantined_targets = getattr(
                 self,
-                "Docker Mods",
-                "Docker mod preload configuration is already current.",
+                "_docker_mod_quarantined_targets",
+                {},
             )
-            return
-        self._restart_docker_monitor_for_compose_change()
-        self._begin_docker_lifecycle(DockerLifecycleAction.RECREATE_GAME)
+            if isinstance(result_target, str) and result_target in quarantined_targets:
+                # Advance beyond any observation that began before the stop
+                # result. A requested post-stop sample must prove OFFLINE/FAILED.
+                quarantined_targets[result_target] = time.monotonic_ns()
+                self._docker_observe_requested.emit()
+        self._clear_pending_docker_mod_operation()
+        self._release_mod_lifecycle_lease()
+        if not succeeded:
+            QMessageBox.critical(
+                self,
+                "Docker Corrective Stop Failed",
+                "The Game server's mod state is unverified and Docker did not "
+                "confirm that the container stopped. Check Docker immediately.",
+            )
 
-    def _restart_server(self) -> None:
+    def _clear_pending_docker_mod_operation(self) -> None:
+        self._pending_docker_mod_plan = None
+        self._pending_docker_mod_apply_result = None
+        self._pending_docker_mods = ()
+        self._pending_docker_mod_lifecycle_result = None
+        self._pending_docker_mod_observation_token = None
+        self._pending_docker_mod_observation_floor_ns = None
+        self._pending_docker_mod_observation_completion = None
+
+    def _restart_server(
+        self,
+        *,
+        allow_force_game_kill: bool = True,
+        on_ready: Callable[[], None] | None = None,
+        continuous_mod_lifecycle: bool = False,
+        mode_override: str | None = None,
+    ) -> None:
         """Resolve the launch mode before stopping, then restart the server."""
         if self._docker_mode():
             if self._docker_managed():
@@ -2124,25 +3690,11 @@ class MainWindow(QMainWindow):
         resolved = self._resolve_server_start()
         if resolved is None:
             return
-        mode, _indicator_script = resolved
+        resolved_mode, _indicator_script = resolved
+        mode = mode_override or resolved_mode
 
-        def start_after_stop() -> None:
-            self._start_service_sequence(
-                start_market=False,
-                start_game=True,
-                mode=mode,
-                on_ready=None,
-                error_title="Restart Server Error",
-            )
-
-        if self._server_process_alive():
-            self._run_stop_sequence(
-                stop_game=True,
-                stop_market=False,
-                on_complete=start_after_stop,
-            )
-            return
-        if is_server_running(port=int(Ports.GAME_TCP)):
+        owns_server = self._server_process_alive()
+        if not owns_server and is_server_running(port=int(Ports.GAME_TCP)):
             QMessageBox.information(
                 self,
                 "Game Server",
@@ -2150,6 +3702,44 @@ class MainWindow(QMainWindow):
                 "Stop it from its original console before starting a replacement "+
                 "through this launcher.",
             )
+            return
+
+        if continuous_mod_lifecycle and not self._acquire_game_mod_lifecycle_lease(
+            str(evejs_root),
+            error_title="Restart Server Error",
+        ):
+            return
+        if continuous_mod_lifecycle:
+            self._mod_lifecycle_handoff = "stop_to_start"
+
+        def start_after_stop() -> None:
+            try:
+                started = self._start_service_sequence(
+                    start_market=False,
+                    start_game=True,
+                    mode=mode,
+                    on_ready=on_ready,
+                    error_title="Restart Server Error",
+                )
+            except Exception:
+                self._release_unbound_mod_lifecycle_lease()
+                raise
+            if not started:
+                self._release_unbound_mod_lifecycle_lease()
+
+        if owns_server:
+            try:
+                began = self._run_stop_sequence(
+                    stop_game=True,
+                    stop_market=False,
+                    on_complete=start_after_stop,
+                    allow_force_game_kill=allow_force_game_kill,
+                )
+            except Exception:
+                self._release_unbound_mod_lifecycle_lease()
+                raise
+            if not began:
+                self._release_unbound_mod_lifecycle_lease()
             return
         start_after_stop()
 
@@ -2355,12 +3945,33 @@ class MainWindow(QMainWindow):
             except (TypeError, ValueError):
                 return None, "The configured Native client endpoints are invalid."
 
+        if (
+            self._lifecycle_active()
+            or getattr(self, "_pending_docker_mod_observation_token", None)
+            is not None
+        ):
+            return (
+                None,
+                "The Docker runtime is changing or being verified. Wait for the "
+                "current lifecycle operation to finish, then try again.",
+            )
+
         observed = snapshot or getattr(self, "_runtime_snapshot", None)
         if (
             observed is None
             or observed.backend is not RuntimeBackend.DOCKER_COMPOSE
         ):
             return None, "Docker client endpoints have not been observed yet."
+        if observed.target_identity in getattr(
+            self,
+            "_docker_mod_quarantined_targets",
+            {},
+        ):
+            return (
+                None,
+                "The selected Docker target has an unverified mod runtime. Stop "
+                "Game or reapply Mods before launching a client.",
+            )
         if (
             observed.target_identity is None
             or observed.settings_identity != self._docker_monitor_settings_identity()
@@ -3986,6 +5597,19 @@ class MainWindow(QMainWindow):
         from_queue: bool = False,
     ) -> bool:
         """Start one non-blocking profile preparation and client spawn."""
+        if self._lifecycle_active():
+            log.info(
+                "Ignored client launch while a server/mod lifecycle is active (%s)",
+                username,
+            )
+            if show_errors and not self._close_in_progress:
+                QMessageBox.information(
+                    self,
+                    "Runtime Change In Progress",
+                    "Wait for the active server or mod operation to finish before "
+                    "launching an EVE client.",
+                )
+            return False
         if getattr(self, "_client_launch_thread", None) is not None:
             log.info(
                 "Ignored duplicate client launch while another launch is active (%s)",
@@ -4031,6 +5655,26 @@ class MainWindow(QMainWindow):
         self._client_launch_result_received = False
         self._client_launch_thread_finished = False
         self._client_launch_succeeded = False
+        try:
+            thread.start()
+        except Exception as exc:
+            log.exception("Unable to start client launch thread for %s", username)
+            self._client_launch_thread = None
+            self._client_launch_worker = None
+            self._client_launch_request = None
+            self._client_launch_show_errors = False
+            self._client_launch_from_queue = False
+            self._client_launch_result_received = False
+            self._client_launch_thread_finished = False
+            self._client_launch_succeeded = False
+            thread.deleteLater()
+            if show_errors and not self._close_in_progress:
+                QMessageBox.critical(
+                    self,
+                    "Launch Error",
+                    str(exc).strip() or "The client launch worker could not start.",
+                )
+            return False
         self._set_client_launch_pending(request, True)
         log.info(
             "Queued client launch for %s as %s",
@@ -4042,7 +5686,6 @@ class MainWindow(QMainWindow):
                 VoiceEvent.CHARACTER_LAUNCHING,
                 character_name=request.character_name,
             )
-        thread.start()
         return True
 
     @pyqtSlot(object)
@@ -4104,7 +5747,47 @@ class MainWindow(QMainWindow):
         if thread is not self._client_launch_thread:
             return
         self._client_launch_thread_finished = True
+        if not self._client_launch_result_received:
+            request = self._client_launch_request
+            if request is not None:
+                # A terminal result emitted immediately before thread shutdown
+                # may still be queued. Audit on the next GUI turn so normal
+                # success/failure delivery wins without stranding true orphans.
+                QTimer.singleShot(
+                    0,
+                    lambda expected_thread=thread, expected_request=request: (
+                        self._recover_orphaned_client_launch(
+                            expected_thread,
+                            expected_request,
+                        )
+                    ),
+                )
+            return
         self._finish_client_launch_if_complete()
+
+    def _recover_orphaned_client_launch(
+        self,
+        expected_thread: QThread,
+        expected_request: ClientLaunchRequest,
+    ) -> None:
+        """Fail one exact request whose worker stopped without a terminal result."""
+        if (
+            self._client_launch_thread is not expected_thread
+            or self._client_launch_request is not expected_request
+            or self._client_launch_result_received
+            or not self._client_launch_thread_finished
+        ):
+            return
+        self._on_client_launch_failed(
+            ClientLaunchFailure(
+                request=expected_request,
+                error_type="WorkerTerminated",
+                message=(
+                    "The client launch worker stopped before reporting whether "
+                    "EVE started. Check for an open client before retrying."
+                ),
+            )
+        )
 
     def _finish_client_launch_if_complete(self) -> None:
         """Release worker ownership after both result delivery and teardown."""
@@ -4140,6 +5823,14 @@ class MainWindow(QMainWindow):
         character_name: str,
         character_id: int | None = None,
     ) -> None:
+        if self._lifecycle_active():
+            QMessageBox.information(
+                self,
+                "Runtime Change In Progress",
+                "Wait for the active server or mod operation to finish before "
+                "launching an EVE client.",
+            )
+            return
         if username in getattr(self, "_pending_client_launches", set()):
             log.info("Ignored duplicate client launch click for %s", username)
             return
@@ -4337,6 +6028,14 @@ class MainWindow(QMainWindow):
 
     def _launch_all(self) -> None:
         """Queue the selected group (or All Visible) serially."""
+        if self._lifecycle_active():
+            QMessageBox.information(
+                self,
+                "Runtime Change In Progress",
+                "Wait for the active server or mod operation to finish before "
+                "launching EVE clients.",
+            )
+            return
         if (
             getattr(self, "_launch_queue", None) is not None
             or getattr(self, "_client_launch_thread", None) is not None
@@ -5247,6 +6946,9 @@ class MainWindow(QMainWindow):
 
     def _prune_and_update(self) -> None:
         if self._tracker.prune_dead() > 0:
+            # Cards and group eligibility use cached account data, so repair
+            # their process state synchronously before the slower data reload.
+            self._refresh_character_views()
             self._refresh_characters()
             self._update_status_bar()
 
@@ -5296,6 +6998,31 @@ class MainWindow(QMainWindow):
         self, observation: DockerObservation, generation: int | None = None
     ) -> None:
         """Adapt read-only container state into the existing snapshot fan-out."""
+        pending_observation_token = getattr(
+            self,
+            "_pending_docker_mod_observation_token",
+            None,
+        )
+        pending_observation_floor_ns = getattr(
+            self,
+            "_pending_docker_mod_observation_floor_ns",
+            None,
+        )
+        observation_sample_started_ns = getattr(
+            observation,
+            "sample_started_monotonic_ns",
+            None,
+        )
+        if pending_observation_token is not None and (
+            type(pending_observation_floor_ns) is not int
+            or type(observation_sample_started_ns) is not int
+            or observation_sample_started_ns <= pending_observation_floor_ns
+        ):
+            # ``observation_sampled`` and ``observation_changed`` are separate
+            # queued signals. Drop the latter too when its poll began before
+            # the recreate result was accepted, otherwise stale presentation
+            # state can cross the same GUI boundary we just rejected.
+            return
         current_generation = getattr(self, "_monitor_generation", 0)
         if (
             self._close_in_progress
@@ -5306,6 +7033,29 @@ class MainWindow(QMainWindow):
             != self._docker_monitor_settings_identity()
         ):
             return
+        quarantined_targets = getattr(
+            self,
+            "_docker_mod_quarantined_targets",
+            {},
+        )
+        quarantine_floor_ns = quarantined_targets.get(observation.target_identity)
+        if quarantine_floor_ns is not None:
+            sample_started_ns = getattr(
+                observation,
+                "sample_started_monotonic_ns",
+                None,
+            )
+            safely_stopped = bool(
+                observation.game in {ServiceState.OFFLINE, ServiceState.FAILED}
+                and observation.game_runtime_identity is None
+            )
+            if (
+                type(sample_started_ns) is not int
+                or sample_started_ns <= quarantine_floor_ns
+                or not safely_stopped
+            ):
+                return
+            quarantined_targets.pop(observation.target_identity, None)
         previous_snapshot = getattr(self, "_runtime_snapshot", None)
         target_changed = (
             previous_snapshot is not None
@@ -5339,6 +7089,31 @@ class MainWindow(QMainWindow):
                 current_image,
             )
         )
+        game_runtime_lost = (
+            previous_snapshot is not None
+            and previous_snapshot.backend is RuntimeBackend.DOCKER_COMPOSE
+            and previous_snapshot.game is ServiceState.ONLINE
+            and observation.game is not ServiceState.ONLINE
+        )
+        current_mod_snapshot = getattr(
+            self,
+            "_current_mod_runtime_snapshot",
+            None,
+        )
+        docker_identity_lost = bool(
+            isinstance(current_mod_snapshot, ModRuntimeSnapshot)
+            and current_mod_snapshot.backend == DOCKER_BACKEND
+            and (
+                observation.target_identity
+                != getattr(self, "_attested_docker_target_identity", None)
+                or observation.game_identity
+                != getattr(self, "_attested_docker_container_id", None)
+                or observation.game_runtime_identity
+                != current_mod_snapshot.runtime_identity
+            )
+        )
+        if target_changed or game_runtime_lost or docker_identity_lost:
+            self._publish_mod_runtime_snapshot(None)
         if target_changed:
             self._docker_tool_token = None
             if getattr(self, "_docker_character_token", None) is not None:
@@ -5373,6 +7148,7 @@ class MainWindow(QMainWindow):
             target_identity=observation.target_identity,
             settings_identity=observation.settings_identity,
             monitor_generation=observation.monitor_generation,
+            game_runtime_identity=observation.game_runtime_identity,
         )
         self._runtime_snapshot = snapshot
         if portrait_context_changed:
@@ -5666,6 +7442,7 @@ class MainWindow(QMainWindow):
             or (generation is not None and generation != getattr(self, "_monitor_generation", 0))
         ):
             return
+        prior_game_reachable = self._service_reachability[0]
         self._service_reachability = (
             probe.game_reachable,
             probe.market_reachable,
@@ -5676,12 +7453,54 @@ class MainWindow(QMainWindow):
         if probe.market_reachable:
             self._market_intent = None
             self._market_error = None
+        if (
+            prior_game_reachable
+            and not probe.game_reachable
+        ) or self._native_mod_runtime_identity_lost():
+            self._publish_mod_runtime_snapshot(None)
         snapshot = self._build_runtime_snapshot(
             game_reachable=probe.game_reachable,
             market_reachable=probe.market_reachable,
         )
         self._runtime_snapshot = snapshot
         self._apply_runtime_snapshot(snapshot)
+
+    def _native_mod_runtime_identity_lost(self) -> bool:
+        """Return whether Native evidence no longer names our live process."""
+
+        current_mod_snapshot = getattr(
+            self,
+            "_current_mod_runtime_snapshot",
+            None,
+        )
+        return bool(
+            isinstance(current_mod_snapshot, ModRuntimeSnapshot)
+            and current_mod_snapshot.backend == NATIVE_BACKEND
+            and (
+                not self._server_process_alive()
+                or current_mod_snapshot.pid
+                != getattr(getattr(self, "_server_proc", None), "pid", None)
+            )
+        )
+
+    def _on_native_service_observation(
+        self,
+        _probe: ServiceProbe,
+        generation: int | None = None,
+    ) -> None:
+        """Invalidate stale process-bound evidence on every Native probe."""
+
+        if (
+            self._close_in_progress
+            or self._docker_mode()
+            or (
+                generation is not None
+                and generation != getattr(self, "_monitor_generation", 0)
+            )
+        ):
+            return
+        if self._native_mod_runtime_identity_lost():
+            self._publish_mod_runtime_snapshot(None)
 
     def _schedule_service_monitor_start(self) -> None:
         """Yield one GUI event turn before creating the monitor worker."""
@@ -5730,6 +7549,12 @@ class MainWindow(QMainWindow):
         monitor.moveToThread(thread)
         thread.started.connect(monitor.start)
         if isinstance(monitor, DockerMonitor):
+            monitor.observation_sampled.connect(
+                lambda observation, generation=generation: self._on_docker_mod_runtime_observation_sample(
+                    observation,
+                    generation,
+                )
+            )
             monitor.observation_changed.connect(
                 lambda observation, generation=generation: self._on_docker_observation(
                     observation, generation
@@ -5737,6 +7562,12 @@ class MainWindow(QMainWindow):
             )
             self._docker_observe_requested.connect(monitor.observe_now)
         else:
+            monitor.probe_observed.connect(
+                lambda probe, generation=generation: self._on_native_service_observation(
+                    probe,
+                    generation,
+                )
+            )
             monitor.probe_changed.connect(
                 lambda probe, generation=generation: self._on_service_probe(probe, generation)
             )
@@ -5760,8 +7591,15 @@ class MainWindow(QMainWindow):
         thread = self._service_thread
         if finished_thread is not None and finished_thread is not thread:
             return
+        current_monitor_finished = (
+            getattr(self, "_service_monitor", None) is not None
+        )
         self._service_monitor = None
         self._service_thread = None
+        if current_monitor_finished:
+            # Without the Native PID or Docker container inspection heartbeat,
+            # the last verified runtime is no longer current evidence.
+            self._publish_mod_runtime_snapshot(None)
         if thread is not None:
             thread.deleteLater()
         if self._service_monitor_restart_pending:
@@ -6344,13 +8182,38 @@ class MainWindow(QMainWindow):
         """Refresh in-memory config and character grid after settings save."""
         previous_root = str(self._cfg.get("evejs_root", ""))
         previous_docker_target = self._docker_target_identity()
+        proposed_cfg = dict(self._cfg)
+        proposed_cfg.update(cfg)
+        proposed_docker_target = (
+            proposed_cfg.get("runtime_backend"),
+            proposed_cfg.get("docker_control_policy"),
+            proposed_cfg.get("evejs_root"),
+            proposed_cfg.get("docker_compose_file"),
+            proposed_cfg.get("docker_project_name"),
+        )
+        if self._lifecycle_active() and proposed_docker_target != previous_docker_target:
+            QMessageBox.warning(
+                self,
+                "Settings Deferred",
+                "Runtime target settings cannot be applied while a server lifecycle "
+                "is in progress. Try Save again when it finishes.",
+            )
+            return
         previous_monitor = (
             self._cfg.get("runtime_backend"), self._cfg.get("docker_compose_file"),
             self._cfg.get("docker_project_name"), previous_root,
         )
         self._cfg.update(cfg)
-        if (
+        docker_target_changed = (
             self._docker_target_identity() != previous_docker_target
+        )
+        if docker_target_changed:
+            # Runtime evidence belongs to one exact backend/root/Compose target.
+            # Clear it synchronously; the replacement monitor may never produce
+            # an observation when Docker or the new target is unavailable.
+            self._publish_mod_runtime_snapshot(None)
+        if (
+            docker_target_changed
             and getattr(self, "_docker_character_token", None) is not None
         ):
             self._abort_docker_character_creation(
@@ -6574,6 +8437,7 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
             self._shutdown_audio_for_close()
+            self._release_mod_lifecycle_lease()
             event.accept()
             return
         if getattr(self, "_close_after_lifecycle", False):
@@ -6588,6 +8452,7 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
             self._shutdown_audio_for_close()
+            self._release_mod_lifecycle_lease()
             event.accept()
             return
 
@@ -6623,6 +8488,7 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         self._shutdown_audio_for_close()
+        self._release_mod_lifecycle_lease()
         event.accept()
 
     def _shutdown_audio_for_close(self) -> None:

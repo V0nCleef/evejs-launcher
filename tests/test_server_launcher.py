@@ -1,6 +1,7 @@
 """Tests for explicit game-server command construction."""
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError, replace
 import io
 import json
 import sqlite3
@@ -10,11 +11,38 @@ from pathlib import Path
 import pytest
 
 from src.core import server_launcher
+from src.core.mod_manager import active_loader_mods, scan_mods
+from src.core.mod_runtime_state import (
+    NATIVE_BACKEND,
+    ModRuntimePlan,
+    build_mod_runtime_plan,
+)
 from src.core.server_launcher import (
     build_game_server_command,
     ensure_native_game_dependencies,
     native_market_database_status,
 )
+
+
+def _native_runtime_plan(
+    root: Path,
+    *,
+    mode: str = "modded",
+) -> ModRuntimePlan:
+    mods = tuple(scan_mods(root))
+    selected = (
+        tuple(mod.id for mod in active_loader_mods(mods))
+        if mode == "modded"
+        else ()
+    )
+    return build_mod_runtime_plan(
+        root,
+        mods,
+        backend=NATIVE_BACKEND,
+        mode=mode,
+        runtime_identity="test-native-runtime-4321",
+        selected_loader_ids=selected,
+    )
 
 
 def _write_market_config(root: Path, database_path: str) -> Path:
@@ -49,6 +77,32 @@ def test_vanilla_command_has_no_mod_preloads(tmp_path: Path) -> None:
     assert not any(argument.casefold().endswith(".bat") for argument in command)
 
 
+def test_console_pipe_preserves_exact_child_stdout_bytes(tmp_path: Path) -> None:
+    output = b"noise-\xff\nEVEJS_MOD_STATUS {\"id\":\"fixture\"}\n"
+    destination = tmp_path / "console.log"
+
+    server_launcher._pipe_to_file(io.BytesIO(output), destination, "w")
+
+    assert destination.read_bytes() == output
+
+
+def test_console_pipe_mirrors_exact_bytes_to_both_destinations(
+    tmp_path: Path,
+) -> None:
+    output = b"noise-\xff\r\nEVEJS_MOD_STATUS {\"id\":\"fixture\"}\npartial"
+    console = tmp_path / "console.log"
+    attestation = tmp_path / "attestation.log"
+
+    server_launcher._pipe_to_files(
+        io.BytesIO(output),
+        (console, attestation),
+        "w",
+    )
+
+    assert console.read_bytes() == output
+    assert attestation.read_bytes() == output
+
+
 def test_modded_command_includes_only_active_loader_preloads(tmp_path: Path) -> None:
     active_b = tmp_path / "mods" / "b-mod" / "loader.js"
     active_a = tmp_path / "mods" / "a-mod" / "loader.js"
@@ -67,6 +121,119 @@ def test_modded_command_includes_only_active_loader_preloads(tmp_path: Path) -> 
     assert command.index(str(active_a)) < command.index(str(active_b))
     assert str(disabled) not in command
     assert not any(argument.casefold().endswith(".bat") for argument in command)
+
+
+def test_modded_command_excludes_conflicted_invalid_loader(tmp_path: Path) -> None:
+    active = tmp_path / "mods" / "conflicted" / "loader.js"
+    disabled = tmp_path / "mods" / "conflicted" / "loader.js.off"
+    active.parent.mkdir(parents=True)
+    active.write_text("module.exports = {};\n", encoding="utf-8")
+    disabled.write_text("module.exports = {};\n", encoding="utf-8")
+
+    command = build_game_server_command(tmp_path, "modded")
+
+    assert str(active) not in command
+    assert str(disabled) not in command
+    assert "--require" not in command
+
+
+def test_runtime_plan_is_the_exact_node_require_list(tmp_path: Path) -> None:
+    selected = tmp_path / "mods" / "Zeta Mod" / "loader.js"
+    other = tmp_path / "mods" / "Other Mod" / "loader.js.disabled"
+    selected.parent.mkdir(parents=True)
+    other.parent.mkdir(parents=True)
+    selected.write_text("module.exports = {};\n", encoding="utf-8")
+    other.write_text("module.exports = {};\n", encoding="utf-8")
+    plan = _native_runtime_plan(tmp_path)
+
+    command = build_game_server_command(
+        tmp_path,
+        "modded",
+        mod_runtime_plan=plan,
+    )
+
+    assert command.count("--require") == 1
+    assert str(selected.resolve()) in command
+    assert str(other.resolve()) not in command
+
+
+def test_runtime_plan_rejects_root_mode_and_backend_mismatch(
+    tmp_path: Path,
+) -> None:
+    planned_root = tmp_path / "planned"
+    other_root = tmp_path / "other"
+    planned_root.mkdir()
+    other_root.mkdir()
+    plan = _native_runtime_plan(planned_root)
+
+    with pytest.raises(ValueError, match="different EveJS root"):
+        build_game_server_command(
+            other_root,
+            "modded",
+            mod_runtime_plan=plan,
+        )
+    with pytest.raises(ValueError, match="mode"):
+        build_game_server_command(
+            planned_root,
+            "vanilla",
+            mod_runtime_plan=plan,
+        )
+    with pytest.raises(ValueError, match="backend"):
+        build_game_server_command(
+            planned_root,
+            "modded",
+            mod_runtime_plan=replace(plan, backend="docker"),
+        )
+
+
+def test_empty_runtime_plan_stays_frozen_instead_of_rescanning(
+    tmp_path: Path,
+) -> None:
+    plan = _native_runtime_plan(tmp_path)
+    late_loader = tmp_path / "mods" / "late-loader" / "loader.js"
+    late_loader.parent.mkdir(parents=True)
+    late_loader.write_text("module.exports = {};\n", encoding="utf-8")
+
+    planned_command = build_game_server_command(
+        tmp_path,
+        "modded",
+        mod_runtime_plan=plan,
+    )
+    legacy_command = build_game_server_command(tmp_path, "modded")
+
+    assert "--require" not in planned_command
+    assert str(late_loader) in legacy_command
+
+
+def test_raw_native_status_log_is_stable_hashed_and_root_specific(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logs_dir = tmp_path / "launcher-logs"
+    first_root = tmp_path / "private install alpha"
+    second_root = tmp_path / "private install beta"
+    first_root.mkdir()
+    second_root.mkdir()
+    monkeypatch.setattr(server_launcher, "_LOGS_DIR", logs_dir)
+
+    first = server_launcher.get_native_mod_status_log(first_root)
+    repeated = server_launcher.get_native_mod_status_log(first_root)
+    second = server_launcher.get_native_mod_status_log(second_root)
+
+    assert first == repeated
+    assert first != second
+    assert first.parent == logs_dir / "native_mod_status"
+    assert len(first.stem) == 64
+    assert all(character in "0123456789abcdef" for character in first.stem)
+    assert str(first_root.resolve()) not in str(first)
+    assert first_root.name not in first.name
+
+
+def test_removed_raw_mod_preloads_keyword_is_not_a_launch_escape_hatch(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(TypeError, match="mod_preloads"):
+        build_game_server_command(tmp_path, "modded", mod_preloads=())
 
 
 def test_unknown_server_mode_is_rejected(tmp_path: Path) -> None:
@@ -722,6 +889,7 @@ def test_start_game_server_honors_explicit_mode(
     monkeypatch.setattr(server_launcher.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(server_launcher.threading, "Thread", FakeThread)
     monkeypatch.setattr(server_launcher, "SERVER_CONSOLE_LOG", tmp_path / "server.log")
+    monkeypatch.setattr(server_launcher, "_LOGS_DIR", tmp_path / "launcher-logs")
     monkeypatch.setattr(
         server_launcher,
         "get_graceful_server_process_flags",
@@ -741,15 +909,104 @@ def test_start_game_server_honors_explicit_mode(
         local_game_data.resolve()
     )
     assert (server_dir / "logs" / "node-reports").is_dir()
+    status_log = server_launcher.get_native_mod_status_log(tmp_path)
     assert observed["thread_kwargs"]["args"] == (
         process.stdout,
-        tmp_path / "server.log",
+        (tmp_path / "server.log", status_log),
         "a",
     )
+    assert status_log.read_bytes() == b""
     assert "Dependency bootstrap preserved" in (tmp_path / "server.log").read_text(
         encoding="utf-8"
     )
     assert observed["thread_started"] is True
+    assert not hasattr(process, "mod_runtime_receipt")
+
+
+def test_plan_bound_start_truncates_raw_attestation_after_dependency_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    (server_dir / "index.js").write_text("", encoding="utf-8")
+    console_log = tmp_path / "server.log"
+    monkeypatch.setattr(server_launcher, "SERVER_CONSOLE_LOG", console_log)
+    monkeypatch.setattr(server_launcher, "_LOGS_DIR", tmp_path / "launcher-logs")
+    status_log = server_launcher.get_native_mod_status_log(tmp_path)
+    child_output = (
+        b"native boot-\xff\r\n"
+        b'EVEJS_MOD_STATUS {"id":"fixture","pid":2468,"state":"running"}\n'
+    )
+    plan = _native_runtime_plan(tmp_path)
+    observed: dict[str, object] = {}
+
+    def fake_dependencies(_server_dir: Path) -> None:
+        server_launcher._append_game_console("dependency output must stay human-only")
+        status_log.parent.mkdir(parents=True, exist_ok=True)
+        status_log.write_bytes(b"stale status from an earlier start\n")
+
+    class FakeProcess:
+        pid = 2468
+        stdout = io.BytesIO(child_output)
+
+    def fake_popen(command: list[str], **kwargs: object) -> FakeProcess:
+        observed["command"] = command
+        observed["popen_kwargs"] = kwargs
+        observed["status_at_spawn"] = status_log.read_bytes()
+        return FakeProcess()
+
+    class ImmediateThread:
+        def __init__(self, *, target, args, daemon: bool) -> None:
+            observed["thread_target"] = target
+            observed["thread_args"] = args
+            self._target = target
+            self._args = args
+            assert daemon is True
+
+        def start(self) -> None:
+            self._target(*self._args)
+
+    monkeypatch.setattr(
+        server_launcher,
+        "ensure_native_game_dependencies",
+        fake_dependencies,
+    )
+    monkeypatch.setattr(server_launcher.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(server_launcher.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(
+        server_launcher,
+        "get_graceful_server_process_flags",
+        lambda: {},
+    )
+
+    process = server_launcher.start_game_server(
+        str(tmp_path),
+        mode="modded",
+        mod_runtime_plan=plan,
+    )
+
+    assert observed["status_at_spawn"] == b""
+    assert observed["thread_target"] is server_launcher._pipe_to_files
+    assert observed["thread_args"] == (
+        process.stdout,
+        (console_log, status_log),
+        "a",
+    )
+    assert status_log.read_bytes() == child_output
+    assert console_log.read_bytes().endswith(child_output)
+    assert b"dependency output must stay human-only" in console_log.read_bytes()
+    assert b"dependency output must stay human-only" not in status_log.read_bytes()
+    assert b"stale status from an earlier start" not in status_log.read_bytes()
+    assert observed["command"][-1] == "."
+    assert "--require" not in observed["command"]
+    receipt = process.mod_runtime_receipt
+    assert isinstance(receipt, server_launcher.NativeModRuntimeLaunchReceipt)
+    assert receipt.plan_sha256 == plan.plan_sha256
+    assert receipt.runtime_identity == plan.runtime_identity
+    assert receipt.status_log_path == status_log
+    with pytest.raises(FrozenInstanceError):
+        receipt.plan_sha256 = "0" * 64
 
 
 def test_start_market_server_appends_attempt_pid_and_child_output(

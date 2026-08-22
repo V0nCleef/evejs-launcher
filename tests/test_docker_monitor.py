@@ -20,6 +20,8 @@ class FakeInspector:
         self.report, self.records = report, records or {}
         self.preflight_calls = 0
         self.status_calls = 0
+        self.runtime_identity: str | None = None
+        self.runtime_identity_calls = 0
 
     def preflight(self, target):
         self.preflight_calls += 1
@@ -28,6 +30,10 @@ class FakeInspector:
     def status(self, target):
         self.status_calls += 1
         return self.records
+
+    def container_runtime_identity(self, target, record):
+        self.runtime_identity_calls += 1
+        return self.runtime_identity
 
 
 def _records(state: ServiceState = ServiceState.ONLINE) -> dict[str, ContainerRecord]:
@@ -263,6 +269,37 @@ def test_endpoint_only_change_is_not_deduplicated() -> None:
     assert len(emitted) == 2
 
 
+def test_every_poll_emits_its_sample_even_when_presentation_is_unchanged() -> None:
+    monitor = DockerMonitor(lambda: object(), inspector_factory=lambda: object())
+    sampled: list[DockerObservation] = []
+    changed: list[DockerObservation] = []
+    events: list[tuple[str, int]] = []
+
+    def record_sample(observation: DockerObservation) -> None:
+        sampled.append(observation)
+        events.append(("sampled", observation.sample_started_monotonic_ns))
+
+    def record_change(observation: DockerObservation) -> None:
+        changed.append(observation)
+        events.append(("changed", observation.sample_started_monotonic_ns))
+
+    monitor.observation_sampled.connect(record_sample)
+    monitor.observation_changed.connect(record_change)
+    first = DockerObservation(
+        ServiceState.ONLINE,
+        ServiceState.ONLINE,
+        sample_started_monotonic_ns=101,
+    )
+    second = replace(first, sample_started_monotonic_ns=202)
+
+    monitor._emit(first)
+    monitor._emit(second)
+
+    assert [item.sample_started_monotonic_ns for item in sampled] == [101, 202]
+    assert changed == [first]
+    assert events == [("changed", 101), ("sampled", 101), ("sampled", 202)]
+
+
 def test_observation_carries_private_safe_target_and_monitor_identity(
     tmp_path: Path,
 ) -> None:
@@ -380,6 +417,32 @@ def test_observation_equality_includes_target_settings_and_generation_identity()
         base,
         monitor_generation=8,
     ).equality_key()
+    assert base.equality_key() != replace(
+        base,
+        game_runtime_identity="runtime-b",
+    ).equality_key()
+
+
+def test_same_container_id_with_new_start_epoch_emits_changed_runtime_identity() -> None:
+    inspector = FakeInspector(
+        PreflightReport(True, (), records=_records()),
+        _records(),
+    )
+    inspector.runtime_identity = "runtime-a"
+    monitor = DockerMonitor(lambda: object(), inspector_factory=lambda: inspector)
+    emitted: list[DockerObservation] = []
+    monitor.observation_changed.connect(emitted.append)
+
+    monitor.observe_now()
+    inspector.runtime_identity = "runtime-b"
+    monitor.observe_now()
+
+    assert [item.game_identity for item in emitted] == ["game-id", "game-id"]
+    assert [item.game_runtime_identity for item in emitted] == [
+        "runtime-a",
+        "runtime-b",
+    ]
+    assert inspector.runtime_identity_calls == 2
 
 
 def test_failed_preflight_observation_has_no_target_or_endpoint_context(

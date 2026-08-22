@@ -92,6 +92,7 @@ def bare_window(qapp: QApplication) -> MainWindow:
     window._home_page = FakeHomePage()
     window._tools_page = FakeToolsPage()
     yield window
+    window._release_mod_lifecycle_lease()
     window.deleteLater()
 
 
@@ -133,19 +134,53 @@ def test_main_window_connects_mods_apply_to_central_restart(
     cfg = _minimal_window_config()
     monkeypatch.setattr(config, "load", lambda: deepcopy(cfg))
     monkeypatch.setattr(config, "save", lambda _cfg: None)
-    restarted: list[MainWindow] = []
+    restarted: list[tuple[MainWindow, dict[str, object]]] = []
 
-    def record_restart(window: MainWindow) -> None:
-        restarted.append(window)
+    def record_restart(window: MainWindow, **kwargs: object) -> None:
+        restarted.append((window, kwargs))
 
     monkeypatch.setattr(MainWindow, "_restart_server", record_restart)
 
     window = MainWindow()
     try:
         window._mods_page.apply_restart_clicked.emit()
-        assert restarted == [window]
+        assert len(restarted) == 1
+        assert restarted[0][0] is window
+        assert restarted[0][1]["allow_force_game_kill"] is False
+        assert restarted[0][1]["on_ready"] is None
+        assert restarted[0][1]["continuous_mod_lifecycle"] is True
+        assert restarted[0][1]["mode_override"] == "modded"
     finally:
         window.deleteLater()
+
+
+@pytest.mark.parametrize(
+    "loader_names",
+    [("Fixture Loader",), ()],
+)
+def test_native_mod_apply_always_uses_lock_owned_modded_discovery(
+    bare_window: MainWindow,
+    loader_names: tuple[str, ...],
+) -> None:
+    class FakeModsPage:
+        @staticmethod
+        def selected_loader_names() -> tuple[str, ...]:
+            return loader_names
+
+        @staticmethod
+        def refresh_mods() -> None:
+            return None
+
+    restarts: list[dict[str, object]] = []
+    bare_window._mods_page = FakeModsPage()
+    bare_window._lifecycle_thread = None
+    bare_window._restart_server = lambda **kwargs: restarts.append(kwargs)
+
+    bare_window._on_mods_apply_restart()
+
+    assert len(restarts) == 1
+    assert restarts[0]["mode_override"] == "modded"
+    assert restarts[0]["on_ready"] is None
 
 
 def test_manual_start_delegates_resolved_mode_to_background_sequence(
@@ -209,6 +244,472 @@ def test_lifecycle_remains_active_until_gui_thread_teardown(
     bare_window._lifecycle_thread = FinishedThread()
 
     assert bare_window._lifecycle_active() is True
+
+
+def test_native_game_start_holds_mod_lease_through_result_handling(
+    bare_window: MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    class FakeLease:
+        root = tmp_path.resolve()
+        released = False
+
+        def release(self) -> None:
+            self.released = True
+            events.append("release")
+
+    class FinishedThread:
+        @staticmethod
+        def deleteLater() -> None:
+            events.append("thread-delete")
+
+    lease = FakeLease()
+    bare_window._cfg["evejs_root"] = str(tmp_path)
+    bare_window._lifecycle_thread = None
+    bare_window._server_intent = None
+    bare_window._server_error = None
+    bare_window._service_reachability = (False, False)
+    bare_window._publish_cached_runtime = lambda: events.append("result-handled")
+    bare_window._snapshot_matches_native_plan = lambda *_args: True
+
+    def acquire(_root: str) -> FakeLease:
+        events.append("acquire")
+        return lease
+
+    def begin(_worker: object, _handler: object) -> None:
+        events.append("begin")
+        bare_window._lifecycle_thread = FinishedThread()
+        bare_window._lifecycle_result_received = False
+        bare_window._lifecycle_thread_finished = False
+
+    monkeypatch.setattr(app_module, "acquire_mod_lifecycle_lease", acquire)
+    bare_window._begin_lifecycle_worker = begin
+
+    assert bare_window._start_service_sequence(
+        start_market=False,
+        start_game=True,
+        mode="vanilla",
+        on_ready=lambda: events.append("ready"),
+        error_title="Game Server Error",
+    )
+    assert events[:2] == ["acquire", "begin"]
+    assert lease.released is False
+
+    bare_window._on_service_start_completed(
+        ServiceStartResult(game_ready=True)
+    )
+
+    assert "result-handled" in events
+    assert lease.released is False
+
+    bare_window._on_lifecycle_thread_finished()
+
+    assert lease.released is True
+    assert events.index("release") < events.index("ready")
+
+
+def test_native_game_worker_is_bound_to_the_lock_owned_runtime_plan(
+    bare_window: MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loader = tmp_path / "mods" / "Fixture Mod" / "loader.js"
+    loader.parent.mkdir(parents=True)
+    loader.write_text("module.exports = {};\n", encoding="utf-8")
+    bare_window._cfg["evejs_root"] = str(tmp_path)
+    bare_window._lifecycle_thread = None
+    bare_window._publish_cached_runtime = lambda: None
+    captured: list[object] = []
+    launches: list[tuple[str, str, object]] = []
+    validations: list[tuple[object, object]] = []
+    launched_process = object()
+    verified_snapshot = object()
+
+    def begin(worker: object, _handler: object) -> None:
+        captured.append(worker)
+        bare_window._lifecycle_thread = object()
+
+    def launch(root: str, mode: str, *, mod_runtime_plan: object) -> object:
+        launches.append((root, mode, mod_runtime_plan))
+        return launched_process
+
+    def verify(plan: object, process: object) -> object:
+        validations.append((plan, process))
+        return verified_snapshot
+
+    bare_window._begin_lifecycle_worker = begin
+    bare_window._verify_native_mod_runtime = verify
+    monkeypatch.setattr(app_module, "start_game_server", launch)
+
+    assert bare_window._start_service_sequence(
+        start_market=False,
+        start_game=True,
+        mode="modded",
+        on_ready=None,
+        error_title="Game Server Error",
+    )
+
+    assert len(captured) == 1
+    worker = captured[0]
+    plan = bare_window._native_mod_runtime_plan
+    assert plan is not None
+    assert plan.selected_loader_ids == ("Fixture Mod",)
+    assert bare_window._mod_lifecycle_lease is not None
+    assert worker._start_game_fn(str(tmp_path), mode="modded") is launched_process
+    assert launches == [(str(tmp_path), "modded", plan)]
+    assert worker._game_runtime_validator(launched_process) is verified_snapshot
+    assert validations == [(plan, launched_process)]
+
+    bare_window._lifecycle_thread = None
+
+
+def test_invalid_mod_manifest_blocks_native_process_start(
+    bare_window: MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = tmp_path / "server" / "mods" / "broken" / "evejs-launcher.mod.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("{not-json}\n", encoding="utf-8")
+    bare_window._cfg["evejs_root"] = str(tmp_path)
+    bare_window._lifecycle_thread = None
+    failures: list[str] = []
+    bare_window._begin_lifecycle_worker = lambda *_args: pytest.fail(
+        "a Game worker was created from invalid mod metadata"
+    )
+    monkeypatch.setattr(
+        app_module.QMessageBox,
+        "critical",
+        lambda _parent, _title, message: failures.append(message),
+    )
+
+    assert not bare_window._start_service_sequence(
+        start_market=False,
+        start_game=True,
+        mode="modded",
+        on_ready=None,
+        error_title="Game Server Error",
+    )
+
+    assert bare_window._mod_lifecycle_lease is None
+    assert bare_window._native_mod_runtime_plan is None
+    assert failures and "No Game process was started" in failures[0]
+
+
+def test_mod_restart_keeps_one_lease_across_stop_then_start(
+    bare_window: MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    stop_callbacks: list[object] = []
+
+    class FakeLease:
+        root = tmp_path.resolve()
+        released = False
+
+        def release(self) -> None:
+            self.released = True
+            events.append("release")
+
+    class LiveProcess:
+        pid = 8765
+
+        @staticmethod
+        def poll() -> None:
+            return None
+
+    lease = FakeLease()
+    bare_window._cfg["evejs_root"] = str(tmp_path)
+    bare_window._server_proc = LiveProcess()
+    bare_window._lifecycle_thread = None
+    bare_window._server_intent = None
+    bare_window._server_error = None
+    bare_window._publish_cached_runtime = lambda: None
+    bare_window._resolve_server_start = lambda: ("vanilla", None)
+
+    def acquire(_root: str) -> FakeLease:
+        events.append("acquire")
+        return lease
+
+    def stop(**kwargs: object) -> bool:
+        events.append("stop")
+        assert lease.released is False
+        stop_callbacks.append(kwargs["on_complete"])
+        return True
+
+    def begin(_worker: object, _handler: object) -> None:
+        events.append("start")
+        bare_window._lifecycle_thread = object()
+
+    monkeypatch.setattr(app_module, "acquire_mod_lifecycle_lease", acquire)
+    bare_window._run_stop_sequence = stop
+    bare_window._begin_lifecycle_worker = begin
+
+    bare_window._restart_server(
+        allow_force_game_kill=False,
+        continuous_mod_lifecycle=True,
+    )
+
+    assert events == ["acquire", "stop"]
+    assert lease.released is False
+    assert len(stop_callbacks) == 1
+
+    bare_window._lifecycle_thread = None
+    stop_callbacks[0]()
+
+    assert events == ["acquire", "stop", "start"]
+    assert lease.released is False
+
+
+def test_failed_mod_restart_stop_releases_continuous_lease_at_boundary(
+    bare_window: MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    released: list[str] = []
+
+    class FakeLease:
+        root = tmp_path.resolve()
+        released = False
+
+        def release(self) -> None:
+            self.released = True
+            released.append("release")
+
+    class FinishedThread:
+        @staticmethod
+        def deleteLater() -> None:
+            return None
+
+    bare_window._mod_lifecycle_lease = FakeLease()
+    bare_window._mod_lifecycle_lease_token = None
+    bare_window._release_mod_lease_after_lifecycle = False
+    bare_window._lifecycle_thread = FinishedThread()
+    bare_window._lifecycle_result_received = False
+    bare_window._lifecycle_thread_finished = False
+    bare_window._lifecycle_stop_scope = (True, False)
+    bare_window._lifecycle_stop_callback = lambda: pytest.fail(
+        "failed stop continued into Game start"
+    )
+    bare_window._service_reachability = (True, False)
+    bare_window._publish_cached_runtime = lambda: None
+    monkeypatch.setattr(app_module.QMessageBox, "critical", lambda *_args: None)
+
+    bare_window._on_service_stop_completed(
+        ServiceStopResult(
+            game_stopped=False,
+            market_stopped=True,
+            game_error="fixture stop failed",
+        )
+    )
+    assert released == []
+
+    bare_window._on_lifecycle_thread_finished()
+
+    assert released == ["release"]
+
+
+def test_mod_attestation_handoff_keeps_lease_through_corrective_stop(
+    bare_window: MainWindow,
+    tmp_path: Path,
+) -> None:
+    events: list[str] = []
+
+    class FakeLease:
+        root = tmp_path.resolve()
+        released = False
+
+        def release(self) -> None:
+            self.released = True
+            events.append("release")
+
+    class LiveProcess:
+        pid = 8765
+
+        @staticmethod
+        def poll() -> None:
+            return None
+
+    class FinishedThread:
+        @staticmethod
+        def deleteLater() -> None:
+            return None
+
+    lease = FakeLease()
+    bare_window._mod_lifecycle_lease = lease
+    bare_window._mod_lifecycle_lease_token = object()
+    bare_window._release_mod_lease_after_lifecycle = True
+    bare_window._server_proc = LiveProcess()
+    bare_window._server_intent = None
+    bare_window._server_error = None
+    bare_window._service_reachability = (True, False)
+    bare_window._lifecycle_thread = None
+    bare_window._publish_cached_runtime = lambda: None
+
+    def begin(_worker: object, _handler: object) -> None:
+        events.append("stop-begin")
+        bare_window._lifecycle_thread = FinishedThread()
+        bare_window._lifecycle_result_received = False
+        bare_window._lifecycle_thread_finished = False
+
+    bare_window._begin_lifecycle_worker = begin
+
+    assert bare_window._retain_mod_lifecycle_lease_for_continuation()
+    assert bare_window._run_stop_sequence(
+        stop_game=True,
+        stop_market=False,
+        on_complete=lambda: events.append("stopped"),
+        allow_force_game_kill=False,
+    )
+    assert events == ["stop-begin"]
+    assert lease.released is False
+
+    bare_window._on_service_stop_completed(
+        ServiceStopResult(game_stopped=True, market_stopped=True)
+    )
+    assert lease.released is False
+
+    bare_window._on_lifecycle_thread_finished()
+
+    assert events == ["stop-begin", "release", "stopped"]
+    assert lease.released is True
+
+
+def test_native_attestation_failure_starts_corrective_stop_after_thread_teardown(
+    bare_window: MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    class LiveProcess:
+        pid = 8765
+
+        @staticmethod
+        def poll() -> None:
+            return None
+
+    class FinishedThread:
+        @staticmethod
+        def deleteLater() -> None:
+            events.append("thread-delete")
+
+    bare_window._cfg["evejs_root"] = str(tmp_path)
+    bare_window._lifecycle_thread = None
+    bare_window._publish_cached_runtime = lambda: None
+    bare_window._publish_mod_runtime_snapshot = (
+        lambda snapshot: events.append("clear-evidence" if snapshot is None else "publish")
+    )
+    monkeypatch.setattr(app_module.QMessageBox, "critical", lambda *_args: None)
+
+    def begin(_worker: object, _handler: object) -> None:
+        bare_window._lifecycle_thread = FinishedThread()
+        bare_window._lifecycle_result_received = False
+        bare_window._lifecycle_thread_finished = False
+
+    def stop(**_kwargs: object) -> bool:
+        assert bare_window._mod_lifecycle_lease is not None
+        events.append("corrective-stop")
+        bare_window._lifecycle_thread = object()
+        return True
+
+    bare_window._begin_lifecycle_worker = begin
+    bare_window._run_stop_sequence = stop
+
+    assert bare_window._start_service_sequence(
+        start_market=False,
+        start_game=True,
+        mode="vanilla",
+        on_ready=lambda: pytest.fail("failed attestation ran ready callback"),
+        error_title="Game Server Error",
+    )
+    events.clear()
+
+    bare_window._on_service_start_completed(
+        ServiceStartResult(
+            game_process=LiveProcess(),
+            game_ready=True,
+            mod_runtime_error="fixture status marker was missing",
+        )
+    )
+
+    assert "corrective-stop" not in events
+    assert bare_window._mod_lifecycle_lease is not None
+    bare_window._on_lifecycle_thread_finished()
+
+    assert events.index("thread-delete") < events.index("corrective-stop")
+    assert bare_window._mod_lifecycle_lease is not None
+    bare_window._lifecycle_thread = None
+
+
+def test_busy_mod_lifecycle_lock_blocks_native_game_worker_start(
+    bare_window: MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warnings: list[str] = []
+    bare_window._cfg["evejs_root"] = str(tmp_path)
+    bare_window._lifecycle_thread = None
+    bare_window._server_error = None
+    bare_window._begin_lifecycle_worker = lambda *_args: pytest.fail(
+        "Game worker started without the lifecycle lock"
+    )
+    monkeypatch.setattr(
+        app_module,
+        "acquire_mod_lifecycle_lease",
+        lambda _root: (_ for _ in ()).throw(
+            app_module.ModLifecycleBusyError("installer owns fixture lock")
+        ),
+    )
+    monkeypatch.setattr(
+        app_module.QMessageBox,
+        "warning",
+        lambda _parent, _title, message: warnings.append(message),
+    )
+
+    assert not bare_window._start_service_sequence(
+        start_market=False,
+        start_game=True,
+        mode="vanilla",
+        on_ready=None,
+        error_title="Game Server Error",
+    )
+
+    assert warnings
+    assert "installer owns fixture lock" in warnings[0]
+
+
+def test_market_only_start_does_not_acquire_mod_lifecycle_lock(
+    bare_window: MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workers: list[object] = []
+    bare_window._cfg["evejs_root"] = str(tmp_path)
+    bare_window._lifecycle_thread = None
+    bare_window._publish_cached_runtime = lambda: None
+    bare_window._begin_lifecycle_worker = (
+        lambda worker, _handler: workers.append(worker)
+    )
+    monkeypatch.setattr(
+        app_module,
+        "acquire_mod_lifecycle_lease",
+        lambda _root: pytest.fail("Market-only start acquired the Game mod lock"),
+    )
+
+    assert bare_window._start_service_sequence(
+        start_market=True,
+        start_game=False,
+        mode=None,
+        on_ready=None,
+        error_title="Market Server Error",
+    )
+
+    assert len(workers) == 1
 
 
 def test_ready_callback_waits_for_service_result_and_thread_teardown(
@@ -1110,6 +1611,66 @@ def test_restart_cancellation_preserves_the_running_server(
     assert stop_calls == []
     assert start_calls == []
     assert bare_window._server_proc.pid == 8765
+
+
+def test_restart_mode_override_replaces_resolved_vanilla_mode(
+    bare_window: MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    starts: list[dict[str, object]] = []
+    bare_window._cfg["evejs_root"] = str(tmp_path)
+    bare_window._server_proc = None
+    bare_window._resolve_server_start = lambda: ("vanilla", None)
+    bare_window._start_service_sequence = (
+        lambda **kwargs: starts.append(kwargs) or True
+    )
+    monkeypatch.setattr(app_module, "is_server_running", lambda **_kwargs: False)
+
+    bare_window._restart_server(mode_override="modded")
+
+    assert len(starts) == 1
+    assert starts[0]["mode"] == "modded"
+
+
+def test_mod_restart_disables_forced_game_cleanup(
+    bare_window: MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class AliveProcess:
+        pid = 8765
+
+        @staticmethod
+        def poll() -> None:
+            return None
+
+    captured: dict[str, object] = {}
+
+    def build_worker(
+        game_process: object,
+        market_process: object,
+        **kwargs: object,
+    ) -> object:
+        captured.update(
+            game_process=game_process,
+            market_process=market_process,
+            **kwargs,
+        )
+        return object()
+
+    bare_window._cfg["evejs_root"] = str(tmp_path)
+    bare_window._server_proc = AliveProcess()
+    bare_window._resolve_server_start = lambda: ("vanilla", None)
+    bare_window._publish_cached_runtime = lambda: None
+    bare_window._begin_lifecycle_worker = lambda _worker, _handler: None
+    monkeypatch.setattr(app_module, "ServiceStopWorker", build_worker)
+
+    bare_window._restart_server(allow_force_game_kill=False)
+
+    assert captured["game_process"] is bare_window._server_proc
+    assert captured["market_process"] is None
+    assert captured["allow_force_game_kill"] is False
 
 
 def test_settings_root_change_refreshes_the_mods_page(
