@@ -6,10 +6,14 @@ paths that were previously inline in launcher.py, profiles.py, etc.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 import ctypes
 import os
 import re
 import subprocess
+import threading
+import time
 from ctypes import wintypes
 from pathlib import Path
 from typing import Callable
@@ -20,8 +24,22 @@ kernel32 = ctypes.windll.kernel32
 ntdll = ctypes.windll.ntdll
 
 _CREATE_SUSPENDED = 0x00000004
+_ATTACH_PARENT_PROCESS = 0xFFFFFFFF
+_CTRL_BREAK_EVENT = 1
+_CLIENT_TRUST_SPAWN_MUTEX_NAME = "Local\\EveJSLauncherClientTrustSpawnV1"
 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9
+_WAIT_OBJECT_0 = 0x00000000
+_WAIT_ABANDONED = 0x00000080
+_WAIT_TIMEOUT = 0x00000102
+_CONSOLE_SIGNAL_LOCK = threading.Lock()
+_CONSOLE_CTRL_HANDLER = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+
+
+@_CONSOLE_CTRL_HANDLER
+def _ignore_console_control(_event: int) -> bool:
+    """Keep the launcher alive while it shares the server's console."""
+    return True
 
 
 class _IoCounters(ctypes.Structure):
@@ -62,6 +80,8 @@ class _ExtendedLimitInformation(ctypes.Structure):
 
 kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
 kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+kernel32.CreateMutexW.restype = wintypes.HANDLE
 kernel32.SetInformationJobObject.argtypes = [
     wintypes.HANDLE,
     ctypes.c_int,
@@ -75,6 +95,23 @@ kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
 kernel32.TerminateJobObject.restype = wintypes.BOOL
 kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 kernel32.CloseHandle.restype = wintypes.BOOL
+kernel32.AttachConsole.argtypes = [wintypes.DWORD]
+kernel32.AttachConsole.restype = wintypes.BOOL
+kernel32.FreeConsole.argtypes = []
+kernel32.FreeConsole.restype = wintypes.BOOL
+kernel32.GenerateConsoleCtrlEvent.argtypes = [wintypes.DWORD, wintypes.DWORD]
+kernel32.GenerateConsoleCtrlEvent.restype = wintypes.BOOL
+kernel32.GetConsoleProcessList.argtypes = [
+    ctypes.POINTER(wintypes.DWORD),
+    wintypes.DWORD,
+]
+kernel32.GetConsoleProcessList.restype = wintypes.DWORD
+kernel32.SetConsoleCtrlHandler.argtypes = [ctypes.c_void_p, wintypes.BOOL]
+kernel32.SetConsoleCtrlHandler.restype = wintypes.BOOL
+kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+kernel32.WaitForSingleObject.restype = wintypes.DWORD
+kernel32.ReleaseMutex.argtypes = [wintypes.HANDLE]
+kernel32.ReleaseMutex.restype = wintypes.BOOL
 ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
 ntdll.NtResumeProcess.restype = wintypes.LONG
 
@@ -110,6 +147,330 @@ def launch_eve_client(
 def get_hidden_process_flags() -> dict[str, int]:
     """Popen kwargs for background server processes (no console window)."""
     return {"creationflags": subprocess.CREATE_NO_WINDOW}
+
+
+@contextmanager
+def serialize_evejs_client_trust_and_spawn(
+    *,
+    timeout_seconds: float = 660,
+) -> Iterator[None]:
+    """Serialize per-user certificate rotation through EVE process creation.
+
+    The EVE certificate bundles and CurrentUser trust store are shared by every
+    launcher process. Holding one Windows named mutex until ``Popen`` returns
+    prevents another root from replacing the CA between validation and spawn.
+    """
+    if timeout_seconds <= 0:
+        raise ValueError("Client launch serialization timeout must be positive.")
+    handle = kernel32.CreateMutexW(
+        None,
+        False,
+        _CLIENT_TRUST_SPAWN_MUTEX_NAME,
+    )
+    if not handle:
+        raise OSError(ctypes.get_last_error(), "Could not create client launch mutex.")
+
+    acquired = False
+    try:
+        timeout_ms = min(int(timeout_seconds * 1_000), 0xFFFFFFFE)
+        wait_result = int(
+            kernel32.WaitForSingleObject(
+                wintypes.HANDLE(handle),
+                wintypes.DWORD(timeout_ms),
+            )
+        )
+        if wait_result == _WAIT_TIMEOUT:
+            raise RuntimeError(
+                "Timed out waiting for another EveJS Launcher to finish "
+                "preparing the shared EVE client."
+            )
+        if wait_result not in {_WAIT_OBJECT_0, _WAIT_ABANDONED}:
+            raise OSError(
+                ctypes.get_last_error(),
+                f"Could not lock the shared EVE client (Windows result {wait_result}).",
+            )
+        acquired = True
+        yield
+    finally:
+        if acquired:
+            kernel32.ReleaseMutex(wintypes.HANDLE(handle))
+        kernel32.CloseHandle(wintypes.HANDLE(handle))
+
+
+def _client_certificate_bundle_paths(client: Path) -> tuple[Path, ...]:
+    """Return every EVE certifi bundle that the official installer manages."""
+    fixed = (
+        client / "bin64" / "cacert.pem",
+        client / "bin64" / "packages" / "certifi" / "cacert.pem",
+        client / "bin" / "cacert.pem",
+        client / "bin" / "packages" / "certifi" / "cacert.pem",
+    )
+    candidates = [path for path in fixed if path.is_file()]
+    try:
+        candidates.extend(client.rglob("cacert.pem"))
+    except OSError:
+        pass
+
+    unique: dict[str, Path] = {}
+    for path in candidates:
+        try:
+            resolved = path.resolve(strict=True)
+        except OSError:
+            continue
+        unique.setdefault(os.path.normcase(str(resolved)), resolved)
+    return tuple(unique.values())
+
+
+def _normalize_pem_text(value: str) -> str:
+    return value.replace("\r\n", "\n").strip()
+
+
+def _selected_ca_is_in_client_bundles(root: Path, client: Path) -> bool:
+    ca_path = root / "server" / "certs" / "xmpp-ca-cert.pem"
+    try:
+        ca_text = _normalize_pem_text(
+            ca_path.read_text(encoding="utf-8", errors="strict")
+        )
+    except (OSError, UnicodeError):
+        return False
+    if not ca_text:
+        return False
+
+    bundles = _client_certificate_bundle_paths(client)
+    if not bundles:
+        return False
+    for bundle in bundles:
+        try:
+            bundle_text = _normalize_pem_text(
+                bundle.read_text(encoding="utf-8", errors="replace")
+            )
+        except OSError:
+            return False
+        if ca_text not in bundle_text:
+            return False
+    return True
+
+
+def prepare_evejs_client_certificate_trust(
+    evejs_root: str | Path,
+    client_path: str | Path,
+    *,
+    timeout_seconds: float = 600,
+) -> bool:
+    """Run EveJS's official certificate preparation before a client launch.
+
+    EveJS v0.12.6 gives every installation its own local CA.  Its stock
+    ``Play.bat`` therefore runs ``Install-EvEJSCerts.ps1`` before every launch
+    so the selected CA replaces stale EveJS certificates in CurrentUser\\Root
+    and in the EVE client's certifi bundles.  Directly spawning ExeFile.exe
+    without this step makes chat and gateway TLS fail after switching roots.
+
+    Older EveJS layouts without the official installer retain their previous
+    launch path; no certificate files or stores are touched for those roots.
+    """
+    root = Path(evejs_root)
+    client = Path(client_path)
+    installer = (
+        root
+        / "tools"
+        / "ClientSETUP"
+        / "scripts"
+        / "Install-EvEJSCerts.ps1"
+    )
+    if not installer.is_file():
+        return False
+    if not client.is_dir():
+        raise FileNotFoundError(
+            f"EVE client folder not found while preparing chat certificates: {client}"
+        )
+    if timeout_seconds <= 0:
+        raise ValueError("Certificate preparation timeout must be positive.")
+    client_bundles_are_current = _selected_ca_is_in_client_bundles(root, client)
+
+    # The bundle belongs to the shared copied client, not to one account
+    # profile. Never rotate it underneath a live EVE process. Multiple clients
+    # from the same selected root remain supported because the official
+    # installer is idempotent when every bundle already has the selected CA.
+    if not client_bundles_are_current:
+        from .overview_patch import is_eve_client_running
+
+        if is_eve_client_running():
+            raise RuntimeError(
+                "Close every EVE client before switching EveJS installations. "
+                "The selected installation uses a different local chat certificate."
+            )
+
+    system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+    powershell = (
+        system_root
+        / "System32"
+        / "WindowsPowerShell"
+        / "v1.0"
+        / "powershell.exe"
+    )
+    if not powershell.is_file():
+        # Windows PowerShell is present on supported Windows releases, but the
+        # PATH fallback keeps source/test environments usable with a relocated
+        # system directory.
+        powershell = Path("powershell.exe")
+
+    command = [
+        str(powershell),
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(installer),
+        "-ClientPath",
+        str(client),
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=str(root),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=float(timeout_seconds),
+            **get_hidden_process_flags(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            "Timed out while EveJS prepared the selected installation's "
+            "chat certificates. Close every EVE client and try again."
+        ) from exc
+    except OSError as exc:
+        raise RuntimeError(
+            "Could not start EveJS's certificate preparation. "
+            f"Windows reported: {exc}"
+        ) from exc
+
+    if completed.returncode != 0:
+        output = "\n".join(
+            line.strip()
+            for line in (completed.stdout + "\n" + completed.stderr).splitlines()
+            if line.strip()
+        )
+        if len(output) > 2_000:
+            output = output[-2_000:]
+        detail = output or f"PowerShell exited with code {completed.returncode}."
+        raise RuntimeError(
+            "EveJS could not prepare chat certificate trust for the selected "
+            f"installation.\n\n{detail}"
+        )
+    if not _selected_ca_is_in_client_bundles(root, client):
+        raise RuntimeError(
+            "EveJS reported successful certificate preparation, but the selected "
+            "CA is still missing from the EVE client certificate bundles."
+        )
+    return True
+
+
+def get_graceful_server_process_flags() -> dict[str, object]:
+    """Popen kwargs for a hidden server with its own controllable console.
+
+    A private console gives the launcher a narrow Ctrl+Break target for Node's
+    ``SIGBREAK`` shutdown hooks.  ``CREATE_NO_WINDOW`` cannot be used here
+    because a console control event has nowhere to be delivered.
+    """
+    startup_info = subprocess.STARTUPINFO()
+    startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startup_info.wShowWindow = subprocess.SW_HIDE
+    return {
+        "creationflags": subprocess.CREATE_NEW_CONSOLE,
+        "startupinfo": startup_info,
+    }
+
+
+def _console_process_ids() -> tuple[int, ...]:
+    """Return process IDs attached to this process's current console."""
+    capacity = 16
+    while capacity <= 1024:
+        buffer = (wintypes.DWORD * capacity)()
+        count = int(kernel32.GetConsoleProcessList(buffer, capacity))
+        if count == 0:
+            return ()
+        if count <= capacity:
+            return tuple(int(buffer[index]) for index in range(count))
+        capacity = count
+    return ()
+
+
+def request_graceful_server_shutdown(pid: int) -> bool:
+    """Send Ctrl+Break only to one launcher's private server console.
+
+    The game server is launched with its own hidden console.  This process
+    briefly attaches to that console, handles console control itself, and
+    generates the event for every process sharing that private console (the
+    owned Node tree).  If source mode already has a console, it is restored
+    through a retained peer process before returning.
+    """
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        raise ValueError("Graceful server shutdown requires a positive PID.")
+
+    with _CONSOLE_SIGNAL_LOCK:
+        original_processes = _console_process_ids()
+        own_pid = os.getpid()
+        restore_pids = tuple(
+            process_id
+            for process_id in original_processes
+            if process_id != own_pid
+        )
+        if original_processes and not restore_pids:
+            # Detaching the last process would destroy a console we cannot
+            # reconstruct safely.  Let the caller use its exact-PID fallback.
+            return False
+
+        detached_original = False
+        attached_target = False
+        ignore_console_control = False
+        signalled = False
+        try:
+            if original_processes:
+                if not kernel32.FreeConsole():
+                    return False
+                detached_original = True
+            if not kernel32.AttachConsole(wintypes.DWORD(pid)):
+                return False
+            attached_target = True
+            if pid not in _console_process_ids():
+                # The retained PID exited or did not own the console that was
+                # attached.  Never broadcast a control event in that case.
+                return False
+            if not kernel32.SetConsoleCtrlHandler(_ignore_console_control, True):
+                return False
+            ignore_console_control = True
+            signalled = bool(
+                kernel32.GenerateConsoleCtrlEvent(_CTRL_BREAK_EVENT, 0)
+            )
+            if signalled:
+                # Console events are dispatched asynchronously.  Keep the
+                # launcher attached and handling the event briefly so Windows can
+                # enter the target's handler before this console is detached.
+                time.sleep(0.1)
+            return signalled
+        finally:
+            detached_target = False
+            if attached_target:
+                # FreeConsole/AttachConsole reset this process's handler table.
+                # Detach while console control is still handled so an
+                # asynchronously dispatched event cannot race a manual handler
+                # removal.
+                detached_target = bool(kernel32.FreeConsole())
+            if ignore_console_control and not detached_target:
+                kernel32.SetConsoleCtrlHandler(_ignore_console_control, False)
+            if detached_original:
+                restored = any(
+                    kernel32.AttachConsole(wintypes.DWORD(restore_pid))
+                    for restore_pid in restore_pids
+                )
+                if not restored:
+                    kernel32.AttachConsole(wintypes.DWORD(_ATTACH_PARENT_PROCESS))
 
 
 def get_suspended_hidden_process_flags() -> dict[str, int]:
@@ -263,6 +624,7 @@ def create_directory_link(target: Path, link: Path) -> None:
     """Create a directory junction (``mklink /J`` — no admin required)."""
     result = subprocess.run(
         ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
     )

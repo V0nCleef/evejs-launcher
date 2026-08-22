@@ -176,6 +176,7 @@ def is_eve_client_running() -> bool:
     try:
         completed = subprocess.run(
             ["tasklist", "/FI", "IMAGENAME eq exefile.exe", "/FO", "CSV", "/NH"],
+            stdin=subprocess.DEVNULL,
             text=True,
             encoding="utf-8",
             errors="replace",

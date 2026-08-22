@@ -141,11 +141,11 @@ class ManagedDockerCharacterCreationController:
         if not self._supports_reviewed_contract(config):
             return self._pre_mutation_failure(
                 "The selected Compose project does not provide the reviewed "
-                "v0.12.5 character-maintenance layout.",
+                "character-maintenance layout.",
                 target_identity=target_identity,
             )
 
-        # This transaction is reviewed only for the ordinary v0.12.5 stack.
+        # This transaction is reviewed only for the ordinary supported stack.
         # A profile/extension service that shares the selected GameStore could
         # otherwise write behind the helper's scoped backup.  Fail closed until
         # every effective service has its own explicit maintenance contract.
@@ -327,7 +327,7 @@ class ManagedDockerCharacterCreationController:
         )
 
     def _supports_reviewed_contract(self, config: ComposeConfig) -> bool:
-        """Gate the narrow v0.12.5 service, mount, and helper layout."""
+        """Gate the narrow reviewed service, mount, and helper layout."""
         if not {"server", "market", "init"}.issubset(config.services):
             return False
         server_service = config.services["server"]

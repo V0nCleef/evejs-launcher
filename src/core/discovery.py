@@ -20,7 +20,6 @@ def validate_evejs_root(path: str) -> tuple[bool, str]:
 
     required = [
         ("server/certs/xmpp-ca-cert.pem", "SSL cert (server may not be configured)"),
-        ("_local/gameStore/gamestore.sqlite", "Game store database"),
         ("tools/ClientSETUP/scripts/EvEJSConfig.bat", "Client config script"),
     ]
 
@@ -32,6 +31,28 @@ def validate_evejs_root(path: str) -> tuple[bool, str]:
     server_bats = discover_server_scripts(p)
     if not server_bats and not (p / "server" / "index.js").exists():
         return False, "Missing server start script (StartServer*.bat) or server/index.js"
+
+    # Accept either an established runtime database or completed static setup.
+    game_store = p / "_local" / "gameStore"
+    database = game_store / "gamestore.sqlite"
+    manifest = game_store / "manifest.json"
+    data_dir = game_store / "data"
+    static_data_ready = False
+    if manifest.is_file() and data_dir.is_dir():
+        try:
+            static_data_ready = any(entry.is_file() for entry in data_dir.rglob("*"))
+        except OSError:
+            static_data_ready = False
+
+    # v0.12.6 creates gamestore.sqlite when the Node server first starts. A
+    # freshly completed Native setup is valid before that first runtime start
+    # when its generated static-data manifest and files are already present.
+    if not database.exists() and not static_data_ready:
+        return False, (
+            "Missing game store: expected _local/gameStore/gamestore.sqlite "
+            "or _local/gameStore/manifest.json with populated "
+            "_local/gameStore/data"
+        )
 
     return True, ""
 

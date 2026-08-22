@@ -21,6 +21,32 @@ from src.wizard import SetupWizard
 from src.workers.docker_preflight_worker import DockerPreflightWorker
 
 
+def _write_native_base_files(root: Path) -> None:
+    for relative in (
+        "server/certs/xmpp-ca-cert.pem",
+        "tools/ClientSETUP/scripts/EvEJSConfig.bat",
+        "server/index.js",
+    ):
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+
+
+def _write_fresh_native_static_data(root: Path) -> Path:
+    _write_native_base_files(root)
+    game_store = root / "_local" / "gameStore"
+    (game_store / "data" / "accounts").mkdir(parents=True)
+    (game_store / "manifest.json").write_text(
+        '{"version": 1, "generatedTables": ["accounts"]}\n',
+        encoding="utf-8",
+    )
+    (game_store / "data" / "accounts" / "data.json").write_text(
+        "[]\n",
+        encoding="utf-8",
+    )
+    return game_store
+
+
 def test_native_validation_remains_strict_for_pristine_root(tmp_path: Path) -> None:
     root = tmp_path / "pristine"
     root.mkdir()
@@ -34,17 +60,45 @@ def test_native_validation_remains_strict_for_pristine_root(tmp_path: Path) -> N
 
 def test_native_validation_still_accepts_existing_layout(tmp_path: Path) -> None:
     root = tmp_path / "native"
-    for relative in (
-        "server/certs/xmpp-ca-cert.pem",
-        "_local/gameStore/gamestore.sqlite",
-        "tools/ClientSETUP/scripts/EvEJSConfig.bat",
-        "server/index.js",
-    ):
-        path = root / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.touch()
+    _write_native_base_files(root)
+    database = root / "_local" / "gameStore" / "gamestore.sqlite"
+    database.parent.mkdir(parents=True)
+    database.touch()
 
     assert validate_evejs_root(str(root)) == (True, "")
+
+
+def test_native_validation_accepts_populated_static_data_before_first_run(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "fresh-native"
+    game_store = _write_fresh_native_static_data(root)
+
+    assert not (game_store / "gamestore.sqlite").exists()
+    assert validate_evejs_root(str(root)) == (True, "")
+
+
+@pytest.mark.parametrize("incomplete_part", ("manifest", "data"))
+def test_native_validation_rejects_incomplete_static_data_without_database(
+    tmp_path: Path,
+    incomplete_part: str,
+) -> None:
+    root = tmp_path / "incomplete-native"
+    _write_native_base_files(root)
+    game_store = root / "_local" / "gameStore"
+    (game_store / "data").mkdir(parents=True)
+    if incomplete_part != "manifest":
+        (game_store / "manifest.json").write_text("{}\n", encoding="utf-8")
+    if incomplete_part != "data":
+        (game_store / "data" / "accounts.json").write_text(
+            "[]\n",
+            encoding="utf-8",
+        )
+
+    valid, diagnostic = validate_evejs_root(str(root))
+
+    assert valid is False
+    assert "game store" in diagnostic.casefold()
 
 
 def test_docker_validation_accepts_pristine_compose_root(tmp_path: Path) -> None:
@@ -146,6 +200,26 @@ def _select_docker(wizard: SetupWizard, root: Path, compose: Path) -> None:
     )
     wizard._path_input.setText(str(root))
     wizard._compose_input.setText(str(compose))
+
+
+def test_wizard_accepts_fresh_native_root_before_first_server_run(
+    qapp,
+    isolated_config: Path,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "fresh-native-wizard"
+    game_store = _write_fresh_native_static_data(root)
+    wizard = SetupWizard()
+    wizard._stack.setCurrentIndex(1)
+    wizard._backend_combo.setCurrentIndex(
+        wizard._backend_combo.findData("native")
+    )
+
+    wizard._path_input.setText(str(root))
+
+    assert not (game_store / "gamestore.sqlite").exists()
+    assert wizard._next_btn.isEnabled() is True
+    assert "Valid EveJS installation" in wizard._path_status.text()
 
 
 def test_wizard_explains_runtime_compose_and_advanced_project_defaults(

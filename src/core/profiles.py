@@ -3,9 +3,10 @@
 Each account gets a junction pointing to the real EVE client install.
 This gives each account a unique path → unique settings folder on first launch.
 """
-import re
 import ipaddress
+import json
 import os
+import re
 from pathlib import Path
 import tempfile
 
@@ -13,6 +14,7 @@ from ..config import CONFIG_DIR
 from .platform import create_directory_link, get_eve_settings_path, remove_directory_link
 
 PROFILES_ROOT = CONFIG_DIR / "Profiles"
+_REQUIRED_CORE_PUBLIC_SECTIONS = ("audio", "device", "generic", "ui")
 
 
 def get_settings_key(client_path: str) -> str:
@@ -165,25 +167,162 @@ def prefill_username(username: str) -> None:
         import shutil
         shutil.copy2(template_yaml, yaml_path)
 
+    if yaml_path.exists() and template_yaml.exists():
+        existing_yaml = yaml_path.read_text(encoding="utf-8", errors="replace")
+        template_text = template_yaml.read_text(encoding="utf-8", errors="replace")
+        repaired_yaml = _repair_core_public_yaml(existing_yaml, template_text)
+        if repaired_yaml != existing_yaml:
+            # Older launcher releases could leave a minimal YAML document that
+            # makes EVE omit the password field and Login button. Preserve the
+            # original once, then add only missing launcher-owned defaults.
+            backup = yaml_path.with_name(f"{yaml_path.name}.launcher-backup")
+            if not backup.exists():
+                import shutil
+                shutil.copy2(yaml_path, backup)
+            _atomic_write_text(yaml_path, repaired_yaml)
+
     import time
     ts = int(time.time() * 10_000_000)  # EVE uses 100-nanosecond intervals
+    yaml_username = json.dumps(str(username), ensure_ascii=False)
 
     # Patch the username under the ``ui:`` section
     if yaml_path.exists():
         text = yaml_path.read_text(encoding="utf-8", errors="replace")
-        # Replace placeholder or existing username value
-        text = re.sub(
-            r"(  username: )\[.*?\]",
-            f"\\1[{ts}, {username}]",
-            text,
+        text = _patch_core_public_login(text, ts, yaml_username)
+        _atomic_write_text(yaml_path, text)
+
+
+def _named_block_ranges(
+    lines: list[str],
+    pattern: re.Pattern[str],
+    *,
+    start: int = 0,
+    end: int | None = None,
+) -> dict[str, tuple[int, int]]:
+    """Index first-occurrence YAML blocks matched at one exact indentation."""
+    limit = len(lines) if end is None else end
+    starts: list[tuple[str, int]] = []
+    for index in range(start, limit):
+        match = pattern.match(lines[index])
+        if match:
+            starts.append((match.group(1).strip(), index))
+    ranges: dict[str, tuple[int, int]] = {}
+    for position, (name, block_start) in enumerate(starts):
+        block_end = starts[position + 1][1] if position + 1 < len(starts) else limit
+        ranges.setdefault(name, (block_start, block_end))
+    return ranges
+
+
+_TOP_LEVEL_YAML_KEY = re.compile(r"^([^#\s][^:]*):(.*)$")
+_CHILD_YAML_KEY = re.compile(r"^  ([^#\s-][^:]*):(.*)$")
+
+
+def _join_yaml_lines(lines: list[str], *, final_newline: bool) -> str:
+    text = "\n".join(lines)
+    return text + "\n" if final_newline and text else text
+
+
+def _repair_core_public_yaml(existing: str, template: str) -> str:
+    """Merge missing required settings from the complete launcher template.
+
+    Existing values and unknown keys are retained. A required section whose
+    header is a scalar/list instead of a mapping is replaced with that section's
+    template block because EVE cannot consume its child settings in that shape.
+    """
+    lines = existing.splitlines()
+    template_lines = template.splitlines()
+    template_sections = _named_block_ranges(template_lines, _TOP_LEVEL_YAML_KEY)
+    if any(section not in template_sections for section in _REQUIRED_CORE_PUBLIC_SECTIONS):
+        return existing
+
+    for section in _REQUIRED_CORE_PUBLIC_SECTIONS:
+        sections = _named_block_ranges(lines, _TOP_LEVEL_YAML_KEY)
+        template_start, template_end = template_sections[section]
+        template_block = template_lines[template_start:template_end]
+        if section not in sections:
+            lines.extend(template_block)
+            continue
+
+        section_start, section_end = sections[section]
+        header_value = lines[section_start].split(":", 1)[1].strip()
+        if header_value and not (section == "generic" and header_value == "{}"):
+            lines[section_start:section_end] = template_block
+            continue
+        template_children = _named_block_ranges(
+            template_lines,
+            _CHILD_YAML_KEY,
+            start=template_start + 1,
+            end=template_end,
         )
-        # Replace placeholder or existing usernames block
-        text = re.sub(
-            r"(  usernames:\n)(  - .*\n  - .*\n)?",
-            f"\\1  - {ts}\n  - [{username}]\n",
-            text,
+        existing_children = _named_block_ranges(
+            lines,
+            _CHILD_YAML_KEY,
+            start=section_start + 1,
+            end=section_end,
         )
-        yaml_path.write_text(text, encoding="utf-8")
+        if section == "generic":
+            if header_value == "{}" or existing_children:
+                continue
+            lines[section_start:section_end] = template_block
+            continue
+
+        missing_blocks: list[str] = []
+        for child, (child_start, child_end) in template_children.items():
+            if child not in existing_children:
+                missing_blocks.extend(template_lines[child_start:child_end])
+        if missing_blocks:
+            lines[section_end:section_end] = missing_blocks
+
+    return _join_yaml_lines(
+        lines,
+        final_newline=existing.endswith(("\n", "\r")) or template.endswith(("\n", "\r")),
+    )
+
+
+def _patch_core_public_login(text: str, timestamp: int, yaml_username: str) -> str:
+    """Upsert EVE's canonical username history fields inside the ``ui`` map."""
+    lines = text.splitlines()
+    sections = _named_block_ranges(lines, _TOP_LEVEL_YAML_KEY)
+    ui_range = sections.get("ui")
+    if ui_range is None:
+        return text
+    ui_start, ui_end = ui_range
+    children = _named_block_ranges(
+        lines,
+        _CHILD_YAML_KEY,
+        start=ui_start + 1,
+        end=ui_end,
+    )
+    replacements = {
+        "username": [f"  username: [{timestamp}, {yaml_username}]"],
+        "usernames": [
+            "  usernames:",
+            f"  - {timestamp}",
+            f"  - [{yaml_username}]",
+        ],
+    }
+    existing_replacements = [
+        (children[name][0], children[name][1], replacement)
+        for name, replacement in replacements.items()
+        if name in children
+    ]
+    for block_start, block_end, replacement in sorted(existing_replacements, reverse=True):
+        lines[block_start:block_end] = replacement
+
+    sections = _named_block_ranges(lines, _TOP_LEVEL_YAML_KEY)
+    ui_start, ui_end = sections["ui"]
+    children = _named_block_ranges(
+        lines,
+        _CHILD_YAML_KEY,
+        start=ui_start + 1,
+        end=ui_end,
+    )
+    for name, replacement in replacements.items():
+        if name not in children:
+            lines[ui_end:ui_end] = replacement
+            ui_end += len(replacement)
+
+    return _join_yaml_lines(lines, final_newline=text.endswith(("\n", "\r")))
 
 
 def configure_profile_game_endpoint(

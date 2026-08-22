@@ -17,6 +17,7 @@ from src import config
 from src.app import MainWindow
 from src.core.launcher import ClientLaunchContext
 from src.workers.client_launch_worker import (
+    ClientLaunchFailure,
     ClientLaunchRequest,
     ClientLaunchWorker,
 )
@@ -92,6 +93,13 @@ def _wait_for_launch_teardown(
     assert window._client_launch_thread is None
 
 
+def _wait_for_timer(timer_fired: list[bool], timeout: float = 0.5) -> None:
+    """Process Qt events until a short timer fires, bounded below worker timeout."""
+    deadline = time.monotonic() + timeout
+    while not timer_fired and time.monotonic() < deadline:
+        QTest.qWait(5)
+
+
 def test_worker_keeps_qt_event_loop_responsive_during_blocking_launch(
     qapp: QApplication,
     tmp_path: Path,
@@ -120,7 +128,7 @@ def test_worker_keeps_qt_event_loop_responsive_during_blocking_launch(
 
     thread.start()
     QTimer.singleShot(10, lambda: timer_fired.append(True))
-    QTest.qWait(40)
+    _wait_for_timer(timer_fired)
 
     assert timer_fired == [True]
     assert len(completed) == 0
@@ -233,7 +241,7 @@ def test_main_window_launch_is_immediately_pending_rejects_duplicates_and_stays_
         )
 
         QTimer.singleShot(10, lambda: timer_fired.append(True))
-        QTest.qWait(40)
+        _wait_for_timer(timer_fired)
         assert timer_fired == [True]
         assert len(calls) == 1
 
@@ -285,6 +293,54 @@ def test_failed_async_launch_clears_pending_and_allows_retry(
         _wait_for_launch_teardown(qapp, window)
         assert attempts == 2
         assert window._tracker.is_account_running("fixture-account")
+    finally:
+        window.deleteLater()
+
+
+def test_launch_queue_completion_surfaces_first_worker_failure(
+    qapp: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = _bare_launch_window(qapp, tmp_path)
+    request = _request(tmp_path)
+    messages: list[tuple[str, str]] = []
+    window._client_launch_request = request
+    window._client_launch_from_queue = True
+    window._client_launch_result_received = False
+    window._client_launch_thread_finished = False
+    window._launch_queue_failure_messages = []
+    window._finish_client_launch_if_complete = lambda: None
+    window._home_page = SimpleNamespace(
+        finish_launch_progress=lambda *_args: None,
+    )
+    window._characters_page.finish_group_launch_progress = lambda: None
+    window._announce_shipboard = lambda *_args, **_kwargs: None
+    monkeypatch.setattr(
+        app_module.QMessageBox,
+        "information",
+        lambda _parent, title, message: messages.append((title, message)),
+    )
+
+    try:
+        window._on_client_launch_failed(
+            ClientLaunchFailure(
+                request=request,
+                error_type="RuntimeError",
+                message="Close every EVE client before switching installations.",
+            )
+        )
+        assert window._launch_queue_failure_messages == [
+            "Close every EVE client before switching installations."
+        ]
+
+        window._launch_queue = object()
+        window._on_launch_queue_finished(2, 0, False)
+
+        assert messages
+        assert messages[-1][0] == "Launch Complete"
+        assert "First failure" in messages[-1][1]
+        assert "Close every EVE client" in messages[-1][1]
     finally:
         window.deleteLater()
 

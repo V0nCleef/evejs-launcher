@@ -66,6 +66,155 @@ def test_bootstrap_copies_only_safe_settings_without_account_cache_state(
     }
 
 
+def _write_complete_core_public_template(template_dir: Path) -> str:
+    text = (
+        "audio:\n"
+        "  masterVolume: [1, 0.7]\n"
+        "device:\n"
+        "  WindowMode: [1, 1]\n"
+        "generic: {}\n"
+        "ui:\n"
+        "  customSetting: [1, true]\n"
+        "  username: [__TS__, __USERNAME__]\n"
+        "  usernames:\n"
+        "  - __TS__\n"
+        "  - [__USERNAME__]\n"
+    )
+    template_dir.mkdir(parents=True)
+    (template_dir / "core_public__.yaml").write_text(text, encoding="utf-8")
+    return text
+
+
+def test_prefill_username_serializes_numeric_account_as_yaml_string(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = tmp_path / "settings"
+    settings.mkdir()
+    module_dir = tmp_path / "module"
+    _write_complete_core_public_template(module_dir / "template_settings")
+    monkeypatch.setattr(profiles, "__file__", str(module_dir / "profiles.py"))
+    monkeypatch.setattr(
+        profiles,
+        "get_profile_settings_path",
+        lambda _username: settings,
+    )
+
+    profiles.prefill_username("5259819")
+
+    text = (settings / "core_public__.yaml").read_text(encoding="utf-8")
+    assert ', "5259819"]' in text
+    assert '  - ["5259819"]' in text
+    assert ", 5259819]" not in text
+
+
+def test_prefill_username_repairs_incomplete_yaml_and_preserves_backup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = tmp_path / "settings"
+    settings.mkdir()
+    malformed = (
+        "generic: {}\n"
+        "ui:\n"
+        "  retainedUserSetting: [77, true]\n"
+        "  username: [1, old-account]\n"
+        "  usernames:\n"
+        "  - 1\n"
+        "  - [old-account]\n"
+    )
+    yaml_path = settings / "core_public__.yaml"
+    yaml_path.write_text(malformed, encoding="utf-8")
+    module_dir = tmp_path / "module"
+    _write_complete_core_public_template(module_dir / "template_settings")
+    monkeypatch.setattr(profiles, "__file__", str(module_dir / "profiles.py"))
+    monkeypatch.setattr(
+        profiles,
+        "get_profile_settings_path",
+        lambda _username: settings,
+    )
+
+    profiles.prefill_username("5259819")
+
+    repaired = yaml_path.read_text(encoding="utf-8")
+    assert all(f"{section}:" in repaired for section in ("audio", "device", "generic", "ui"))
+    assert ', "5259819"]' in repaired
+    backup = settings / "core_public__.yaml.launcher-backup"
+    assert backup.read_text(encoding="utf-8") == malformed
+    assert "retainedUserSetting: [77, true]" in repaired
+
+    profiles.prefill_username("another-account")
+
+    assert backup.read_text(encoding="utf-8") == malformed
+    assert "retainedUserSetting: [77, true]" in yaml_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("generic_line", ("generic: false", "generic:"))
+def test_prefill_username_repairs_scalar_sections_and_missing_login_keys(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    generic_line: str,
+) -> None:
+    settings = tmp_path / "settings"
+    settings.mkdir()
+    malformed = (
+        "audio: null\n"
+        "device: []\n"
+        f"{generic_line}\n"
+        "ui:\n"
+        "  retainedUserSetting: [77, true]\n"
+    )
+    yaml_path = settings / "core_public__.yaml"
+    yaml_path.write_text(malformed, encoding="utf-8")
+    module_dir = tmp_path / "module"
+    _write_complete_core_public_template(module_dir / "template_settings")
+    monkeypatch.setattr(profiles, "__file__", str(module_dir / "profiles.py"))
+    monkeypatch.setattr(
+        profiles,
+        "get_profile_settings_path",
+        lambda _username: settings,
+    )
+
+    profiles.prefill_username("5259819")
+
+    repaired = yaml_path.read_text(encoding="utf-8")
+    assert "audio:\n  masterVolume:" in repaired
+    assert "device:\n  WindowMode:" in repaired
+    assert "generic: {}" in repaired
+    assert "retainedUserSetting: [77, true]" in repaired
+    assert ', "5259819"]' in repaired
+    assert '  - ["5259819"]' in repaired
+
+
+def test_prefill_username_preserves_complete_existing_yaml(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = tmp_path / "settings"
+    settings.mkdir()
+    module_dir = tmp_path / "module"
+    complete = _write_complete_core_public_template(module_dir / "template_settings")
+    existing = complete.replace(
+        "  customSetting: [1, true]",
+        "  customSetting: [99, false]",
+    )
+    yaml_path = settings / "core_public__.yaml"
+    yaml_path.write_text(existing, encoding="utf-8")
+    monkeypatch.setattr(profiles, "__file__", str(module_dir / "profiles.py"))
+    monkeypatch.setattr(
+        profiles,
+        "get_profile_settings_path",
+        lambda _username: settings,
+    )
+
+    profiles.prefill_username('account "quoted"')
+
+    patched = yaml_path.read_text(encoding="utf-8")
+    assert "customSetting: [99, false]" in patched
+    assert 'account \\"quoted\\"' in patched
+    assert not (settings / "core_public__.yaml.launcher-backup").exists()
+
+
 def test_existing_profile_is_patched_to_remapped_game_endpoint(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

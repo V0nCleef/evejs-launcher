@@ -5,6 +5,8 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import sys
+import textwrap
 import zipfile
 import zlib
 
@@ -61,6 +63,126 @@ def test_eve_process_probe_fails_closed_on_unsuccessful_tasklist(
     )
 
     assert patcher.is_eve_client_running() is True
+
+
+def test_eve_process_probe_does_not_inherit_launcher_stdin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(patcher.os, "name", "nt")
+    observed: dict[str, object] = {}
+
+    def fake_run(*_args: object, **kwargs: object) -> subprocess.CompletedProcess:
+        observed.update(kwargs)
+        return subprocess.CompletedProcess([], 0, stdout="INFO: No tasks are running")
+
+    monkeypatch.setattr(patcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(patcher, "get_hidden_process_flags", lambda: {})
+
+    assert patcher.is_eve_client_running() is False
+    assert observed["stdin"] is subprocess.DEVNULL
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows standard-handle contract")
+def test_consoleless_eve_process_probe_survives_invalid_stdin_handle(
+    tmp_path: Path,
+) -> None:
+    """The real probe must not inherit pythonw's stale standard-input handle."""
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    python = Path(sys.executable).with_name("python.exe")
+    if not pythonw.is_file() or not python.is_file():
+        pytest.skip("python.exe and pythonw.exe are required for this integration test")
+
+    repo_root = Path(__file__).resolve().parents[1]
+    result_path = tmp_path / "invalid-stdin-probe.json"
+    script = textwrap.dedent(
+        f"""
+        import ctypes
+        import json
+        from pathlib import Path
+        import subprocess
+        import traceback
+
+        from src.core import overview_patch as patcher
+
+        result_path = Path({str(result_path)!r})
+        real_run = subprocess.run
+        spawned = False
+
+        def deterministic_run(_argv, **kwargs):
+            global spawned
+            completed = real_run(
+                [
+                    {str(python)!r},
+                    "-B",
+                    "-c",
+                    "import os; os.write(1, b'INFO: No tasks are running\\\\n')",
+                ],
+                **kwargs,
+            )
+            spawned = True
+            return completed
+
+        try:
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.SetStdHandle.argtypes = [ctypes.c_ulong, ctypes.c_void_p]
+            kernel32.SetStdHandle.restype = ctypes.c_int
+            std_input_handle = -10 & 0xFFFFFFFF
+            if not kernel32.SetStdHandle(
+                std_input_handle,
+                ctypes.c_void_p(-1),
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+
+            try:
+                real_run(
+                    [
+                        {str(python)!r},
+                        "-B",
+                        "-c",
+                        "raise SystemExit(0)",
+                    ],
+                    capture_output=True,
+                    timeout=5,
+                    check=False,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+            except OSError as exc:
+                inherited_stdin_error = getattr(exc, "winerror", None)
+            else:
+                inherited_stdin_error = None
+
+            if inherited_stdin_error != 6:
+                raise AssertionError(
+                    "invalid STD_INPUT_HANDLE did not reproduce WinError 6; "
+                    f"observed {{inherited_stdin_error!r}}"
+                )
+
+            patcher.subprocess.run = deterministic_run
+            running = patcher.is_eve_client_running()
+            payload = {{"running": running, "spawned": spawned}}
+        except BaseException:
+            payload = {{"error": traceback.format_exc(), "spawned": spawned}}
+
+        result_path.write_text(json.dumps(payload), encoding="utf-8")
+        """
+    )
+
+    completed = subprocess.run(
+        [str(pythonw), "-B", "-c", script],
+        cwd=repo_root,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=15,
+        check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+
+    assert completed.returncode == 0
+    assert result_path.is_file(), "consoleless probe did not write its result"
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert "error" not in payload, payload.get("error")
+    assert payload == {"running": False, "spawned": True}
 
 
 def test_source_transform_schedules_non_blocking_one_shot_bridge() -> None:

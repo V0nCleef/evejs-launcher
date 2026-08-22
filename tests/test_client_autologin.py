@@ -200,5 +200,6 @@ def test_windows_launch_uses_an_argument_list_without_shell_or_redirection(
     ]
     kwargs = captured["kwargs"]
     assert "shell" not in kwargs
+    assert "stdin" not in kwargs
     assert "stdout" not in kwargs
     assert "stderr" not in kwargs

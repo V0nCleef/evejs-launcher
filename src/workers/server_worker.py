@@ -17,6 +17,11 @@ from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal, pyqtSlot
 
 from ..constants import Ports
 from ..core import server_launcher
+from ..core.platform import request_graceful_server_shutdown
+
+GAME_GRACEFUL_SHUTDOWN_TIMEOUT_SEC = 120.0
+MARKET_GRACEFUL_SHUTDOWN_TIMEOUT_SEC = 15.0
+MARKET_READINESS_TIMEOUT_SEC = 300.0
 
 
 @dataclass(frozen=True)
@@ -82,6 +87,8 @@ class ServiceStartWorker(QObject):
         start_market: bool,
         start_game: bool,
         readiness_timeout_sec: float = 60,
+        market_readiness_timeout_sec: float | None = None,
+        continue_game_after_market_failure: bool = False,
         poll_interval_sec: float = 0.25,
         probe: Callable[[int], bool] | None = None,
         start_market_fn: Callable[[str], ManagedProcess] | None = None,
@@ -96,6 +103,14 @@ class ServiceStartWorker(QObject):
         self._start_market = start_market
         self._start_game = start_game
         self._readiness_timeout_sec = max(0.01, float(readiness_timeout_sec))
+        self._market_readiness_timeout_sec = (
+            self._readiness_timeout_sec
+            if market_readiness_timeout_sec is None
+            else max(0.01, float(market_readiness_timeout_sec))
+        )
+        self._continue_game_after_market_failure = bool(
+            continue_game_after_market_failure
+        )
         self._poll_interval_sec = max(0.0, float(poll_interval_sec))
         self._probe = probe or self._default_probe
         self._start_market_fn = start_market_fn or server_launcher.start_market_server
@@ -112,8 +127,10 @@ class ServiceStartWorker(QObject):
         process: ManagedProcess,
         ports: tuple[int, ...],
         service_name: str,
+        *,
+        timeout_sec: float,
     ) -> tuple[bool, str | None]:
-        deadline = self._clock() + self._readiness_timeout_sec
+        deadline = self._clock() + timeout_sec
         probe_error: str | None = None
         while self._clock() < deadline:
             return_code = process.poll()
@@ -142,51 +159,64 @@ class ServiceStartWorker(QObject):
         """Run Market → Game startup and emit one terminal result."""
         market_process: ManagedProcess | None = None
         game_process: ManagedProcess | None = None
+        market_ready = False
+        market_error: str | None = None
 
         if self._start_market:
             self.phase_changed.emit("market", "starting")
             try:
                 market_process = self._start_market_fn(self._evejs_root)
             except Exception as exc:  # noqa: BLE001 - propagated as UI state
-                message = f"Unable to start Market service: {exc}"
-                self.completed.emit(
-                    ServiceStartResult(
-                        market_error=message,
-                        game_error=(
-                            "Game start skipped because Market did not start."
-                            if self._start_game
-                            else None
-                        ),
+                market_error = f"Unable to start Market service: {exc}"
+                if not (
+                    self._start_game
+                    and self._continue_game_after_market_failure
+                ):
+                    self.completed.emit(
+                        ServiceStartResult(
+                            market_error=market_error,
+                            game_error=(
+                                "Game start skipped because Market did not start."
+                                if self._start_game
+                                else None
+                            ),
+                        )
                     )
+                    return
+            else:
+                self.phase_changed.emit("market", "waiting")
+                market_ready, market_error = self._wait_for_ports(
+                    market_process,
+                    (int(Ports.MARKET_HTTP), int(Ports.MARKET_RPC)),
+                    "Market service",
+                    timeout_sec=self._market_readiness_timeout_sec,
                 )
-                return
-            self.phase_changed.emit("market", "waiting")
-            market_ready, market_error = self._wait_for_ports(
-                market_process,
-                (int(Ports.MARKET_HTTP), int(Ports.MARKET_RPC)),
-                "Market service",
-            )
-            if not market_ready:
-                self.completed.emit(
-                    ServiceStartResult(
-                        market_process=market_process,
-                        market_error=market_error,
-                        game_error=(
-                            "Game start skipped because Market did not become ready."
-                            if self._start_game
-                            else None
-                        ),
+                if not market_ready and not (
+                    self._start_game
+                    and self._continue_game_after_market_failure
+                ):
+                    self.completed.emit(
+                        ServiceStartResult(
+                            market_process=market_process,
+                            market_error=market_error,
+                            game_error=(
+                                "Game start skipped because Market did not become ready."
+                                if self._start_game
+                                else None
+                            ),
+                        )
                     )
-                )
-                return
-            self.phase_changed.emit("market", "ready")
+                    return
+                if market_ready:
+                    self.phase_changed.emit("market", "ready")
 
         if self._start_game:
             if self._mode is None:
                 self.completed.emit(
                     ServiceStartResult(
                         market_process=market_process,
-                        market_ready=market_process is not None,
+                        market_ready=market_ready,
+                        market_error=market_error,
                         game_error="Game start requires a resolved server mode.",
                     )
                 )
@@ -198,7 +228,8 @@ class ServiceStartWorker(QObject):
                 self.completed.emit(
                     ServiceStartResult(
                         market_process=market_process,
-                        market_ready=market_process is not None,
+                        market_ready=market_ready,
+                        market_error=market_error,
                         game_error=f"Unable to start Game service: {exc}",
                     )
                 )
@@ -208,13 +239,15 @@ class ServiceStartWorker(QObject):
                 game_process,
                 (int(Ports.GAME_TCP),),
                 "Game service",
+                timeout_sec=self._readiness_timeout_sec,
             )
             if not game_ready:
                 self.completed.emit(
                     ServiceStartResult(
                         market_process=market_process,
                         game_process=game_process,
-                        market_ready=market_process is not None,
+                        market_ready=market_ready,
+                        market_error=market_error,
                         game_error=game_error,
                     )
                 )
@@ -225,8 +258,9 @@ class ServiceStartWorker(QObject):
             ServiceStartResult(
                 market_process=market_process,
                 game_process=game_process,
-                market_ready=market_process is not None,
+                market_ready=market_ready,
                 game_ready=game_process is not None,
+                market_error=market_error,
             )
         )
 
@@ -241,9 +275,11 @@ class ServiceStopWorker(QObject):
         game_process: ManagedProcess | None,
         market_process: ManagedProcess | None,
         *,
-        graceful_timeout_sec: float = 15,
+        game_graceful_timeout_sec: float = GAME_GRACEFUL_SHUTDOWN_TIMEOUT_SEC,
+        market_graceful_timeout_sec: float = MARKET_GRACEFUL_SHUTDOWN_TIMEOUT_SEC,
         poll_interval_sec: float = 0.25,
         force_kill_fn: Callable[[ManagedProcess], bool] | None = None,
+        graceful_game_stop_fn: Callable[[ManagedProcess], bool] | None = None,
         sleep_fn: Callable[[float], None] = time.sleep,
         clock_fn: Callable[[], float] = time.monotonic,
         parent: QObject | None = None,
@@ -251,9 +287,23 @@ class ServiceStopWorker(QObject):
         super().__init__(parent)
         self._game_process = game_process
         self._market_process = market_process
-        self._graceful_timeout_sec = max(0.01, float(graceful_timeout_sec))
+        # EveJS currently permits seven sequential 10-second hooks, then a
+        # 10-second persistence-worker drain and a 1-second close, before final
+        # flush/release overhead.  Two minutes covers that full server bound;
+        # Market retains its existing 15-second bound.
+        self._game_graceful_timeout_sec = max(
+            0.01,
+            float(game_graceful_timeout_sec),
+        )
+        self._market_graceful_timeout_sec = max(
+            0.01,
+            float(market_graceful_timeout_sec),
+        )
         self._poll_interval_sec = max(0.0, float(poll_interval_sec))
         self._force_kill = force_kill_fn or self._default_force_kill
+        self._graceful_game_stop = (
+            graceful_game_stop_fn or self._default_graceful_game_stop
+        )
         self._sleep = sleep_fn
         self._clock = clock_fn
 
@@ -261,44 +311,102 @@ class ServiceStopWorker(QObject):
     def _default_force_kill(process: ManagedProcess) -> bool:
         result = subprocess.run(
             ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             check=False,
             timeout=5,
         )
         return result.returncode == 0
 
-    def _stop_process(self, process: ManagedProcess | None) -> tuple[bool, str | None]:
+    @staticmethod
+    def _default_graceful_game_stop(process: ManagedProcess) -> bool:
+        return request_graceful_server_shutdown(process.pid)
+
+    @staticmethod
+    def _request_terminate(process: ManagedProcess) -> bool:
+        process.terminate()
+        return True
+
+    def _stop_process(
+        self,
+        process: ManagedProcess | None,
+        request_stop: Callable[[ManagedProcess], bool],
+        *,
+        graceful_timeout_sec: float,
+        require_clean_exit: bool = False,
+        forced_shutdown_error: str | None = None,
+    ) -> tuple[bool, str | None]:
         if process is None or process.poll() is not None:
             return True, None
+        request_error: str | None = None
         try:
-            process.terminate()
+            requested = request_stop(process)
         except Exception as exc:  # noqa: BLE001 - process adapters can vary
-            return False, f"Failed to request service shutdown: {exc}"
+            requested = False
+            request_error = f"Failed to request service shutdown: {exc}"
 
-        deadline = self._clock() + self._graceful_timeout_sec
-        while self._clock() < deadline:
-            if process.poll() is not None:
+        if requested:
+            deadline = self._clock() + graceful_timeout_sec
+            while self._clock() < deadline:
+                return_code = process.poll()
+                if return_code is not None:
+                    if require_clean_exit and return_code != 0:
+                        return (
+                            True,
+                            "Game service exited with code "
+                            f"{return_code} during graceful shutdown.",
+                        )
+                    return True, None
+                self._sleep(self._poll_interval_sec)
+            return_code = process.poll()
+            if return_code is not None:
+                if require_clean_exit and return_code != 0:
+                    return (
+                        True,
+                        "Game service exited with code "
+                        f"{return_code} during graceful shutdown.",
+                    )
                 return True, None
-            self._sleep(self._poll_interval_sec)
+        elif request_error is None:
+            request_error = "Service rejected the graceful shutdown request."
+
         if process.poll() is not None:
-            return True, None
+            return True, forced_shutdown_error or request_error
 
         try:
             forced = self._force_kill(process)
         except Exception as exc:  # noqa: BLE001 - process adapters can vary
-            return False, f"Forced service shutdown failed: {exc}"
+            if process.poll() is not None:
+                return True, forced_shutdown_error or request_error
+            message = f"Forced service shutdown failed: {exc}"
+            return False, f"{request_error} {message}" if request_error else message
         if not forced:
-            return False, "Forced service shutdown failed."
-        return (True, None) if process.poll() is not None else (
-            False,
-            "Service did not exit after forced shutdown.",
-        )
+            if process.poll() is not None:
+                return True, forced_shutdown_error or request_error
+            message = "Forced service shutdown failed."
+            return False, f"{request_error} {message}" if request_error else message
+        if process.poll() is not None:
+            return True, forced_shutdown_error
+        return False, "Service did not exit after forced shutdown."
 
     @pyqtSlot()
     def run(self) -> None:
         """Stop Game before Market and emit one terminal result."""
-        game_stopped, game_error = self._stop_process(self._game_process)
-        market_stopped, market_error = self._stop_process(self._market_process)
+        game_stopped, game_error = self._stop_process(
+            self._game_process,
+            self._graceful_game_stop,
+            graceful_timeout_sec=self._game_graceful_timeout_sec,
+            require_clean_exit=True,
+            forced_shutdown_error=(
+                "Game service stopped without verified graceful cleanup; "
+                "persisted state may be incomplete."
+            ),
+        )
+        market_stopped, market_error = self._stop_process(
+            self._market_process,
+            self._request_terminate,
+            graceful_timeout_sec=self._market_graceful_timeout_sec,
+        )
         self.completed.emit(
             ServiceStopResult(
                 game_stopped=game_stopped,

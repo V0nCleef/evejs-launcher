@@ -229,3 +229,78 @@ def test_launch_client_passes_only_verified_typed_auto_login_arguments(
         "/login:fixture-account:fixture-dummy",
         "/autoSelectCharacter:90000001",
     )
+
+
+def test_launch_client_prepares_selected_root_trust_before_spawn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "evejs"
+    client = tmp_path / "client" / "tq"
+    profile_tq = tmp_path / "profiles" / "account" / "tq"
+    exe = profile_tq / "bin64" / "exefile.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"")
+    client.mkdir(parents=True)
+    events: list[tuple[object, ...]] = []
+
+    monkeypatch.setattr(launcher, "get_client_exe_path", lambda _path: exe)
+    monkeypatch.setattr(
+        launcher,
+        "prepare_evejs_client_certificate_trust",
+        lambda selected_root, selected_client: events.append(
+            ("trust", selected_root, selected_client)
+        )
+        or True,
+    )
+    monkeypatch.setattr(
+        launcher,
+        "launch_eve_client",
+        lambda executable, env, cwd: events.append(("spawn", executable))
+        or object(),
+    )
+
+    launcher.launch_client(
+        evejs_root=str(root),
+        profile_tq_path=profile_tq,
+        client_path=str(client),
+    )
+
+    assert events[0] == ("trust", str(root), client)
+    assert events[1] == ("spawn", exe)
+
+
+def test_launch_client_does_not_spawn_when_certificate_preparation_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "evejs"
+    client = tmp_path / "client" / "tq"
+    profile_tq = tmp_path / "profiles" / "account" / "tq"
+    exe = profile_tq / "bin64" / "exefile.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"")
+    client.mkdir(parents=True)
+
+    monkeypatch.setattr(launcher, "get_client_exe_path", lambda _path: exe)
+
+    def fail_trust(_root, _client):  # type: ignore[no-untyped-def]
+        raise RuntimeError("trust preparation failed")
+
+    monkeypatch.setattr(
+        launcher,
+        "prepare_evejs_client_certificate_trust",
+        fail_trust,
+    )
+    monkeypatch.setattr(
+        launcher,
+        "launch_eve_client",
+        lambda *_args, **_kwargs: pytest.fail("EVE must not spawn"),
+    )
+
+    with pytest.raises(RuntimeError, match="trust preparation failed"):
+        launcher.launch_client(
+            evejs_root=str(root),
+            profile_tq_path=profile_tq,
+            client_path=str(client),
+        )

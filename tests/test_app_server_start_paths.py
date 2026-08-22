@@ -1,6 +1,7 @@
 """Tests for routing every application server-start path through one resolver."""
 from __future__ import annotations
 
+import sqlite3
 from copy import deepcopy
 from pathlib import Path
 
@@ -26,6 +27,27 @@ def _minimal_window_config() -> dict:
         }
     )
     return cfg
+
+
+def _write_valid_market_seed(root: Path) -> Path:
+    market_dir = root / "externalservices" / "market-server"
+    config_path = market_dir / "config" / "market-server.local.toml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        '[storage]\ndatabase_path = "data/generated/market.sqlite"\n',
+        encoding="utf-8",
+    )
+    database = market_dir / "data" / "generated" / "market.sqlite"
+    database.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE manifest (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO manifest (key, value) VALUES (?, ?)",
+            ("manifest_json", "{}"),
+        )
+    return database
 
 
 @pytest.fixture
@@ -58,6 +80,9 @@ def bare_window(qapp: QApplication) -> MainWindow:
     window._cfg = _minimal_window_config()
     window._server_proc = None
     window._market_proc = None
+    window._market_intent = None
+    window._market_error = None
+    window._service_reachability = (False, False)
     window._service_thread = None
     window._service_monitor = None
     window._service_monitor_start_pending = False
@@ -243,12 +268,87 @@ def test_ready_callback_survives_thread_finish_arriving_before_result(
     assert bare_window._lifecycle_thread is None
 
 
+def test_stack_worker_is_allowed_to_start_game_after_optional_market_failure(
+    bare_window: MainWindow,
+    tmp_path: Path,
+) -> None:
+    captured: list[object] = []
+    bare_window._cfg["evejs_root"] = str(tmp_path)
+    bare_window._lifecycle_thread = None
+    bare_window._server_intent = None
+    bare_window._server_error = None
+    bare_window._publish_cached_runtime = lambda: None
+    bare_window._begin_lifecycle_worker = (
+        lambda worker, _handler: captured.append(worker)
+    )
+
+    assert bare_window._start_service_sequence(
+        start_market=True,
+        start_game=True,
+        mode="vanilla",
+        on_ready=None,
+        error_title="Service Startup Failed",
+    )
+
+    assert len(captured) == 1
+    assert captured[0]._continue_game_after_market_failure is True
+
+
+def test_partial_stack_start_keeps_game_ready_and_runs_client_continuation(
+    bare_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FinishedThread:
+        @staticmethod
+        def deleteLater() -> None:
+            return None
+
+    callbacks: list[str] = []
+    warnings: list[tuple[str, str]] = []
+    bare_window._lifecycle_thread = FinishedThread()
+    bare_window._lifecycle_result_received = False
+    bare_window._lifecycle_thread_finished = False
+    bare_window._lifecycle_after_thread_callback = None
+    bare_window._lifecycle_start_scope = (True, True)
+    bare_window._lifecycle_start_token = object()
+    bare_window._lifecycle_ready_callback = lambda: callbacks.append("ready")
+    bare_window._lifecycle_start_voice_event = None
+    bare_window._lifecycle_error_title = "Auto-start Services Failed"
+    bare_window._server_intent = object()
+    bare_window._server_error = None
+    bare_window._publish_cached_runtime = lambda: None
+    monkeypatch.setattr(
+        "src.app.QMessageBox.warning",
+        lambda _parent, title, message: warnings.append((title, message)),
+    )
+    monkeypatch.setattr(
+        "src.app.QMessageBox.critical",
+        lambda *_args: pytest.fail("a usable Game-only result is not a total failure"),
+    )
+
+    bare_window._on_service_start_completed(
+        ServiceStartResult(
+            market_ready=False,
+            game_ready=True,
+            market_error="Market service exited before readiness (code 1).",
+        )
+    )
+    bare_window._on_lifecycle_thread_finished()
+
+    assert bare_window._service_reachability == (True, False)
+    assert bare_window._server_intent is None
+    assert callbacks == ["ready"]
+    assert warnings
+    assert "Game is online" in warnings[0][1]
+
+
 def test_manual_market_start_delegates_to_background_sequence(
     bare_window: MainWindow,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bare_window._cfg["evejs_root"] = str(tmp_path)
+    _write_valid_market_seed(tmp_path)
     calls: list[dict[str, object]] = []
 
     class FakeProcess:
@@ -280,6 +380,41 @@ def test_manual_market_start_delegates_to_background_sequence(
             "voice_event": VoiceEvent.MARKET_SERVER_LAUNCHING,
         }
     ]
+
+
+def test_manual_market_start_skips_unavailable_seed_and_clears_stale_error(
+    bare_window: MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bare_window._cfg["evejs_root"] = str(tmp_path)
+    bare_window._market_intent = object()
+    bare_window._market_error = "previous Market startup failed"
+    bare_window._service_reachability = (True, True)
+    events: list[str] = []
+    messages: list[tuple[str, str]] = []
+    bare_window._is_market_running = lambda: False
+    bare_window._update_status_bar = lambda: events.append("status")
+    monkeypatch.setattr(
+        "src.app.QMessageBox.information",
+        lambda _parent, title, message: messages.append((title, message)),
+    )
+    monkeypatch.setattr(
+        bare_window,
+        "_start_service_sequence",
+        lambda **_kwargs: pytest.fail("unavailable Market reached startup worker"),
+        raising=False,
+    )
+
+    bare_window._start_market()
+
+    assert events == ["status"]
+    assert len(messages) == 1
+    assert messages[0][0] == "Optional Market Not Ready"
+    assert "Tools > Market Seed Builder" in messages[0][1]
+    assert bare_window._market_intent is None
+    assert bare_window._market_error is None
+    assert bare_window._service_reachability == (True, False)
 
 
 def test_manual_start_does_not_duplicate_alive_starting_process(
@@ -322,6 +457,7 @@ def test_start_all_delegates_market_then_game_to_background_sequence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bare_window._cfg["evejs_root"] = str(tmp_path)
+    _write_valid_market_seed(tmp_path)
     events: list[object] = []
     bare_window._resolve_server_start = lambda: (
         events.append("resolve") or ("modded", tmp_path / "StartServerWithMods.bat")
@@ -356,6 +492,105 @@ def test_start_all_delegates_market_then_game_to_background_sequence(
             },
         ),
     ]
+
+
+def test_start_all_starts_game_without_unseeded_optional_market(
+    bare_window: MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bare_window._cfg["evejs_root"] = str(tmp_path)
+    market_dir = tmp_path / "externalservices" / "market-server"
+    config_path = market_dir / "config" / "market-server.local.toml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        '[storage]\ndatabase_path = "data/generated/market.sqlite"\n',
+        encoding="utf-8",
+    )
+    bare_window._market_intent = object()
+    bare_window._market_error = "previous Market startup failed"
+    bare_window._service_reachability = (False, True)
+    events: list[object] = []
+    messages: list[tuple[str, str]] = []
+    bare_window._resolve_server_start = lambda: (
+        events.append("resolve") or ("vanilla", tmp_path / "StartServer.bat")
+    )
+    bare_window._is_market_running = lambda: False
+    monkeypatch.setattr("src.app.is_server_running", lambda **_kwargs: False)
+    monkeypatch.setattr(
+        "src.app.QMessageBox.information",
+        lambda _parent, title, message: messages.append((title, message)),
+    )
+    monkeypatch.setattr(
+        bare_window,
+        "_start_service_sequence",
+        lambda **kwargs: events.append(("sequence", kwargs)) or True,
+        raising=False,
+    )
+
+    bare_window._start_all_servers()
+
+    assert events == [
+        "resolve",
+        (
+            "sequence",
+            {
+                "start_market": False,
+                "start_game": True,
+                "mode": "vanilla",
+                "on_ready": None,
+                "error_title": "Service Startup Failed",
+                "voice_event": VoiceEvent.GAME_SERVER_LAUNCHING,
+            },
+        ),
+    ]
+    assert len(messages) == 1
+    assert "optional market" in messages[0][1].casefold()
+    assert "game will start without it" in messages[0][1].casefold()
+    assert "Tools > Market Seed Builder" in messages[0][1]
+    assert bare_window._market_intent is None
+    assert bare_window._market_error is None
+    assert bare_window._service_reachability == (False, False)
+
+
+def test_start_all_skips_unavailable_market_when_game_is_already_active(
+    bare_window: MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bare_window._cfg["evejs_root"] = str(tmp_path)
+    bare_window._market_intent = object()
+    bare_window._market_error = "previous Market startup failed"
+    bare_window._service_reachability = (True, True)
+    events: list[str] = []
+    messages: list[tuple[str, str]] = []
+    bare_window._server_process_alive = lambda: True
+    bare_window._is_market_running = lambda: False
+    bare_window._resolve_server_start = lambda: pytest.fail(
+        "active Game should not resolve a new start"
+    )
+    bare_window._update_status_bar = lambda: events.append("status")
+    monkeypatch.setattr(
+        "src.app.QMessageBox.information",
+        lambda _parent, title, message: messages.append((title, message)),
+    )
+    monkeypatch.setattr(
+        bare_window,
+        "_start_service_sequence",
+        lambda **_kwargs: pytest.fail("empty startup request reached worker"),
+        raising=False,
+    )
+
+    bare_window._start_all_servers()
+
+    assert events == ["status"]
+    assert len(messages) == 1
+    assert messages[0][0] == "Optional Market Not Ready"
+    assert "game is already online" in messages[0][1].casefold()
+    assert "already running" not in messages[0][0].casefold()
+    assert bare_window._market_intent is None
+    assert bare_window._market_error is None
+    assert bare_window._service_reachability == (True, False)
 
 
 def test_owned_game_stop_delegates_wait_and_kill_to_background_sequence(
@@ -529,6 +764,7 @@ def test_auto_start_defers_the_ready_callback_until_the_sequence_finishes(
             "auto_start_server": True,
         }
     )
+    _write_valid_market_seed(tmp_path)
     events: list[str] = []
     sequence_calls: list[dict[str, object]] = []
     bare_window._resolve_server_start = lambda: (
@@ -555,6 +791,94 @@ def test_auto_start_defers_the_ready_callback_until_the_sequence_finishes(
     assert callable(callback)
     callback()
     assert events == ["resolve", "ready"]
+
+
+def test_auto_start_continues_game_without_unavailable_optional_market(
+    bare_window: MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bare_window._cfg.update(
+        {
+            "evejs_root": str(tmp_path),
+            "auto_start_market": True,
+            "auto_start_server": True,
+        }
+    )
+    bare_window._market_intent = object()
+    bare_window._market_error = "previous Market startup failed"
+    bare_window._service_reachability = (False, True)
+    events: list[str] = []
+    sequence_calls: list[dict[str, object]] = []
+    bare_window._resolve_server_start = lambda: (
+        events.append("resolve") or ("vanilla", tmp_path / "StartServer.bat")
+    )
+    bare_window._is_market_running = lambda: False
+    monkeypatch.setattr("src.app.is_server_running", lambda **_kwargs: False)
+    monkeypatch.setattr(
+        "src.app.QMessageBox.information",
+        lambda *_args: pytest.fail("auto-start must not pause on an optional service"),
+    )
+    monkeypatch.setattr(
+        bare_window,
+        "_start_service_sequence",
+        lambda **kwargs: sequence_calls.append(kwargs) or True,
+        raising=False,
+    )
+
+    assert bare_window._ensure_server_if_needed(lambda: events.append("ready")) is True
+
+    assert events == ["resolve"]
+    assert len(sequence_calls) == 1
+    assert sequence_calls[0]["start_market"] is False
+    assert sequence_calls[0]["start_game"] is True
+    assert sequence_calls[0]["mode"] == "vanilla"
+    assert sequence_calls[0]["error_title"] == "Auto-start Services Failed"
+    callback = sequence_calls[0]["on_ready"]
+    assert callable(callback)
+    callback()
+    assert events == ["resolve", "ready"]
+    assert bare_window._market_intent is None
+    assert bare_window._market_error is None
+    assert bare_window._service_reachability == (False, False)
+
+
+def test_auto_start_continues_client_when_only_unavailable_market_was_requested(
+    bare_window: MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bare_window._cfg.update(
+        {
+            "evejs_root": str(tmp_path),
+            "auto_start_market": True,
+            "auto_start_server": True,
+        }
+    )
+    bare_window._market_intent = object()
+    bare_window._market_error = "previous Market startup failed"
+    bare_window._service_reachability = (True, True)
+    events: list[str] = []
+    bare_window._server_process_alive = lambda: True
+    bare_window._is_market_running = lambda: False
+    bare_window._update_status_bar = lambda: events.append("status")
+    monkeypatch.setattr(
+        "src.app.QMessageBox.information",
+        lambda *_args: pytest.fail("client continuation must not wait on optional Market"),
+    )
+    monkeypatch.setattr(
+        bare_window,
+        "_start_service_sequence",
+        lambda **_kwargs: pytest.fail("empty startup request reached worker"),
+        raising=False,
+    )
+
+    assert bare_window._ensure_server_if_needed(lambda: events.append("ready")) is True
+
+    assert events == ["status", "ready"]
+    assert bare_window._market_intent is None
+    assert bare_window._market_error is None
+    assert bare_window._service_reachability == (True, False)
 
 
 def test_single_client_launch_aborts_when_auto_start_is_cancelled(
@@ -994,6 +1318,40 @@ def test_failed_deferred_shutdown_keeps_the_window_open(
     )
 
     assert bare_window._close_after_lifecycle is False
+
+
+def test_nonzero_graceful_exit_clears_owned_game_and_reports_failure(
+    bare_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    messages: list[str] = []
+    owned_process = object()
+    bare_window._server_proc = owned_process
+    bare_window._lifecycle_stop_scope = (True, False)
+    bare_window._lifecycle_stop_callback = None
+    bare_window._service_reachability = (True, False)
+    bare_window._publish_cached_runtime = lambda: None
+    bare_window._lifecycle_result_received = False
+    bare_window._lifecycle_thread_finished = False
+    monkeypatch.setattr(
+        "src.app.QMessageBox.critical",
+        lambda _parent, _title, message: messages.append(message),
+    )
+
+    bare_window._on_service_stop_completed(
+        ServiceStopResult(
+            game_stopped=True,
+            market_stopped=True,
+            game_error=(
+                "Game service exited with code 17 during graceful shutdown."
+            ),
+        )
+    )
+
+    assert bare_window._server_proc is None
+    assert bare_window._service_reachability == (False, False)
+    assert messages
+    assert "code 17" in messages[-1]
 
 
 def test_service_monitor_shutdown_intent_precedes_thread_release(

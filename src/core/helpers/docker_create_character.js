@@ -18,7 +18,6 @@ const { exitWithTerminalResult } = require("./terminal_result");
 
 const MAX_INPUT_BYTES = 16 * 1024;
 const EXPECTED_APP_ROOT = "/app";
-const EXPECTED_EVEJS_VERSION = "0.12.5";
 const BACKUP_ROOT = "/run/evejs-launcher/backup";
 const GAMESTORE_ROOT = "/var/lib/evejs/gameStore";
 const GAMESTORE_DATA = `${GAMESTORE_ROOT}/data`;
@@ -42,46 +41,192 @@ const MANIFEST_PATTERN = /^(?:manifest(?:[._-][A-Za-z0-9_.-]+)?|database-manifes
 const WELCOME_MAIL_SENDER_ID = 140000004;
 const WELCOME_MAIL_SENDER_NAME = "GM ELYSIAN";
 const WELCOME_MAIL_TITLE = "Welcome to EveJS Elysian";
-const REVIEWED_SOURCE_CONTRACTS = Object.freeze([
-  ["gameStore/index.js", "dc474d40f02e64db715361630c1a48ac3e3de30ed77ae300d2ffd82815178421", [
+const MAX_STARTER_SKILL_COUNT = 256;
+const SKILL_RECORD_KEYS = Object.freeze([
+  "itemID", "typeID", "ownerID", "locationID", "flagID", "categoryID",
+  "groupID", "groupName", "itemName", "published", "skillLevel",
+  "trainedSkillLevel", "effectiveSkillLevel", "virtualSkillLevel", "skillRank",
+  "skillPoints", "trainedSkillPoints", "inTraining", "trainingStartSP",
+  "trainingDestinationSP", "trainingStartTime", "trainingEndTime",
+]);
+const V0126_EMPTY_MAIL_PRESTATE = Object.freeze({
+  _meta: Object.freeze({
+    nextMessageID: 1,
+    nextMailingListID: 500000000,
+  }),
+  messages: Object.freeze({}),
+  mailboxes: Object.freeze({}),
+  mailingLists: Object.freeze({}),
+});
+const V0126_EMPTY_NOTIFICATION_PRESTATE = Object.freeze({
+  _meta: Object.freeze({ nextNotificationID: 1 }),
+  boxes: Object.freeze({}),
+});
+const REVIEWED_SOURCE_TOKENS = Object.freeze({
+  "gameStore/index.js": Object.freeze([
     "function acquirePersistenceOwnerLease(options = {})",
     "function shutdown(reason = \"shutdown\")",
     "_sqliteTables: SQLITE_TABLES",
-  ]],
-  ["gameStore/sqliteStore.js", "c71e3a6fb0c2f3c51be2848f0842a5286775c978ad19d39c006747ef08fecc0a", [
+  ]),
+  "gameStore/sqliteStore.js": Object.freeze([
     "function assembleFromRows(table, rows = {})",
     "assembleFromRows,",
     "ROW_KEY_SEP",
-  ]],
-  ["gameStore/tableRepository.js", "f74665cd5de3a23bc4bf0f317ab6aa4186ba0a9b8443bcbdf70bbe784d99ac6e", [
+  ]),
+  "gameStore/tableRepository.js": Object.freeze([
     "return store.write(table, pathArg, value, opts)",
     "return store.remove(table, pathArg)",
     "return store.ensureTable(table)",
-  ]],
-  ["services/_shared/identityAllocator.js", "f801b4cbc973451ea7ba561d6a1df9bae589ddd84b21874549864ebe1124ea8f", [
+  ]),
+  "services/_shared/identityAllocator.js": Object.freeze([
     "function reserveAccountID()",
     "database.flushTablesSync([IDENTITY_TABLE])",
-  ]],
-  ["services/account/accountRoleProfiles.js", "b850b911ae3942f97211d6031c5e45bbf90f67764d97f59fb1c00b55b9c3494b", [
+  ]),
+  "services/account/accountRoleProfiles.js": Object.freeze([
     "function buildPersistedAccountRoleRecord(account = {})",
     "buildPersistedAccountRoleRecord,",
-  ]],
-  ["services/character/charService.js", "302bfbcc6abdb7125721d469a9a76dc5879393488d83ad2ddd710da92dff7524", [
+  ]),
+  "services/character/charService.js": Object.freeze([
     "Handle_CreateCharacterWithDoll(args, session)",
     "spawnRookieShipForCharacter(",
     "repo.flushTablesSync([",
-  ]],
-  ["services/ship/rookieShipRuntime.js", "54ea7e981c9938538c264079124c2cd6f47518946e734a5be91fb54f40272f2b", [
+  ]),
+  "services/character/characterState.js": Object.freeze([
+    "function normalizeCharacterRecord(charId, record, options = {})",
+    "ensureCharacterSkills(charId);",
+    "getCharacterSkillPointTotal(charId)",
+  ]),
+  "services/character/characterCreationData.js": Object.freeze([
+    "function getCharacterCreationRace(raceID, options = {})",
+    "getCharacterCreationRace,",
+    "skills: (Array.isArray(entry.skills) ? entry.skills : [])",
+  ]),
+  "services/skills/skillState.js": Object.freeze([
+    "function buildSkillRecord(",
+    "function calculateSkillPointsForLevel(",
+    "function getSkillTypeByID(typeID, options = {})",
+    "function ensureCharacterSkills(charId, options = {})",
+    "return seedCharacterStarterSkills(numericCharId, characterRecord.raceID);",
+    "buildSkillRecord,",
+    "calculateSkillPointsForLevel,",
+    "getSkillTypeByID,",
+  ]),
+  "services/mail/mailState.js": Object.freeze([
+    "const FIRST_MAILING_LIST_ID = 500000000;",
+    "nextMessageID: 1,",
+    "nextMailingListID: FIRST_MAILING_LIST_ID,",
+    "function sendWelcomeMailToCharacter(characterID, options = {})",
+    "sendWelcomeMailToCharacter,",
+  ]),
+  "services/notifications/notificationState.js": Object.freeze([
+    "nextNotificationID: 1,",
+    "function createNewMailNotification(characterID, data = {}, options = {})",
+    "createNewMailNotification,",
+  ]),
+  "services/ship/rookieShipRuntime.js": Object.freeze([
     "function spawnRookieShipForCharacter(",
     "spawnRookieShipForCharacter,",
-  ]],
-  ["space/runtime.js", "485cb18c79e5f54d3973327fdcf4c3b686442cab0b1c67bbb85e02d853088097", [
+  ]),
+  "space/runtime.js": Object.freeze([
     "const runtimeExports = module.exports",
-  ]],
-  ["space/transitions.js", "211c2074f82a6129bfa96da6e3150e55bf217c419bb7a733e75359f51d1a4307", [
+  ]),
+  "space/transitions.js": Object.freeze([
     "module.exports = {",
-  ]],
+  ]),
+});
+const BASE_REVIEWED_SOURCE_PATHS = Object.freeze([
+  "gameStore/index.js",
+  "gameStore/sqliteStore.js",
+  "gameStore/tableRepository.js",
+  "services/_shared/identityAllocator.js",
+  "services/account/accountRoleProfiles.js",
+  "services/character/charService.js",
+  "services/ship/rookieShipRuntime.js",
+  "space/runtime.js",
+  "space/transitions.js",
 ]);
+
+function makeReviewedImageProfile(version, sourceHashes) {
+  const expectedPaths = Object.keys(sourceHashes);
+  if (
+    typeof version !== "string" ||
+    BASE_REVIEWED_SOURCE_PATHS.some(
+      (relativePath) =>
+        !Object.prototype.hasOwnProperty.call(sourceHashes, relativePath),
+    ) ||
+    expectedPaths.some(
+      (relativePath) =>
+        !Object.prototype.hasOwnProperty.call(REVIEWED_SOURCE_TOKENS, relativePath),
+    )
+  ) {
+    throw new Error("Invalid reviewed Docker image profile.");
+  }
+  const sourceContracts = expectedPaths.map((relativePath) => {
+    const expectedHash = sourceHashes[relativePath];
+    if (!/^[0-9a-f]{64}$/.test(expectedHash || "")) {
+      throw new Error("Invalid reviewed Docker image source hash.");
+    }
+    return Object.freeze([
+      relativePath,
+      expectedHash,
+      REVIEWED_SOURCE_TOKENS[relativePath],
+    ]);
+  });
+  return Object.freeze({
+    version,
+    serverPackage: Object.freeze({
+      name: "eve.js",
+      type: "commonjs",
+      dependencies: Object.freeze({
+        "better-sqlite3": "^12.11.1",
+      }),
+    }),
+    sqlitePackage: Object.freeze({
+      name: "better-sqlite3",
+      version: "12.11.1",
+    }),
+    sourceContracts: Object.freeze(sourceContracts),
+  });
+}
+
+const REVIEWED_IMAGE_PROFILES = Object.freeze({
+  "0.12.5": makeReviewedImageProfile("0.12.5", {
+    "gameStore/index.js": "dc474d40f02e64db715361630c1a48ac3e3de30ed77ae300d2ffd82815178421",
+    "gameStore/sqliteStore.js": "c71e3a6fb0c2f3c51be2848f0842a5286775c978ad19d39c006747ef08fecc0a",
+    "gameStore/tableRepository.js": "f74665cd5de3a23bc4bf0f317ab6aa4186ba0a9b8443bcbdf70bbe784d99ac6e",
+    "services/_shared/identityAllocator.js": "f801b4cbc973451ea7ba561d6a1df9bae589ddd84b21874549864ebe1124ea8f",
+    "services/account/accountRoleProfiles.js": "b850b911ae3942f97211d6031c5e45bbf90f67764d97f59fb1c00b55b9c3494b",
+    "services/character/charService.js": "302bfbcc6abdb7125721d469a9a76dc5879393488d83ad2ddd710da92dff7524",
+    "services/ship/rookieShipRuntime.js": "54ea7e981c9938538c264079124c2cd6f47518946e734a5be91fb54f40272f2b",
+    "space/runtime.js": "485cb18c79e5f54d3973327fdcf4c3b686442cab0b1c67bbb85e02d853088097",
+    "space/transitions.js": "211c2074f82a6129bfa96da6e3150e55bf217c419bb7a733e75359f51d1a4307",
+  }),
+  "0.12.6": makeReviewedImageProfile("0.12.6", {
+    "gameStore/index.js": "4007195df24a93f815a2f82b155bbfdfd78b56749b3a89d1f402abb33df61eac",
+    "gameStore/sqliteStore.js": "c181ef96354b5565baf457d9d40de0380654eb8e20f95008d1a8f3870d7c926f",
+    "gameStore/tableRepository.js": "ae7bdb55fd48e0d0e3fd3c72416e511804ee4414652e4e84a139b351a62c3008",
+    "services/_shared/identityAllocator.js": "f801b4cbc973451ea7ba561d6a1df9bae589ddd84b21874549864ebe1124ea8f",
+    "services/account/accountRoleProfiles.js": "b850b911ae3942f97211d6031c5e45bbf90f67764d97f59fb1c00b55b9c3494b",
+    "services/character/charService.js": "e48586fa08087bbcde9bf9ac15eaff2525b976c0900e7202b8e3c03d87c85aaa",
+    "services/character/characterState.js": "4292922f810901292c1915716998f62727d3cbcd62fae61f35a366dc92f28a9d",
+    "services/character/characterCreationData.js": "7ef9c0b71ac5a595c47baf39013390029cd32de794ed5c98227c74bfb7c0ac64",
+    "services/skills/skillState.js": "9194dd1c0184094a182aabd84b1236c5be2ea6410578edcc408a489099c55f88",
+    "services/mail/mailState.js": "47a656ca926aeed1621ed390cf4353e7b5c6bce69355587cbb123b732b6c47b9",
+    "services/notifications/notificationState.js": "535c108b63b5d4e769018017987af6e37eedbb5c30c5e29403ada2117700b53d",
+    "services/ship/rookieShipRuntime.js": "54ea7e981c9938538c264079124c2cd6f47518946e734a5be91fb54f40272f2b",
+    "space/runtime.js": "2103dced34a2fdcc99a4b174e851a1f009864fd20c15f9d0bc15093bb651a300",
+    "space/transitions.js": "70686c837c62530467f78d88757641f479a05f410c097e3df7a1f24cd674be19",
+  }),
+});
+
+function reviewedImageProfile(version) {
+  return (
+    typeof version === "string" &&
+    Object.prototype.hasOwnProperty.call(REVIEWED_IMAGE_PROFILES, version)
+  )
+    ? REVIEWED_IMAGE_PROFILES[version]
+    : null;
+}
 
 function fixedError(code, message) {
   const error = new Error(message);
@@ -245,26 +390,32 @@ function attestProductionImage(root) {
     throw fixedError("UNSUPPORTED_IMAGE", "Docker character image is unsupported.");
   }
   const serverPackage = readPackage(path.join(resolvedRoot, "server", "package.json"));
+  const profile = reviewedImageProfile(serverPackage.version);
   if (
-    serverPackage.name !== "eve.js" ||
-    serverPackage.version !== EXPECTED_EVEJS_VERSION ||
-    serverPackage.type !== "commonjs" ||
+    profile === null ||
+    serverPackage.version !== profile.version ||
+    serverPackage.name !== profile.serverPackage.name ||
+    serverPackage.type !== profile.serverPackage.type ||
     !serverPackage.dependencies ||
-    serverPackage.dependencies["better-sqlite3"] !== "^12.11.1"
+    serverPackage.dependencies["better-sqlite3"] !==
+      profile.serverPackage.dependencies["better-sqlite3"]
   ) {
     throw fixedError("UNSUPPORTED_IMAGE", "Docker character image is unsupported.");
   }
   const sqlitePackage = readPackage(
     path.join(resolvedRoot, "server", "node_modules", "better-sqlite3", "package.json"),
   );
-  if (sqlitePackage.name !== "better-sqlite3" || sqlitePackage.version !== "12.11.1") {
+  if (
+    sqlitePackage.name !== profile.sqlitePackage.name ||
+    sqlitePackage.version !== profile.sqlitePackage.version
+  ) {
     throw fixedError("UNSUPPORTED_IMAGE", "Docker character image is unsupported.");
   }
   const serverSource = path.join(resolvedRoot, "server", "src");
   if (fs.existsSync(path.join(serverSource, "gameStore", "package.json"))) {
     throw fixedError("UNSUPPORTED_IMAGE", "Docker character image is unsupported.");
   }
-  for (const [relativePath, expectedHash, tokens] of REVIEWED_SOURCE_CONTRACTS) {
+  for (const [relativePath, expectedHash, tokens] of profile.sourceContracts) {
     const source = fs.readFileSync(
       requireOrdinaryFile(path.join(serverSource, ...relativePath.split("/"))),
       "utf8",
@@ -280,7 +431,7 @@ function attestProductionImage(root) {
       throw fixedError("UNSUPPORTED_IMAGE", "Docker character image is unsupported.");
     }
   }
-  return serverSource;
+  return Object.freeze({ serverSource, profile });
 }
 
 function requirePlainDirectory(directory, code = "UNSAFE_PATH") {
@@ -574,6 +725,230 @@ function withoutKeys(value, omitted) {
   );
 }
 
+function failCreationDependency() {
+  throw fixedError(
+    "DEPENDENCY_FAILED",
+    "Docker character dependencies are unavailable.",
+  );
+}
+
+function deepFreezeValue(value) {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const nested of Object.values(value)) deepFreezeValue(nested);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+function immutableJsonClone(value) {
+  let cloned;
+  try {
+    cloned = JSON.parse(JSON.stringify(value));
+  } catch (_error) {
+    failCreationDependency();
+  }
+  if (!logicalEqual(value, cloned)) failCreationDependency();
+  return deepFreezeValue(cloned);
+}
+
+function loadStarterSkillBlueprints(
+  getCharacterCreationRace,
+  getSkillTypeByID,
+) {
+  if (
+    typeof getCharacterCreationRace !== "function" ||
+    typeof getSkillTypeByID !== "function"
+  ) {
+    failCreationDependency();
+  }
+  const raceProfile = getCharacterCreationRace(1);
+  if (
+    !raceProfile ||
+    typeof raceProfile !== "object" ||
+    Array.isArray(raceProfile) ||
+    raceProfile.raceID !== 1 ||
+    !Array.isArray(raceProfile.skills) ||
+    raceProfile.skills.length < 1 ||
+    raceProfile.skills.length > MAX_STARTER_SKILL_COUNT
+  ) {
+    failCreationDependency();
+  }
+  const seenTypeIds = new Set();
+  const blueprints = [];
+  for (const entry of raceProfile.skills) {
+    if (
+      !entry ||
+      typeof entry !== "object" ||
+      Array.isArray(entry) ||
+      !logicalEqual(Object.keys(entry).sort(), ["level", "typeID"]) ||
+      !Number.isSafeInteger(entry.typeID) ||
+      entry.typeID <= 0 ||
+      !Number.isInteger(entry.level) ||
+      entry.level < 0 ||
+      entry.level > 5
+    ) {
+      failCreationDependency();
+    }
+    const key = String(entry.typeID);
+    if (seenTypeIds.has(key)) failCreationDependency();
+    const rawSkillType = getSkillTypeByID(entry.typeID);
+    if (
+      !rawSkillType ||
+      typeof rawSkillType !== "object" ||
+      Array.isArray(rawSkillType)
+    ) {
+      failCreationDependency();
+    }
+    const skillType = immutableJsonClone(rawSkillType);
+    if (skillType.typeID !== entry.typeID) failCreationDependency();
+    seenTypeIds.add(key);
+    blueprints.push(Object.freeze({
+      typeID: entry.typeID,
+      level: entry.level,
+      skillType,
+    }));
+  }
+  return Object.freeze(blueprints);
+}
+
+function isCanonicalStarterSkillRecord(record, characterId, typeId, level) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return false;
+  const expectedItemId = characterId * 100000 + typeId;
+  const expectedSkillPoints = level <= 0
+    ? 0
+    : Math.round(
+      250 * record.skillRank * Math.pow(Math.sqrt(32), level - 1),
+    );
+  return (
+    logicalEqual(Object.keys(record).sort(), [...SKILL_RECORD_KEYS].sort()) &&
+    Number.isSafeInteger(expectedItemId) &&
+    Number.isSafeInteger(record.itemID) &&
+    record.itemID === expectedItemId &&
+    record.typeID === typeId &&
+    record.ownerID === characterId &&
+    record.locationID === characterId &&
+    record.flagID === 7 &&
+    record.categoryID === 16 &&
+    Number.isSafeInteger(record.groupID) &&
+    record.groupID >= 0 &&
+    typeof record.groupName === "string" &&
+    typeof record.itemName === "string" &&
+    record.itemName.trim().length > 0 &&
+    typeof record.published === "boolean" &&
+    Number.isInteger(record.skillLevel) &&
+    record.skillLevel === level &&
+    Number.isInteger(record.trainedSkillLevel) &&
+    record.trainedSkillLevel === level &&
+    Number.isInteger(record.effectiveSkillLevel) &&
+    record.effectiveSkillLevel === level &&
+    record.virtualSkillLevel === null &&
+    typeof record.skillRank === "number" &&
+    Number.isFinite(record.skillRank) &&
+    record.skillRank > 0 &&
+    Number.isSafeInteger(record.skillPoints) &&
+    record.skillPoints >= 0 &&
+    Number.isSafeInteger(expectedSkillPoints) &&
+    record.skillPoints === expectedSkillPoints &&
+    record.trainedSkillPoints === record.skillPoints &&
+    record.trainingStartSP === record.skillPoints &&
+    record.trainingDestinationSP === record.skillPoints &&
+    record.inTraining === false &&
+    record.trainingStartTime === null &&
+    record.trainingEndTime === null
+  );
+}
+
+function buildCanonicalStarterSkills(
+  characterIdValue,
+  blueprints,
+  buildSkillRecord,
+) {
+  const characterId = positiveInt(characterIdValue);
+  if (
+    !characterId ||
+    !Array.isArray(blueprints) ||
+    blueprints.length < 1 ||
+    blueprints.length > MAX_STARTER_SKILL_COUNT ||
+    typeof buildSkillRecord !== "function"
+  ) {
+    failCreationDependency();
+  }
+  const records = Object.create(null);
+  let skillPointTotal = 0;
+  for (const blueprint of blueprints) {
+    const typeId = positiveInt(blueprint && blueprint.typeID);
+    const level = blueprint && blueprint.level;
+    const key = String(typeId);
+    if (
+      !typeId ||
+      !Number.isInteger(level) ||
+      level < 0 ||
+      level > 5 ||
+      Object.prototype.hasOwnProperty.call(records, key) ||
+      !blueprint.skillType ||
+      blueprint.skillType.typeID !== typeId
+    ) {
+      failCreationDependency();
+    }
+    const record = immutableJsonClone(
+      buildSkillRecord(characterId, blueprint.skillType, level),
+    );
+    if (!isCanonicalStarterSkillRecord(record, characterId, typeId, level)) {
+      failCreationDependency();
+    }
+    skillPointTotal += record.skillPoints;
+    if (!Number.isSafeInteger(skillPointTotal)) failCreationDependency();
+    records[key] = record;
+  }
+  return Object.freeze({
+    records: Object.freeze(records),
+    skillPointTotal,
+  });
+}
+
+function assertV0126StarterSkillMutation(beforeValue, afterValue, expected) {
+  const characterId = positiveInt(expected.characterId);
+  const characterKey = String(characterId);
+  const expectedSkills = requireObject(expected.starterSkillRecords);
+  const expectedSkillKeys = Object.keys(expectedSkills).sort();
+  if (
+    !characterId ||
+    expectedSkillKeys.length < 1 ||
+    expectedSkillKeys.length > MAX_STARTER_SKILL_COUNT ||
+    !Number.isSafeInteger(expected.starterSkillPointTotal) ||
+    expected.starterSkillPointTotal < 0
+  ) {
+    throw fixedError("UNEXPECTED_MUTATION", "Docker character verification found an unexpected change.");
+  }
+  requirePreservedEntries(beforeValue, afterValue, new Set([characterKey]));
+  const afterSkills = requireObject(afterValue);
+  const starterSkills = requireObject(afterSkills[characterKey]);
+  requireExactKeys(starterSkills, expectedSkillKeys);
+  let canonicalSkillPointTotal = 0;
+  for (const key of expectedSkillKeys) {
+    const canonicalRecord = requireObject(expectedSkills[key]);
+    const persistedRecord = requireObject(starterSkills[key]);
+    requireExactKeys(persistedRecord, SKILL_RECORD_KEYS);
+    if (!logicalEqual(persistedRecord, canonicalRecord)) {
+      throw fixedError("UNEXPECTED_MUTATION", "Docker character verification found an unexpected change.");
+    }
+    canonicalSkillPointTotal += canonicalRecord.skillPoints;
+    if (!Number.isSafeInteger(canonicalSkillPointTotal)) {
+      throw fixedError("UNEXPECTED_MUTATION", "Docker character verification found an unexpected change.");
+    }
+  }
+  if (canonicalSkillPointTotal !== expected.starterSkillPointTotal) {
+    throw fixedError("UNEXPECTED_MUTATION", "Docker character verification found an unexpected change.");
+  }
+}
+
+function versionedEmptyPrestate(value, reviewedVersion, canonicalValue) {
+  const state = requireObject(value);
+  return reviewedVersion === "0.12.6" && Object.keys(state).length === 0
+    ? canonicalValue
+    : state;
+}
+
 function expectedWelcomeMailBody(characterName) {
   const pilot = String(characterName).trim() || "pilot";
   return [
@@ -621,11 +996,22 @@ function assertCreationLogicalContract(beforeTables, afterTables, expected) {
   const after = requireObject(afterTables);
   requireExactKeys(before, MUTATED_TABLES);
   requireExactKeys(after, MUTATED_TABLES);
+  const reviewedVersion = expected && expected.reviewedVersion;
+  if (reviewedVersion !== "0.12.5" && reviewedVersion !== "0.12.6") {
+    throw fixedError("UNEXPECTED_MUTATION", "Docker character verification found an unexpected change.");
+  }
 
-  for (const table of ["alliances", "corporations", "skills"]) {
+  for (const table of ["alliances", "corporations"]) {
     if (!logicalEqual(before[table], after[table])) {
       throw fixedError("UNEXPECTED_MUTATION", "Docker character verification found an unexpected change.");
     }
+  }
+  if (reviewedVersion === "0.12.5") {
+    if (!logicalEqual(before.skills, after.skills)) {
+      throw fixedError("UNEXPECTED_MUTATION", "Docker character verification found an unexpected change.");
+    }
+  } else {
+    assertV0126StarterSkillMutation(before.skills, after.skills, expected);
   }
 
   const username = String(expected.username);
@@ -634,6 +1020,16 @@ function assertCreationLogicalContract(beforeTables, afterTables, expected) {
   requirePreservedEntries(before.characters, after.characters, new Set([characterKey]));
   if (!logicalEqual(after.accounts[username], expected.accountRecord)) {
     throw fixedError("UNEXPECTED_MUTATION", "Docker character verification found an unexpected change.");
+  }
+  if (reviewedVersion === "0.12.6") {
+    const createdCharacter = requireObject(after.characters[characterKey]);
+    if (
+      createdCharacter.raceID !== 1 ||
+      !Number.isSafeInteger(expected.starterSkillPointTotal) ||
+      createdCharacter.skillPoints !== expected.starterSkillPointTotal
+    ) {
+      throw fixedError("UNEXPECTED_MUTATION", "Docker character verification found an unexpected change.");
+    }
   }
 
   const beforeIdentity = requireObject(before.identityState);
@@ -702,7 +1098,11 @@ function assertCreationLogicalContract(beforeTables, afterTables, expected) {
     throw fixedError("UNEXPECTED_MUTATION", "Docker character verification found an unexpected change.");
   }
 
-  const beforeMail = requireObject(before.mail);
+  const beforeMail = versionedEmptyPrestate(
+    before.mail,
+    reviewedVersion,
+    V0126_EMPTY_MAIL_PRESTATE,
+  );
   const afterMail = requireObject(after.mail);
   requireExactKeys(beforeMail, ["_meta", "messages", "mailboxes", "mailingLists"]);
   requireExactKeys(afterMail, Object.keys(beforeMail));
@@ -743,17 +1143,29 @@ function assertCreationLogicalContract(beforeTables, afterTables, expected) {
   const mailbox = requireObject(afterMail.mailboxes[characterKey]);
   requireExactKeys(mailbox, ["statuses", "labels", "_meta"]);
   requireExactKeys(mailbox.statuses, [String(messageId)]);
-  requireExactKeys(mailbox.statuses[String(messageId)], ["statusMask", "labelMask"]);
+  const messageStatus = requireObject(mailbox.statuses[String(messageId)]);
+  requireExactKeys(
+    messageStatus,
+    reviewedVersion === "0.12.6"
+      ? ["messageID", "statusMask", "labelMask"]
+      : ["statusMask", "labelMask"],
+  );
   if (
-    Number(mailbox.statuses[String(messageId)].statusMask) !== 0 ||
-    Number(mailbox.statuses[String(messageId)].labelMask) !== 1 ||
+    (reviewedVersion === "0.12.6" &&
+      positiveInt(messageStatus.messageID) !== messageId) ||
+    Number(messageStatus.statusMask) !== 0 ||
+    Number(messageStatus.labelMask) !== 1 ||
     !logicalEqual(mailbox.labels, {}) ||
     !logicalEqual(mailbox._meta, { nextLabelMask: 16 })
   ) {
     throw fixedError("UNEXPECTED_MUTATION", "Docker character verification found an unexpected change.");
   }
 
-  const beforeNotifications = requireObject(before.notifications);
+  const beforeNotifications = versionedEmptyPrestate(
+    before.notifications,
+    reviewedVersion,
+    V0126_EMPTY_NOTIFICATION_PRESTATE,
+  );
   const afterNotifications = requireObject(after.notifications);
   requireExactKeys(beforeNotifications, ["_meta", "boxes"]);
   requireExactKeys(afterNotifications, Object.keys(beforeNotifications));
@@ -1377,7 +1789,7 @@ function loadProductionRuntime() {
   const root = process.cwd();
   // Attest the exact reviewed image in this same one-off process before any
   // EveJS module can initialize GameStore or obtain persistence authority.
-  const serverSource = attestProductionImage(root);
+  const { serverSource, profile } = attestProductionImage(root);
   const database = require(path.join(serverSource, "gameStore", "index.js"));
   const BetterSqlite3 = require(
     path.join(root, "server", "node_modules", "better-sqlite3"),
@@ -1399,8 +1811,9 @@ function loadProductionRuntime() {
   return {
     database,
     backupManager: makeProductionBackupManager({ database, BetterSqlite3, sqliteStore }),
+    reviewedProfile: profile,
     loadCreationDependencies() {
-      return {
+      const dependencies = {
         reserveAccountID: require(
           path.join(serverSource, "services", "_shared", "identityAllocator"),
         ).reserveAccountID,
@@ -1411,6 +1824,22 @@ function loadProductionRuntime() {
           path.join(serverSource, "services", "character", "charService"),
         ),
       };
+      if (profile.version === "0.12.6") {
+        dependencies.getCharacterCreationRace = require(
+          path.join(
+            serverSource,
+            "services",
+            "character",
+            "characterCreationData",
+          ),
+        ).getCharacterCreationRace;
+        const skillState = require(
+          path.join(serverSource, "services", "skills", "skillState"),
+        );
+        dependencies.getSkillTypeByID = skillState.getSkillTypeByID;
+        dependencies.buildSkillRecord = skillState.buildSkillRecord;
+      }
+      return dependencies;
     },
   };
 }
@@ -1452,7 +1881,7 @@ async function executeDockerCharacterCreation(payload, overrides = {}) {
     overrides.database && overrides.backupManager && overrides.loadCreationDependencies
       ? overrides
       : loadProductionRuntime();
-  const { database, backupManager, loadCreationDependencies } = runtime;
+  const { database, backupManager, loadCreationDependencies, reviewedProfile } = runtime;
   let leaseAcquired = false;
   let context = null;
   let mutationStarted = false;
@@ -1461,6 +1890,8 @@ async function executeDockerCharacterCreation(payload, overrides = {}) {
 
   try {
     if (
+      reviewedImageProfile(reviewedProfile && reviewedProfile.version) !==
+        reviewedProfile ||
       !database ||
       typeof database.acquirePersistenceOwnerLease !== "function" ||
       typeof database.shutdown !== "function"
@@ -1490,8 +1921,15 @@ async function executeDockerCharacterCreation(payload, overrides = {}) {
       },
     );
 
-    const { reserveAccountID, buildPersistedAccountRoleRecord, CharService } =
-      loadCreationDependencies();
+    const creationDependencies = loadCreationDependencies();
+    const {
+      reserveAccountID,
+      buildPersistedAccountRoleRecord,
+      CharService,
+      getCharacterCreationRace,
+      getSkillTypeByID,
+      buildSkillRecord,
+    } = creationDependencies;
     if (
       typeof reserveAccountID !== "function" ||
       typeof buildPersistedAccountRoleRecord !== "function" ||
@@ -1501,6 +1939,12 @@ async function executeDockerCharacterCreation(payload, overrides = {}) {
     ) {
       throw fixedError("DEPENDENCY_FAILED", "Docker character dependencies are unavailable.");
     }
+    const starterSkillBlueprints = reviewedProfile.version === "0.12.6"
+      ? loadStarterSkillBlueprints(
+        getCharacterCreationRace,
+        getSkillTypeByID,
+      )
+      : null;
 
     const accountsResult = requireSuccess(
       database.read("accounts", "/"),
@@ -1558,6 +2002,13 @@ async function executeDockerCharacterCreation(payload, overrides = {}) {
     if (!characterId) {
       throw fixedError("CHARACTER_ID_FAILED", "Docker character allocation failed.");
     }
+    const canonicalStarterSkills = reviewedProfile.version === "0.12.6"
+      ? buildCanonicalStarterSkills(
+        characterId,
+        starterSkillBlueprints,
+        buildSkillRecord,
+      )
+      : null;
     requireSuccess(database.flushAllSync(), "CREATION_FLUSH_FAILED");
     const verified = await backupManager.verifyCreation(context, {
       accountId,
@@ -1565,6 +2016,10 @@ async function executeDockerCharacterCreation(payload, overrides = {}) {
       characterName: request.characterName,
       username: request.username,
       accountRecord: account,
+      reviewedVersion: reviewedProfile.version,
+      starterSkillRecords: canonicalStarterSkills && canonicalStarterSkills.records,
+      starterSkillPointTotal:
+        canonicalStarterSkills && canonicalStarterSkills.skillPointTotal,
     });
     if (!verified || verified.rookieShipVerified !== true) {
       throw fixedError("CREATION_VERIFY_FAILED", "Docker character creation was not persisted.");
@@ -1686,5 +2141,6 @@ module.exports = {
   listFileDigests,
   logicalRowsDigest,
   parsePayloadBuffer,
+  reviewedImageProfile,
   verifyRetainedBackup,
 };

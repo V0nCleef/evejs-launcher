@@ -8,7 +8,12 @@ from pathlib import Path
 
 from .client_autologin import AutoLoginLaunch, require_auto_login_arguments
 from .overview_state import OverviewBridgeLaunch
-from .platform import get_client_exe_path, launch_eve_client
+from .platform import (
+    get_client_exe_path,
+    launch_eve_client,
+    prepare_evejs_client_certificate_trust,
+    serialize_evejs_client_trust_and_spawn,
+)
 from .runtime.endpoints import RuntimeEndpoints
 
 
@@ -157,48 +162,59 @@ def launch_client(
     if not exe.exists():
         raise FileNotFoundError(f"Client executable not found: {exe}")
 
-    effective_proxy = launch_context.proxy_url if launch_context is not None else proxy_url
-    env = build_env(evejs_root, effective_proxy)
-    if overview_bridge is not None:
-        env["EVEJS_OVERVIEW_BRIDGE"] = overview_bridge.command
-        env["EVEJS_OVERVIEW_ACK_PATH"] = str(overview_bridge.ack_path)
-
-    # ── ResFiles: derive from the configured client path, NOT the junction ──
-    # Play.bat resolves EVEJS_CLIENT_PATH\\..\\ResFiles — the ResFiles that
-    # lives beside the user's configured client copy.  Resolving through the
-    # junction could land on the real TQ client's cache, poisoning the client
-    # with official resource files instead of the EveJS-managed ones.
-    if client_path:
-        cache_root = Path(client_path).parent
-    else:
-        # Fallback for callers that don't pass client_path (backward compat).
-        cache_root = profile_tq_path.resolve().parent
-
-    resfiles = cache_root / "ResFiles"
-    if resfiles.exists():
-        env["EO_REMOTEFILECACHEFOLDER"] = str(resfiles)
-
-    arguments: tuple[str, ...] = ()
-    if auto_login is not None:
-        effective_context = launch_context or ClientLaunchContext.native(
-            proxy_url=effective_proxy,
+    with serialize_evejs_client_trust_and_spawn():
+        certificate_client_path = (
+            Path(client_path) if client_path else profile_tq_path.resolve()
         )
-        arguments = require_auto_login_arguments(
-            auto_login,
-            evejs_root=evejs_root,
-            client_path=client_path or profile_tq_path.resolve(),
-            game_host=effective_context.game_host,
-        )
+        if prepare_evejs_client_certificate_trust(
+            evejs_root,
+            certificate_client_path,
+        ):
+            log.info("Prepared EveJS certificate trust for the selected installation.")
 
-    if arguments:
-        # Never log the rendered /login value: even though the supported Native
-        # path uses a fixed dummy password, keeping the diagnostic structural
-        # prevents future credentials from leaking into launcher logs.
-        log.info(
-            "Starting EVE with verified local auto-login "
-            "(account=%s character_id=%s switches=noconsole,login,autoSelectCharacter)",
-            auto_login.username,
-            auto_login.character_id,
+        effective_proxy = (
+            launch_context.proxy_url if launch_context is not None else proxy_url
         )
-        return launch_eve_client(exe, env, exe.parent, arguments=arguments)
-    return launch_eve_client(exe, env, exe.parent)
+        env = build_env(evejs_root, effective_proxy)
+        if overview_bridge is not None:
+            env["EVEJS_OVERVIEW_BRIDGE"] = overview_bridge.command
+            env["EVEJS_OVERVIEW_ACK_PATH"] = str(overview_bridge.ack_path)
+
+        # ── ResFiles: derive from configured client, NOT profile junction ──
+        # Resolving through the junction could use the official TQ cache instead
+        # of the copied client's EveJS-managed resources.
+        if client_path:
+            cache_root = Path(client_path).parent
+        else:
+            # Fallback for callers that don't pass client_path (backward compat).
+            cache_root = profile_tq_path.resolve().parent
+
+        resfiles = cache_root / "ResFiles"
+        if resfiles.exists():
+            env["EO_REMOTEFILECACHEFOLDER"] = str(resfiles)
+
+        arguments: tuple[str, ...] = ()
+        if auto_login is not None:
+            effective_context = launch_context or ClientLaunchContext.native(
+                proxy_url=effective_proxy,
+            )
+            arguments = require_auto_login_arguments(
+                auto_login,
+                evejs_root=evejs_root,
+                client_path=client_path or profile_tq_path.resolve(),
+                game_host=effective_context.game_host,
+            )
+
+        if arguments:
+            # Never log the rendered /login value: even though the supported
+            # Native path uses a fixed dummy password, keeping the diagnostic
+            # structural prevents future credentials from leaking into logs.
+            log.info(
+                "Starting EVE with verified local auto-login "
+                "(account=%s character_id=%s "
+                "switches=noconsole,login,autoSelectCharacter)",
+                auto_login.username,
+                auto_login.character_id,
+            )
+            return launch_eve_client(exe, env, exe.parent, arguments=arguments)
+        return launch_eve_client(exe, env, exe.parent)

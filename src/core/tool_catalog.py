@@ -445,6 +445,12 @@ def resolve_tools(
     root_text = str(evejs_root or "").strip()
     if not root_text:
         return _unavailable_tools(None, "Set the EveJS root in Settings")
+    # Python 3.11.0 on Windows can silently truncate a path at NUL during
+    # ``Path.resolve`` instead of raising.  Reject it before resolution so a
+    # malformed configured root can never produce candidates under a different
+    # prefix path.
+    if "\x00" in root_text:
+        return _unavailable_tools(None, "Configured EveJS root was not found")
 
     try:
         root = Path(root_text).expanduser().resolve(strict=False)

@@ -630,7 +630,7 @@ def test_absent_records_are_safely_stopped(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("unsupported", ["missing_init", "tmpfs", "no_mount"])
-def test_reviewed_v0125_structural_gate_runs_no_helper(
+def test_reviewed_structural_gate_runs_no_helper(
     unsupported: str,
     tmp_path: Path,
 ) -> None:
@@ -657,7 +657,7 @@ def test_reviewed_v0125_structural_gate_runs_no_helper(
     )
 
     assert not result.succeeded
-    assert "v0.12.5" in result.error
+    assert "reviewed character-maintenance layout" in result.error
     assert inspector.calls == [target]
     assert runner.calls == []
 

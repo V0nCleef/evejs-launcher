@@ -2,6 +2,74 @@
 
 ## Changelog
 
+## v1.0.44 — 2026-08-21
+
+### Fixed
+- **Chat after switching EveJS installations** — before spawning EVE, the launcher now runs the selected installation's official `Install-EvEJSCerts.ps1` trust preparation in the existing background launch worker. EveJS v0.12.6 gives each installation its own local CA; this keeps Windows `CurrentUser\Root` and every copied-client `cacert.pem` bundle synchronized with the active root, preventing the repeating `localhost:5222` chat connection dialog after moving between a fresh install and an existing save.
+- **Actionable Launch All failures** — queued client launches now retain and display the first worker failure, so certificate, client-path, and PowerShell errors are no longer reduced to only “N failed.”
+
+### Safety and compatibility
+- The launcher delegates certificate creation, validation, stale-CA removal, root-store installation, and client-bundle updates to the selected EveJS root's own official helper. It does not accumulate historical EveJS CAs or modify GameStore, Market, account, character, item, or profile data.
+- A real CA rotation is refused while any EVE client is running. Same-root multibox launches remain supported because the official health check is idempotent. A per-user Windows named mutex keeps certificate preparation and EVE process creation atomic across multiple launcher instances.
+- Older EveJS layouts without `tools/ClientSETUP/scripts/Install-EvEJSCerts.ps1` retain their established launch path unchanged.
+
+### Verification
+- **1,254 automated tests passed**, including selected-root trust preparation, hidden PowerShell and isolated-standard-handle contracts, post-install bundle verification, failure-before-spawn behavior, same-root live-client behavior, cross-process launch serialization, older-layout fallback, queued error visibility, and the full existing Native, Docker, fresh-v0.12.6, legacy-save, character, profile, and service-lifecycle suites.
+- The reported fresh-to-existing-save switch was reproduced with a healthy XMPP listener on `127.0.0.1:5222`: Windows and both EVE client bundles trusted the fresh root while the selected copy presented its different CA. Running the copy's official setup changed its certificate check from orange to green, after which the existing character connected to chat. The patched source then completed the exact official trust helper successfully against that same copied root.
+
+## v1.0.43 — 2026-08-21
+
+### Fixed
+- **Native restart after graceful shutdown** — Game, Market, the EVE-client safety probe, forced service cleanup, and profile junction creation no longer inherit an invalid Windows standard-input handle after the launcher sends Game a graceful Ctrl+Break. This fixes the misleading “Close every EVE client” character-creation block and the later `[WinError 6] The handle is invalid` Game/Market startup failures.
+
+### Safety and compatibility
+- Existing GameStore, Market, character, account, profile, and client data are not migrated, rebuilt, or rewritten by this fix. Healthy `better-sqlite3` installations—including older saves and earlier supported EveJS layouts—still pass the existing runtime probe and are left in place.
+- The EVE-client check remains fail-closed for genuine Windows process-query failures; only its dependency on the launcher's inherited console handle was removed.
+
+### Verification
+- **1,243 automated tests passed**, including deterministic consoleless and invalid-standard-handle Windows regressions, explicit isolated-handle assertions for Game, Market, client detection, and forced cleanup, plus all existing Native, Docker, fresh-v0.12.6, and legacy-layout tests.
+- A pristine v0.12.6 archive completed official Native setup under npm 12, had its blocked `better-sqlite3` binding repaired, booted and stopped cleanly three times, created a real character, and booted successfully afterward. An independent clone of a migrated v0.12.2-era save then completed three full Market + modded Game cycles around real character creation; every Game shutdown was graceful, final SQLite `quick_check` passed, and the original copy's Game/Market database and WAL hashes remained unchanged.
+- A separately isolated pristine v0.12.6 Compose project initialized GameStore, built the official 890,192-order Market seed, reached healthy, created and verified a real character through the launcher's managed Docker transaction, and completed two launcher-managed stop/start cycles around that transaction. Its unique containers, image, volumes, network, ports, backups, and extracted files were removed afterward.
+
+## v1.0.42 — 2026-08-21
+
+### Fixed
+- **Post-character service restoration** — Native character creation can no longer leave Game unavailable solely because the optional Market process fails during automatic restoration. The launcher still reports the Market failure, but continues Game startup and any waiting client launch once Game itself is ready.
+- **Actionable Market restart diagnostics** — Market startup attempts now append timestamped command and PID markers instead of truncating the console log twice. Retry evidence is preserved, and Native lifecycle failures are also written to `launcher.log` instead of existing only in a temporary dialog.
+- **Fresh EveJS v0.12.6 Docker character creation** — Managed Compose character creation now recognizes the exact reviewed v0.12.6 image in addition to v0.12.5. It verifies v0.12.6's starter-skill records, lazily initialized mail and notification state, and mailbox message identifiers before committing, so a freshly downloaded stack can create a character and restart safely.
+
+### Safety and compatibility
+- The fallback changes service sequencing only. It does not replace, reset, migrate, or rewrite GameStore, Market, character, account, item, profile, or older-save data.
+- Market remains optional only when Game was also requested. A standalone Market start retains strict failure behavior, and the prior default remains available to non-launcher callers.
+- Docker character creation remains exact-version and exact-source gated. The original v0.12.5 hashes and mutation contract are unchanged; v0.12.6 has its own immutable 14-source contract, canonical starter-skill metadata and totals, and strict rollback verification. Modified or unknown images still fail closed.
+
+### Verification
+- **1,240 automated tests passed**, including optional-Market failure continuation, strict standalone-Market behavior, post-character callback restoration, durable retry diagnostics, fresh v0.12.6 setup, older Native save migration, profile repair, graceful shutdown, exact v0.12.5/v0.12.6 Docker image contracts, canonical v0.12.6 starter skills, rollback, and adjacent Docker lifecycle regressions.
+- An untouched EveJS v0.12.6 archive completed its official Native setup, reproduced the blocked `better-sqlite3` binding, was repaired by the launcher, booted twice, created a real account/character and rookie ship between boots, and stopped cleanly both times. The final GameStore passed SQLite quick/integrity checks with an empty persistence outbox and every ownership lease released.
+- A separately extracted untouched v0.12.6 Compose project built from scratch with isolated resource names, initialized GameStore, and seeded 890,192 Market orders. A real invalid-name transaction mutated then restored all nine scoped logical tables exactly; a valid transaction created an account, character, canonical starter skills, welcome mail/notification state, and verified Ibis. Both post-transaction stack restarts reached healthy, final SQLite quick/integrity checks and retained-backup digests passed, the persistence outbox and owner leases were clean, and the stock Market doctor validated all 890,192 open orders plus 580,560 history rows.
+
+## v1.0.41 — 2026-08-21
+
+### Fixed
+- **Fresh EveJS v0.12.6 Native setup** — the setup wizard now accepts a completed static GameStore (`manifest.json` plus generated data) before the first server run creates `gamestore.sqlite`. Existing initialized Native installations remain supported, while incomplete roots still fail validation.
+- **Fresh EveJS v0.12.6 Node dependencies** — Game startup now proves that `better-sqlite3` can create and query a real in-memory database instead of trusting the presence of `node_modules`. If a fresh npm install omitted the native binding, the launcher reinstalls the locked dependencies with lifecycle scripts disabled, approves only the exact pinned `better-sqlite3` package on npm 12+, performs its targeted rebuild, and verifies the runtime again before launching EveJS. npm 11 and earlier retain a compatible targeted-rebuild path.
+- **Legacy Native save handoff** — direct launcher startup now honors EveJS v0.12.6's official `_local/newDatabase` → `_local/gameStore` migration before selecting the runtime data path. It never creates an empty destination ahead of migration, and an ambiguous root containing both save layouts stops with an actionable error instead of silently choosing one.
+- **Optional Native Market startup** — a fresh v0.12.6 install without a built Market seed no longer blocks Game startup or client auto-start. The launcher validates the configured SQLite seed, explains how to build it from Tools, and gives first-time Rust compilation a separate five-minute readiness budget.
+- **Manual-login profile rendering** — numeric account names are serialized as YAML strings, and incomplete or malformed `core_public__.yaml` sections are repaired from the complete launcher template before EVE starts. Existing valid values are retained and the original document is backed up before structural repair.
+- **Graceful Native Game shutdown** — the launcher-owned Game process receives Ctrl+Break through an isolated hidden console so Node can finish its shutdown hooks and persistence flushes. The launcher waits for the full bounded cleanup window and clearly reports any forced or non-clean exit; Market retains its normal bounded terminate path.
+
+### Safety and compatibility
+- Working existing installations pass the native SQLite probe and skip npm repair entirely. Dependency repair is confined to the selected server's locked Node dependencies and pinned install-script policy; it does not delete, seed, replace, or migrate `_local`, `gamestore.sqlite`, Market data, characters, profiles, or EVE client settings.
+- An installed but broken `better-sqlite3` is rebuilt in place, preserving additional mod dependencies that are not in the stock lockfile. A full script-disabled `npm ci` is reserved for a missing or unreadable required package.
+- Automatic repair never enables arbitrary dependency scripts, preserves an explicit `better-sqlite3` denial, has bounded command timeouts with exact process-tree cleanup, and keeps the bootstrap output in the Game Console. Fatal Node reports now have their required directory before Game startup.
+- Profile repair never copies, deletes, or rewrites `core_user__.dat`, `core_char__.dat`, or browser cache state. Required YAML defaults are merged without overwriting valid account-specific settings.
+- Fresh-root validation still requires the Native server entrypoint, local certificate, client configuration script, static-data manifest, and populated data tree; `compose.yaml` alone is not accepted as a Native installation.
+- Forced shutdown remains exact-process scoped and is used only after the graceful request fails or exceeds its bounded timeout.
+
+### Verification
+- **1,208 automated tests passed**, including the real setup-wizard state for a pre-first-run v0.12.6 root, npm 12 pinned-script repair, older-npm fallback, healthy-install bypass, in-place mod-dependency preservation, explicit-denial preservation, dependency timeouts, legacy-save migration and ambiguous-layout refusal, missing/corrupt/default-path Market seeds, Game/client continuation without optional Market, slow first-time Market compilation, numeric username parsing, malformed-profile repair and backup, Windows Ctrl+Break delivery to a hidden Node process, graceful shutdown timing, and adjacent Native/Docker regressions.
+- A clean EveJS v0.12.6 installation was repaired on Node 24, started to its live TCP endpoint, created a 115-table GameStore that passed SQLite integrity checking, completed its persistence flush, and exited cleanly through the launcher's graceful shutdown path.
+
 ## v1.0.40 — 2026-08-16
 
 ### Fixed

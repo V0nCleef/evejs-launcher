@@ -16,6 +16,81 @@ HELPERS = Path(__file__).resolve().parents[1] / "src" / "core" / "helpers"
 DOCKER_HELPER = HELPERS / "docker_create_character.js"
 TERMINAL_HELPER = HELPERS / "terminal_result.js"
 RESULT_PREFIX = "EVEJS_LAUNCHER_RESULT="
+REVIEWED_PROFILE_HASHES = {
+    "0.12.5": {
+        "gameStore/index.js": (
+            "dc474d40f02e64db715361630c1a48ac3e3de30ed77ae300d2ffd82815178421"
+        ),
+        "gameStore/sqliteStore.js": (
+            "c71e3a6fb0c2f3c51be2848f0842a5286775c978ad19d39c006747ef08fecc0a"
+        ),
+        "gameStore/tableRepository.js": (
+            "f74665cd5de3a23bc4bf0f317ab6aa4186ba0a9b8443bcbdf70bbe784d99ac6e"
+        ),
+        "services/_shared/identityAllocator.js": (
+            "f801b4cbc973451ea7ba561d6a1df9bae589ddd84b21874549864ebe1124ea8f"
+        ),
+        "services/account/accountRoleProfiles.js": (
+            "b850b911ae3942f97211d6031c5e45bbf90f67764d97f59fb1c00b55b9c3494b"
+        ),
+        "services/character/charService.js": (
+            "302bfbcc6abdb7125721d469a9a76dc5879393488d83ad2ddd710da92dff7524"
+        ),
+        "services/ship/rookieShipRuntime.js": (
+            "54ea7e981c9938538c264079124c2cd6f47518946e734a5be91fb54f40272f2b"
+        ),
+        "space/runtime.js": (
+            "485cb18c79e5f54d3973327fdcf4c3b686442cab0b1c67bbb85e02d853088097"
+        ),
+        "space/transitions.js": (
+            "211c2074f82a6129bfa96da6e3150e55bf217c419bb7a733e75359f51d1a4307"
+        ),
+    },
+    "0.12.6": {
+        "gameStore/index.js": (
+            "4007195df24a93f815a2f82b155bbfdfd78b56749b3a89d1f402abb33df61eac"
+        ),
+        "gameStore/sqliteStore.js": (
+            "c181ef96354b5565baf457d9d40de0380654eb8e20f95008d1a8f3870d7c926f"
+        ),
+        "gameStore/tableRepository.js": (
+            "ae7bdb55fd48e0d0e3fd3c72416e511804ee4414652e4e84a139b351a62c3008"
+        ),
+        "services/_shared/identityAllocator.js": (
+            "f801b4cbc973451ea7ba561d6a1df9bae589ddd84b21874549864ebe1124ea8f"
+        ),
+        "services/account/accountRoleProfiles.js": (
+            "b850b911ae3942f97211d6031c5e45bbf90f67764d97f59fb1c00b55b9c3494b"
+        ),
+        "services/character/charService.js": (
+            "e48586fa08087bbcde9bf9ac15eaff2525b976c0900e7202b8e3c03d87c85aaa"
+        ),
+        "services/character/characterState.js": (
+            "4292922f810901292c1915716998f62727d3cbcd62fae61f35a366dc92f28a9d"
+        ),
+        "services/character/characterCreationData.js": (
+            "7ef9c0b71ac5a595c47baf39013390029cd32de794ed5c98227c74bfb7c0ac64"
+        ),
+        "services/skills/skillState.js": (
+            "9194dd1c0184094a182aabd84b1236c5be2ea6410578edcc408a489099c55f88"
+        ),
+        "services/mail/mailState.js": (
+            "47a656ca926aeed1621ed390cf4353e7b5c6bce69355587cbb123b732b6c47b9"
+        ),
+        "services/notifications/notificationState.js": (
+            "535c108b63b5d4e769018017987af6e37eedbb5c30c5e29403ada2117700b53d"
+        ),
+        "services/ship/rookieShipRuntime.js": (
+            "54ea7e981c9938538c264079124c2cd6f47518946e734a5be91fb54f40272f2b"
+        ),
+        "space/runtime.js": (
+            "2103dced34a2fdcc99a4b174e851a1f009864fd20c15f9d0bc15093bb651a300"
+        ),
+        "space/transitions.js": (
+            "70686c837c62530467f78d88757641f479a05f410c097e3df7a1f24cd674be19"
+        ),
+    },
+}
 
 
 pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required")
@@ -57,6 +132,11 @@ def _transaction_probe(tmp_path: Path, mode: str) -> dict:
         const path = require("path");
         const helper = require(__DOCKER_HELPER__);
         const mode = __MODE__;
+        const reviewedVersion = mode.startsWith("v0126-") ? "0.12.6" : "0.12.5";
+        const starterSkillEntries = [
+          { typeID: 3300, level: 4 },
+          { typeID: 3301, level: 1 },
+        ];
         const tables = [
           "accounts",
           "alliances",
@@ -69,6 +149,55 @@ def _transaction_probe(tmp_path: Path, mode: str) -> dict:
           "notifications",
         ];
         const clone = (value) => JSON.parse(JSON.stringify(value));
+        function syntheticSkillType(typeID) {
+          return {
+            typeID,
+            categoryID: 16,
+            groupID: 255,
+            groupName: "Gunnery",
+            name: `Synthetic Skill ${typeID}`,
+            published: true,
+            skillRank: 1,
+          };
+        }
+        function buildSyntheticSkillRecord(characterId, entry, rawSkillType = null) {
+          const skillType = rawSkillType || syntheticSkillType(entry.typeID);
+          const skillRank = skillType.skillRank;
+          const skillPoints = entry.level <= 0
+            ? 0
+            : Math.round(
+              250 * skillRank * Math.pow(Math.sqrt(32), entry.level - 1),
+            );
+          return {
+            itemID: characterId * 100000 + entry.typeID,
+            typeID: entry.typeID,
+            ownerID: characterId,
+            locationID: characterId,
+            flagID: 7,
+            categoryID: skillType.categoryID || 16,
+            groupID: skillType.groupID || 0,
+            groupName: skillType.groupName || "",
+            itemName: skillType.name,
+            published: Boolean(skillType.published),
+            skillLevel: entry.level,
+            trainedSkillLevel: entry.level,
+            effectiveSkillLevel: entry.level,
+            virtualSkillLevel: null,
+            skillRank,
+            skillPoints,
+            trainedSkillPoints: skillPoints,
+            inTraining: false,
+            trainingStartSP: skillPoints,
+            trainingDestinationSP: skillPoints,
+            trainingStartTime: null,
+            trainingEndTime: null,
+          };
+        }
+        const starterSkillPointTotal = starterSkillEntries.reduce(
+          (total, entry) =>
+            total + buildSyntheticSkillRecord(1, entry).skillPoints,
+          0,
+        );
         const initial = {
           accounts: {
             "legacy-account": { id: 7, role: "player", marker: "before:accounts" },
@@ -106,6 +235,16 @@ def _transaction_probe(tmp_path: Path, mode: str) -> dict:
             boxes: { "9001": { marker: "before:notifications" } },
           },
         };
+        if (mode.startsWith("v0126-empty-prestate")) {
+          initial.mail = {};
+          initial.notifications = {};
+        } else if (mode === "v0126-mail-nonempty-prestate") {
+          initial.mail = { unexpected: true };
+          initial.notifications = {};
+        } else if (mode === "v0126-notifications-nonempty-prestate") {
+          initial.mail = {};
+          initial.notifications = { unexpected: true };
+        }
         const state = clone(initial);
         const events = [];
         let pendingOutbox = 0;
@@ -373,6 +512,9 @@ def _transaction_probe(tmp_path: Path, mode: str) -> dict:
                   {
                     accountId: session.userid,
                     characterName: args[0],
+                    ...(reviewedVersion === "0.12.6"
+                      ? { raceID: 1, skillPoints: starterSkillPointTotal }
+                      : {}),
                     shipID: shipId,
                     shipTypeID: 606,
                     stationID: stationId,
@@ -419,6 +561,62 @@ def _transaction_probe(tmp_path: Path, mode: str) -> dict:
                   },
                   { force: true },
                 );
+                if (reviewedVersion === "0.12.6") {
+                  database.write(
+                    "skills",
+                    "/",
+                    {
+                      ...state.skills,
+                      [characterId]: Object.fromEntries(
+                        starterSkillEntries.map((entry) => [
+                          String(entry.typeID),
+                          buildSyntheticSkillRecord(characterId, entry),
+                        ]),
+                      ),
+                    },
+                    { force: true },
+                  );
+                  if (!state.mail._meta || typeof state.mail._meta !== "object") {
+                    state.mail._meta = {
+                      nextMessageID: 1,
+                      nextMailingListID: 500000000,
+                    };
+                  }
+                  if (!Number.isSafeInteger(state.mail._meta.nextMessageID)) {
+                    state.mail._meta.nextMessageID = 1;
+                  }
+                  if (!Number.isSafeInteger(state.mail._meta.nextMailingListID)) {
+                    state.mail._meta.nextMailingListID = 500000000;
+                  }
+                  if (!state.mail.messages || typeof state.mail.messages !== "object") {
+                    state.mail.messages = {};
+                  }
+                  if (!state.mail.mailboxes || typeof state.mail.mailboxes !== "object") {
+                    state.mail.mailboxes = {};
+                  }
+                  if (!state.mail.mailingLists || typeof state.mail.mailingLists !== "object") {
+                    state.mail.mailingLists = {};
+                  }
+                  if (
+                    !state.notifications._meta ||
+                    typeof state.notifications._meta !== "object"
+                  ) {
+                    state.notifications._meta = { nextNotificationID: 1 };
+                  }
+                  if (
+                    !Number.isSafeInteger(
+                      state.notifications._meta.nextNotificationID,
+                    )
+                  ) {
+                    state.notifications._meta.nextNotificationID = 1;
+                  }
+                  if (
+                    !state.notifications.boxes ||
+                    typeof state.notifications.boxes !== "object"
+                  ) {
+                    state.notifications.boxes = {};
+                  }
+                }
                 const messageId = state.mail._meta.nextMessageID;
                 const message = {
                   messageID: messageId,
@@ -441,7 +639,15 @@ def _transaction_probe(tmp_path: Path, mode: str) -> dict:
                     mailboxes: {
                       ...state.mail.mailboxes,
                       [characterId]: {
-                        statuses: { [messageId]: { statusMask: 0, labelMask: 1 } },
+                        statuses: {
+                          [messageId]: {
+                            ...(reviewedVersion === "0.12.6"
+                              ? { messageID: messageId }
+                              : {}),
+                            statusMask: 0,
+                            labelMask: 1,
+                          },
+                        },
                         labels: {},
                         _meta: { nextLabelMask: 16 },
                       },
@@ -540,6 +746,80 @@ def _transaction_probe(tmp_path: Path, mode: str) -> dict:
                     .byID[String(notificationId)].typeID = 1;
                 } else if (mode === "contract-skills-delta") {
                   state.skills[String(characterId)] = { unexpected: true };
+                } else if (mode === "v0126-skill-extra-character") {
+                  state.skills["777"] = {
+                    "3300": buildSyntheticSkillRecord(777, starterSkillEntries[0]),
+                  };
+                } else if (mode === "v0126-skill-empty-map") {
+                  state.skills[String(characterId)] = {};
+                } else if (mode === "v0126-skill-unexpected-type") {
+                  state.skills[String(characterId)]["9999"] =
+                    buildSyntheticSkillRecord(characterId, {
+                      typeID: 9999,
+                      level: 1,
+                    });
+                } else if (mode === "v0126-skill-missing-type") {
+                  delete state.skills[String(characterId)]["3301"];
+                } else if (mode === "v0126-skill-level-mismatch") {
+                  state.skills[String(characterId)]["3300"].skillLevel = 3;
+                } else if (mode === "v0126-skill-extra-field") {
+                  state.skills[String(characterId)]["3300"].unexpected = true;
+                } else if (mode === "v0126-skill-item-id") {
+                  state.skills[String(characterId)]["3300"].itemID += 1;
+                } else if (mode === "v0126-skill-owner-location") {
+                  state.skills[String(characterId)]["3300"].ownerID = 999;
+                  state.skills[String(characterId)]["3300"].locationID = 999;
+                } else if (mode === "v0126-skill-flag-category") {
+                  state.skills[String(characterId)]["3300"].flagID = 8;
+                  state.skills[String(characterId)]["3300"].categoryID = 17;
+                } else if (mode === "v0126-skill-empty-name") {
+                  state.skills[String(characterId)]["3300"].itemName = "";
+                } else if (mode === "v0126-skill-rank") {
+                  state.skills[String(characterId)]["3300"].skillRank = 2;
+                } else if (mode === "v0126-skill-coherent-rank-points") {
+                  const skill = state.skills[String(characterId)]["3300"];
+                  const alteredRank = 2;
+                  const alteredPoints = Math.round(
+                    250 * alteredRank * Math.pow(
+                      Math.sqrt(32),
+                      skill.skillLevel - 1,
+                    ),
+                  );
+                  skill.skillRank = alteredRank;
+                  skill.skillPoints = alteredPoints;
+                  skill.trainedSkillPoints = alteredPoints;
+                  skill.trainingStartSP = alteredPoints;
+                  skill.trainingDestinationSP = alteredPoints;
+                } else if (mode === "v0126-skill-metadata-published") {
+                  const skill = state.skills[String(characterId)]["3300"];
+                  skill.groupID = 999;
+                  skill.groupName = "Altered Group";
+                  skill.itemName = "Altered Skill";
+                  skill.published = false;
+                } else if (mode === "v0126-skill-points-formula") {
+                  const skill = state.skills[String(characterId)]["3300"];
+                  const wrongPoints = skill.skillPoints + 1;
+                  skill.skillPoints = wrongPoints;
+                  skill.trainedSkillPoints = wrongPoints;
+                  skill.trainingStartSP = wrongPoints;
+                  skill.trainingDestinationSP = wrongPoints;
+                } else if (mode === "v0126-skill-training") {
+                  const skill = state.skills[String(characterId)]["3300"];
+                  skill.inTraining = true;
+                  skill.trainingStartTime = "2026-08-13T12:00:00.000Z";
+                  skill.trainingEndTime = "2026-08-14T12:00:00.000Z";
+                } else if (mode === "v0126-preexisting-skill-modify") {
+                  state.skills["9001"] = {
+                    ...state.skills["9001"],
+                    unexpected: "changed",
+                  };
+                } else if (mode === "v0126-character-race-id") {
+                  state.characters[String(characterId)].raceID = 2;
+                } else if (mode === "v0126-character-skill-points") {
+                  state.characters[String(characterId)].skillPoints += 1;
+                } else if (mode === "v0126-mailbox-status-message-id") {
+                  state.mail.mailboxes[String(characterId)]
+                    .statuses[String(messageId)].messageID = messageId + 1;
                 }
                 if (mode.startsWith("retained-")) corruptRetainedBackup();
                 const reachesVerification =
@@ -548,7 +828,8 @@ def _transaction_probe(tmp_path: Path, mode: str) -> dict:
                   mode === "verified-commit-outbox" ||
                   mode.startsWith("preexisting-") ||
                   mode.startsWith("retained-") ||
-                  mode.startsWith("contract-");
+                  mode.startsWith("contract-") ||
+                  mode.startsWith("v0126-");
                 if (
                   !reachesVerification
                 ) {
@@ -559,6 +840,37 @@ def _transaction_probe(tmp_path: Path, mode: str) -> dict:
                 return characterId;
               }
             },
+            ...(reviewedVersion === "0.12.6"
+              ? {
+                  getCharacterCreationRace(raceID) {
+                    const skills = mode === "v0126-skill-overbound-profile"
+                      ? Array.from({ length: 257 }, (_value, index) => ({
+                          typeID: 10000 + index,
+                          level: 1,
+                        }))
+                      : starterSkillEntries;
+                    return raceID === 1
+                      ? { raceID: 1, name: "Synthetic", skills: clone(skills) }
+                      : null;
+                  },
+                  getSkillTypeByID(typeID) {
+                    events.push(`get-skill-type:${typeID}`);
+                    return starterSkillEntries.some(
+                      (entry) => entry.typeID === typeID,
+                    )
+                      ? clone(syntheticSkillType(typeID))
+                      : null;
+                  },
+                  buildSkillRecord(characterId, skillType, level) {
+                    events.push(`build-skill-record:${skillType.typeID}`);
+                    return buildSyntheticSkillRecord(
+                      characterId,
+                      { typeID: skillType.typeID, level },
+                      skillType,
+                    );
+                  },
+                }
+              : {}),
           };
         }
 
@@ -570,7 +882,12 @@ def _transaction_probe(tmp_path: Path, mode: str) -> dict:
               password: "PRIVATE_PASSWORD_SENTINEL",
               username: "fixture-account",
             },
-            { database, backupManager, loadCreationDependencies },
+            {
+              database,
+              backupManager,
+              loadCreationDependencies,
+              reviewedProfile: helper.reviewedImageProfile(reviewedVersion),
+            },
           );
           process.stdout.write(JSON.stringify({
             result,
@@ -665,11 +982,13 @@ def test_payload_parser_is_bounded_strict_and_private_safe(tmp_path: Path) -> No
 def test_production_contract_attests_before_import_and_keeps_backup_scoped() -> None:
     source = DOCKER_HELPER.read_text(encoding="utf-8")
 
-    attestation = "const serverSource = attestProductionImage(root);"
+    attestation = "const { serverSource, profile } = attestProductionImage(root);"
     game_store_import = (
         'const database = require(path.join(serverSource, "gameStore", "index.js"));'
     )
     assert source.index(attestation) < source.index(game_store_import)
+    assert "const profile = reviewedImageProfile(serverPackage.version);" in source
+    assert "profile.sourceContracts" in source
     assert "sqlite-tables.json" in source
     assert "source.backup(" not in source
     assert "copyTreeStrict(dataRoot, backupData)" not in source
@@ -677,6 +996,76 @@ def test_production_contract_attests_before_import_and_keeps_backup_scoped() -> 
         "dc474d40f02e64db715361630c1a48ac3e3de30ed77ae300d2ffd82815178421"
         in source
     )
+
+
+def test_exact_reviewed_image_profiles_are_immutable_and_fail_closed(
+    tmp_path: Path,
+) -> None:
+    source = r"""
+        "use strict";
+        const helper = require(__DOCKER_HELPER__);
+        const versions = ["0.12.5", "0.12.6"];
+        const profiles = Object.fromEntries(versions.map((version) => {
+          const profile = helper.reviewedImageProfile(version);
+          const immutable = Boolean(
+            profile &&
+            Object.isFrozen(profile) &&
+            Object.isFrozen(profile.serverPackage) &&
+            Object.isFrozen(profile.serverPackage.dependencies) &&
+            Object.isFrozen(profile.sqlitePackage) &&
+            Object.isFrozen(profile.sourceContracts) &&
+            profile.sourceContracts.every((contract) =>
+              Object.isFrozen(contract) && Object.isFrozen(contract[2])
+            )
+          );
+          return [version, {
+            version: profile && profile.version,
+            serverPackage: profile && profile.serverPackage,
+            sqlitePackage: profile && profile.sqlitePackage,
+            sourceHashes: profile && Object.fromEntries(
+              profile.sourceContracts.map(([relativePath, expectedHash]) =>
+                [relativePath, expectedHash]
+              )
+            ),
+            immutable,
+          }];
+        }));
+        const rejectedVersions = [
+          "0.12.4",
+          "0.12.7",
+          "0.12.6+local",
+          "v0.12.6",
+          "",
+          "__proto__",
+          "constructor",
+          null,
+        ];
+        const rejected = rejectedVersions.map((version) =>
+          helper.reviewedImageProfile(version) === null
+        );
+        process.stdout.write(JSON.stringify({ profiles, rejected }));
+    """
+    source = source.replace("__DOCKER_HELPER__", json.dumps(str(DOCKER_HELPER)))
+    completed = _run_script(tmp_path, source)
+
+    assert completed.returncode == 0, completed.stderr
+    report = _last_json(completed.stdout)
+    assert all(report["rejected"])
+    assert set(report["profiles"]) == set(REVIEWED_PROFILE_HASHES)
+    for version, expected_hashes in REVIEWED_PROFILE_HASHES.items():
+        profile = report["profiles"][version]
+        assert profile["version"] == version
+        assert profile["serverPackage"] == {
+            "name": "eve.js",
+            "type": "commonjs",
+            "dependencies": {"better-sqlite3": "^12.11.1"},
+        }
+        assert profile["sqlitePackage"] == {
+            "name": "better-sqlite3",
+            "version": "12.11.1",
+        }
+        assert profile["sourceHashes"] == expected_hashes
+        assert profile["immutable"] is True
 
 
 def test_success_orders_lease_backup_mutation_shutdown_and_verification(
@@ -723,6 +1112,148 @@ def test_success_orders_lease_backup_mutation_shutdown_and_verification(
     assert "fixture-account" not in serialized
     assert "Fixture Pilot" not in serialized
     assert "PRIVATE_PASSWORD_SENTINEL" not in serialized
+
+
+@pytest.mark.parametrize(
+    "mode",
+    ["v0126-success", "v0126-empty-prestate-success"],
+)
+def test_v0126_exact_starter_skills_and_supported_mail_prestates_commit(
+    tmp_path: Path,
+    mode: str,
+) -> None:
+    report = _transaction_probe(tmp_path, mode)
+
+    assert report["result"] == {
+        "ok": True,
+        "accountId": 101,
+        "characterId": 202,
+        "rookieShipVerified": True,
+        "backupCreated": True,
+        "backupName": "fixture-backup",
+        "cleanupConfirmed": True,
+        "restartSafe": True,
+    }
+    assert report["stateMatchesInitial"] is False
+    assert "skills" in report["touched"]
+    assert "mail" in report["touched"]
+    assert "notifications" in report["touched"]
+    assert "verify-creation" in report["events"]
+    assert "rollback" not in report["events"]
+    first_write = next(
+        index
+        for index, event in enumerate(report["events"])
+        if event.startswith("write:")
+    )
+    assert report["events"].index("get-skill-type:3300") < first_write
+    assert report["events"].index("get-skill-type:3301") < first_write
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "v0126-skill-extra-character",
+        "v0126-skill-empty-map",
+        "v0126-skill-unexpected-type",
+        "v0126-skill-missing-type",
+        "v0126-skill-level-mismatch",
+        "v0126-skill-extra-field",
+        "v0126-skill-item-id",
+        "v0126-skill-owner-location",
+        "v0126-skill-flag-category",
+        "v0126-skill-empty-name",
+        "v0126-skill-rank",
+        "v0126-skill-coherent-rank-points",
+        "v0126-skill-metadata-published",
+        "v0126-skill-points-formula",
+        "v0126-skill-training",
+        "v0126-preexisting-skill-modify",
+    ],
+)
+def test_v0126_malformed_or_unexpected_skill_mutation_rolls_back(
+    tmp_path: Path,
+    mode: str,
+) -> None:
+    report = _transaction_probe(tmp_path, mode)
+    result = report["result"]
+
+    assert result["ok"] is False
+    assert result["rollbackSucceeded"] is True
+    assert result["restartSafe"] is True
+    assert report["stateMatchesInitial"] is True
+    assert report["events"].index("verify-creation") < report["events"].index(
+        "rollback"
+    )
+
+
+@pytest.mark.parametrize(
+    "mode",
+    ["v0126-character-race-id", "v0126-character-skill-points"],
+)
+def test_v0126_character_race_and_skill_total_are_exact(
+    tmp_path: Path,
+    mode: str,
+) -> None:
+    report = _transaction_probe(tmp_path, mode)
+    result = report["result"]
+
+    assert result["ok"] is False
+    assert result["rollbackSucceeded"] is True
+    assert result["restartSafe"] is True
+    assert report["stateMatchesInitial"] is True
+    assert "verify-creation" in report["events"]
+    assert "rollback" in report["events"]
+
+
+def test_v0126_overbound_starter_skill_profile_fails_before_mutation(
+    tmp_path: Path,
+) -> None:
+    report = _transaction_probe(tmp_path, "v0126-skill-overbound-profile")
+    result = report["result"]
+
+    assert result["ok"] is False
+    assert result["rollbackSucceeded"] is True
+    assert result["restartSafe"] is True
+    assert report["stateMatchesInitial"] is True
+    assert report["touched"] == []
+    assert "verify-creation" not in report["events"]
+    assert "rollback" not in report["events"]
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "v0126-mail-nonempty-prestate",
+        "v0126-notifications-nonempty-prestate",
+    ],
+)
+def test_v0126_default_state_exception_requires_an_exact_empty_prestate(
+    tmp_path: Path,
+    mode: str,
+) -> None:
+    report = _transaction_probe(tmp_path, mode)
+    result = report["result"]
+
+    assert result["ok"] is False
+    assert result["rollbackSucceeded"] is True
+    assert result["restartSafe"] is True
+    assert report["stateMatchesInitial"] is True
+    assert "verify-creation" in report["events"]
+    assert "rollback" in report["events"]
+
+
+def test_v0126_mailbox_status_requires_the_allocated_message_id(
+    tmp_path: Path,
+) -> None:
+    report = _transaction_probe(tmp_path, "v0126-mailbox-status-message-id")
+    result = report["result"]
+
+    assert result["ok"] is False
+    assert result["rollbackSucceeded"] is True
+    assert result["restartSafe"] is True
+    assert report["stateMatchesInitial"] is True
+    assert "verify-creation" in report["events"]
+    assert "rollback" in report["events"]
 
 
 def test_verified_commit_survives_unconfirmed_final_cleanup_without_retry(

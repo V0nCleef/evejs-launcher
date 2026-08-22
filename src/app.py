@@ -110,6 +110,7 @@ from .core.server_launcher import (
     get_market_console_log,
     get_server_log_path,
     is_server_running,
+    native_market_database_status,
     start_game_server,
     start_market_server,
 )
@@ -215,6 +216,7 @@ from .workers.overview_patch_worker import (
     OverviewPatchWorker,
 )
 from .workers.server_worker import (
+    MARKET_READINESS_TIMEOUT_SEC,
     ServiceMonitor,
     ServiceProbe,
     ServiceStartResult,
@@ -456,6 +458,7 @@ class MainWindow(QMainWindow):
         self._launch_queue_group_name: str | None = None
         self._launch_queue_skipped_running = 0
         self._launch_queue_skipped_unavailable = 0
+        self._launch_queue_failure_messages: list[str] = []
         self._settings_generation = 0
         self._pending_settings_intent: tuple[str, int | None] | None = None
         self._data_request_sequence = 0
@@ -1715,8 +1718,16 @@ class MainWindow(QMainWindow):
             mode=mode,
             start_market=start_market,
             start_game=start_game,
+            continue_game_after_market_failure=start_market and start_game,
             start_market_fn=start_market_server,
             start_game_fn=start_game_server,
+            market_readiness_timeout_sec=MARKET_READINESS_TIMEOUT_SEC,
+        )
+        log.info(
+            "Starting Native services: market=%s game=%s mode=%s",
+            start_market,
+            start_game,
+            mode or "none",
         )
         self._begin_lifecycle_worker(
             worker,
@@ -1786,6 +1797,14 @@ class MainWindow(QMainWindow):
         self._lifecycle_ready_callback = None
         launching_event = getattr(self, "_lifecycle_start_voice_event", None)
         self._lifecycle_start_voice_event = None
+        partial_game_ready = bool(
+            start_market
+            and start_game
+            and result.market_error
+            and result.game_ready
+            and not result.game_error
+        )
+        continuation_ready = result.succeeded or partial_game_ready
         if launching_event is not None:
             self._announce_shipboard(
                 service_start_result_event(
@@ -1793,15 +1812,35 @@ class MainWindow(QMainWindow):
                     succeeded=result.succeeded,
                 )
             )
-        if result.succeeded:
+        diagnostics = [
+            message
+            for message in (result.market_error, result.game_error)
+            if message
+        ]
+        if continuation_ready:
             self._lifecycle_after_thread_callback = callback
         else:
             self._lifecycle_after_thread_callback = None
-            diagnostics = [
-                message
-                for message in (result.market_error, result.game_error)
-                if message
-            ]
+        if result.succeeded:
+            log.info(
+                "Native service startup completed: market_ready=%s game_ready=%s",
+                result.market_ready,
+                result.game_ready,
+            )
+        elif partial_game_ready:
+            log.warning(
+                "Native Game started without optional Market: %s",
+                " | ".join(diagnostics),
+            )
+            QMessageBox.warning(
+                self,
+                getattr(self, "_lifecycle_error_title", "Service Startup Warning"),
+                "\n\n".join(diagnostics)
+                + "\n\nGame is online and remains usable without the optional "
+                "Market service. Use the Market Console button on Home for details.",
+            )
+        else:
+            log.error("Native service startup failed: %s", " | ".join(diagnostics))
             QMessageBox.critical(
                 self,
                 getattr(self, "_lifecycle_error_title", "Service Startup Failed"),
@@ -2114,6 +2153,41 @@ class MainWindow(QMainWindow):
             return
         start_after_stop()
 
+    def _native_market_start_available(
+        self,
+        *,
+        unavailable_continuation: str,
+        notify: bool,
+    ) -> bool:
+        """Preflight optional Native Market and clear stale failure state on skip."""
+        available, reason = native_market_database_status(
+            str(self._cfg.get("evejs_root", ""))
+        )
+        if available:
+            return True
+
+        self._market_intent = None
+        self._market_error = None
+        game_reachable, _market_reachable = getattr(
+            self,
+            "_service_reachability",
+            (False, False),
+        )
+        self._service_reachability = (game_reachable, False)
+
+        message = f"{reason}\n\n{unavailable_continuation}"
+        if "Tools > Market Seed Builder" not in message:
+            message += " To set it up, use Tools > Market Seed Builder."
+        if notify:
+            QMessageBox.information(
+                self,
+                "Optional Market Not Ready",
+                message,
+            )
+        else:
+            log.warning(message.replace("\n\n", " "))
+        return False
+
     def _start_market(self) -> None:
         if self._docker_mode():
             if self._docker_managed():
@@ -2127,6 +2201,12 @@ class MainWindow(QMainWindow):
             return
         if self._is_market_running():
             log.info("Ignored duplicate Market start while already active")
+            self._update_status_bar()
+            return
+        if not self._native_market_start_available(
+            unavailable_continuation="Market was not started.",
+            notify=True,
+        ):
             self._update_status_bar()
             return
         self._start_service_sequence(
@@ -2200,9 +2280,31 @@ class MainWindow(QMainWindow):
 
         start_market = not self._is_market_running()
         start_game = not game_active
+        market_skipped = False
+        if start_market:
+            continuation = (
+                "Game will start without it."
+                if start_game
+                else "Game is already online; optional Market was not started."
+            )
+            if not self._native_market_start_available(
+                unavailable_continuation=continuation,
+                notify=True,
+            ):
+                start_market = False
+                market_skipped = True
         if not start_market and not start_game:
+            if market_skipped:
+                self._update_status_bar()
+                return
             QMessageBox.information(self, "Already Running", "Both servers are already online.")
             return
+
+        voice_event = (
+            VoiceEvent.GAME_SERVER_LAUNCHING
+            if market_skipped
+            else VoiceEvent.SERVER_STACK_LAUNCHING
+        )
 
         if self._start_service_sequence(
             start_market=start_market,
@@ -2210,7 +2312,7 @@ class MainWindow(QMainWindow):
             mode=resolved[0] if resolved is not None else None,
             on_ready=None,
             error_title="Service Startup Failed",
-            voice_event=VoiceEvent.SERVER_STACK_LAUNCHING,
+            voice_event=voice_event,
         ):
             return
 
@@ -2342,7 +2444,22 @@ class MainWindow(QMainWindow):
         start_market = bool(self._cfg.get("auto_start_market", False)) and not (
             self._is_market_running()
         )
+        market_skipped = False
+        if start_market:
+            continuation = (
+                "Game and the client launch will continue without optional Market."
+                if start_game
+                else "Client launch will continue without optional Market."
+            )
+            if not self._native_market_start_available(
+                unavailable_continuation=continuation,
+                notify=False,
+            ):
+                start_market = False
+                market_skipped = True
         if not start_market and not start_game:
+            if market_skipped:
+                self._update_status_bar()
             on_ready()
             return True
 
@@ -3968,6 +4085,13 @@ class MainWindow(QMainWindow):
                 VoiceEvent.CHARACTER_LAUNCH_FAILED,
                 character_name=request.character_name,
             )
+        else:
+            queue_failures = getattr(self, "_launch_queue_failure_messages", None)
+            if queue_failures is None:
+                queue_failures = []
+                self._launch_queue_failure_messages = queue_failures
+            if failure.message not in queue_failures:
+                queue_failures.append(failure.message)
         if self._client_launch_show_errors and not self._close_in_progress:
             QMessageBox.critical(self, "Launch Error", failure.message)
         self._refresh_character_views()
@@ -4301,6 +4425,7 @@ class MainWindow(QMainWindow):
             0,
             int(skipped_unavailable),
         )
+        self._launch_queue_failure_messages = []
         queue.progress.connect(self._on_launch_queue_progress)
         queue.finished.connect(self._on_launch_queue_finished)
         self._home_page.set_launch_progress(
@@ -4364,12 +4489,16 @@ class MainWindow(QMainWindow):
             0,
         )
         group_name = getattr(self, "_launch_queue_group_name", None)
+        failure_messages = list(
+            getattr(self, "_launch_queue_failure_messages", ())
+        )
         self._launch_queue = None
         self._home_page.finish_launch_progress(attempted, succeeded, cancelled)
         self._characters_page.finish_group_launch_progress()
         self._launch_queue_group_name = None
         self._launch_queue_skipped_running = 0
         self._launch_queue_skipped_unavailable = 0
+        self._launch_queue_failure_messages = []
         self._refresh_character_views()
         self._update_status_bar()
         if self._close_in_progress:
@@ -4405,10 +4534,13 @@ class MainWindow(QMainWindow):
             if failures:
                 details.append(f"{failures} failed")
             suffix = f" Skipped: {', '.join(details)}." if details else ""
+            failure_detail = ""
+            if failures and failure_messages:
+                failure_detail = f"\n\nFirst failure:\n{failure_messages[0]}"
             QMessageBox.information(
                 self,
                 "Launch Complete",
-                f"Launched {succeeded} client(s).{suffix}",
+                f"Launched {succeeded} client(s).{suffix}{failure_detail}",
             )
 
     def _kill_all_clients(self) -> None:
