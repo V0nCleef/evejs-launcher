@@ -146,10 +146,30 @@ def launch_eve_client(
     arguments: tuple[str, ...] = (),
 ) -> subprocess.Popen:
     """Launch the EVE client executable directly (native Windows)."""
+    # The client MUST be given real standard handles.  The launcher is a
+    # windowed build (build.spec sets console=False) so its own fd 0/1/2 are
+    # already invalid, and DETACHED_PROCESS means the client gets no console of
+    # its own either.  Without explicit handles the client inherits that
+    # invalid trio, and every raw ``print >> sys.stderr`` inside the client's
+    # logmodule raises ``IOError: [Errno 9] Bad file descriptor``.
+    #
+    # That is not a cosmetic logging failure.  ``logmodule.LogTraceback`` ends
+    # with an unguarded stderr print, so the IOError unwinds out of whatever
+    # tasklet happened to log a warning -- including UI construction.  A single
+    # benign warning during window setup then kills the window: opening
+    # Neocom -> Industry logs "Possible service deadlock detected!" while
+    # blueprintSvc is still starting, and the window is never built.
+    #
+    # DEVNULL is enough because NUL is a valid descriptor: the write succeeds
+    # and is discarded.  Play.bat solves the same problem by redirecting to a
+    # file (see its EBADF comment) if the client stream is ever wanted.
     return subprocess.Popen(
         [str(exe_path), *arguments],
         env=env,
         cwd=str(cwd),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         **get_client_process_flags(),
     )
 
