@@ -51,7 +51,10 @@ from .audio.events import (
     service_stop_result_event,
 )
 from .constants import APP_TITLE, Page, Ports
-from .core.client_launch_queue import AsyncClientLaunchQueue
+from .core.client_launch_queue import (
+    AsyncClientLaunchQueue,
+    ClientWindowReadinessGate,
+)
 from .core.dashboard import visible_account_count, visible_character_rows
 from .core.discovery import resolve_client_tq_path
 from .core.db import (
@@ -82,7 +85,14 @@ from .core.character_deletion import (
     CharacterDeletionResult,
     CharacterDeletionScope,
 )
-from .core.launcher import ClientLaunchContext, launch_client
+from .core.launcher import (
+    ClientLaunchContext,
+    launch_client,
+    require_client_endpoints_ready,
+    validate_proxy_origin,
+    wait_for_client_endpoints,
+)
+from .core.platform import has_visible_window_for_pid
 from .core.mod_lifecycle_lock import (
     ModLifecycleBusyError,
     ModLifecycleLease,
@@ -182,6 +192,7 @@ from .core.runtime.docker_tools import (
     DockerToolResult,
     ManagedDockerToolController,
 )
+from .core.runtime.endpoints import validate_port
 from .core.runtime.docker_mods import (
     DockerModApplyResult,
     DockerModBridgeError,
@@ -277,6 +288,8 @@ log = setup_logger(__name__)
 _NATIVE_MOD_ATTESTATION_TIMEOUT_SEC = 3.0
 _NATIVE_MOD_ATTESTATION_POLL_SEC = 0.05
 _DOCKER_MOD_POST_RESULT_OBSERVATION_TIMEOUT_MS = 20_000
+_CLIENT_WINDOW_READY_TIMEOUT_MS = 60_000
+_CLIENT_WINDOW_READY_POLL_MS = 250
 
 
 @dataclass(frozen=True)
@@ -291,25 +304,33 @@ class _DataRequestToken:
     character_id: int | None = None
 
 
-def _restore_eve_window(window_title: str = "EVE", timeout: int = 30) -> None:
-    """Wait for the EVE client window to appear, then restore and focus it.
+def _restore_eve_window(process: LaunchedProcess, timeout: int = 60) -> None:
+    """Wait for one EVE process window to appear, then restore and focus it.
 
     Runs in a daemon thread.  The EVE client takes 10-15 seconds to
     materialise its DirectX window on first launch; without this the
     window may appear minimised or behind the launcher.
     """
-    from .core.platform import find_and_focus_eve_window
+    from .core.platform import find_and_focus_eve_window_for_pid
 
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if find_and_focus_eve_window(window_title):
+    pid = process.pid
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            log.debug("Stopped EVE window restore after pid=%s exited", pid)
+            return
+        if find_and_focus_eve_window_for_pid(pid):
             return
         time.sleep(2)
-    log.debug("EVE window '%s' not detected within %ss", window_title, timeout)
+    log.debug("EVE window for pid=%s not detected within %ss", pid, timeout)
 
 
 def _perform_client_launch(request: ClientLaunchRequest) -> LaunchedProcess:
     """Prepare one profile and create its EVE process outside the GUI thread."""
+    log.info("Client launch stage=endpoints_waiting account=%s", request.username)
+    wait_for_client_endpoints(request.launch_context)
+    log.info("Client launch stage=endpoints_ready account=%s", request.username)
+
     if not profile_exists(request.username):
         create_profile(request.username, request.client_path)
 
@@ -347,6 +368,9 @@ def _perform_client_launch(request: ClientLaunchRequest) -> LaunchedProcess:
         launch_context=request.launch_context,
         auto_login=auto_login,
         overview_bridge=request.overview_bridge,
+        pre_spawn_check=lambda: require_client_endpoints_ready(
+            request.launch_context
+        ),
     )
 
 
@@ -490,6 +514,9 @@ class MainWindow(QMainWindow):
         self._client_launch_result_received = False
         self._client_launch_thread_finished = False
         self._client_launch_succeeded = False
+        self._client_launch_result: ClientLaunchResult | None = None
+        self._client_window_readiness_gate: ClientWindowReadinessGate | None = None
+        self._client_window_readiness_queue: AsyncClientLaunchQueue | None = None
         self._pending_client_launches: set[str] = set()
         self._new_character_dialog: NewCharacterDialog | None = None
         self._character_creation_thread: QThread | None = None
@@ -714,6 +741,7 @@ class MainWindow(QMainWindow):
         self._mods_page = ModsPage()
         self._tools_page = ToolsPage(str(self._cfg.get("evejs_root", "")))
         self._settings_page = SettingsPage()
+        self._settings_page.set_save_validator(self._settings_save_rejection)
         self._stack.addWidget(self._home_page)        # Page.HOME = 0
         self._stack.addWidget(self._characters_page)  # Page.CHARACTERS = 1
         self._stack.addWidget(self._mods_page)        # Page.MODS = 2
@@ -1164,6 +1192,32 @@ class MainWindow(QMainWindow):
 
     def _docker_mode(self) -> bool:
         return self._cfg.get("runtime_backend") == "docker_compose"
+
+    def _native_game_port(self, *, strict: bool = False) -> int:
+        """Return the configured Native port, optionally rejecting bad config."""
+        configured = self._cfg.get("game_port", int(Ports.GAME_TCP))
+        try:
+            return validate_port(configured, label="EveJS game")
+        except ValueError:
+            if strict:
+                raise
+            log.warning(
+                "Invalid configured game port %r; using %s",
+                configured,
+                int(Ports.GAME_TCP),
+            )
+            return int(Ports.GAME_TCP)
+
+    def _native_game_running(self, *, fail_closed: bool = False) -> bool:
+        """Probe the selected Native endpoint, failing closed for data guards."""
+        try:
+            effective_port = self._native_game_port(strict=fail_closed)
+        except ValueError:
+            # A database mutation is not safe when we cannot prove which Game
+            # endpoint owns the selected Native data. Fail closed.
+            log.error("Native game endpoint is invalid; treating data guard as busy")
+            return True
+        return is_server_running(port=effective_port)
 
     def _docker_monitor_settings_identity(self) -> str:
         """Hash selected Docker target settings without exposing private paths."""
@@ -1853,7 +1907,7 @@ class MainWindow(QMainWindow):
             else:
                 self._start_server()
             return
-        if is_server_running(port=int(Ports.GAME_TCP)):
+        if self._native_game_running():
             self._stop_server()
         else:
             self._start_server()
@@ -2578,6 +2632,7 @@ class MainWindow(QMainWindow):
                 mode=mode,
                 start_market=start_market,
                 start_game=start_game,
+                game_port=self._native_game_port(),
                 continue_game_after_market_failure=start_market and start_game,
                 start_market_fn=start_market_server,
                 start_game_fn=start_planned_game,
@@ -2986,7 +3041,7 @@ class MainWindow(QMainWindow):
         if not evejs_root:
             QMessageBox.warning(self, "Not Configured", "Set up EveJS root in Settings first.")
             return
-        if self._server_process_alive() or is_server_running(port=int(Ports.GAME_TCP)):
+        if self._server_process_alive() or self._native_game_running():
             log.info("Ignored duplicate game-server start while already active")
             self._update_status_bar()
             return
@@ -3014,7 +3069,7 @@ class MainWindow(QMainWindow):
             return
         proc = self._server_proc
         if proc is None or proc.poll() is not None:
-            if is_server_running(port=int(Ports.GAME_TCP)):
+            if self._native_game_running():
                 QMessageBox.information(
                     self,
                     "Game Server",
@@ -3074,7 +3129,9 @@ class MainWindow(QMainWindow):
         owns_market = (
             self._market_proc is not None and self._market_proc.poll() is None
         )
-        external_game = not owns_game and is_server_running(port=int(Ports.GAME_TCP))
+        external_game = not owns_game and self._native_game_running(
+            fail_closed=True
+        )
         external_market = not owns_market and is_server_running(
             port=int(Ports.MARKET_RPC)
         )
@@ -3204,7 +3261,7 @@ class MainWindow(QMainWindow):
             )
             return
         reachable_services = []
-        if is_server_running(port=int(Ports.GAME_TCP)):
+        if self._native_game_running(fail_closed=True):
             reachable_services.append("Game")
         if is_server_running(port=int(Ports.MARKET_RPC)):
             reachable_services.append("Market")
@@ -3694,7 +3751,7 @@ class MainWindow(QMainWindow):
         mode = mode_override or resolved_mode
 
         owns_server = self._server_process_alive()
-        if not owns_server and is_server_running(port=int(Ports.GAME_TCP)):
+        if not owns_server and self._native_game_running():
             QMessageBox.information(
                 self,
                 "Game Server",
@@ -3858,9 +3915,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Not Configured", "Set up EveJS first.")
             return
 
-        game_active = self._server_process_alive() or is_server_running(
-            port=int(Ports.GAME_TCP)
-        )
+        game_active = self._server_process_alive() or self._native_game_running()
         resolved: tuple[str, Path | None] | None = None
         if not game_active:
             # Resolve before Market so cancelling cannot leave a partial stack.
@@ -3932,7 +3987,7 @@ class MainWindow(QMainWindow):
             try:
                 return (
                     ClientLaunchContext.native(
-                        game_port=int(self._cfg.get("game_port", 26000)),
+                        game_port=self._native_game_port(strict=True),
                         proxy_url=str(
                             self._cfg.get(
                                 "proxy_url",
@@ -4041,9 +4096,7 @@ class MainWindow(QMainWindow):
             return True
 
         auto_start_server = bool(self._cfg.get("auto_start_server", False))
-        game_active = self._server_process_alive() or is_server_running(
-            port=int(Ports.GAME_TCP)
-        )
+        game_active = self._server_process_alive() or self._native_game_running()
         resolved: tuple[str, Path | None] | None = None
         start_game = auto_start_server and not game_active
         if start_game:
@@ -4333,7 +4386,7 @@ class MainWindow(QMainWindow):
             self._begin_docker_character_creation(draft)
             return
 
-        game_active = is_server_running(port=int(Ports.GAME_TCP))
+        game_active = self._native_game_running(fail_closed=True)
         market_active = self._is_market_running()
         game_owned = self._server_process_alive()
         market_owned = (
@@ -4829,7 +4882,7 @@ class MainWindow(QMainWindow):
         dialog = self._new_character_dialog
         if request is None:
             return
-        if is_server_running(port=int(Ports.GAME_TCP)) or is_server_running(
+        if self._native_game_running(fail_closed=True) or is_server_running(
             port=int(Ports.MARKET_RPC)
         ):
             if dialog is not None:
@@ -5093,7 +5146,7 @@ class MainWindow(QMainWindow):
             )
             return
 
-        game_active = is_server_running(port=int(Ports.GAME_TCP))
+        game_active = self._native_game_running(fail_closed=True)
         market_active = self._is_market_running()
         game_owned = self._server_process_alive()
         market_owned = (
@@ -5210,7 +5263,7 @@ class MainWindow(QMainWindow):
         request = self._character_deletion_request
         if request is None:
             return
-        if is_server_running(port=int(Ports.GAME_TCP)) or is_server_running(
+        if self._native_game_running(fail_closed=True) or is_server_running(
             port=int(Ports.MARKET_RPC)
         ):
             progress = self._character_deletion_progress
@@ -5535,7 +5588,7 @@ class MainWindow(QMainWindow):
         )
         threading.Thread(
             target=_restore_eve_window,
-            args=("EVE",),
+            args=(result.process,),
             daemon=True,
         ).start()
 
@@ -5655,6 +5708,7 @@ class MainWindow(QMainWindow):
         self._client_launch_result_received = False
         self._client_launch_thread_finished = False
         self._client_launch_succeeded = False
+        self._client_launch_result = None
         try:
             thread.start()
         except Exception as exc:
@@ -5667,6 +5721,7 @@ class MainWindow(QMainWindow):
             self._client_launch_result_received = False
             self._client_launch_thread_finished = False
             self._client_launch_succeeded = False
+            self._client_launch_result = None
             thread.deleteLater()
             if show_errors and not self._close_in_progress:
                 QMessageBox.critical(
@@ -5699,6 +5754,7 @@ class MainWindow(QMainWindow):
             return
         self._client_launch_result_received = True
         self._client_launch_succeeded = True
+        self._client_launch_result = result
         self._set_client_launch_pending(request, False)
         self._finalize_client_launch(result)
         self._refresh_character_views()
@@ -5716,6 +5772,7 @@ class MainWindow(QMainWindow):
             return
         self._client_launch_result_received = True
         self._client_launch_succeeded = False
+        self._client_launch_result = None
         self._set_client_launch_pending(request, False)
         log.error(
             "Client launch failed for %s (%s): %s",
@@ -5799,6 +5856,7 @@ class MainWindow(QMainWindow):
         thread = self._client_launch_thread
         from_queue = self._client_launch_from_queue
         succeeded = self._client_launch_succeeded
+        result = self._client_launch_result
 
         self._client_launch_thread = None
         self._client_launch_worker = None
@@ -5808,14 +5866,145 @@ class MainWindow(QMainWindow):
         self._client_launch_result_received = False
         self._client_launch_thread_finished = False
         self._client_launch_succeeded = False
+        self._client_launch_result = None
         if isinstance(thread, QThread):
             thread.deleteLater()
 
         queue = getattr(self, "_launch_queue", None)
         if from_queue and queue is not None:
-            queue.item_finished(succeeded)
+            if succeeded and result is not None:
+                self._begin_client_window_readiness(queue, result.process)
+            else:
+                queue.item_finished(False)
         if self._close_in_progress:
             QTimer.singleShot(0, self.close)
+
+    def _begin_client_window_readiness(
+        self,
+        queue: AsyncClientLaunchQueue,
+        process: LaunchedProcess,
+    ) -> None:
+        """Hold Launch All until the exact process owns a usable game window."""
+        if getattr(queue, "cancel_requested", False):
+            queue.item_finished(True)
+            return
+        existing = getattr(self, "_client_window_readiness_gate", None)
+        if existing is not None:
+            log.error(
+                "Client window readiness invariant failed existing_pid=%s new_pid=%s",
+                existing.pid,
+                process.pid,
+            )
+            existing_queue = getattr(self, "_client_window_readiness_queue", None)
+            self._client_window_readiness_gate = None
+            self._client_window_readiness_queue = None
+            existing.stop()
+            existing.deleteLater()
+            if existing_queue is not None:
+                existing_queue.cancel()
+                existing_queue.item_finished(True)
+            if queue is not existing_queue:
+                queue.cancel()
+                queue.item_finished(True)
+            return
+
+        gate = ClientWindowReadinessGate(
+            process.pid,
+            process.poll,
+            has_visible_window_for_pid,
+            timeout_ms=_CLIENT_WINDOW_READY_TIMEOUT_MS,
+            poll_interval_ms=_CLIENT_WINDOW_READY_POLL_MS,
+            parent=self,
+        )
+        self._client_window_readiness_gate = gate
+        self._client_window_readiness_queue = queue
+        gate.finished.connect(
+            lambda ready, reason, expected_gate=gate, expected_queue=queue: (
+                self._on_client_window_readiness_finished(
+                    expected_gate,
+                    expected_queue,
+                    ready,
+                    reason,
+                )
+            )
+        )
+        log.info(
+            "Launch All waiting for client window pid=%s timeout_ms=%s",
+            process.pid,
+            _CLIENT_WINDOW_READY_TIMEOUT_MS,
+        )
+        gate.start()
+
+    def _on_client_window_readiness_finished(
+        self,
+        gate: ClientWindowReadinessGate,
+        queue: AsyncClientLaunchQueue,
+        ready: bool,
+        reason: str,
+    ) -> None:
+        """Release only the queue/gate pair that produced this callback."""
+        if (
+            gate is not getattr(self, "_client_window_readiness_gate", None)
+            or queue is not getattr(self, "_client_window_readiness_queue", None)
+        ):
+            return
+        self._client_window_readiness_gate = None
+        self._client_window_readiness_queue = None
+        gate.stop()
+        gate.deleteLater()
+
+        if ready:
+            log.info("Launch All client window ready pid=%s", gate.pid)
+        else:
+            process_exited = reason.startswith("process-exited:")
+            if process_exited:
+                return_code = reason.partition(":")[2]
+                message = (
+                    f"EVE client process {gate.pid} exited with code {return_code} "
+                    "before opening a usable window."
+                )
+            else:
+                timeout_seconds = max(
+                    1,
+                    (_CLIENT_WINDOW_READY_TIMEOUT_MS + 999) // 1_000,
+                )
+                message = (
+                    f"EVE client process {gate.pid} did not open a usable window "
+                    f"within {timeout_seconds} seconds."
+                )
+            log.error("Launch All readiness failed pid=%s reason=%s", gate.pid, reason)
+            queue_failures = getattr(self, "_launch_queue_failure_messages", None)
+            if queue_failures is None:
+                queue_failures = []
+                self._launch_queue_failure_messages = queue_failures
+            if message not in queue_failures:
+                queue_failures.append(message)
+
+        if queue is getattr(self, "_launch_queue", None):
+            if not ready:
+                # If one client cannot establish a usable window, adding more
+                # simultaneous startup load is the least useful thing we can do.
+                queue.cancel()
+                queue.item_finished(not process_exited)
+            else:
+                queue.item_finished(True)
+
+    def _release_client_window_readiness_for_cancel(
+        self,
+        queue: AsyncClientLaunchQueue,
+    ) -> None:
+        """A spawned process counts as launched when its remaining queue is cancelled."""
+        gate = getattr(self, "_client_window_readiness_gate", None)
+        if (
+            gate is None
+            or queue is not getattr(self, "_client_window_readiness_queue", None)
+        ):
+            return
+        self._client_window_readiness_gate = None
+        self._client_window_readiness_queue = None
+        gate.stop()
+        gate.deleteLater()
+        queue.item_finished(True)
 
     def _on_character_launch(
         self,
@@ -6126,7 +6315,16 @@ class MainWindow(QMainWindow):
         )
         self._launch_queue_failure_messages = []
         queue.progress.connect(self._on_launch_queue_progress)
-        queue.finished.connect(self._on_launch_queue_finished)
+        queue.finished.connect(
+            lambda attempted, succeeded, cancelled, expected_queue=queue: (
+                self._on_launch_queue_finished(
+                    attempted,
+                    succeeded,
+                    cancelled,
+                    expected_queue=expected_queue,
+                )
+            )
+        )
         self._home_page.set_launch_progress(
             0,
             len(candidates),
@@ -6150,6 +6348,7 @@ class MainWindow(QMainWindow):
         queue = getattr(self, "_launch_queue", None)
         if queue is not None:
             queue.cancel()
+            self._release_client_window_readiness_for_cancel(queue)
 
     def _on_launch_queue_progress(
         self,
@@ -6178,8 +6377,14 @@ class MainWindow(QMainWindow):
         attempted: int,
         succeeded: int,
         cancelled: bool,
+        *,
+        expected_queue: AsyncClientLaunchQueue | None = None,
     ) -> None:
-        if getattr(self, "_launch_queue", None) is None:
+        current_queue = getattr(self, "_launch_queue", None)
+        if current_queue is None:
+            return
+        if expected_queue is not None and expected_queue is not current_queue:
+            log.debug("Ignored stale client launch queue completion")
             return
         skipped_running = getattr(self, "_launch_queue_skipped_running", 0)
         skipped_unavailable = getattr(
@@ -6220,6 +6425,8 @@ class MainWindow(QMainWindow):
                     f" Skipped {skipped_unavailable} hidden, banned, missing, "
                     "or otherwise unavailable character(s)."
                 )
+            if failure_messages:
+                message += f"\n\nLaunch sequence stopped:\n{failure_messages[0]}"
             QMessageBox.information(self, "Launch Cancelled", message)
         else:
             failures = max(0, attempted - succeeded)
@@ -7545,7 +7752,10 @@ class MainWindow(QMainWindow):
                 settings_identity=self._docker_monitor_settings_identity(),
             )
         else:
-            monitor = ServiceMonitor(interval_ms=5_000)
+            monitor = ServiceMonitor(
+                interval_ms=5_000,
+                game_port=self._native_game_port(),
+            )
         monitor.moveToThread(thread)
         thread.started.connect(monitor.start)
         if isinstance(monitor, DockerMonitor):
@@ -7650,7 +7860,7 @@ class MainWindow(QMainWindow):
             return
         if self._service_monitor is None:
             self._service_reachability = (
-                is_server_running(port=int(Ports.GAME_TCP)),
+                is_server_running(port=self._native_game_port()),
                 is_server_running(port=int(Ports.MARKET_RPC)),
             )
         snapshot = self._build_runtime_snapshot()
@@ -8178,10 +8388,104 @@ class MainWindow(QMainWindow):
             # preference cannot be written; launcher actions remain unaffected.
             log.exception("Could not persist the soundtrack mute setting")
 
+    @staticmethod
+    def _normalized_evejs_root(candidate: dict) -> str:
+        """Return one case-insensitive absolute identity for an EveJS root."""
+        raw_root = str(candidate.get("evejs_root", "")).strip()
+        return (
+            str(Path(raw_root).resolve(strict=False)).casefold()
+            if raw_root
+            else ""
+        )
+
+    @classmethod
+    def _native_runtime_identity(cls, candidate: dict) -> object:
+        """Return one canonical Native root and client-endpoint identity."""
+        if candidate.get("runtime_backend") != "native":
+            return None
+        root_identity = cls._normalized_evejs_root(candidate)
+        raw_port = candidate.get("game_port", int(Ports.GAME_TCP))
+        try:
+            port_identity: object = validate_port(raw_port, label="EveJS game")
+        except ValueError:
+            # Non-strict Native runtime probes use the documented default when
+            # recovering from an invalid persisted value.
+            port_identity = int(Ports.GAME_TCP)
+        raw_proxy = candidate.get("proxy_url", "http://127.0.0.1:26002")
+        try:
+            proxy_identity: object = validate_proxy_origin(str(raw_proxy))
+        except ValueError:
+            proxy_identity = ("invalid", type(raw_proxy).__name__, repr(raw_proxy))
+        return ("native", root_identity, port_identity, proxy_identity)
+
+    def _settings_save_rejection(self, draft: dict) -> str | None:
+        """Reject unsafe Native endpoint changes before Settings writes disk."""
+        proposed = dict(self._cfg)
+        proposed.update(draft)
+
+        if proposed.get("runtime_backend") == "native":
+            try:
+                validate_port(
+                    proposed.get("game_port", int(Ports.GAME_TCP)),
+                    label="EveJS game",
+                )
+                validate_proxy_origin(
+                    str(proposed.get("proxy_url", "http://127.0.0.1:26002"))
+                )
+            except ValueError:
+                return "The Native client endpoints are invalid. Nothing was saved."
+
+        if self._cfg.get("runtime_backend") != "native":
+            return None
+
+        previous_identity = self._native_runtime_identity(self._cfg)
+        proposed_identity = self._native_runtime_identity(proposed)
+        if proposed_identity == previous_identity:
+            return None
+
+        root_or_backend_changed = (
+            proposed.get("runtime_backend") != "native"
+            or self._normalized_evejs_root(proposed)
+            != self._normalized_evejs_root(self._cfg)
+        )
+
+        try:
+            previous_port = validate_port(
+                self._cfg.get("game_port", int(Ports.GAME_TCP)),
+                label="EveJS game",
+            )
+        except ValueError:
+            previous_port = int(Ports.GAME_TCP)
+
+        game_active = self._server_process_alive() or is_server_running(
+            port=previous_port
+        )
+        market_active = root_or_backend_changed and self._is_market_running()
+        if game_active or market_active:
+            if game_active and market_active:
+                active_services = (
+                    f"Game server on port {previous_port} and Market server"
+                )
+            elif game_active:
+                active_services = f"Game server on port {previous_port}"
+            else:
+                active_services = "Market server"
+            return (
+                f"Stop the Native {active_services} before changing the selected "
+                "EveJS root, game port, proxy URL, or runtime backend. Nothing "
+                "was saved."
+            )
+        return None
+
     def _on_settings_saved(self, cfg: dict) -> None:
         """Refresh in-memory config and character grid after settings save."""
         previous_root = str(self._cfg.get("evejs_root", ""))
         previous_docker_target = self._docker_target_identity()
+
+        previous_lifecycle_target = (
+            *previous_docker_target,
+            self._native_runtime_identity(self._cfg),
+        )
         proposed_cfg = dict(self._cfg)
         proposed_cfg.update(cfg)
         proposed_docker_target = (
@@ -8191,7 +8495,14 @@ class MainWindow(QMainWindow):
             proposed_cfg.get("docker_compose_file"),
             proposed_cfg.get("docker_project_name"),
         )
-        if self._lifecycle_active() and proposed_docker_target != previous_docker_target:
+        proposed_lifecycle_target = (
+            *proposed_docker_target,
+            self._native_runtime_identity(proposed_cfg),
+        )
+        if (
+            self._lifecycle_active()
+            and proposed_lifecycle_target != previous_lifecycle_target
+        ):
             QMessageBox.warning(
                 self,
                 "Settings Deferred",
@@ -8202,6 +8513,11 @@ class MainWindow(QMainWindow):
         previous_monitor = (
             self._cfg.get("runtime_backend"), self._cfg.get("docker_compose_file"),
             self._cfg.get("docker_project_name"), previous_root,
+            (
+                None
+                if self._docker_mode()
+                else self._native_game_port()
+            ),
         )
         self._cfg.update(cfg)
         docker_target_changed = (
@@ -8229,6 +8545,11 @@ class MainWindow(QMainWindow):
         current_monitor = (
             self._cfg.get("runtime_backend"), self._cfg.get("docker_compose_file"),
             self._cfg.get("docker_project_name"), current_root,
+            (
+                None
+                if self._docker_mode()
+                else self._native_game_port()
+            ),
         )
         if current_monitor != previous_monitor:
             self._cancel_launch_queue()
@@ -8343,7 +8664,7 @@ class MainWindow(QMainWindow):
         launch_queue = getattr(self, "_launch_queue", None)
         if launch_queue is not None:
             self._close_in_progress = True
-            launch_queue.cancel()
+            self._cancel_launch_queue()
         if getattr(self, "_client_launch_thread", None) is not None:
             self._close_in_progress = True
             self._shutdown_audio_for_close()

@@ -13,6 +13,8 @@ Values load from / save to :mod:`src.config`.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+import logging
 import shutil
 import subprocess
 from datetime import datetime
@@ -41,6 +43,9 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 class FocusWheelSpinBox(QSpinBox):
@@ -145,6 +150,7 @@ class SettingsPage(QWidget):
         self._validated_docker_fingerprint: str | None = None
         self._save_after_docker_preflight = False
         self._lifecycle_busy = False
+        self._save_validator: Callable[[dict], str | None] | None = None
         self._settings_baseline: dict[str, object] | None = None
         self._voice_preview_available = False
         self._voice_preview_reason = (
@@ -1438,6 +1444,17 @@ class SettingsPage(QWidget):
         if self._lifecycle_busy:
             self._reject_lifecycle_busy_save()
             return
+        validator = self._save_validator
+        if validator is not None:
+            try:
+                rejection = validator(dict(cfg))
+            except Exception:  # noqa: BLE001 - a failed guard must fail closed
+                log.exception("Settings save validation failed")
+                rejection = "Settings validation failed. Nothing was saved."
+            if rejection:
+                self._show_save_feedback(str(rejection), success=False)
+                self.save_finished.emit(False)
+                return
         try:
             config.save(cfg)
         except OSError:
@@ -1451,6 +1468,13 @@ class SettingsPage(QWidget):
         self._settings_baseline = self._form_state()
         self.settings_saved.emit(cfg)
         self.save_finished.emit(True)
+
+    def set_save_validator(
+        self,
+        validator: Callable[[dict], str | None] | None,
+    ) -> None:
+        """Install the synchronous pre-persistence runtime safety guard."""
+        self._save_validator = validator
 
     def _collect_docker_draft(self) -> DockerSetupDraft:
         return DockerSetupDraft(

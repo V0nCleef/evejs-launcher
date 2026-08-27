@@ -7,6 +7,21 @@ import socket
 from typing import Callable
 
 
+def validate_port(value: object, *, label: str = "Endpoint") -> int:
+    """Return one usable TCP port or raise a stable configuration error."""
+    if isinstance(value, bool):
+        raise ValueError(f"{label} port is invalid.")
+    try:
+        port = int(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{label} port is invalid.") from exc
+    if isinstance(value, float) and not value.is_integer():
+        raise ValueError(f"{label} port is invalid.")
+    if not 1 <= port <= 65535:
+        raise ValueError(f"{label} port is invalid.")
+    return port
+
+
 @dataclass(frozen=True)
 class Endpoint:
     """One effective loopback publication for a semantic service endpoint."""

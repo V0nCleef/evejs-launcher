@@ -8,13 +8,14 @@ import json
 import os
 import re
 from pathlib import Path
-import tempfile
+import uuid
 
 from ..config import CONFIG_DIR
 from .platform import create_directory_link, get_eve_settings_path, remove_directory_link
 
 PROFILES_ROOT = CONFIG_DIR / "Profiles"
 _REQUIRED_CORE_PUBLIC_SECTIONS = ("audio", "device", "generic", "ui")
+_ATOMIC_TEMP_CREATE_ATTEMPTS = 8
 
 
 def get_settings_key(client_path: str) -> str:
@@ -346,8 +347,13 @@ def configure_profile_game_endpoint(
     updated_start = _patch_start_ini(start_text, host=host, port=port)
     updated_prefs = _patch_flat_key(prefs_text, "port", str(port))
 
-    _atomic_write_text(start_path, updated_start)
-    _atomic_write_text(prefs_path, updated_prefs)
+    # Avoid touching the shared client installation on every launch when its
+    # endpoint is already correct. Besides preserving timestamps, this lets a
+    # correctly configured read-only install launch normally.
+    if updated_start != start_text:
+        _atomic_write_text(start_path, updated_start)
+    if updated_prefs != prefs_text:
+        _atomic_write_text(prefs_path, updated_prefs)
 
 
 def _validate_game_endpoint(host: str, port: int) -> None:
@@ -456,28 +462,64 @@ def _patch_flat_key(text: str, key: str, value: str) -> str:
     return newline.join(patched) + suffix
 
 
+def _create_atomic_temporary(path: Path) -> tuple[int, Path]:
+    """Create one sibling temporary file without tempfile's Windows retry loop.
+
+    CPython's ``tempfile._mkstemp_inner`` treats ``PermissionError`` as a
+    possible name collision on Windows and can retry up to ``TMP_MAX`` times.
+    A write-restricted EVE installation therefore used to peg one CPU core and
+    leave the launcher stuck on LAUNCHING. Real permission errors must fail on
+    the first attempt; only the vanishingly unlikely name collision is retried.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    for _attempt in range(_ATOMIC_TEMP_CREATE_ATTEMPTS):
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            return os.open(temporary, flags, 0o600), temporary
+        except FileExistsError:
+            continue
+        except PermissionError as exc:
+            raise PermissionError(
+                f"Cannot update '{path.name}': Windows denied temporary-file "
+                "creation beside it. Check that the copied client or profile "
+                "folder is writable."
+            ) from exc
+    raise FileExistsError(
+        f"Cannot update '{path.name}': unable to reserve a temporary file."
+    )
+
+
 def _atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None
+    descriptor: int | None = None
     try:
-        with tempfile.NamedTemporaryFile(
+        descriptor, temporary = _create_atomic_temporary(path)
+        with os.fdopen(
+            descriptor,
             mode="w",
             encoding="utf-8",
             newline="",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
         ) as handle:
-            temporary = Path(handle.name)
+            descriptor = None  # fdopen owns and closes it from here onward.
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
         temporary = None
     finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                # Preserve the write/open failure that led us into cleanup.
+                pass
         if temporary is not None:
-            temporary.unlink(missing_ok=True)
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                # The original failure is more useful than a cleanup failure.
+                pass
 
 
 def list_profiles() -> list[str]:

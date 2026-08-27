@@ -62,6 +62,172 @@ class _FakeMutexKernel:
         self.events.append(("close", _dword_value(handle)))
         return True
 
+
+class _FakeWindowUser32:
+    def __init__(self, windows: list[dict[str, object]]) -> None:
+        self._windows = {int(window["hwnd"]): window for window in windows}
+        self._order = [int(window["hwnd"]) for window in windows]
+        self.events: list[tuple[object, ...]] = []
+
+    def EnumWindows(self, callback: object, lparam: object) -> bool:  # noqa: N802
+        self.events.append(("enumerate",))
+        for hwnd in self._order:
+            if not callback(hwnd, lparam):  # type: ignore[operator]
+                break
+        return True
+
+    def IsWindowVisible(self, hwnd: object) -> bool:  # noqa: N802
+        return bool(self._windows[_dword_value(hwnd)]["visible"])
+
+    def GetWindowThreadProcessId(  # noqa: N802
+        self,
+        hwnd: object,
+        owner_pid: object,
+    ) -> int:
+        owner_pid._obj.value = int(  # type: ignore[attr-defined]
+            self._windows[_dword_value(hwnd)]["pid"]
+        )
+        return 1
+
+    def GetWindowRect(self, hwnd: object, rect: object) -> bool:  # noqa: N802
+        left, top, right, bottom = self._windows[_dword_value(hwnd)]["rect"]
+        rect._obj.left = left  # type: ignore[attr-defined]
+        rect._obj.top = top  # type: ignore[attr-defined]
+        rect._obj.right = right  # type: ignore[attr-defined]
+        rect._obj.bottom = bottom  # type: ignore[attr-defined]
+        return True
+
+    def IsIconic(self, hwnd: object) -> bool:  # noqa: N802
+        self.events.append(("iconic", _dword_value(hwnd)))
+        return bool(self._windows[_dword_value(hwnd)]["iconic"])
+
+    def ShowWindow(self, hwnd: object, command: object) -> bool:  # noqa: N802
+        self.events.append(("restore", _dword_value(hwnd), _dword_value(command)))
+        return True
+
+    def SetForegroundWindow(self, hwnd: object) -> bool:  # noqa: N802
+        self.events.append(("foreground", _dword_value(hwnd)))
+        return True
+
+
+@pytest.mark.parametrize("pid", [0, -1, True, False, "42", None])
+def test_pid_scoped_window_focus_requires_positive_integer_pid(
+    monkeypatch: pytest.MonkeyPatch,
+    pid: object,
+) -> None:
+    fake_user32 = _FakeWindowUser32([])
+    monkeypatch.setattr(platform_win, "user32", fake_user32)
+
+    with pytest.raises(ValueError, match="positive process ID"):
+        platform_win.find_and_focus_eve_window_for_pid(pid)  # type: ignore[arg-type]
+
+    assert fake_user32.events == []
+
+
+def test_pid_scoped_window_focus_restores_only_exact_eligible_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_user32 = _FakeWindowUser32(
+        [
+            {
+                "hwnd": 101,
+                "pid": 7001,
+                "visible": True,
+                "rect": (0, 0, 1200, 900),
+                "iconic": False,
+            },
+            {
+                "hwnd": 102,
+                "pid": 4242,
+                "visible": False,
+                "rect": (0, 0, 1200, 900),
+                "iconic": False,
+            },
+            {
+                "hwnd": 103,
+                "pid": 4242,
+                "visible": True,
+                "rect": (0, 0, 201, 200),
+                "iconic": False,
+            },
+            {
+                "hwnd": 104,
+                "pid": 4242,
+                "visible": True,
+                "rect": (10, 20, 810, 620),
+                "iconic": True,
+            },
+            {
+                "hwnd": 105,
+                "pid": 4242,
+                "visible": True,
+                "rect": (0, 0, 1600, 1000),
+                "iconic": False,
+            },
+        ]
+    )
+    monkeypatch.setattr(platform_win, "user32", fake_user32)
+
+    assert platform_win.find_and_focus_eve_window_for_pid(4242)
+    assert fake_user32.events == [
+        ("enumerate",),
+        ("iconic", 104),
+        ("restore", 104, 9),
+        ("foreground", 104),
+    ]
+
+
+def test_pid_scoped_window_focus_returns_false_without_eligible_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_user32 = _FakeWindowUser32(
+        [
+            {
+                "hwnd": 201,
+                "pid": 5150,
+                "visible": True,
+                "rect": (0, 0, 1200, 900),
+                "iconic": False,
+            },
+            {
+                "hwnd": 202,
+                "pid": 4242,
+                "visible": True,
+                "rect": (0, 0, 200, 201),
+                "iconic": True,
+            },
+        ]
+    )
+    monkeypatch.setattr(platform_win, "user32", fake_user32)
+
+    assert not platform_win.find_and_focus_eve_window_for_pid(4242)
+    assert fake_user32.events == [("enumerate",)]
+
+
+def test_pid_scoped_window_focus_skips_restore_when_not_iconic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_user32 = _FakeWindowUser32(
+        [
+            {
+                "hwnd": 301,
+                "pid": 4242,
+                "visible": True,
+                "rect": (-10, -20, 790, 580),
+                "iconic": False,
+            }
+        ]
+    )
+    monkeypatch.setattr(platform_win, "user32", fake_user32)
+
+    assert platform_win.find_and_focus_eve_window_for_pid(4242)
+    assert fake_user32.events == [
+        ("enumerate",),
+        ("iconic", 301),
+        ("foreground", 301),
+    ]
+
+
 def test_graceful_server_flags_create_one_hidden_private_console() -> None:
     kwargs = platform_win.get_graceful_server_process_flags()
 

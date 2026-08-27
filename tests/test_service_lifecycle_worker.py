@@ -343,7 +343,7 @@ def test_start_worker_reports_timeout_even_if_no_probe_iteration_runs() -> None:
     assert "timeout" in str(observed[0].market_error).lower()
 
 
-def test_start_worker_game_only_never_launches_or_probes_market() -> None:
+def test_start_worker_game_only_uses_configured_port_and_never_probes_market() -> None:
     launched: list[tuple[str, str | None]] = []
     probed_ports: list[int] = []
     observed = []
@@ -357,6 +357,7 @@ def test_start_worker_game_only_never_launches_or_probes_market() -> None:
         mode="vanilla",
         start_market=False,
         start_game=True,
+        game_port=27555,
         probe=lambda port: probed_ports.append(port) is None,
         start_market_fn=lambda _root: (_ for _ in ()).throw(AssertionError("market launch")),
         start_game_fn=start_game,
@@ -366,7 +367,7 @@ def test_start_worker_game_only_never_launches_or_probes_market() -> None:
     worker.run()
 
     assert launched == [("game", "vanilla")]
-    assert probed_ports == [int(Ports.GAME_TCP)]
+    assert probed_ports == [27555]
     assert len(observed) == 1
     assert observed[0].game_ready is True
     assert observed[0].market_process is None

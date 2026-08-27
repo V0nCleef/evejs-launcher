@@ -3,12 +3,18 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
+import logging
 import subprocess
 
 from .platform import has_visible_window_for_pid
 
 CLIENT_LAUNCH_GRACE_SECONDS = 20.0
 CLIENT_WINDOW_CLOSE_GRACE_SECONDS = 2.0
+
+# ``src.app`` owns the launcher's rotating file handler.  Reuse that logger so
+# these retirement breadcrumbs reach launcher.log without opening a competing
+# handler from this low-level module.
+log = logging.getLogger("src.app")
 
 
 @dataclass
@@ -111,7 +117,26 @@ class ProcessTracker:
         return before - len(self._clients)
 
     def _retain_client(self, client: LaunchedClient) -> bool:
-        if not client.is_running:
+        process = client.process
+        if process is None:
+            log.info(
+                "Client tracking retired pid=%s reason=process-unavailable "
+                "uptime_seconds=%.1f window_seen=%s",
+                client.pid,
+                max(0.0, client.uptime_seconds),
+                client.has_seen_window,
+            )
+            return False
+        return_code = process.poll()
+        if return_code is not None:
+            log.info(
+                "Client tracking retired pid=%s reason=process-exited "
+                "uptime_seconds=%.1f return_code=%s window_seen=%s",
+                client.pid,
+                max(0.0, client.uptime_seconds),
+                return_code,
+                client.has_seen_window,
+            )
             return False
         try:
             window_visible = bool(self._window_probe(client.pid))
@@ -129,7 +154,17 @@ class ProcessTracker:
         if client.window_missing_since is None:
             client.window_missing_since = now
         missing_seconds = (now - client.window_missing_since).total_seconds()
-        return missing_seconds < self._window_close_grace_seconds
+        if missing_seconds < self._window_close_grace_seconds:
+            return True
+        log.info(
+            "Client tracking retired pid=%s reason=window-missing "
+            "process_alive=True uptime_seconds=%.1f window_seen=True "
+            "window_missing_seconds=%.1f",
+            client.pid,
+            max(0.0, client.uptime_seconds),
+            max(0.0, missing_seconds),
+        )
+        return False
 
     @property
     def running(self) -> list[LaunchedClient]:

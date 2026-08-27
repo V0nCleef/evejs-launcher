@@ -107,6 +107,7 @@ def test_main_window_constructs_without_legacy_settings_prompt(
     window = MainWindow()
     try:
         assert window._settings_page is not None
+        assert callable(window._settings_page._save_validator)
     finally:
         window.deleteLater()
 
@@ -320,6 +321,7 @@ def test_native_game_worker_is_bound_to_the_lock_owned_runtime_plan(
     loader.parent.mkdir(parents=True)
     loader.write_text("module.exports = {};\n", encoding="utf-8")
     bare_window._cfg["evejs_root"] = str(tmp_path)
+    bare_window._cfg["game_port"] = 27555
     bare_window._lifecycle_thread = None
     bare_window._publish_cached_runtime = lambda: None
     captured: list[object] = []
@@ -359,6 +361,7 @@ def test_native_game_worker_is_bound_to_the_lock_owned_runtime_plan(
     assert plan.selected_loader_ids == ("Fixture Mod",)
     assert bare_window._mod_lifecycle_lease is not None
     assert worker._start_game_fn(str(tmp_path), mode="modded") is launched_process
+    assert worker._game_port == 27555
     assert launches == [(str(tmp_path), "modded", plan)]
     assert worker._game_runtime_validator(launched_process) is verified_snapshot
     assert validations == [(plan, launched_process)]
@@ -1253,6 +1256,390 @@ def test_auto_start_cancellation_occurs_before_market_side_effects(
     assert ready == []
 
 
+def test_auto_start_probes_the_configured_native_game_port(
+    bare_window: MainWindow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bare_window._cfg.update(
+        {
+            "evejs_root": str(tmp_path),
+            "game_port": 27555,
+            "auto_start_market": False,
+            "auto_start_server": False,
+        }
+    )
+    probed_ports: list[int] = []
+    bare_window._is_market_running = lambda: False
+    bare_window._update_status_bar = lambda: None
+    monkeypatch.setattr(
+        "src.app.is_server_running",
+        lambda *, port, **_kwargs: probed_ports.append(port) is not None,
+    )
+
+    ready: list[str] = []
+
+    assert bare_window._ensure_server_if_needed(lambda: ready.append("ready")) is True
+    assert probed_ports == [27555]
+    assert ready == ["ready"]
+
+
+def test_native_data_guard_uses_only_the_selected_game_port(
+    bare_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bare_window._cfg["game_port"] = 27555
+    probed_ports: list[int] = []
+
+    def probe(*, port: int, **_kwargs: object) -> bool:
+        probed_ports.append(port)
+        return port == int(app_module.Ports.GAME_TCP)
+
+    monkeypatch.setattr("src.app.is_server_running", probe)
+
+    assert bare_window._native_game_running(fail_closed=True) is False
+    assert probed_ports == [27555]
+
+
+def test_native_data_guard_fails_closed_for_invalid_game_port(
+    bare_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bare_window._cfg["game_port"] = 0
+    monkeypatch.setattr(
+        "src.app.is_server_running",
+        lambda **_kwargs: pytest.fail("invalid endpoint must not be probed"),
+    )
+
+    assert bare_window._native_game_running(fail_closed=True) is True
+
+
+def test_invalid_native_game_port_is_rejected_for_client_launch(
+    bare_window: MainWindow,
+) -> None:
+    bare_window._cfg["game_port"] = 0
+
+    context, reason = bare_window._resolve_client_launch_context()
+
+    assert context is None
+    assert "invalid" in reason.casefold()
+
+
+def test_native_game_port_change_is_deferred_during_service_lifecycle(
+    bare_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bare_window._lifecycle_thread = object()
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        "src.app.QMessageBox.warning",
+        lambda _parent, _title, message: warnings.append(message),
+    )
+
+    bare_window._on_settings_saved({**bare_window._cfg, "game_port": 27555})
+
+    assert bare_window._cfg["game_port"] == int(app_module.Ports.GAME_TCP)
+    assert warnings
+    assert "lifecycle" in warnings[0].casefold()
+
+
+def test_native_game_port_change_is_rejected_for_owned_running_server(
+    bare_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bare_window._server_process_alive = lambda: True
+    monkeypatch.setattr(
+        "src.app.is_server_running",
+        lambda **_kwargs: pytest.fail("owned process evidence must short-circuit"),
+    )
+
+    rejection = bare_window._settings_save_rejection(
+        {**bare_window._cfg, "game_port": 27555}
+    )
+
+    assert rejection is not None
+    assert "26000" in rejection
+    assert "nothing was saved" in rejection.casefold()
+
+
+def test_native_game_port_change_probes_and_rejects_external_old_endpoint(
+    bare_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    probed_ports: list[int] = []
+    bare_window._server_process_alive = lambda: False
+    monkeypatch.setattr(
+        "src.app.is_server_running",
+        lambda *, port: probed_ports.append(port) or port == 26000,
+    )
+
+    rejection = bare_window._settings_save_rejection(
+        {**bare_window._cfg, "game_port": 27555}
+    )
+
+    assert rejection is not None
+    assert probed_ports == [26000]
+
+
+def test_native_game_port_validation_allows_idle_and_equivalent_transitions(
+    bare_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    probed_ports: list[int] = []
+    bare_window._server_process_alive = lambda: False
+    monkeypatch.setattr(
+        "src.app.is_server_running",
+        lambda *, port: probed_ports.append(port) or False,
+    )
+
+    equivalent = bare_window._settings_save_rejection(
+        {**bare_window._cfg, "game_port": "26000"}
+    )
+    changed = bare_window._settings_save_rejection(
+        {**bare_window._cfg, "game_port": 27555}
+    )
+
+    assert equivalent is None
+    assert changed is None
+    assert probed_ports == [26000]
+
+
+def test_native_game_port_validation_rejects_invalid_candidate_but_ignores_docker(
+    bare_window: MainWindow,
+) -> None:
+    native_rejection = bare_window._settings_save_rejection(
+        {**bare_window._cfg, "game_port": 0}
+    )
+    bare_window._cfg["runtime_backend"] = "docker_compose"
+    docker_rejection = bare_window._settings_save_rejection(
+        {**bare_window._cfg, "game_port": 0}
+    )
+
+    assert native_rejection is not None
+    assert "invalid" in native_rejection.casefold()
+    assert docker_rejection is None
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"proxy_url": "http://127.0.0.1:27557"},
+        {"evejs_root": "C:/Fixture/Other-EveJS"},
+        {"runtime_backend": "docker_compose"},
+    ],
+)
+def test_live_native_game_rejects_every_runtime_identity_change(
+    bare_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    change: dict[str, object],
+) -> None:
+    bare_window._cfg["evejs_root"] = "C:/Fixture/EveJS"
+    bare_window._server_process_alive = lambda: False
+    monkeypatch.setattr("src.app.is_server_running", lambda *, port: port == 26000)
+
+    rejection = bare_window._settings_save_rejection(
+        {**bare_window._cfg, **change}
+    )
+
+    assert rejection is not None
+    assert "nothing was saved" in rejection.casefold()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"proxy_url": "http://127.0.0.1:27557"},
+        {"evejs_root": "C:/Fixture/Other-EveJS"},
+        {"runtime_backend": "docker_compose"},
+    ],
+)
+def test_idle_native_game_allows_runtime_identity_change(
+    bare_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    change: dict[str, object],
+) -> None:
+    bare_window._cfg["evejs_root"] = "C:/Fixture/EveJS"
+    bare_window._server_process_alive = lambda: False
+    monkeypatch.setattr("src.app.is_server_running", lambda **_kwargs: False)
+
+    assert (
+        bare_window._settings_save_rejection({**bare_window._cfg, **change})
+        is None
+    )
+
+
+def test_equivalent_native_proxy_origin_does_not_probe_running_game(
+    bare_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bare_window._cfg["proxy_url"] = "http://LOCALHOST:26002"
+    bare_window._server_process_alive = lambda: False
+    monkeypatch.setattr(
+        "src.app.is_server_running",
+        lambda **_kwargs: pytest.fail("equivalent identity must not be probed"),
+    )
+
+    rejection = bare_window._settings_save_rejection(
+        {**bare_window._cfg, "proxy_url": "http://localhost:26002/"}
+    )
+
+    assert rejection is None
+
+
+def test_invalid_old_native_port_uses_runtime_fallback_for_safe_repair(
+    bare_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bare_window._cfg["game_port"] = 0
+    bare_window._server_process_alive = lambda: True
+    monkeypatch.setattr(
+        "src.app.is_server_running",
+        lambda **_kwargs: pytest.fail("equivalent fallback repair must not probe"),
+    )
+
+    rejection = bare_window._settings_save_rejection(
+        {**bare_window._cfg, "game_port": 26000}
+    )
+
+    assert rejection is None
+
+
+def test_invalid_old_native_port_retarget_probes_runtime_fallback(
+    bare_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bare_window._cfg["game_port"] = 0
+    bare_window._server_process_alive = lambda: False
+    probed_ports: list[int] = []
+    monkeypatch.setattr(
+        "src.app.is_server_running",
+        lambda *, port: probed_ports.append(port) or True,
+    )
+
+    rejection = bare_window._settings_save_rejection(
+        {**bare_window._cfg, "game_port": 27555}
+    )
+
+    assert rejection is not None
+    assert probed_ports == [26000]
+
+
+def test_switching_docker_to_native_rejects_invalid_client_endpoints(
+    bare_window: MainWindow,
+) -> None:
+    bare_window._cfg["runtime_backend"] = "docker_compose"
+
+    rejection = bare_window._settings_save_rejection(
+        {**bare_window._cfg, "runtime_backend": "native", "game_port": 0}
+    )
+
+    assert rejection is not None
+    assert "invalid" in rejection.casefold()
+
+
+def test_owned_market_blocks_native_root_change_when_game_is_offline(
+    bare_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class LiveMarket:
+        @staticmethod
+        def poll() -> None:
+            return None
+
+    bare_window._cfg["evejs_root"] = "C:/Fixture/EveJS"
+    bare_window._server_process_alive = lambda: False
+    bare_window._market_proc = LiveMarket()
+    monkeypatch.setattr(
+        "src.app.is_server_running",
+        lambda *, port: port == int(app_module.Ports.MARKET_RPC),
+    )
+
+    rejection = bare_window._settings_save_rejection(
+        {**bare_window._cfg, "evejs_root": "C:/Fixture/Other-EveJS"}
+    )
+
+    assert rejection is not None
+    assert "market" in rejection.casefold()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"evejs_root": "C:/Fixture/Other-EveJS"},
+        {"runtime_backend": "docker_compose"},
+    ],
+)
+def test_external_market_blocks_native_root_or_backend_change(
+    bare_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    change: dict[str, object],
+) -> None:
+    bare_window._cfg["evejs_root"] = "C:/Fixture/EveJS"
+    bare_window._server_process_alive = lambda: False
+    probed_ports: list[int] = []
+    monkeypatch.setattr(
+        "src.app.is_server_running",
+        lambda *, port: (
+            probed_ports.append(port)
+            or port == int(app_module.Ports.MARKET_RPC)
+        ),
+    )
+
+    rejection = bare_window._settings_save_rejection(
+        {**bare_window._cfg, **change}
+    )
+
+    assert rejection is not None
+    assert "market" in rejection.casefold()
+    assert probed_ports == [26000, int(app_module.Ports.MARKET_RPC)]
+
+
+def test_market_only_does_not_block_native_proxy_change(
+    bare_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class LiveMarket:
+        @staticmethod
+        def poll() -> None:
+            return None
+
+    bare_window._market_proc = LiveMarket()
+    bare_window._server_process_alive = lambda: False
+    probed_ports: list[int] = []
+    monkeypatch.setattr(
+        "src.app.is_server_running",
+        lambda *, port: probed_ports.append(port) or False,
+    )
+
+    rejection = bare_window._settings_save_rejection(
+        {**bare_window._cfg, "proxy_url": "http://127.0.0.1:27557"}
+    )
+
+    assert rejection is None
+    assert probed_ports == [26000]
+
+
+def test_native_game_port_change_restarts_the_service_monitor(
+    bare_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    bare_window._cancel_launch_queue = lambda: None
+    bare_window._clear_data_load_error = lambda: None
+    bare_window._stop_docker_log_stream = lambda: None
+    bare_window._stop_service_monitor = lambda: events.append("stop") or True
+    bare_window._schedule_service_monitor_start = lambda: events.append("start")
+    bare_window._apply_runtime_settings = lambda: None
+    bare_window._refresh_characters = lambda: None
+    bare_window._server_process_alive = lambda: False
+    monkeypatch.setattr("src.app.is_server_running", lambda **_kwargs: False)
+
+    bare_window._on_settings_saved({**bare_window._cfg, "game_port": 27555})
+
+    assert bare_window._cfg["game_port"] == 27555
+    assert events == ["stop", "start"]
+
+
 def test_auto_start_defers_the_ready_callback_until_the_sequence_finishes(
     bare_window: MainWindow,
     tmp_path: Path,
@@ -1494,6 +1881,7 @@ def test_native_client_launch_preserves_configured_endpoint_context(
 
     bare_window._tracker = Tracker()
     monkeypatch.setattr(app_module, "PROFILES_ROOT", tmp_path / "profiles")
+    monkeypatch.setattr(app_module, "wait_for_client_endpoints", lambda _context: None)
     monkeypatch.setattr(app_module, "profile_exists", lambda _username: True)
     monkeypatch.setattr(
         app_module,

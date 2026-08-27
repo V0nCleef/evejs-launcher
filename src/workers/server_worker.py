@@ -18,6 +18,7 @@ from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal, pyqtSlot
 from ..constants import Ports
 from ..core import server_launcher
 from ..core.platform import request_graceful_server_shutdown
+from ..core.runtime.endpoints import validate_port
 
 GAME_GRACEFUL_SHUTDOWN_TIMEOUT_SEC = 120.0
 MARKET_GRACEFUL_SHUTDOWN_TIMEOUT_SEC = 15.0
@@ -92,6 +93,7 @@ class ServiceStartWorker(QObject):
         mode: str | None,
         start_market: bool,
         start_game: bool,
+        game_port: int = int(Ports.GAME_TCP),
         readiness_timeout_sec: float = 60,
         market_readiness_timeout_sec: float | None = None,
         continue_game_after_market_failure: bool = False,
@@ -109,6 +111,7 @@ class ServiceStartWorker(QObject):
         self._mode = mode
         self._start_market = start_market
         self._start_game = start_game
+        self._game_port = validate_port(game_port, label="Game service")
         self._readiness_timeout_sec = max(0.01, float(readiness_timeout_sec))
         self._market_readiness_timeout_sec = (
             self._readiness_timeout_sec
@@ -247,7 +250,7 @@ class ServiceStartWorker(QObject):
             self.phase_changed.emit("game", "waiting")
             game_ready, game_error = self._wait_for_ports(
                 game_process,
-                (int(Ports.GAME_TCP),),
+                (self._game_port,),
                 "Game service",
                 timeout_sec=self._readiness_timeout_sec,
             )
@@ -460,9 +463,16 @@ class ServiceMonitor(QObject):
     probe_observed = pyqtSignal(object)
     probe_changed = pyqtSignal(object)
 
-    def __init__(self, interval_ms: int = 5_000, parent: QObject | None = None) -> None:
+    def __init__(
+        self,
+        interval_ms: int = 5_000,
+        parent: QObject | None = None,
+        *,
+        game_port: int = int(Ports.GAME_TCP),
+    ) -> None:
         super().__init__(parent)
         self._interval_ms = max(250, int(interval_ms))
+        self._game_port = validate_port(game_port, label="Game service")
         self._shutdown_requested = threading.Event()
         self._startup_timer: QTimer | None = None
         self._timer: QTimer | None = None
@@ -504,7 +514,7 @@ class ServiceMonitor(QObject):
     def probe_now(self) -> None:
         """Probe endpoints, publishing every observation and changed state."""
         game_reachable = server_launcher.is_server_running(
-            port=int(Ports.GAME_TCP)
+            port=self._game_port
         )
         market_reachable = server_launcher.is_server_running(
             port=int(Ports.MARKET_RPC)

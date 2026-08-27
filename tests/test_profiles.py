@@ -275,6 +275,113 @@ def test_repeated_launch_replaces_stale_values_without_duplicate_keys(
     assert "32600" not in start and "32600" not in prefs
 
 
+def test_matching_endpoint_does_not_rewrite_profile_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile_tq, settings = _paths(tmp_path)
+    (profile_tq / "start.ini").write_text(
+        "[main]\nrole=client\nserver=127.0.0.1\nport=26000\n",
+        encoding="utf-8",
+    )
+    (settings / "prefs.ini").write_text(
+        "newbie=0\nport=26000\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(profiles, "get_profile_settings_path", lambda _username: settings)
+    writes: list[Path] = []
+    monkeypatch.setattr(
+        profiles,
+        "_atomic_write_text",
+        lambda path, _text: writes.append(path),
+    )
+
+    profiles.configure_profile_game_endpoint(
+        "fixture-account",
+        profile_tq,
+        host="127.0.0.1",
+        port=26000,
+    )
+
+    assert writes == []
+
+
+def test_endpoint_update_rewrites_only_the_stale_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile_tq, settings = _paths(tmp_path)
+    start_path = profile_tq / "start.ini"
+    prefs_path = settings / "prefs.ini"
+    start_path.write_text(
+        "[main]\nserver=127.0.0.1\nport=26000\n",
+        encoding="utf-8",
+    )
+    prefs_path.write_text("newbie=0\nport=32600\n", encoding="utf-8")
+    monkeypatch.setattr(
+        profiles,
+        "get_profile_settings_path",
+        lambda _username: settings,
+    )
+    writes: list[Path] = []
+    real_atomic_write = profiles._atomic_write_text
+
+    def record_write(path: Path, text: str) -> None:
+        writes.append(path)
+        real_atomic_write(path, text)
+
+    monkeypatch.setattr(profiles, "_atomic_write_text", record_write)
+
+    profiles.configure_profile_game_endpoint(
+        "fixture-account",
+        profile_tq,
+        host="127.0.0.1",
+        port=26000,
+    )
+
+    assert writes == [prefs_path]
+    assert start_path.read_text(encoding="utf-8").endswith("port=26000\n")
+    assert prefs_path.read_text(encoding="utf-8").endswith("port=26000\n")
+
+
+def test_endpoint_update_does_not_rewrite_matching_prefs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile_tq, settings = _paths(tmp_path)
+    start_path = profile_tq / "start.ini"
+    prefs_path = settings / "prefs.ini"
+    start_path.write_text(
+        "[main]\nserver=127.0.0.1\nport=32600\n",
+        encoding="utf-8",
+    )
+    prefs_path.write_text("newbie=0\nport=26000\n", encoding="utf-8")
+    monkeypatch.setattr(
+        profiles,
+        "get_profile_settings_path",
+        lambda _username: settings,
+    )
+    writes: list[Path] = []
+    real_atomic_write = profiles._atomic_write_text
+
+    def record_write(path: Path, text: str) -> None:
+        writes.append(path)
+        real_atomic_write(path, text)
+
+    monkeypatch.setattr(profiles, "_atomic_write_text", record_write)
+
+    profiles.configure_profile_game_endpoint(
+        "fixture-account",
+        profile_tq,
+        host="127.0.0.1",
+        port=26000,
+    )
+
+    assert writes == [start_path]
+    assert start_path.read_text(encoding="utf-8").endswith("port=26000\n")
+    assert prefs_path.read_text(encoding="utf-8").endswith("port=26000\n")
+
+
 def test_missing_endpoint_keys_are_added_without_damaging_other_sections(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -329,3 +436,64 @@ def test_unsafe_game_endpoint_is_rejected_before_file_mutation(
     assert start_path.read_text(encoding="utf-8").endswith("port=26000\n")
     assert prefs_path.read_text(encoding="utf-8").endswith("port=26000\n")
     assert list(tmp_path.rglob("*.tmp")) == []
+
+
+def test_atomic_write_fails_immediately_when_temp_creation_is_denied(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "start.ini"
+    target.write_text("original", encoding="utf-8")
+    attempts: list[object] = []
+
+    def deny_open(*args: object, **_kwargs: object) -> int:
+        attempts.append(args)
+        raise PermissionError("fixture denied")
+
+    monkeypatch.setattr(profiles.os, "open", deny_open)
+
+    with pytest.raises(PermissionError, match="temporary-file creation"):
+        profiles._atomic_write_text(target, "replacement")
+
+    assert len(attempts) == 1
+    assert target.read_text(encoding="utf-8") == "original"
+    assert list(tmp_path.glob(".*.tmp")) == []
+
+
+def test_atomic_write_bounds_temp_name_collision_retries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "start.ini"
+    attempts = 0
+
+    def collide(*_args: object, **_kwargs: object) -> int:
+        nonlocal attempts
+        attempts += 1
+        raise FileExistsError("fixture collision")
+
+    monkeypatch.setattr(profiles.os, "open", collide)
+
+    with pytest.raises(FileExistsError, match="unable to reserve"):
+        profiles._atomic_write_text(target, "replacement")
+
+    assert attempts == profiles._ATOMIC_TEMP_CREATE_ATTEMPTS
+
+
+def test_atomic_write_cleans_temp_when_replace_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "start.ini"
+    target.write_text("original", encoding="utf-8")
+
+    def deny_replace(_source: object, _target: object) -> None:
+        raise PermissionError("fixture replace failure")
+
+    monkeypatch.setattr(profiles.os, "replace", deny_replace)
+
+    with pytest.raises(PermissionError, match="fixture replace failure"):
+        profiles._atomic_write_text(target, "replacement")
+
+    assert target.read_text(encoding="utf-8") == "original"
+    assert list(tmp_path.glob(".*.tmp")) == []

@@ -15,10 +15,12 @@ from PyQt6.QtWidgets import QApplication, QMainWindow
 from src import app as app_module
 from src import config
 from src.app import MainWindow
+from src.core.client_launch_queue import AsyncClientLaunchQueue
 from src.core.launcher import ClientLaunchContext
 from src.workers.client_launch_worker import (
     ClientLaunchFailure,
     ClientLaunchRequest,
+    ClientLaunchResult,
     ClientLaunchWorker,
 )
 
@@ -180,6 +182,18 @@ class _CharactersPage:
         self.states.append((username, character_name, pending))
 
 
+class _LaunchQueueProbe:
+    def __init__(self) -> None:
+        self.cancel_requested = False
+        self.completions: list[bool] = []
+
+    def cancel(self) -> None:
+        self.cancel_requested = True
+
+    def item_finished(self, succeeded: bool) -> None:
+        self.completions.append(succeeded)
+
+
 def _bare_launch_window(qapp: QApplication, tmp_path: Path) -> MainWindow:
     window = MainWindow.__new__(MainWindow)
     QMainWindow.__init__(window)
@@ -205,6 +219,9 @@ def _bare_launch_window(qapp: QApplication, tmp_path: Path) -> MainWindow:
     window._client_launch_result_received = False
     window._client_launch_thread_finished = False
     window._client_launch_succeeded = False
+    window._client_launch_result = None
+    window._client_window_readiness_gate = None
+    window._client_window_readiness_queue = None
     window._launch_queue = None
     window._close_in_progress = False
     window._resolve_configured_client_path = (
@@ -213,6 +230,24 @@ def _bare_launch_window(qapp: QApplication, tmp_path: Path) -> MainWindow:
     window._refresh_character_views = lambda: None
     window._update_status_bar = lambda: None
     return window
+
+
+def _arm_completed_queued_launch(
+    window: MainWindow,
+    tmp_path: Path,
+    process: _FakeProcess,
+    queue: _LaunchQueueProbe,
+) -> None:
+    window._launch_queue = queue
+    window._client_launch_request = _request(tmp_path)
+    window._client_launch_from_queue = True
+    window._client_launch_result_received = True
+    window._client_launch_thread_finished = True
+    window._client_launch_succeeded = True
+    window._client_launch_result = ClientLaunchResult(
+        window._client_launch_request,
+        process,
+    )
 
 
 def test_main_window_launch_is_immediately_pending_rejects_duplicates_and_stays_responsive(
@@ -266,6 +301,212 @@ def test_main_window_launch_is_immediately_pending_rejects_duplicates_and_stays_
             False,
         )
         assert window._tracker.is_account_running("fixture-account")
+    finally:
+        window.deleteLater()
+
+
+def test_launch_all_waits_for_exact_process_window_before_releasing_queue(
+    qapp: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = _bare_launch_window(qapp, tmp_path)
+    queue = _LaunchQueueProbe()
+    process = _FakeProcess()
+    observed_pids: list[int] = []
+    visible = False
+
+    def window_probe(pid: int) -> bool:
+        observed_pids.append(pid)
+        return visible
+
+    monkeypatch.setattr(app_module, "has_visible_window_for_pid", window_probe)
+    monkeypatch.setattr(app_module, "_CLIENT_WINDOW_READY_POLL_MS", 5)
+    _arm_completed_queued_launch(window, tmp_path, process, queue)
+
+    try:
+        window._finish_client_launch_if_complete()
+
+        assert queue.completions == []
+        assert observed_pids == [4242]
+        assert window._client_window_readiness_gate is not None
+
+        visible = True
+        deadline = time.monotonic() + 0.2
+        while not queue.completions and time.monotonic() < deadline:
+            QTest.qWait(5)
+
+        assert queue.completions == [True]
+        assert set(observed_pids) == {4242}
+        assert window._client_window_readiness_gate is None
+    finally:
+        window.deleteLater()
+
+
+def test_real_launch_queue_does_not_start_item_two_before_item_one_window(
+    qapp: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = _bare_launch_window(qapp, tmp_path)
+    started: list[str] = []
+    visible = False
+
+    def start_item(item: str) -> bool:
+        started.append(item)
+        return item == "first"
+
+    queue = AsyncClientLaunchQueue(
+        ["first", "second"],
+        start_item,
+        stagger_ms=0,
+        parent=window,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "has_visible_window_for_pid",
+        lambda _pid: visible,
+    )
+    monkeypatch.setattr(app_module, "_CLIENT_WINDOW_READY_POLL_MS", 5)
+    window._launch_queue = queue
+    queue.start()
+    _arm_completed_queued_launch(window, tmp_path, _FakeProcess(), queue)
+
+    try:
+        window._finish_client_launch_if_complete()
+        QTest.qWait(20)
+        assert started == ["first"]
+
+        visible = True
+        deadline = time.monotonic() + 0.2
+        while len(started) < 2 and time.monotonic() < deadline:
+            QTest.qWait(5)
+
+        assert started == ["first", "second"]
+    finally:
+        queue.cancel()
+        queue.item_finished(False)
+        window.deleteLater()
+
+
+def test_successful_launch_restores_only_its_exact_process_window(
+    qapp: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = _bare_launch_window(qapp, tmp_path)
+    captured: dict[str, object] = {}
+
+    def thread_factory(*, target, args, daemon):
+        captured.update(target=target, args=args, daemon=daemon)
+        return SimpleNamespace(start=lambda: captured.update(started=True))
+
+    monkeypatch.setattr(app_module.threading, "Thread", thread_factory)
+    result = ClientLaunchResult(_request(tmp_path), _FakeProcess())
+
+    try:
+        window._finalize_client_launch(result)
+
+        assert captured == {
+            "target": app_module._restore_eve_window,
+            "args": (result.process,),
+            "daemon": True,
+            "started": True,
+        }
+    finally:
+        window.deleteLater()
+
+
+def test_window_restorer_stops_before_reusing_an_exited_pid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = SimpleNamespace(pid=4242, poll=lambda: 0)
+    monkeypatch.setattr(
+        "src.core.platform.find_and_focus_eve_window_for_pid",
+        lambda _pid: pytest.fail("an exited process window must not be inspected"),
+    )
+
+    app_module._restore_eve_window(process, timeout=1)
+
+
+def test_launch_all_stops_remaining_queue_when_process_exits_before_window(
+    qapp: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = _bare_launch_window(qapp, tmp_path)
+    queue = _LaunchQueueProbe()
+    process = SimpleNamespace(pid=4242, poll=lambda: 17)
+    window._launch_queue_failure_messages = []
+    monkeypatch.setattr(
+        app_module,
+        "has_visible_window_for_pid",
+        lambda _pid: pytest.fail("dead process must be detected before window probing"),
+    )
+    _arm_completed_queued_launch(window, tmp_path, process, queue)
+
+    try:
+        window._finish_client_launch_if_complete()
+
+        assert queue.cancel_requested is True
+        assert queue.completions == [False]
+        assert window._client_window_readiness_gate is None
+        assert window._launch_queue_failure_messages == [
+            "EVE client process 4242 exited with code 17 before opening a usable window."
+        ]
+    finally:
+        window.deleteLater()
+
+
+def test_launch_all_timeout_stops_future_launches_but_counts_live_process(
+    qapp: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = _bare_launch_window(qapp, tmp_path)
+    queue = _LaunchQueueProbe()
+    window._launch_queue_failure_messages = []
+    monkeypatch.setattr(app_module, "has_visible_window_for_pid", lambda _pid: False)
+    monkeypatch.setattr(app_module, "_CLIENT_WINDOW_READY_TIMEOUT_MS", 20)
+    monkeypatch.setattr(app_module, "_CLIENT_WINDOW_READY_POLL_MS", 5)
+    _arm_completed_queued_launch(window, tmp_path, _FakeProcess(), queue)
+
+    try:
+        window._finish_client_launch_if_complete()
+        deadline = time.monotonic() + 0.2
+        while not queue.completions and time.monotonic() < deadline:
+            QTest.qWait(5)
+
+        assert queue.cancel_requested is True
+        assert queue.completions == [True]
+        assert window._client_window_readiness_gate is None
+        assert window._launch_queue_failure_messages == [
+            "EVE client process 4242 did not open a usable window within 1 seconds."
+        ]
+    finally:
+        window.deleteLater()
+
+
+def test_cancelling_launch_all_releases_window_gate_without_killing_process(
+    qapp: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = _bare_launch_window(qapp, tmp_path)
+    queue = _LaunchQueueProbe()
+    monkeypatch.setattr(app_module, "has_visible_window_for_pid", lambda _pid: False)
+    _arm_completed_queued_launch(window, tmp_path, _FakeProcess(), queue)
+
+    try:
+        window._finish_client_launch_if_complete()
+        assert window._client_window_readiness_gate is not None
+
+        window._cancel_launch_queue()
+        QTest.qWait(10)
+
+        assert queue.cancel_requested is True
+        assert queue.completions == [True]
+        assert window._client_window_readiness_gate is None
     finally:
         window.deleteLater()
 
@@ -458,6 +699,34 @@ def test_launch_queue_completion_surfaces_first_worker_failure(
         window.deleteLater()
 
 
+def test_stale_queue_completion_cannot_clear_current_launch_queue(
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    window = _bare_launch_window(qapp, tmp_path)
+    current_queue = object()
+    stale_queue = object()
+    finish_calls: list[tuple[int, int, bool]] = []
+    window._launch_queue = current_queue
+    window._home_page = SimpleNamespace(
+        finish_launch_progress=lambda *args: finish_calls.append(args),
+    )
+    window._characters_page.finish_group_launch_progress = lambda: None
+
+    try:
+        window._on_launch_queue_finished(
+            1,
+            1,
+            False,
+            expected_queue=stale_queue,
+        )
+
+        assert window._launch_queue is current_queue
+        assert finish_calls == []
+    finally:
+        window.deleteLater()
+
+
 def test_perform_launch_forwards_exact_character_as_typed_auto_login_intent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -474,7 +743,14 @@ def test_perform_launch_forwards_exact_character_as_typed_auto_login_intent(
     )
     (request.profiles_root / request.username / "tq").mkdir(parents=True)
     captured: dict[str, object] = {}
+    endpoint_checks: list[ClientLaunchContext] = []
 
+    monkeypatch.setattr(app_module, "wait_for_client_endpoints", lambda _context: None)
+    monkeypatch.setattr(
+        app_module,
+        "require_client_endpoints_ready",
+        endpoint_checks.append,
+    )
     monkeypatch.setattr(app_module, "profile_exists", lambda _username: True)
     monkeypatch.setattr(app_module, "prefill_username", lambda _username: None)
     monkeypatch.setattr(
@@ -495,6 +771,10 @@ def test_perform_launch_forwards_exact_character_as_typed_auto_login_intent(
     assert intent is not None
     assert intent.username == "fixture-account"
     assert intent.character_id == 90000001
+    pre_spawn_check = captured["pre_spawn_check"]
+    assert callable(pre_spawn_check)
+    pre_spawn_check()
+    assert endpoint_checks == [request.launch_context]
 
 
 def test_perform_launch_keeps_manual_mode_argument_free(
@@ -505,6 +785,7 @@ def test_perform_launch_keeps_manual_mode_argument_free(
     (request.profiles_root / request.username / "tq").mkdir(parents=True)
     captured: dict[str, object] = {}
 
+    monkeypatch.setattr(app_module, "wait_for_client_endpoints", lambda _context: None)
     monkeypatch.setattr(app_module, "profile_exists", lambda _username: True)
     monkeypatch.setattr(app_module, "prefill_username", lambda _username: None)
     monkeypatch.setattr(
@@ -530,6 +811,7 @@ def test_perform_launch_logs_bounded_preparation_stages(
     request = _request(tmp_path)
     (request.profiles_root / request.username / "tq").mkdir(parents=True)
     messages: list[str] = []
+    monkeypatch.setattr(app_module, "wait_for_client_endpoints", lambda _context: None)
     monkeypatch.setattr(app_module, "profile_exists", lambda _username: True)
     monkeypatch.setattr(app_module, "prefill_username", lambda _username: None)
     monkeypatch.setattr(
@@ -554,7 +836,29 @@ def test_perform_launch_logs_bounded_preparation_stages(
         message for message in messages if "Client launch stage=" in message
     ]
     assert stages == [
+        "Client launch stage=endpoints_waiting account=fixture-account",
+        "Client launch stage=endpoints_ready account=fixture-account",
         "Client launch stage=profile_ready account=fixture-account",
         "Client launch stage=settings_ready account=fixture-account",
         "Client launch stage=certificate_and_spawn account=fixture-account",
     ]
+
+
+def test_perform_launch_does_not_mutate_profile_when_runtime_is_not_ready(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path)
+    monkeypatch.setattr(
+        app_module,
+        "wait_for_client_endpoints",
+        lambda _context: (_ for _ in ()).throw(RuntimeError("proxy not ready")),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "profile_exists",
+        lambda _username: pytest.fail("profile must not be inspected or mutated"),
+    )
+
+    with pytest.raises(RuntimeError, match="proxy not ready"):
+        app_module._perform_client_launch(request)

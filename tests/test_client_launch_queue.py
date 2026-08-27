@@ -5,13 +5,18 @@ from copy import deepcopy
 import time
 
 import pytest
+from PyQt6.QtCore import QTimer
 from PyQt6.QtTest import QSignalSpy, QTest
 from PyQt6.QtWidgets import QApplication
 
 from src import app as app_module
 from src import config
 from src.app import MainWindow
-from src.core.client_launch_queue import AsyncClientLaunchQueue, ClientLaunchQueue
+from src.core.client_launch_queue import (
+    AsyncClientLaunchQueue,
+    ClientLaunchQueue,
+    ClientWindowReadinessGate,
+)
 from src.core.db import Account, Character
 from src.core.launcher import ClientLaunchContext
 
@@ -171,6 +176,88 @@ def test_async_queue_cancellation_waits_for_in_flight_item_and_skips_future_item
     assert started == ["first"]
     assert finished == [(1, 1, True)]
     assert queue.is_active is False
+
+
+def test_window_readiness_gate_waits_without_blocking_qt(
+    qapp: QApplication,
+) -> None:
+    visible = False
+    timer_fired: list[bool] = []
+    gate = ClientWindowReadinessGate(
+        4242,
+        lambda: None,
+        lambda pid: pid == 4242 and visible,
+        timeout_ms=250,
+        poll_interval_ms=5,
+    )
+    completion = QSignalSpy(gate.finished)
+
+    gate.start()
+    QTimer.singleShot(1, lambda: timer_fired.append(True))
+    QTest.qWait(15)
+
+    assert timer_fired == [True]
+    assert len(completion) == 0
+    visible = True
+    assert completion.wait(100)
+    assert list(completion[0]) == [True, "window-visible"]
+    assert gate.is_active is False
+
+
+def test_window_readiness_gate_fails_when_process_exits_before_window(
+    qapp: QApplication,
+) -> None:
+    gate = ClientWindowReadinessGate(
+        4242,
+        lambda: 17,
+        lambda _pid: False,
+        timeout_ms=250,
+        poll_interval_ms=5,
+    )
+    completion = QSignalSpy(gate.finished)
+
+    gate.start()
+
+    assert len(completion) == 1
+    assert list(completion[0]) == [False, "process-exited:17"]
+
+
+def test_window_readiness_gate_times_out_boundedly(
+    qapp: QApplication,
+) -> None:
+    gate = ClientWindowReadinessGate(
+        4242,
+        lambda: None,
+        lambda _pid: False,
+        timeout_ms=20,
+        poll_interval_ms=5,
+    )
+    completion = QSignalSpy(gate.finished)
+
+    gate.start()
+
+    assert completion.wait(200)
+    assert list(completion[0]) == [False, "window-timeout"]
+
+
+def test_window_readiness_gate_stop_suppresses_terminal_signal(
+    qapp: QApplication,
+) -> None:
+    gate = ClientWindowReadinessGate(
+        4242,
+        lambda: None,
+        lambda _pid: False,
+        timeout_ms=20,
+        poll_interval_ms=5,
+    )
+    completion = QSignalSpy(gate.finished)
+
+    gate.start()
+    gate.stop()
+    QTest.qWait(50)
+
+    assert len(completion) == 0
+    assert gate.is_active is False
 
 
 def test_launch_all_uses_shared_queue_and_cancellation_preserves_started_clients(

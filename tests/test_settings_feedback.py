@@ -89,6 +89,35 @@ def test_settings_save_reports_an_inline_failure_without_emitting_success(
         page.deleteLater()
 
 
+def test_settings_save_validator_rejects_before_persistence_and_stays_dirty(
+    qapp: QApplication,
+    isolated_config: Path,
+) -> None:
+    page = SettingsPage()
+    saved_configs: list[dict] = []
+    outcomes: list[bool] = []
+    page.settings_saved.connect(saved_configs.append)
+    page.save_finished.connect(outcomes.append)
+    page.set_save_validator(lambda _draft: "Stop the Game server. Nothing was saved.")
+    page.show()
+    qapp.processEvents()
+
+    try:
+        page.proxy_url_edit.setText("http://127.0.0.1:26010")
+        page.save_settings()
+
+        assert config.load()["proxy_url"] == "http://127.0.0.1:26002"
+        assert saved_configs == []
+        assert outcomes == [False]
+        assert page.is_dirty() is True
+        feedback = page.findChild(QLabel, "settingsSaveFeedback")
+        assert feedback is not None
+        assert feedback.text() == "Stop the Game server. Nothing was saved."
+    finally:
+        page.close()
+        page.deleteLater()
+
+
 def test_proxy_url_field_explains_its_local_evejs_role(
     qapp: QApplication,
     isolated_config: Path,

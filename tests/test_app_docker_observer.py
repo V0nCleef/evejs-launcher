@@ -980,6 +980,7 @@ def test_complete_connect_only_endpoints_use_one_context_for_profile_and_client(
     profile_root = tmp_path / "profiles" / "fixture-account"
     (profile_root / "tq").mkdir(parents=True)
     monkeypatch.setattr(app_module, "PROFILES_ROOT", tmp_path / "profiles")
+    monkeypatch.setattr(app_module, "wait_for_client_endpoints", lambda _context: None)
     monkeypatch.setattr(
         app_module,
         "profile_exists",

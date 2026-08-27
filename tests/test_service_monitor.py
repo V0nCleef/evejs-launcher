@@ -110,12 +110,12 @@ def test_monitor_probes_market_rpc_not_game_market_proxy(
         "is_server_running",
         record_probe,
     )
-    monitor = ServiceMonitor(interval_ms=10_000)
+    monitor = ServiceMonitor(interval_ms=10_000, game_port=27555)
 
     monitor.start()
     try:
         qapp.processEvents()
-        assert probed_ports == [int(Ports.GAME_TCP), int(Ports.MARKET_RPC)]
+        assert probed_ports == [27555, int(Ports.MARKET_RPC)]
         assert int(Ports.GAME_MARKET_PROXY) not in probed_ports
     finally:
         monitor.stop()

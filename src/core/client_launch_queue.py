@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 import logging
+import time
 from typing import TypeVar
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot
@@ -10,6 +11,101 @@ from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot
 
 T = TypeVar("T")
 log = logging.getLogger(__name__)
+
+
+class ClientWindowReadinessGate(QObject):
+    """Wait for one launched process to own a usable window without blocking Qt."""
+
+    finished = pyqtSignal(bool, str)  # ready, terminal reason
+
+    def __init__(
+        self,
+        pid: int,
+        process_poll: Callable[[], int | None],
+        window_probe: Callable[[int], bool],
+        *,
+        timeout_ms: int,
+        poll_interval_ms: int,
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(parent)
+        if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+            raise ValueError("Client readiness requires a positive process ID.")
+        self._pid = pid
+        self._process_poll = process_poll
+        self._window_probe = window_probe
+        self._timeout_ms = max(0, int(timeout_ms))
+        self._poll_interval_ms = max(1, int(poll_interval_ms))
+        self._deadline = 0.0
+        self._active = False
+        self._started = False
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._poll)
+
+    @property
+    def pid(self) -> int:
+        return self._pid
+
+    @property
+    def is_active(self) -> bool:
+        return self._active
+
+    def start(self) -> None:
+        """Begin bounded polling and perform the first cheap observation now."""
+        if self._started:
+            return
+        self._started = True
+        self._active = True
+        self._deadline = time.monotonic() + (self._timeout_ms / 1_000)
+        self._poll()
+
+    def stop(self) -> None:
+        """Stop polling without emitting a terminal result."""
+        self._active = False
+        self._timer.stop()
+
+    @pyqtSlot()
+    def _poll(self) -> None:
+        if not self._active:
+            return
+
+        try:
+            return_code = self._process_poll()
+        except Exception:  # noqa: BLE001 - observation failure is retried until timeout
+            log.debug(
+                "Unable to poll client process pid=%s while awaiting its window",
+                self._pid,
+                exc_info=True,
+            )
+        else:
+            if return_code is not None:
+                self._complete(False, f"process-exited:{return_code}")
+                return
+
+        try:
+            if self._window_probe(self._pid):
+                self._complete(True, "window-visible")
+                return
+        except Exception:  # noqa: BLE001 - observation failure is retried until timeout
+            log.debug(
+                "Unable to inspect client window pid=%s while awaiting readiness",
+                self._pid,
+                exc_info=True,
+            )
+
+        remaining_ms = max(0, int((self._deadline - time.monotonic()) * 1_000))
+        if remaining_ms <= 0:
+            self._complete(False, "window-timeout")
+            return
+        self._timer.start(min(self._poll_interval_ms, remaining_ms))
+
+    def _complete(self, ready: bool, reason: str) -> None:
+        if not self._active:
+            return
+        self._active = False
+        self._timer.stop()
+        self.finished.emit(ready, reason)
 
 
 class ClientLaunchQueue(QObject):
@@ -126,6 +222,11 @@ class AsyncClientLaunchQueue(QObject):
     def is_active(self) -> bool:
         """Return whether the queue owns an in-flight or future launch."""
         return self._active
+
+    @property
+    def cancel_requested(self) -> bool:
+        """Return whether future items were cancelled during the active item."""
+        return self._cancel_requested
 
     def start(self) -> None:
         """Start the first asynchronous launch without a stagger."""

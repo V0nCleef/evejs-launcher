@@ -753,6 +753,46 @@ def has_visible_window_for_pid(pid: int) -> bool:
     return found
 
 
+def find_and_focus_eve_window_for_pid(pid: int) -> bool:
+    """Restore and focus one visible application window owned by *pid*.
+
+    EVE clients all use the same window title, while the launcher's own title
+    also contains ``EVE``. Process ownership is therefore the only safe way to
+    attribute a window-restoration attempt to the client that was just spawned.
+    """
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        raise ValueError("Window lookup requires a positive process ID.")
+
+    target_hwnd: int | None = None
+
+    def _callback(hwnd: int, _lparam: int) -> bool:
+        nonlocal target_hwnd
+        if target_hwnd is not None:
+            return False
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        owner_pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner_pid))
+        if int(owner_pid.value) != pid:
+            return True
+        left, top, right, bottom = _get_window_rect(hwnd)
+        if (right - left) <= 200 or (bottom - top) <= 200:
+            return True
+        target_hwnd = hwnd
+        return False
+
+    user32.EnumWindows(_WNDENUMPROC(_callback), 0)
+    if target_hwnd is None:
+        return False
+
+    # Restore if minimized, then bring only this process-owned window forward.
+    SW_RESTORE = 9
+    if user32.IsIconic(target_hwnd):
+        user32.ShowWindow(target_hwnd, SW_RESTORE)
+    user32.SetForegroundWindow(target_hwnd)
+    return True
+
+
 def find_eve_window(title: str = "EVE") -> bool:
     """Check whether an EVE client window is currently visible."""
     found = False

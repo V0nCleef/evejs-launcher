@@ -82,7 +82,9 @@ a = Analysis(
         ('assets/*.ico', 'assets'),
         ('CHANGELOG.md', '.'),
         ('README.md', '.'),
-        ('docs/*.md', 'docs'),
+        # Package only reviewed public documentation. A wildcard here can
+        # silently scoop local investigation notes into a public release.
+        ('docs/MOD_AUTHORING.md', 'docs'),
         ('LICENSE', '.'),
         ('THIRD_PARTY_NOTICES.md', '.'),
         ('VERSION', '.'),
