@@ -2,6 +2,26 @@
 
 ## Changelog
 
+## v1.0.46 — 2026-08-28
+
+### Fixed
+- **Play.bat resource-cache parity** — every EVE client now launches against the verified `ResFiles` cache and resource index belonging to the selected copied client. Inherited cache paths are cleared before launch, fixing the launcher-only failure where the normal Industry blueprint list and controls differed from a client started through `Play.bat`.
+- **Stable Launch All sequencing** — the next queued client now waits non-blockingly until the exact launched process owns a usable game window, then applies the configured stagger. If a client exits early or never opens a window, the remaining queue stops instead of adding more startup load; cancelling still leaves already-started clients alone.
+- **Exact client-window restoration** — window focus and restore now use the launched process ID rather than the first title containing “EVE”, so an older client, the launcher, or another similarly named window cannot steal the restoration attempt. The watcher also stops when that exact process exits.
+- **Client setup no longer hangs on write-restricted folders** — profile endpoint updates avoid unchanged writes, and Windows permission failures now return promptly with an actionable error instead of entering `tempfile`'s extremely long collision-retry path and leaving a card stuck on **LAUNCHING**.
+- **Native endpoint consistency** — Game startup, monitoring, service controls, client arguments, and data-safety guards now use the configured Native game port consistently. The launcher validates the game port and proxy origin, waits for both Game TCP and the proxy health endpoint before changing a profile, and rechecks both immediately before spawning EVE.
+- **Safer runtime-setting changes** — changing the Native root, game port, proxy URL, or backend is refused while affected Native services are active, preventing the saved configuration from drifting away from the running stack.
+- **Better client-exit diagnostics** — `launcher.log` now records account-neutral PID, uptime, exit-code, and window-retirement evidence when a tracked client disappears.
+
+### Safety and compatibility
+- This release changes launcher validation, environment construction, process sequencing, and diagnostics only. It does not repair, move, delete, or rewrite GameStore items, blueprints, Industry jobs, characters, accounts, profiles, or Market data. In particular, pre-existing ghost corporation blueprints that report **“That facility could not be found”** are a separate EveJS database-custody issue and are not repaired by this launcher release.
+- Launch All remains cancellable and keeps the interface responsive while waiting. A readiness timeout leaves the already-spawned client alone, reports why the sequence stopped, and does not start the remaining clients.
+- The Windows package now includes only explicitly reviewed public documentation, preventing unrelated local investigation notes from being swept into a release by a wildcard.
+
+### Verification
+- **1,655 automated tests passed** with 4 skipped, covering copied-client resource validation, Play.bat environment parity, endpoint readiness and last-moment rechecks, custom Native ports, active-service settings guards, atomic-write permission failures, exact-PID window handling, queue cancellation and timeout behavior, stale queue signals, and account-neutral process diagnostics.
+- Manual source testing confirmed the Industry blueprint list remains usable through the launcher and that Launch All waits between real client windows without freezing the launcher. The release tree also passed syntax compilation, Foundation smoke, dependency checks, whitespace checks, and packaged-artifact verification.
+
 ## v1.0.45 — 2026-08-22
 
 ### Added
