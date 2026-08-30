@@ -23,6 +23,12 @@ from src.constants import COLORS as C, SEMANTIC_COLORS as S
 from src.core.character_creation import normalize_character_name
 from src.core.db import Account
 from src.core.overview_patch import OverviewPatchState, OverviewPatchStatus
+from src.i18n import translate_ui_phrase
+from src.widgets.ui_translation import (
+    register_translatable_widget_tree,
+    set_translatable_text,
+    set_translatable_text_template,
+)
 
 
 _ACCOUNT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{2,31}$")
@@ -65,6 +71,7 @@ class NewCharacterDialog(QDialog):
         self._runtime_label = str(runtime_label).strip().upper() or "EVEJS RUNTIME"
         self._busy = False
         self._build_ui()
+        register_translatable_widget_tree(self)
         self._apply_deep_signal_style()
         self.set_patch_status(patch_status)
         self._validate()
@@ -74,7 +81,12 @@ class NewCharacterDialog(QDialog):
         root.setContentsMargins(24, 22, 24, 22)
         root.setSpacing(16)
 
-        eyebrow = QLabel(f"CHARACTER PROVISIONING  /  {self._runtime_label}")
+        eyebrow = QLabel()
+        set_translatable_text_template(
+            eyebrow,
+            "CHARACTER PROVISIONING  /  "
+            f"{translate_ui_phrase(self._runtime_label)}",
+        )
         eyebrow.setObjectName("dialogEyebrow")
         root.addWidget(eyebrow)
 
@@ -151,7 +163,8 @@ class NewCharacterDialog(QDialog):
                     else "launch once to capture"
                 )
                 self.overview_combo.addItem(
-                    f"{character.name} ({account.username}) — {readiness}",
+                    f"{character.name} ({account.username}) — "
+                    f"{translate_ui_phrase(readiness)}",
                     character.char_id,
                 )
         overview_layout.addWidget(self.overview_combo)
@@ -324,7 +337,7 @@ class NewCharacterDialog(QDialog):
             OverviewPatchState.UNSUPPORTED: C["gold"],
             OverviewPatchState.MISSING: C["grey"],
         }
-        self.patch_status_label.setText(status.reason)
+        set_translatable_text(self.patch_status_label, status.reason)
         self.patch_status_label.setStyleSheet(
             f"color: {colors.get(status.state, C['grey'])};"
         )
@@ -349,7 +362,8 @@ class NewCharacterDialog(QDialog):
                     )
                     self.overview_combo.setItemText(
                         index,
-                        f"{character.name} ({account.username}) — {readiness}",
+                        f"{character.name} ({account.username}) — "
+                        f"{translate_ui_phrase(readiness)}",
                     )
                     break
         self._validate()
@@ -367,11 +381,11 @@ class NewCharacterDialog(QDialog):
         ):
             widget.setEnabled(not busy)
         button_text = (message or "WORKING…") if busy else "CREATE CHARACTER"
-        self.create_button.setText(button_text)
+        set_translatable_text(self.create_button, button_text)
         self._validate()
 
     def show_error(self, message: str) -> None:
-        self.error_label.setText(message)
+        set_translatable_text(self.error_label, message)
         self.error_label.setVisible(bool(message))
 
     def _selected_source(self) -> int | None:
@@ -391,27 +405,31 @@ class NewCharacterDialog(QDialog):
             if self._patch_status.state is not OverviewPatchState.PATCHED:
                 valid = False
                 action_text = "PATCH CLIENT FIRST"
-                self.overview_hint.setText(
+                set_translatable_text(
+                    self.overview_hint,
                     "Install the optional overview bridge before selecting a source."
                 )
             elif source_id not in self._snapshot_ready_ids:
-                self.overview_hint.setText(
+                set_translatable_text(
+                    self.overview_hint,
                     "You can create the character now. Afterwards, launch this source "
                     "character once through the launcher to capture its overview, then "
                     "launch the new character to apply the queued copy."
                 )
             else:
-                self.overview_hint.setText(
+                set_translatable_text(
+                    self.overview_hint,
                     "The captured source overview will be imported on the new "
                     "character's first launcher login."
                 )
         else:
-            self.overview_hint.setText(
+            set_translatable_text(
+                self.overview_hint,
                 "Choose a captured character only if you want the same overview "
                 "tabs, presets, columns, colors, and filters."
             )
         if not self._busy:
-            self.create_button.setText(action_text)
+            set_translatable_text(self.create_button, action_text)
         self.create_button.setEnabled(valid and not self._busy)
 
     def _submit(self) -> None:

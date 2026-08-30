@@ -428,3 +428,169 @@ def test_library_update_mute_disable_and_shutdown_preserve_lifecycle(
     backend.finish()
     assert len(backend.sources) == selected_count
     assert controller.music_active is False
+
+
+def test_startup_uses_a_fresh_shuffled_bag_instead_of_catalog_order(
+    qapp,
+    tmp_path: Path,
+) -> None:
+    class ReverseRandom(random.Random):
+        def shuffle(self, values) -> None:
+            values.reverse()
+
+    music_root = tmp_path / "music"
+    for name in ("alpha.wav", "bravo.wav", "charlie.wav"):
+        _track(music_root, name)
+    backend = _PlaylistMusic()
+    controller = AudioController(
+        {},
+        music_factory=lambda _parent: backend,
+        music_root=music_root,
+        rng=ReverseRandom(),
+    )
+
+    assert controller.start_music() is True
+    assert backend.current_source is not None
+    assert backend.current_source.name == "charlie.wav"
+
+
+def test_manual_previous_and_next_follow_history_then_forward_path(
+    qapp,
+    tmp_path: Path,
+) -> None:
+    music_root = tmp_path / "music"
+    for name in ("alpha.wav", "bravo.wav", "charlie.wav", "delta.wav"):
+        _track(music_root, name)
+    backend = _PlaylistMusic()
+    controller = AudioController(
+        {},
+        music_factory=lambda _parent: backend,
+        music_root=music_root,
+        rng=random.Random(19),
+    )
+
+    assert controller.start_music() is True
+    first = backend.current_source
+    assert controller.next_music() is True
+    second = backend.current_source
+    assert controller.next_music() is True
+    third = backend.current_source
+    assert first is not None and second is not None and third is not None
+    assert len({first, second, third}) == 3
+
+    assert controller.previous_music() is True
+    assert backend.current_source == second
+    assert controller.previous_music() is True
+    assert backend.current_source == first
+    source_count = len(backend.sources)
+    assert controller.previous_music() is False
+    assert len(backend.sources) == source_count
+    assert backend.current_source == first
+
+    assert controller.next_music() is True
+    assert backend.current_source == second
+    assert controller.next_music() is True
+    assert backend.current_source == third
+
+
+def test_natural_advance_is_recorded_for_previous_and_forward_navigation(
+    qapp,
+    tmp_path: Path,
+) -> None:
+    music_root = tmp_path / "music"
+    for name in ("one.wav", "two.wav", "three.wav"):
+        _track(music_root, name)
+    backend = _PlaylistMusic()
+    controller = AudioController(
+        {},
+        music_factory=lambda _parent: backend,
+        music_root=music_root,
+        rng=random.Random(5),
+    )
+
+    assert controller.start_music() is True
+    first = backend.current_source
+    backend.finish()
+    second = backend.current_source
+    assert first is not None and second is not None and first != second
+
+    assert controller.previous_music() is True
+    assert backend.current_source == first
+    assert controller.next_music() is True
+    assert backend.current_source == second
+
+
+def test_navigation_respects_stop_mute_disable_and_failed_track_retirement(
+    qapp,
+    tmp_path: Path,
+) -> None:
+    music_root = tmp_path / "music"
+    for name in ("one.wav", "two.wav", "three.wav"):
+        _track(music_root, name)
+    backend = _PlaylistMusic()
+    controller = AudioController(
+        {},
+        music_factory=lambda _parent: backend,
+        music_root=music_root,
+        rng=random.Random(5),
+    )
+
+    assert controller.start_music() is True
+    first = backend.current_source
+    assert controller.next_music() is True
+    failed = backend.current_source
+    assert first is not None and failed is not None and first != failed
+    backend.fail()
+    recovered = backend.current_source
+    assert recovered is not None and recovered not in {first, failed}
+
+    # The broken entry is not put into navigable history.
+    assert controller.previous_music() is True
+    assert backend.current_source == first
+
+    controller.set_music_muted(True)
+    selected_count = len(backend.sources)
+    assert controller.next_music() is False
+    assert controller.previous_music() is False
+    assert len(backend.sources) == selected_count
+
+    controller.set_music_muted(False)
+    controller.apply_settings({"audio_music_enabled": False})
+    selected_count = len(backend.sources)
+    assert controller.next_music() is False
+    assert controller.previous_music() is False
+    assert len(backend.sources) == selected_count
+
+    controller.apply_settings({"audio_music_enabled": True})
+    controller.stop_music()
+    selected_count = len(backend.sources)
+    assert controller.next_music() is False
+    assert controller.previous_music() is False
+    assert len(backend.sources) == selected_count
+
+
+def test_stale_previous_entry_fails_softly_and_restores_current_track(
+    qapp,
+    tmp_path: Path,
+) -> None:
+    music_root = tmp_path / "music"
+    _track(music_root, "first.wav")
+    _track(music_root, "second.wav")
+    backend = _PlaylistMusic()
+    controller = AudioController(
+        {},
+        music_factory=lambda _parent: backend,
+        music_root=music_root,
+        rng=random.Random(1),
+    )
+
+    assert controller.start_music() is True
+    previous = backend.current_source
+    assert controller.next_music() is True
+    current = backend.current_source
+    assert previous is not None and current is not None and previous != current
+    previous.unlink()
+
+    assert controller.previous_music() is False
+    assert backend.current_source == current
+    assert controller.music_active is True

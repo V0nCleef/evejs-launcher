@@ -18,6 +18,12 @@ from PyQt6.QtWidgets import (
 )
 
 from src.constants import COLORS as C, SEMANTIC_COLORS as S, Status
+from src.widgets.ui_translation import (
+    set_translatable_accessible_description,
+    set_translatable_accessible_name,
+    set_translatable_text,
+    set_translatable_tooltip,
+)
 
 
 class BorderedPortraitLabel(QLabel):
@@ -173,7 +179,8 @@ class DetailPanel(QFrame):
         for row_index, label_text in enumerate(
             ("ISK", "SP", "Ship", "Location", "Sec Status")
         ):
-            label = QLabel(label_text.upper())
+            label = QLabel()
+            set_translatable_text(label, label_text.upper())
             label.setStyleSheet(
                 f"color: {S['text_muted']}; font-size: 9px;"
             )
@@ -412,8 +419,8 @@ class DetailPanel(QFrame):
     def show_empty(self) -> None:
         """Show the empty state."""
         self._stack.setCurrentIndex(0)
-        self.setAccessibleName("Character details")
-        self.setAccessibleDescription("No character selected")
+        set_translatable_accessible_name(self, "Character details")
+        set_translatable_accessible_description(self, "No character selected")
 
     def show_character(
         self,
@@ -432,10 +439,20 @@ class DetailPanel(QFrame):
         self._name_label.setText(char_name)
         self._account_label.setText(username)
         self._portrait.set_portrait(portrait_pixmap)
-        self._launch_btn.setAccessibleName(f"Launch {char_name}")
-        self.setAccessibleName(f"Details for {char_name}")
-        self.setAccessibleDescription(
-            f"Selected character on account {username}."
+        set_translatable_accessible_name(
+            self._launch_btn,
+            f"Launch {char_name}",
+            allow_templates=True,
+        )
+        set_translatable_accessible_name(
+            self,
+            f"Details for {char_name}",
+            allow_templates=True,
+        )
+        set_translatable_accessible_description(
+            self,
+            f"Selected character on account {username}.",
+            allow_templates=True,
         )
 
         # Populate stats
@@ -473,13 +490,19 @@ class DetailPanel(QFrame):
     def _apply_launch_button_state(self) -> None:
         if self._launch_pending or self._character_status is Status.LAUNCHING:
             self._launch_btn.setEnabled(False)
-            self._launch_btn.setText("LAUNCHING...")
-            self._launch_btn.setToolTip("Preparing the profile and starting EVE")
+            set_translatable_text(self._launch_btn, "LAUNCHING...")
+            set_translatable_tooltip(
+                self._launch_btn,
+                "Preparing the profile and starting EVE",
+            )
             return
         if not self._launch_available:
             self._launch_btn.setEnabled(False)
-            self._launch_btn.setText("VIEW ONLY")
-            self._launch_btn.setToolTip(self._launch_unavailable_reason)
+            set_translatable_text(self._launch_btn, "VIEW ONLY")
+            set_translatable_tooltip(
+                self._launch_btn,
+                self._launch_unavailable_reason,
+            )
             return
         blocked = {
             Status.RUNNING: (
@@ -499,9 +522,32 @@ class DetailPanel(QFrame):
         if blocked_state is not None:
             text, tooltip = blocked_state
             self._launch_btn.setEnabled(False)
-            self._launch_btn.setText(text)
-            self._launch_btn.setToolTip(tooltip)
+            set_translatable_text(self._launch_btn, text)
+            set_translatable_tooltip(self._launch_btn, tooltip)
             return
         self._launch_btn.setEnabled(True)
-        self._launch_btn.setText("LAUNCH")
+        set_translatable_text(self._launch_btn, "LAUNCH")
         self._launch_btn.setToolTip("")
+
+    def retranslate_ui(self) -> None:
+        """Refresh retained launch state and selected-character framing."""
+        self._apply_launch_button_state()
+        if self._stack.currentIndex() == 0 or not self._char_name:
+            set_translatable_accessible_name(self, "Character details")
+            set_translatable_accessible_description(self, "No character selected")
+            return
+        set_translatable_accessible_name(
+            self._launch_btn,
+            f"Launch {self._char_name}",
+            allow_templates=True,
+        )
+        set_translatable_accessible_name(
+            self,
+            f"Details for {self._char_name}",
+            allow_templates=True,
+        )
+        set_translatable_accessible_description(
+            self,
+            f"Selected character on account {self._username}.",
+            allow_templates=True,
+        )

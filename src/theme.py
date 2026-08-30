@@ -590,13 +590,15 @@ QPushButton[class="signalSecondary"]:disabled {{
 
 /* -- Deep Signal Mods ----------------------------------------------------- */
 QFrame[class="modsRuntimePanel"],
+QFrame[class="modsFolderPanel"],
 QFrame[class="modsManifestPanel"],
 QFrame[class="modsActionRail"] {{
     background-color: rgba(7, 17, 29, 210);
     border: 1px solid {s['border_bright']};
     border-radius: 9px;
 }}
-QFrame[class="modsRuntimePanel"] {{
+QFrame[class="modsRuntimePanel"],
+QFrame[class="modsFolderPanel"] {{
     background-color: rgba(8, 24, 36, 222);
     border-color: {s['accent_dim']};
 }}

@@ -23,6 +23,7 @@ def test_fresh_config_uses_ask_preference(isolated_config: Path) -> None:
     loaded = config.load()
 
     assert loaded["server_start_preference"] == ASK_EVERY_TIME
+    assert loaded["language"] == "en"
     assert loaded["auto_login_enabled"] is False
     assert "server_start_script" not in loaded
     assert "server_start_scripts" not in loaded
@@ -220,6 +221,22 @@ def test_auto_login_setting_accepts_only_a_real_boolean(
         encoding="utf-8",
     )
     assert config.load()["auto_login_enabled"] is True
+
+
+def test_language_setting_accepts_supported_codes_and_rejects_unknown_values(
+    isolated_config: Path,
+) -> None:
+    isolated_config.write_text(
+        json.dumps({"language": "zh-Hans"}),
+        encoding="utf-8",
+    )
+    assert config.load()["language"] == "zh_CN"
+
+    isolated_config.write_text(
+        json.dumps({"language": "klingon"}),
+        encoding="utf-8",
+    )
+    assert config.load()["language"] == "en"
 
 
 def test_malformed_json_is_backed_up_and_defaults_are_loaded(

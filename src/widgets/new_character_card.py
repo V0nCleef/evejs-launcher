@@ -14,6 +14,13 @@ from PyQt6.QtWidgets import (
 )
 
 from src.constants import SEMANTIC_COLORS as S
+from src.widgets.ui_translation import register_translatable_widget_tree
+from src.widgets.ui_translation import (
+    set_translatable_accessible_description,
+    set_translatable_accessible_name,
+    set_translatable_text,
+    set_translatable_tooltip,
+)
 
 
 class _PlusGlyph(QWidget):
@@ -81,8 +88,9 @@ class NewCharacterCard(QFrame):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setAccessibleName("Create a new local character")
+        set_translatable_accessible_name(self, "Create a new local character")
         self._build_ui()
+        register_translatable_widget_tree(self)
         self._restyle()
 
     def _build_ui(self) -> None:
@@ -148,16 +156,29 @@ class NewCharacterCard(QFrame):
             unavailable_label = "NATIVE ONLY"
         elif "managed" in reason_folded or "connect-only" in reason_folded:
             unavailable_label = "MANAGED ONLY"
-        self._button.setText("CREATE" if enabled else unavailable_label)
-        self._button.setToolTip(self._reason)
+        set_translatable_text(
+            self._button,
+            "CREATE" if enabled else unavailable_label,
+        )
+        set_translatable_tooltip(self._button, self._reason)
         self._glyph.set_available(enabled)
-        self.setToolTip(self._reason)
-        self.setAccessibleDescription(
+        set_translatable_tooltip(self, self._reason)
+        set_translatable_accessible_description(
+            self,
             "Character creation is available"
             if enabled
-            else (self._reason or "Character creation is unavailable")
+            else self._reason or "Character creation is unavailable",
         )
         self._restyle()
+
+    def retranslate_ui(self) -> None:
+        """Refresh retained availability and accessibility copy."""
+        set_translatable_accessible_name(self, "Create a new local character")
+        set_translatable_accessible_name(
+            self._button,
+            "Create a new local character",
+        )
+        self.set_available(self._available, self._reason)
 
     def enterEvent(self, event) -> None:  # noqa: N802
         self._hovered = True

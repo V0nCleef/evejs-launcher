@@ -37,6 +37,11 @@ _WAIT_OBJECT_0 = 0x00000000
 _WAIT_ABANDONED = 0x00000080
 _WAIT_TIMEOUT = 0x00000102
 _DIRECTORY_LINK_TIMEOUT_SECONDS = 10
+_TH32CS_SNAPPROCESS = 0x00000002
+_INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+_MONITOR_DEFAULTTONEAREST = 0x00000002
+_SWP_NOZORDER = 0x0004
+_SWP_NOACTIVATE = 0x0010
 _CONSOLE_SIGNAL_LOCK = threading.Lock()
 _CONSOLE_CTRL_HANDLER = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
 
@@ -83,6 +88,30 @@ class _ExtendedLimitInformation(ctypes.Structure):
     ]
 
 
+class _ProcessEntry32W(ctypes.Structure):
+    _fields_ = [
+        ("dwSize", wintypes.DWORD),
+        ("cntUsage", wintypes.DWORD),
+        ("th32ProcessID", wintypes.DWORD),
+        ("th32DefaultHeapID", ctypes.c_size_t),
+        ("th32ModuleID", wintypes.DWORD),
+        ("cntThreads", wintypes.DWORD),
+        ("th32ParentProcessID", wintypes.DWORD),
+        ("pcPriClassBase", wintypes.LONG),
+        ("dwFlags", wintypes.DWORD),
+        ("szExeFile", wintypes.WCHAR * 260),
+    ]
+
+
+class _MonitorInfo(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("rcMonitor", wintypes.RECT),
+        ("rcWork", wintypes.RECT),
+        ("dwFlags", wintypes.DWORD),
+    ]
+
+
 kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
 kernel32.CreateJobObjectW.restype = wintypes.HANDLE
 kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
@@ -117,11 +146,39 @@ kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
 kernel32.WaitForSingleObject.restype = wintypes.DWORD
 kernel32.ReleaseMutex.argtypes = [wintypes.HANDLE]
 kernel32.ReleaseMutex.restype = wintypes.BOOL
+kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+kernel32.Process32FirstW.argtypes = [
+    wintypes.HANDLE,
+    ctypes.POINTER(_ProcessEntry32W),
+]
+kernel32.Process32FirstW.restype = wintypes.BOOL
+kernel32.Process32NextW.argtypes = [
+    wintypes.HANDLE,
+    ctypes.POINTER(_ProcessEntry32W),
+]
+kernel32.Process32NextW.restype = wintypes.BOOL
 user32.GetWindowThreadProcessId.argtypes = [
     wintypes.HWND,
     ctypes.POINTER(wintypes.DWORD),
 ]
 user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+user32.GetClassNameW.restype = ctypes.c_int
+user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+user32.MonitorFromWindow.restype = wintypes.HANDLE
+user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(_MonitorInfo)]
+user32.GetMonitorInfoW.restype = wintypes.BOOL
+user32.SetWindowPos.argtypes = [
+    wintypes.HWND,
+    wintypes.HWND,
+    ctypes.c_int,
+    ctypes.c_int,
+    ctypes.c_int,
+    ctypes.c_int,
+    wintypes.UINT,
+]
+user32.SetWindowPos.restype = wintypes.BOOL
 ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
 ntdll.NtResumeProcess.restype = wintypes.LONG
 
@@ -645,11 +702,13 @@ def create_directory_link(target: Path, link: Path) -> None:
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
+        errors="replace",
         timeout=_DIRECTORY_LINK_TIMEOUT_SECONDS,
     )
     if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
         raise RuntimeError(
-            f"Failed to create junction at {link}: {result.stderr.strip()}"
+            f"Failed to create junction at {link}: {stderr}"
         )
 
 
@@ -719,11 +778,149 @@ def _get_window_title(hwnd: int) -> str:
     return buf.value
 
 
+def _get_window_class(hwnd: int) -> str:
+    """Return the native class name of *hwnd*, or ``""`` on failure."""
+    buf = ctypes.create_unicode_buffer(256)
+    if user32.GetClassNameW(hwnd, buf, len(buf)) == 0:
+        return ""
+    return buf.value
+
+
 def _get_window_rect(hwnd: int) -> tuple[int, int, int, int]:
     """Return ``(left, top, right, bottom)`` for *hwnd*."""
     rect = wintypes.RECT()
     user32.GetWindowRect(hwnd, ctypes.byref(rect))
     return rect.left, rect.top, rect.right, rect.bottom
+
+
+def _process_tree_pids(root_pid: int) -> set[int]:
+    """Return a snapshot of *root_pid* and all of its descendants."""
+    process_ids = {root_pid}
+    snapshot = kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPPROCESS, 0)
+    snapshot_value = getattr(snapshot, "value", snapshot)
+    if not snapshot_value or snapshot_value == _INVALID_HANDLE_VALUE:
+        return process_ids
+
+    entries: list[tuple[int, int]] = []
+    try:
+        entry = _ProcessEntry32W()
+        entry.dwSize = ctypes.sizeof(entry)
+        if not kernel32.Process32FirstW(snapshot, ctypes.byref(entry)):
+            return process_ids
+        while True:
+            entries.append(
+                (int(entry.th32ProcessID), int(entry.th32ParentProcessID))
+            )
+            entry.dwSize = ctypes.sizeof(entry)
+            if not kernel32.Process32NextW(snapshot, ctypes.byref(entry)):
+                break
+    finally:
+        kernel32.CloseHandle(snapshot)
+
+    # Snapshot order is not guaranteed, so expand until every reachable child
+    # has been discovered rather than assuming parents precede descendants.
+    while True:
+        before = len(process_ids)
+        process_ids.update(
+            pid
+            for pid, parent_pid in entries
+            if pid > 0 and parent_pid in process_ids
+        )
+        if len(process_ids) == before:
+            return process_ids
+
+
+def center_tool_window_for_process_tree(
+    root_pid: int,
+    expected_title: str,
+    expected_class_name: str,
+    *,
+    anchor_hwnd: int | None = None,
+) -> bool:
+    """Center one exact, process-owned tool window inside a monitor work area.
+
+    Batch wrappers retain the returned ``cmd.exe`` process while their Python
+    GUI runs as a child.  Matching the complete descendant tree and an exact
+    title and native window class lets the launcher correct that GUI without
+    moving an unrelated window (including the wrapper's same-title console).
+    """
+    if not isinstance(root_pid, int) or isinstance(root_pid, bool) or root_pid <= 0:
+        raise ValueError("Tool window lookup requires a positive process ID.")
+    if not isinstance(expected_title, str) or not expected_title:
+        raise ValueError("Tool window lookup requires an exact window title.")
+    if not isinstance(expected_class_name, str) or not expected_class_name:
+        raise ValueError("Tool window lookup requires an exact window class.")
+    if (
+        anchor_hwnd is not None
+        and (
+            not isinstance(anchor_hwnd, int)
+            or isinstance(anchor_hwnd, bool)
+            or anchor_hwnd <= 0
+        )
+    ):
+        raise ValueError("Tool window anchoring requires a positive window handle.")
+
+    owned_pids = _process_tree_pids(root_pid)
+    target_hwnd: int | None = None
+
+    def _callback(hwnd: int, _lparam: int) -> bool:
+        nonlocal target_hwnd
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        if _get_window_title(hwnd) != expected_title:
+            return True
+        if _get_window_class(hwnd) != expected_class_name:
+            return True
+        owner_pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner_pid))
+        if int(owner_pid.value) not in owned_pids:
+            return True
+        left, top, right, bottom = _get_window_rect(hwnd)
+        if right <= left or bottom <= top:
+            return True
+        target_hwnd = hwnd
+        return False
+
+    user32.EnumWindows(_WNDENUMPROC(_callback), 0)
+    if target_hwnd is None:
+        return False
+
+    monitor_source = anchor_hwnd or target_hwnd
+    monitor = user32.MonitorFromWindow(
+        wintypes.HWND(monitor_source),
+        _MONITOR_DEFAULTTONEAREST,
+    )
+    if not monitor:
+        return False
+    monitor_info = _MonitorInfo()
+    monitor_info.cbSize = ctypes.sizeof(monitor_info)
+    if not user32.GetMonitorInfoW(monitor, ctypes.byref(monitor_info)):
+        return False
+
+    left, top, right, bottom = _get_window_rect(target_hwnd)
+    current_width = right - left
+    current_height = bottom - top
+    work = monitor_info.rcWork
+    work_width = int(work.right - work.left)
+    work_height = int(work.bottom - work.top)
+    if current_width <= 0 or current_height <= 0 or work_width <= 0 or work_height <= 0:
+        return False
+
+    width = min(current_width, work_width)
+    height = min(current_height, work_height)
+    x = int(work.left + (work_width - width) // 2)
+    y = int(work.top + (work_height - height) // 2)
+    return bool(
+        user32.SetWindowPos(
+            wintypes.HWND(target_hwnd),
+            wintypes.HWND(0),
+            x,
+            y,
+            width,
+            height,
+            _SWP_NOZORDER | _SWP_NOACTIVATE,
+        )
+    )
 
 
 def has_visible_window_for_pid(pid: int) -> bool:

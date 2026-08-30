@@ -11,12 +11,10 @@ from PyQt6.QtWidgets import (
     QDialog,
     QFrame,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QPushButton,
     QSplitter,
     QTreeWidget,
@@ -26,6 +24,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.constants import COLORS as C, SEMANTIC_COLORS as S
+from src.i18n import format_ui_phrase, translate_ui_phrase
 from src.core.db import Account, Character
 from src.core.groups import (
     CharacterGroup,
@@ -38,6 +37,15 @@ from src.core.groups import (
     duplicate_group,
     resolve_group,
     validate_state,
+)
+from src.widgets.localized_dialogs import (
+    LocalizedInputDialog as QInputDialog,
+    LocalizedMessageBox as QMessageBox,
+)
+from src.widgets.ui_translation import (
+    register_translatable_widget_tree,
+    set_translatable_text,
+    set_translatable_text_template,
 )
 
 
@@ -90,6 +98,7 @@ class CharacterGroupsDialog(QDialog):
         self._updating_editor = False
         self._member_items: dict[GroupMember, QTreeWidgetItem] = {}
         self._build_ui()
+        register_translatable_widget_tree(self)
         self._apply_deep_signal_style()
         self._refresh_group_list(select_id=self._initial_group_id())
 
@@ -482,7 +491,8 @@ class CharacterGroupsDialog(QDialog):
 
     @staticmethod
     def _group_item_text(group: CharacterGroup) -> str:
-        return f"●  {group.name or 'Untitled Group'}   ({len(group.members)})"
+        name = group.name or translate_ui_phrase("Untitled Group")
+        return f"●  {name}   ({len(group.members)})"
 
     def _on_group_selected(self, row: int) -> None:
         group = self._groups[row] if 0 <= row < len(self._groups) else None
@@ -506,13 +516,19 @@ class CharacterGroupsDialog(QDialog):
             self.name_edit.clear()
             self.color_combo.setCurrentIndex(0)
             self.character_tree.clear()
-            self.member_count_label.setText("No group selected")
-            self.editor_title.setText("CREATE YOUR FIRST GROUP")
+            set_translatable_text(self.member_count_label, "No group selected")
+            set_translatable_text(
+                self.editor_title,
+                "CREATE YOUR FIRST GROUP",
+            )
             self._member_items.clear()
             self._updating_editor = False
             return
 
-        self.editor_title.setText(f"EDIT {group.name.upper()}")
+        set_translatable_text_template(
+            self.editor_title,
+            f"EDIT {group.name.upper()}",
+        )
         self.name_edit.setText(group.name)
         color_index = self.color_combo.findData(group.color)
         self.color_combo.setCurrentIndex(max(0, color_index))
@@ -570,9 +586,13 @@ class CharacterGroupsDialog(QDialog):
                 known.add(member)
                 statuses: list[str] = []
                 if account.banned:
-                    statuses.append("banned — will not launch")
+                    statuses.append(
+                        translate_ui_phrase("banned — will not launch")
+                    )
                 if getattr(account, "hidden", False) or character.name in self._hidden_characters:
-                    statuses.append("hidden — will not launch")
+                    statuses.append(
+                        translate_ui_phrase("hidden — will not launch")
+                    )
                 suffix = f"  [{'; '.join(statuses)}]" if statuses else ""
                 child = QTreeWidgetItem([f"{character.name}{suffix}"])
                 child.setData(0, _MEMBER_ROLE, member)
@@ -591,14 +611,19 @@ class CharacterGroupsDialog(QDialog):
 
         missing = [member for member in group.members if member not in known]
         if missing:
-            parent = QTreeWidgetItem(["Unavailable characters"])
+            parent = QTreeWidgetItem(
+                [translate_ui_phrase("Unavailable characters")]
+            )
             parent.setForeground(0, QColor(C["red"]))
             self.character_tree.addTopLevelItem(parent)
             for member in missing:
                 child = QTreeWidgetItem(
                     [
-                        f"Character ID {member.character_id} "
-                        f"(account ID {member.account_id}) — missing"
+                        format_ui_phrase(
+                            "Character ID {character_id} (account ID {account_id}) — missing",
+                            character_id=member.character_id,
+                            account_id=member.account_id,
+                        )
                     ]
                 )
                 child.setData(0, _MEMBER_ROLE, member)
@@ -612,10 +637,10 @@ class CharacterGroupsDialog(QDialog):
 
     def _new_group(self) -> None:
         folded = {group.name.casefold() for group in self._groups}
-        name = "New Group"
+        name = translate_ui_phrase("New Group")
         suffix = 2
         while name.casefold() in folded:
-            name = f"New Group {suffix}"
+            name = format_ui_phrase("New Group {n}", n=suffix)
             suffix += 1
         state, group = create_group(
             TargetGroupState(tuple(self._groups), self._selected_group_id),
@@ -649,8 +674,14 @@ class CharacterGroupsDialog(QDialog):
         if len(self._relink_candidates) > 1:
             labels = [
                 (
-                    f"Previous set {index}: {len(state.groups)} group(s), "
-                    f"{sum(len(group.members) for group in state.groups)} character(s)"
+                    format_ui_phrase(
+                        "Previous set {n}: {groups} group(s), {characters} character(s)",
+                        n=index,
+                        groups=len(state.groups),
+                        characters=sum(
+                            len(group.members) for group in state.groups
+                        ),
+                    )
                 )
                 for index, state in enumerate(self._relink_candidates, start=1)
             ]
@@ -678,7 +709,8 @@ class CharacterGroupsDialog(QDialog):
         self._groups = list(candidate.groups)
         self._selected_group_id = candidate.selected_group_id
         self._refresh_group_list(select_id=candidate.selected_group_id)
-        self.error_label.setText(
+        set_translatable_text(
+            self.error_label,
             "Previous groups restored. Review them, then choose SAVE GROUPS."
         )
         self.error_label.setStyleSheet(f"color: {C['green']};")
@@ -727,7 +759,10 @@ class CharacterGroupsDialog(QDialog):
         item = self.group_list.item(row)
         if item is not None:
             item.setText(self._group_item_text(self._groups[row]))
-        self.editor_title.setText(f"EDIT {(value or 'GROUP').upper()}")
+        set_translatable_text_template(
+            self.editor_title,
+            f"EDIT {(value or 'GROUP').upper()}",
+        )
         self.error_label.clear()
 
     def _on_color_changed(self, _index: int) -> None:
@@ -777,7 +812,7 @@ class CharacterGroupsDialog(QDialog):
         group = self._current_group()
         count = len(group.members) if group is not None else 0
         self.member_count_label.setText(
-            f"{count} character{'s' if count != 1 else ''}"
+            format_ui_phrase("{count} character(s)", count=count)
         )
 
     def _filter_characters(self, text: str) -> None:
@@ -802,8 +837,11 @@ class CharacterGroupsDialog(QDialog):
                 resolution = resolve_group(group, self._accounts)
                 if resolution.conflicting_account_ids:
                     raise GroupValidationError(
-                        f"'{group.name}' contains more than one character from "
-                        "the same account. Keep only one per account."
+                        format_ui_phrase(
+                            "'{group}' contains more than one character from the same account. "
+                            "Keep only one per account.",
+                            group=group.name,
+                        )
                     )
         except GroupValidationError as exc:
             self._show_error(str(exc))
@@ -813,5 +851,5 @@ class CharacterGroupsDialog(QDialog):
 
     def _show_error(self, message: str) -> None:
         self.error_label.setStyleSheet(f"color: {C['red']};")
-        self.error_label.setText(message)
+        set_translatable_text(self.error_label, message)
         self.error_label.setFocus()

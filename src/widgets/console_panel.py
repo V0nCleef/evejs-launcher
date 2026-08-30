@@ -17,6 +17,11 @@ from PyQt6.QtWidgets import (
 )
 
 from src.constants import SEMANTIC_COLORS as S
+from src.widgets.ui_translation import (
+    register_translatable_widget_tree,
+    set_translatable_text,
+    set_translatable_text_template,
+)
 
 
 class ConsolePanel(QFrame):
@@ -56,6 +61,7 @@ class ConsolePanel(QFrame):
         self._poll_timer.timeout.connect(self._poll_log)
 
         self._build_ui()
+        register_translatable_widget_tree(self)
         self._apply_style()
         self.hide()
 
@@ -308,7 +314,7 @@ class ConsolePanel(QFrame):
         """Start tailing *log_path* and show the panel."""
         self.stop_tailing()
         self._streaming = False
-        self._activity_label.setText("●  LIVE")
+        set_translatable_text(self._activity_label, "●  LIVE")
         self._activity_label.setStyleSheet("")
         self._notepad_btn.setEnabled(True)
         self._log_path = Path(log_path)
@@ -329,7 +335,10 @@ class ConsolePanel(QFrame):
                 )
             self._log_offset = file_size
 
-        self._title_label.setText(f"Console — {self._log_path.name}")
+        set_translatable_text_template(
+            self._title_label,
+            f"Console — {self._log_path.name}",
+        )
         self._poll_timer.start()
         self._reposition()
         self.show()
@@ -345,16 +354,20 @@ class ConsolePanel(QFrame):
         self.hide()
         self.closed.emit()
 
-    def begin_stream(self, title: str) -> None:
+    def begin_stream(self, title: str, *, allow_templates: bool = False) -> None:
         """Present a non-file stream while preserving the existing ring buffer."""
         self.stop_tailing()
         self._streaming = True
-        self._activity_label.setText("●  LIVE")
+        set_translatable_text(self._activity_label, "●  LIVE")
         self._activity_label.setStyleSheet("")
         self._log_path = None
         self._log.clear()
         self._log_offset = 0
-        self._title_label.setText(title)
+        (
+            set_translatable_text_template
+            if allow_templates
+            else set_translatable_text
+        )(self._title_label, title)
         self._notepad_btn.setEnabled(False)
         self._reposition()
         self.show()
@@ -370,7 +383,7 @@ class ConsolePanel(QFrame):
         if self._streaming and message:
             self._append_lines([message])
         if self._streaming:
-            self._activity_label.setText("●  COMPLETE")
+            set_translatable_text(self._activity_label, "●  COMPLETE")
             self._activity_label.setStyleSheet(
                 f"color: {S['text_muted']}; background: transparent; "
                 "font-size: 9px; font-weight: 700; letter-spacing: 1px;"
@@ -382,7 +395,7 @@ class ConsolePanel(QFrame):
 
     def set_title(self, title: str) -> None:
         """Set the header title label."""
-        self._title_label.setText(title)
+        set_translatable_text(self._title_label, title)
 
     def _poll_log(self) -> None:
         if not self._log_path or not self._log_path.exists():

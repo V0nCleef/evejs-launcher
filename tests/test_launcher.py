@@ -111,6 +111,70 @@ def test_network_policy_discards_inherited_one_shot_launch_state(
     assert "EVEJS_OVERVIEW_ACK_PATH" not in env
 
 
+def test_client_environment_aliases_non_ascii_windows_identity_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legacy client identity stays ASCII while real Unicode paths are preserved."""
+    identity = {
+        "COMPUTERNAME": "测试电脑",
+        "HOSTNAME": "测试电脑",
+        "USERNAME": "测试用户",
+        "USERDOMAIN": "测试域",
+        "USERDNSDOMAIN": "测试域.example",
+        "USERDOMAIN_ROAMINGPROFILE": "测试域",
+        "LOGONSERVER": r"\\测试电脑",
+    }
+    unicode_paths = {
+        "USERPROFILE": r"C:\Users\测试用户",
+        "APPDATA": r"C:\Users\测试用户\AppData\Roaming",
+        "LOCALAPPDATA": r"C:\Users\测试用户\AppData\Local",
+        "TEMP": r"C:\Users\测试用户\AppData\Local\Temp",
+        "TMP": r"C:\Users\测试用户\AppData\Local\Temp",
+    }
+    for key, value in {**identity, **unicode_paths}.items():
+        monkeypatch.setenv(key, value)
+
+    env = launcher.build_env(r"C:\游戏\EveJS")
+
+    assert env["COMPUTERNAME"] == "EVEJS-PC"
+    assert env["HOSTNAME"] == "EVEJS-PC"
+    assert env["USERNAME"] == "EVEJS-USER"
+    assert {
+        key: env[key]
+        for key in (
+            "USERDOMAIN",
+            "USERDNSDOMAIN",
+            "USERDOMAIN_ROAMINGPROFILE",
+            "LOGONSERVER",
+        )
+    } == {
+        key: identity[key]
+        for key in (
+            "USERDOMAIN",
+            "USERDNSDOMAIN",
+            "USERDOMAIN_ROAMINGPROFILE",
+            "LOGONSERVER",
+        )
+    }
+    assert {key: env[key] for key in unicode_paths} == unicode_paths
+
+
+def test_client_environment_preserves_existing_ascii_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity = {
+        "COMPUTERNAME": "CAPSULE-PC",
+        "USERNAME": "capsuleer",
+        "USERDOMAIN": "NEWEDEN",
+    }
+    for key, value in identity.items():
+        monkeypatch.setenv(key, value)
+
+    env = launcher.build_env("C:/Fixture/EveJS")
+
+    assert {key: env[key] for key in identity} == identity
+
+
 def test_resource_cache_validation_matches_play_bat_thresholds() -> None:
     assert launcher._MIN_RESOURCE_CACHE_HEX_DIRECTORIES == 240
     assert launcher._MIN_RESOURCE_CACHE_FILES == 50_000
@@ -473,6 +537,53 @@ def test_launch_client_resfiles_come_from_configured_client_not_profile_junction
     assert env["EO_REMOTEFILECACHEFOLDER"] == str(configured_resfiles)
     assert env["EO_REMOTEFILECACHEFOLDER"] != str(profile_resfiles)
     assert captured["arguments"] == ("/port:26000",)
+
+
+def test_launch_client_preserves_unicode_paths_through_the_spawn_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Wide Windows paths survive while legacy identity labels become ASCII."""
+    _accept_fixture_cache(monkeypatch)
+    evejs_root = tmp_path / "游戏服务器" / "EveJS"
+    profile_tq = tmp_path / "测试用户" / "配置文件" / "账户" / "tq"
+    exe = profile_tq / "bin64" / "ExeFile.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"")
+    configured_tq = tmp_path / "客户端副本" / "tq"
+    configured_resfiles = _create_client_cache(configured_tq)
+    captured: dict[str, object] = {}
+
+    monkeypatch.setenv("COMPUTERNAME", "测试电脑")
+    monkeypatch.setenv("USERNAME", "测试用户")
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "测试用户"))
+    monkeypatch.setattr(launcher, "get_client_exe_path", lambda _path: exe)
+    monkeypatch.setattr(
+        launcher,
+        "launch_eve_client",
+        lambda executable, env, cwd, *, arguments: captured.update(
+            executable=executable,
+            env=env,
+            cwd=cwd,
+            arguments=arguments,
+        )
+        or object(),
+    )
+
+    launcher.launch_client(
+        evejs_root=str(evejs_root),
+        profile_tq_path=profile_tq,
+        client_path=str(configured_tq),
+    )
+
+    assert captured["executable"] == exe
+    assert captured["cwd"] == exe.parent
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert env["EO_REMOTEFILECACHEFOLDER"] == str(configured_resfiles)
+    assert env["USERPROFILE"] == str(tmp_path / "测试用户")
+    assert env["COMPUTERNAME"] == "EVEJS-PC"
+    assert env["USERNAME"] == "EVEJS-USER"
 
 
 def test_launch_client_passes_only_verified_typed_auto_login_arguments(

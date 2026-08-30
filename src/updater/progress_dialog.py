@@ -17,8 +17,14 @@ from PyQt6.QtWidgets import (
 )
 
 from src.constants import SEMANTIC_COLORS as S
+from src.i18n import translate_ui_phrase
 from src.theme import load_fonts
 from src.widgets.deep_signal_background import operations_scene_path
+from src.widgets.ui_translation import (
+    register_translatable_widget_tree,
+    set_translatable_text,
+    set_translatable_text_template,
+)
 
 
 class UpdateProgressDialog(QDialog):
@@ -47,6 +53,7 @@ class UpdateProgressDialog(QDialog):
         self._active_phase_index = 0
 
         self._build_ui()
+        register_translatable_widget_tree(self)
         self._apply_styles()
         self.set_stage("download", "Preparing the update…")
 
@@ -196,7 +203,9 @@ class UpdateProgressDialog(QDialog):
         phase_layout = QHBoxLayout(phases)
         phase_layout.setContentsMargins(10, 9, 10, 9)
         phase_layout.setSpacing(7)
-        for index, text in enumerate(("Download", "Prepare", "Install", "Restart")):
+        for index, text in enumerate(
+            ("DOWNLOAD", "PREPARE", "INSTALL", "RESTART")
+        ):
             phase = QFrame(phases)
             phase.setObjectName("updatePhase")
             phase.setProperty("phaseState", "pending")
@@ -207,7 +216,7 @@ class UpdateProgressDialog(QDialog):
             number.setObjectName("phaseNumber")
             number.setAlignment(Qt.AlignmentFlag.AlignCenter)
             phase_step.addWidget(number)
-            label = QLabel(text.upper(), phase)
+            label = QLabel(text, phase)
             label.setObjectName("phaseLabel")
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             phase_step.addWidget(label)
@@ -428,57 +437,81 @@ class UpdateProgressDialog(QDialog):
         )
 
     def set_stage(self, stage: str, detail: str) -> None:
-        """Show a named non-download phase with an active progress indicator."""
+        """Show one trusted launcher-owned phase and preserve inserted values."""
         stage_key = stage if stage in self._STAGES else "prepare"
         title, index = self._STAGES[stage_key]
-        self.status_label.setText(title)
-        self.detail_label.setText(detail)
+        set_translatable_text(self.status_label, title)
+        # Stage details come only from the launcher/updater workers.  Opting
+        # this explicit boundary into reviewed-template matching lets the
+        # lock-settle countdown translate without ever translating arbitrary
+        # paths or diagnostics: unknown text still passes through unchanged.
+        set_translatable_text_template(
+            self.detail_label,
+            detail,
+            template_min_literal=20,
+        )
         self.progress_bar.setRange(0, 0)
         self._set_visual_state(stage_key)
         self._set_active_phase(index)
 
     def set_download_progress(self, downloaded: int, total: int) -> None:
         """Render real byte progress from the release-asset download."""
-        self.status_label.setText(self._STAGES["download"][0])
+        set_translatable_text(self.status_label, self._STAGES["download"][0])
         self._set_visual_state("download")
         self._set_active_phase(self._STAGES["download"][1])
 
         if total <= 0:
-            self.detail_label.setText(f"Downloaded {self._format_bytes(downloaded)}")
+            set_translatable_text_template(
+                self.detail_label,
+                f"Downloaded {self._format_bytes(downloaded)}",
+            )
             self.progress_bar.setRange(0, 0)
             return
 
         percent = min(100, max(0, round(downloaded * 100 / total)))
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(percent)
-        self.detail_label.setText(
-            f"{self._format_bytes(downloaded)} of {self._format_bytes(total)}"
+        set_translatable_text_template(
+            self.detail_label,
+            f"{self._format_bytes(downloaded)} of {self._format_bytes(total)}",
         )
 
     def set_copy_progress(self, completed: int, total: int) -> None:
         """Render file-copy progress from the standalone updater process."""
-        self.status_label.setText("Installing update")
+        set_translatable_text(self.status_label, "Installing update")
         self._set_visual_state("install")
         self._set_active_phase(self._STAGES["install"][1])
         if total <= 0:
-            self.detail_label.setText("Copying launcher files…")
+            set_translatable_text(self.detail_label, "Copying launcher files…")
             self.progress_bar.setRange(0, 0)
             return
 
         percent = min(100, max(0, round(completed * 100 / total)))
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(percent)
-        self.detail_label.setText(f"Copied {completed} of {total} files")
+        set_translatable_text_template(
+            self.detail_label,
+            f"Copied {completed} of {total} files",
+        )
 
     def show_error(self, detail: str) -> None:
         """Keep a failed update visible and let the user return to the launcher."""
         self._allow_close = True
-        self.status_label.setText("Update could not finish")
-        self.detail_label.setText(detail)
+        set_translatable_text(self.status_label, "Update could not finish")
+        # Update workers return launcher-owned framing with paths/exceptions
+        # inserted.  Reverse-match only strongly specific reviewed templates;
+        # arbitrary diagnostics must remain byte-for-byte unchanged.
+        self.detail_label.setText(
+            translate_ui_phrase(
+                detail,
+                allow_templates=True,
+                template_min_literal=20,
+            )
+        )
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
-        self.hero_state_label.setText("UPDATE LINK FAILED")
-        self.state_badge.setText("LINK FAILURE")
+        set_translatable_text(self.hero_state_label, "UPDATE LINK FAILED")
+        set_translatable_text(self.state_badge, "LINK FAILURE")
         for widget in (
             self.status_panel,
             self.state_indicator,
@@ -494,8 +527,8 @@ class UpdateProgressDialog(QDialog):
     def set_handoff_mode(self) -> None:
         """Identify the standalone updater without altering worker behavior."""
         self.setProperty("handoffMode", True)
-        self.context_label.setText("DEEP SIGNAL // UPDATE AGENT")
-        self.window_heading.setText("Applying launcher update")
+        set_translatable_text(self.context_label, "DEEP SIGNAL // UPDATE AGENT")
+        set_translatable_text(self.window_heading, "Applying launcher update")
         self._refresh_widget(self)
 
     def allow_close(self) -> None:
@@ -511,8 +544,8 @@ class UpdateProgressDialog(QDialog):
     def _set_visual_state(self, stage: str) -> None:
         visual_state = "restart" if stage == "restart" else "active"
         badge = self._STAGE_BADGES.get(stage, self._STAGE_BADGES["prepare"])
-        self.hero_state_label.setText(badge)
-        self.state_badge.setText(badge)
+        set_translatable_text(self.hero_state_label, badge)
+        set_translatable_text(self.state_badge, badge)
         for widget in (
             self.status_panel,
             self.state_indicator,

@@ -22,14 +22,6 @@ was generated specifically for this project with OpenAI's image-generation
 tool on 2026-08-12. It depicts an original, franchise-neutral orbital facility;
 no CCP game asset, screenshot, soundtrack, or character voice is bundled.
 
-The Deep Signal Living Universe soundscape in
-`assets/audio/music/deep_signal_ambience.wav` was synthesized specifically for
-this project from deterministic oscillators and periodic noise-like partials.
-Its reproducible source is `scripts/generate_ambience.py`; the dark tonal bed,
-station machinery, structural creaks, hydraulic gantries, ship flybys, docking
-clamps, and warp-arrival textures contain no sample or derivation from EVE
-Online music or game audio.
-
 The Celestial Transit music track in
 `assets/audio/music/celestial_transit.wav` is an original composition
 synthesized specifically for this project from pitched additive oscillators

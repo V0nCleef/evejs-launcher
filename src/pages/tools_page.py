@@ -30,6 +30,13 @@ from src.core.tool_catalog import (
 )
 from src.core.service_status import DockerControlPolicy, RuntimeBackend
 from src.widgets.page_header import PageHeader
+from src.widgets.ui_translation import (
+    register_translatable_widget_tree,
+    set_translatable_accessible_description,
+    set_translatable_accessible_name,
+    set_translatable_text,
+    set_translatable_tooltip,
+)
 
 
 _ROOT_STATE_REASONS = {
@@ -51,8 +58,8 @@ class ToolCard(QFrame):
         self.setObjectName(f"toolCard-{definition.id}")
         self.setProperty("class", "toolCard")
         self.setProperty("accent", definition.accent_role)
-        self.setAccessibleName(definition.name)
-        self.setAccessibleDescription(definition.description)
+        set_translatable_accessible_name(self, definition.name)
+        set_translatable_accessible_description(self, definition.description)
         # Keep the two-column layout shrinkable so the page receives a resize
         # event and can reflow before a hidden horizontal overflow develops.
         self.setMinimumWidth(240)
@@ -93,10 +100,15 @@ class ToolCard(QFrame):
 
         metadata = QHBoxLayout()
         metadata.setSpacing(6)
-        self.category_label = QLabel(definition.category.upper())
+        self.category_label = QLabel()
+        set_translatable_text(
+            self.category_label,
+            definition.category.upper(),
+        )
         self.category_label.setProperty("class", "toolCategoryPill")
         metadata.addWidget(self.category_label)
         self.source_label = QLabel(definition.source_folder)
+        self.source_label.setProperty("i18nIgnore", True)
         self.source_label.setProperty("class", "toolSource")
         metadata.addWidget(self.source_label)
         metadata.addStretch()
@@ -153,15 +165,20 @@ class ToolCard(QFrame):
             button.setProperty("class", self._action_class(action))
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setEnabled(action.available)
-            button.setAccessibleName(f"{action.label} {definition.name}")
-            button.setAccessibleDescription(
+            set_translatable_accessible_name(
+                button,
+                f"{action.label} {definition.name}",
+            )
+            set_translatable_accessible_description(
+                button,
                 (
                     f"{action.label} via the selected Docker Compose target"
                     if action.dispatch_kind is ToolDispatchKind.DOCKER_COMPOSE
                     else f"{action.label} via {definition.relative_entrypoint}"
                 )
             )
-            button.setToolTip(
+            set_translatable_tooltip(
+                button,
                 (
                     f"{action.label}: selected Docker Compose target"
                     if action.dispatch_kind is ToolDispatchKind.DOCKER_COMPOSE
@@ -192,6 +209,7 @@ class ToolCard(QFrame):
         root.addLayout(action_layout)
 
         self._restore_ready_state()
+        register_translatable_widget_tree(self)
 
     def _badge_risk(self) -> str:
         label = self.tool.definition.prerequisite_label.casefold()
@@ -229,37 +247,54 @@ class ToolCard(QFrame):
         button = self.action_buttons.get(action_id)
         if success:
             success_text = "Completed" if completed else "Launched"
-            self.status_label.setText(success_text)
+            set_translatable_text(self.status_label, success_text)
             self.status_label.setProperty("state", "launched")
             self.status_dot.setProperty("state", "launched")
-            self.status_label.setToolTip(message or "Tool wrapper launched")
+            if message:
+                self.status_label.setToolTip(message)
+            else:
+                set_translatable_tooltip(
+                    self.status_label,
+                    "Tool wrapper launched",
+                )
             if button is not None:
-                button.setText(success_text)
+                set_translatable_text(button, success_text)
         else:
-            self.status_label.setText(
+            set_translatable_text(
+                self.status_label,
                 "Operation failed" if completed else "Launch failed"
             )
             self.status_label.setProperty("state", "error")
             self.status_dot.setProperty("state", "error")
-            self.status_label.setToolTip(message or "Tool wrapper could not be launched")
+            if message:
+                self.status_label.setToolTip(message)
+            else:
+                set_translatable_tooltip(
+                    self.status_label,
+                    "Tool wrapper could not be launched",
+                )
             if button is not None:
-                button.setText("Failed")
+                set_translatable_text(button, "Failed")
         self._refresh_dynamic_style()
         self._feedback_timer.start()
 
     def _restore_ready_state(self) -> None:
         definition = self.tool.definition
         status = "Ready" if self.tool.available else self.tool.unavailable_reason
-        self.status_label.setText(status)
+        set_translatable_text(self.status_label, status)
         state = "ready" if self.tool.available else "missing"
         self.status_label.setProperty("state", state)
         self.status_dot.setProperty("state", state)
-        self.status_label.setToolTip(f"{status}\n{definition.relative_entrypoint}")
+        # The status is launcher-owned; the relative entry point is data and
+        # must remain byte-for-byte unchanged.
+        self.status_label.setToolTip(
+            f"{self.status_label.text()}\n{definition.relative_entrypoint}"
+        )
 
         for action in self.tool.actions:
             button = self.action_buttons.get(action.id)
             if button is not None:
-                button.setText(action.label)
+                set_translatable_text(button, action.label)
                 button.setEnabled(action.available)
         self._feedback_action_id = ""
         self._refresh_dynamic_style()
@@ -297,7 +332,8 @@ class ToolCategorySection(QWidget):
         root.setSpacing(8)
 
         heading_row = QHBoxLayout()
-        self.heading_label = QLabel(category.upper())
+        self.heading_label = QLabel()
+        set_translatable_text(self.heading_label, category.upper())
         self.heading_label.setProperty("class", "toolSectionTitle")
         heading_row.addWidget(self.heading_label)
         heading_row.addStretch()
@@ -313,6 +349,7 @@ class ToolCategorySection(QWidget):
         self.grid.setVerticalSpacing(12)
         root.addLayout(self.grid)
         self.set_columns(columns)
+        register_translatable_widget_tree(self)
 
     def set_columns(self, columns: int) -> None:
         """Reflow existing cards without recreating their widgets."""
@@ -354,6 +391,7 @@ class ToolsPage(QWidget):
         self._sections: dict[str, ToolCategorySection] = {}
         self.card_column_count = 2
         self._build_ui()
+        register_translatable_widget_tree(self)
         self._update_context_presentation()
         self.refresh_tools()
 
@@ -429,8 +467,9 @@ class ToolsPage(QWidget):
         category_label.setProperty("class", "toolFilterLabel")
         category_block.addWidget(category_label)
         self.category_combo = QComboBox()
-        self.category_combo.addItem("All categories")
-        self.category_combo.addItems(TOOL_CATEGORIES)
+        self.category_combo.addItem("All categories", "")
+        for category in TOOL_CATEGORIES:
+            self.category_combo.addItem(category, category)
         self.category_combo.setMinimumWidth(164)
         self.category_combo.setAccessibleName("Tool category")
         self.category_combo.setAccessibleDescription(
@@ -512,7 +551,7 @@ class ToolsPage(QWidget):
             text, state = "DOCKER · MANAGED", "online"
         else:
             text, state = "DOCKER · CONNECT ONLY", "idle"
-        self.runtime_context_label.setText(text)
+        set_translatable_text(self.runtime_context_label, text)
         self.runtime_context_label.setProperty("state", state)
         style = self.runtime_context_label.style()
         style.unpolish(self.runtime_context_label)
@@ -531,7 +570,10 @@ class ToolsPage(QWidget):
             compose_file=self._compose_file,
         )
         available = sum(tool.available for tool in resolved_tools)
-        self.available_count_label.setText(f"{available} available")
+        set_translatable_text(
+            self.available_count_label,
+            f"{available} available",
+        )
         self.available_count_label.setProperty(
             "state",
             "online" if available else "idle",
@@ -578,7 +620,7 @@ class ToolsPage(QWidget):
         filtered = filter_tools(
             self._resolved_tools,
             self.search_edit.text(),
-            self.category_combo.currentText(),
+            self.category_combo.currentData(),
         )
         self.no_results_label.setVisible(not filtered)
         if not filtered:
@@ -640,7 +682,7 @@ class ToolsPage(QWidget):
                 "selected root or use a supported EveJS version."
             ),
         }
-        self.empty_message_label.setText(messages[reason])
+        set_translatable_text(self.empty_message_label, messages[reason])
         self.empty_state.show()
         self.no_results_label.hide()
 

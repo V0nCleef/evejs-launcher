@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QDate, QLocale, Qt
 from PyQt6.QtGui import QFont, QPixmap
 from PyQt6.QtWidgets import (
     QDialog,
@@ -24,8 +24,13 @@ from PyQt6.QtWidgets import (
 )
 
 from src.constants import SEMANTIC_COLORS as S
+from src.i18n import current_language, translate_ui_phrase
 from src.theme import load_fonts
 from src.widgets.deep_signal_background import operations_scene_path
+from src.widgets.ui_translation import (
+    register_translatable_widget_tree,
+    set_translatable_text_template,
+)
 
 
 class UpdateDialog(QDialog):
@@ -69,6 +74,7 @@ class UpdateDialog(QDialog):
         self._skip_requested: bool = False
 
         self._build_ui()
+        register_translatable_widget_tree(self)
         self._apply_styles()
         self._fit_to_available_screen()
 
@@ -198,15 +204,21 @@ class UpdateDialog(QDialog):
         # ── Release notes ─────────────────────────────────────────────
         notes_header = QHBoxLayout()
         notes_header.setSpacing(10)
-        changelog_header = QLabel(
-            f"What's new in v{self._new_version.lstrip('vV')}"
+        self.changelog_header = QLabel()
+        set_translatable_text_template(
+            self.changelog_header,
+            f"What's new in v{self._new_version.lstrip('vV')}",
         )
-        changelog_header.setObjectName("releaseNotesTitle")
-        notes_header.addWidget(changelog_header)
+        self.changelog_header.setObjectName("releaseNotesTitle")
+        notes_header.addWidget(self.changelog_header)
         notes_header.addStretch()
-        date_label = QLabel(f"Released: {self._format_date(self._published_at)}")
-        date_label.setObjectName("releaseDate")
-        notes_header.addWidget(date_label)
+        self.date_label = QLabel()
+        set_translatable_text_template(
+            self.date_label,
+            f"Released: {self._format_date(self._published_at)}",
+        )
+        self.date_label.setObjectName("releaseDate")
+        notes_header.addWidget(self.date_label)
         root.addLayout(notes_header)
         root.addSpacing(8)
 
@@ -214,7 +226,8 @@ class UpdateDialog(QDialog):
         self._changelog_view = QTextEdit(self)
         self._changelog_view.setObjectName("releaseNotes")
         self._changelog_view.setReadOnly(True)
-        self._changelog_view.setMarkdown(self._changelog or "*No changelog provided.*")
+        fallback_changelog = f"*{translate_ui_phrase('No changelog provided.')}*"
+        self._changelog_view.setMarkdown(self._changelog or fallback_changelog)
         self._changelog_view.setAccessibleName("Update release notes")
         self._changelog_view.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
@@ -488,9 +501,23 @@ class UpdateDialog(QDialog):
     def _format_date(iso_string: str) -> str:
         """Turn an ISO-8601 timestamp into a human-readable date string."""
         if not iso_string:
-            return "Unknown"
+            return translate_ui_phrase("Unknown")
         try:
             dt = datetime.fromisoformat(iso_string.replace("Z", "+00:00"))
-            return dt.strftime("%B %d, %Y")
+            locale_names = {
+                "en": "en_GB",
+                "zh_CN": "zh_CN",
+                "ja": "ja_JP",
+                "ko": "ko_KR",
+                "fr": "fr_FR",
+                "de": "de_DE",
+                "nl": "nl_NL",
+                "ru": "ru_RU",
+            }
+            locale = QLocale(locale_names.get(current_language(), "en_GB"))
+            return locale.toString(
+                QDate(dt.year, dt.month, dt.day),
+                QLocale.FormatType.LongFormat,
+            )
         except (ValueError, TypeError):
             return iso_string

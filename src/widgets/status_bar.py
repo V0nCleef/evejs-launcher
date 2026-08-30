@@ -1,28 +1,126 @@
 """Status bar widget for EveJS Launcher V2."""
 from __future__ import annotations
 
+from math import cos, pi, sin
+
 from PyQt6.QtCore import (
     QAbstractAnimation,
     QEasingCurve,
     QObject,
+    QPointF,
     QPropertyAnimation,
+    QRectF,
+    QSize,
     Qt,
     pyqtSignal,
 )
-from PyQt6.QtGui import QPainter
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
+    QComboBox,
     QFrame,
     QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
-    QSpacerItem,
     QSizePolicy,
     QWidget,
 )
 
 from src.constants import APP_VERSION, COLORS
 from src.core.service_status import ServiceState
+from src.i18n import (
+    LANGUAGES,
+    current_language,
+    set_language,
+    translate,
+    translate_service_action,
+    translate_ui_phrase,
+)
 from src.ui.motion import MotionController
+from src.widgets.ui_translation import (
+    set_translatable_accessible_name,
+)
+
+
+def _language_flag_icon(code: str) -> QIcon:
+    """Paint a small deterministic flag without relying on emoji fonts."""
+    width, height = 24, 16
+    pixmap = QPixmap(width, height)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    rect = QRectF(0.5, 0.5, width - 1.0, height - 1.0)
+
+    if code == "en":
+        painter.fillRect(rect, QColor("#17365D"))
+        painter.setPen(QPen(QColor("#FFFFFF"), 3.0))
+        painter.drawLine(QPointF(1, 1), QPointF(width - 1, height - 1))
+        painter.drawLine(QPointF(width - 1, 1), QPointF(1, height - 1))
+        painter.setPen(QPen(QColor("#C8102E"), 1.2))
+        painter.drawLine(QPointF(1, 1), QPointF(width - 1, height - 1))
+        painter.drawLine(QPointF(width - 1, 1), QPointF(1, height - 1))
+        painter.fillRect(QRectF(0, 5.5, width, 5), QColor("#FFFFFF"))
+        painter.fillRect(QRectF(9.5, 0, 5, height), QColor("#FFFFFF"))
+        painter.fillRect(QRectF(0, 6.5, width, 3), QColor("#C8102E"))
+        painter.fillRect(QRectF(10.5, 0, 3, height), QColor("#C8102E"))
+    elif code == "zh_CN":
+        painter.fillRect(rect, QColor("#DE2910"))
+        star_center = QPointF(5.2, 4.8)
+        star_points = []
+        for index in range(10):
+            radius = 2.4 if index % 2 == 0 else 1.0
+            angle = -pi / 2.0 + index * pi / 5.0
+            star_points.append(
+                QPointF(
+                    star_center.x() + radius * cos(angle),
+                    star_center.y() + radius * sin(angle),
+                )
+            )
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#FFDE00"))
+        painter.drawPolygon(*star_points)
+    elif code == "ja":
+        painter.fillRect(rect, QColor("#FFFFFF"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#BC002D"))
+        painter.drawEllipse(QPointF(width / 2, height / 2), 4.2, 4.2)
+    elif code == "ko":
+        painter.fillRect(rect, QColor("#FFFFFF"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#CD2E3A"))
+        painter.drawPie(QRectF(7, 3, 10, 10), 0, 180 * 16)
+        painter.setBrush(QColor("#0047A0"))
+        painter.drawPie(QRectF(7, 3, 10, 10), 180 * 16, 180 * 16)
+        painter.setPen(QPen(QColor("#111111"), 1.0))
+        painter.drawLine(QPointF(3, 4), QPointF(6, 2))
+        painter.drawLine(QPointF(18, 14), QPointF(21, 12))
+    elif code == "fr":
+        painter.fillRect(QRectF(0.5, 0.5, 8, 15), QColor("#0055A4"))
+        painter.fillRect(QRectF(8.5, 0.5, 8, 15), QColor("#FFFFFF"))
+        painter.fillRect(QRectF(16.5, 0.5, 7, 15), QColor("#EF4135"))
+    elif code == "de":
+        painter.fillRect(QRectF(0.5, 0.5, 23, 5), QColor("#111111"))
+        painter.fillRect(QRectF(0.5, 5.5, 23, 5), QColor("#DD0000"))
+        painter.fillRect(QRectF(0.5, 10.5, 23, 5), QColor("#FFCE00"))
+    elif code == "nl":
+        painter.fillRect(QRectF(0.5, 0.5, 23, 5), QColor("#AE1C28"))
+        painter.fillRect(QRectF(0.5, 5.5, 23, 5), QColor("#FFFFFF"))
+        painter.fillRect(QRectF(0.5, 10.5, 23, 5), QColor("#21468B"))
+    elif code == "ru":
+        painter.fillRect(QRectF(0.5, 0.5, 23, 5), QColor("#FFFFFF"))
+        painter.fillRect(QRectF(0.5, 5.5, 23, 5), QColor("#0039A6"))
+        painter.fillRect(QRectF(0.5, 10.5, 23, 5), QColor("#D52B1E"))
+    else:
+        painter.fillRect(rect, QColor("#34495E"))
+        painter.setPen(QPen(QColor("#D5E7F0"), 1.0))
+        painter.drawEllipse(QRectF(7.5, 2.5, 9, 11))
+        painter.drawLine(QPointF(3, 8), QPointF(21, 8))
+        painter.drawLine(QPointF(12, 2.5), QPointF(12, 13.5))
+
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(QPen(QColor(170, 190, 202, 170), 0.8))
+    painter.drawRoundedRect(rect, 1.0, 1.0)
+    painter.end()
+    return QIcon(pixmap)
 
 
 class TelemetryLabel(QLabel):
@@ -67,6 +165,9 @@ class StatusSection(QFrame):
         super().__init__(parent)
         self.section_name = name
         self._state = ServiceState.OFFLINE
+        self._pid: int | None = None
+        self._container: str | None = None
+        self._error: str | None = None
         self._count: int | None = None
         self._full_text = ""
         self._pulse_requested = False
@@ -108,7 +209,11 @@ class StatusSection(QFrame):
         # baseline under the application stylesheet.
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setAccessibleName(f"{self.section_name} telemetry")
+        set_translatable_accessible_name(
+            self,
+            f"{self.section_name} telemetry",
+            allow_templates=True,
+        )
 
         # Pulsing animation for "Starting..." state
         self._opacity_effect = QGraphicsOpacityEffect(self.dot)
@@ -199,9 +304,12 @@ class StatusSection(QFrame):
     def set_state(self, state: ServiceState, pid: int | None = None, container: str | None = None,
                   error: str | None = None) -> None:
         self._state = state
+        self._pid = pid
+        self._container = container
+        self._error = error
         if state == ServiceState.ONLINE:
             self._set_visual_state("online", COLORS["green"])
-            txt = f"{self.section_name}: Online"
+            txt = translate_service_action(f"{self.section_name}: Online")
             if pid:
                 txt += f" (PID {pid})"
             elif container:
@@ -209,21 +317,30 @@ class StatusSection(QFrame):
             self._set_label_text(txt)
         elif state == ServiceState.STARTING:
             self._set_visual_state("warning", COLORS["gold"], pulse=True)
-            self._set_label_text(f"{self.section_name}: Starting...")
+            self._set_label_text(
+                translate_service_action(f"{self.section_name}: Starting...")
+            )
         elif state == ServiceState.STOPPING:
             self._set_visual_state("warning", COLORS["gold"], pulse=True)
-            self._set_label_text(f"{self.section_name}: Stopping...")
+            self._set_label_text(
+                translate_service_action(f"{self.section_name}: Stopping...")
+            )
         elif state == ServiceState.FAILED:
             self._set_visual_state("danger", COLORS["red"])
-            self._set_label_text(f"{self.section_name}: Failed")
+            self._set_label_text(
+                translate_service_action(f"{self.section_name}: Failed")
+            )
             if error:
                 self.label.setToolTip(error)
         elif state == ServiceState.UNKNOWN:
             self._set_visual_state("warning", COLORS["gold"])
-            self._set_label_text(f"{self.section_name}: Unknown" + (f" — {error}" if error else ""))
+            base = translate_service_action(f"{self.section_name}: Unknown")
+            self._set_label_text(base + (f" — {error}" if error else ""))
         else:
             self._set_visual_state("offline", COLORS["grey"])
-            self._set_label_text(f"{self.section_name}: Offline")
+            self._set_label_text(
+                translate_service_action(f"{self.section_name}: Offline")
+            )
 
     def set_count(self, count: int) -> None:
         """Set the client count (only used for Clients section)."""
@@ -232,7 +349,25 @@ class StatusSection(QFrame):
             "online" if count > 0 else "offline",
             COLORS["green"] if count > 0 else COLORS["grey"],
         )
-        self._set_label_text(f"{count} client{'s' if count != 1 else ''} running")
+        source = f"{count} client{'s' if count != 1 else ''} running"
+        self._set_label_text(translate_ui_phrase(source))
+
+    def retranslate_ui(self) -> None:
+        """Render the current semantic state in the active language."""
+        set_translatable_accessible_name(
+            self,
+            f"{self.section_name} telemetry",
+            allow_templates=True,
+        )
+        if self._count is not None:
+            self.set_count(self._count)
+            return
+        self.set_state(
+            self._state,
+            pid=self._pid,
+            container=self._container,
+            error=self._error,
+        )
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -257,13 +392,14 @@ class StatusBar(QFrame):
     """Bottom status bar showing server, market, and client status."""
 
     console_toggled = pyqtSignal(str)
+    language_changed = pyqtSignal(str)
     HEIGHT = 44
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._motion = MotionController(parent=self)
         self.setObjectName("statusBar")
-        self.setAccessibleName("Launcher telemetry footer")
+        set_translatable_accessible_name(self, "Launcher telemetry footer")
         self.setFixedHeight(self.HEIGHT)
         self.setStyleSheet("""
             StatusBar#statusBar {
@@ -283,21 +419,61 @@ class StatusBar(QFrame):
         layout.setContentsMargins(14, 0, 10, 0)
         layout.setSpacing(18)
 
-        # Flexible shoulders keep the three telemetry sections visually calm
-        # and centred.  This must be a non-painting layout item: a plain
-        # QWidget inherits the application's opaque base background and masks
-        # the footer gradient with a darker rectangle.
-        left_shoulder = QSpacerItem(
-            76,
-            0,
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Minimum,
+        # Language belongs to the application-wide footer, not to one page or
+        # the system-control block.  Its 190px width keeps the first telemetry
+        # section aligned just beyond the 220px navigation rail.
+        self.language_combo = QComboBox(self)
+        self.language_combo.setObjectName("languageSelector")
+        self.language_combo.setAccessibleName(translate("nav.language_tooltip"))
+        self.language_combo.setToolTip(translate("nav.language_tooltip"))
+        self.language_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.language_combo.setFixedSize(190, 28)
+        self.language_combo.setIconSize(QSize(24, 16))
+        self.language_combo.setMaxVisibleItems(len(LANGUAGES))
+        self.language_combo.setStyleSheet(f"""
+            QComboBox#languageSelector {{
+                background-color: rgba(7, 15, 26, 0.92);
+                color: #D7E5EC;
+                border: 1px solid rgba(0, 200, 224, 0.34);
+                border-radius: 3px;
+                padding: 0 28px 0 12px;
+                font-size: 10px;
+                font-weight: 600;
+            }}
+            QComboBox#languageSelector:hover,
+            QComboBox#languageSelector:focus {{
+                background-color: rgba(19, 35, 49, 0.96);
+                border-color: {COLORS['teal']};
+            }}
+            QComboBox#languageSelector::drop-down {{
+                width: 24px;
+                border: none;
+                border-left: 1px solid rgba(0, 200, 224, 0.18);
+            }}
+            QComboBox#languageSelector QAbstractItemView {{
+                background-color: #0B1725;
+                color: #D7E5EC;
+                border: 1px solid {COLORS['teal_dim']};
+                selection-background-color: #153746;
+                selection-color: #FFFFFF;
+                outline: 0;
+            }}
+        """)
+        for option in LANGUAGES:
+            self.language_combo.addItem(
+                _language_flag_icon(option.code),
+                option.display_name,
+                option.code,
+            )
+        selected_index = self.language_combo.findData(current_language())
+        self.language_combo.setCurrentIndex(max(selected_index, 0))
+        self.language_combo.currentIndexChanged.connect(
+            self._on_language_selected
         )
-        layout.addSpacerItem(left_shoulder)
-        layout.setStretch(layout.count() - 1, 1)
-        # QBoxLayout does not insert its widget-to-widget spacing beside a
-        # spacer item, so retain the established telemetry position explicitly.
-        layout.addSpacing(layout.spacing())
+        layout.addWidget(
+            self.language_combo,
+            alignment=Qt.AlignmentFlag.AlignVCenter,
+        )
 
         # Server section
         self.server_section = StatusSection(
@@ -309,7 +485,7 @@ class StatusBar(QFrame):
         # Install event filter to catch clicks on child labels
         self.server_section.label.installEventFilter(self)
         self.server_section.dot.installEventFilter(self)
-        self.server_section.setMinimumWidth(180)
+        self.server_section.setMinimumWidth(160)
         self.server_section.setMaximumWidth(230)
         layout.addWidget(self.server_section)
 
@@ -322,7 +498,7 @@ class StatusBar(QFrame):
         self.market_section.clicked.connect(self.console_toggled.emit)
         self.market_section.label.installEventFilter(self)
         self.market_section.dot.installEventFilter(self)
-        self.market_section.setMinimumWidth(180)
+        self.market_section.setMinimumWidth(160)
         self.market_section.setMaximumWidth(230)
         layout.addWidget(self.market_section)
 
@@ -333,7 +509,7 @@ class StatusBar(QFrame):
             motion_controller=self._motion,
         )
         self.clients_section.set_count(0)
-        self.clients_section.setMinimumWidth(170)
+        self.clients_section.setMinimumWidth(160)
         self.clients_section.setMaximumWidth(220)
         layout.addWidget(self.clients_section)
 
@@ -362,6 +538,26 @@ class StatusBar(QFrame):
             " font-weight: 700; letter-spacing: 1px; padding: 0 8px 0 4px;"
         )
         layout.addWidget(self.version_label)
+
+    def _on_language_selected(self, index: int) -> None:
+        code = self.language_combo.itemData(index)
+        if not isinstance(code, str):
+            return
+        normalized = set_language(code)
+        self.retranslate_ui()
+        self.language_changed.emit(normalized)
+
+    def retranslate_ui(self) -> None:
+        """Refresh the footer-owned language control."""
+        language_tooltip = translate("nav.language_tooltip")
+        self.language_combo.setAccessibleName(language_tooltip)
+        self.language_combo.setToolTip(language_tooltip)
+        for section in (
+            self.server_section,
+            self.market_section,
+            self.clients_section,
+        ):
+            section.retranslate_ui()
 
     # ── Event filter: forward child-label clicks to the parent section ──
     def eventFilter(self, obj: QObject, event) -> bool:  # noqa: N802

@@ -8,6 +8,7 @@ from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication, QLabel, QPushButton
 
 from src import config
+from src.pages import settings_page as settings_page_module
 from src.pages.settings_page import SettingsPage
 
 
@@ -52,6 +53,30 @@ def test_settings_save_shows_then_clears_inline_confirmation(
     finally:
         page.close()
         page.deleteLater()
+
+
+def test_changelog_uses_unicode_safe_desktop_file_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+
+    class DesktopServices:
+        @staticmethod
+        def openUrl(url) -> bool:  # type: ignore[no-untyped-def]
+            observed["url"] = url
+            return True
+
+    monkeypatch.setattr(
+        settings_page_module,
+        "QDesktopServices",
+        DesktopServices,
+    )
+
+    SettingsPage._open_changelog(object())  # type: ignore[arg-type]
+
+    url = observed["url"]
+    assert url.isLocalFile()  # type: ignore[union-attr]
+    assert url.toLocalFile().endswith("CHANGELOG.md")  # type: ignore[union-attr]
 
 
 def test_settings_save_reports_an_inline_failure_without_emitting_success(

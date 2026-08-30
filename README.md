@@ -130,7 +130,7 @@ The launcher does not recursively expose arbitrary scripts. It resolves only kno
 
 ![Audio and Voice settings showing the bundled LYRA Balanced Lift profile ready for preview](screenshots/audio-settings.png)
 
-The Audio & Voice panel controls the bundled Deep Signal soundscape and local prerecorded launcher announcements. LYRA is distinct from EVE's Aura: v1.0.38 ships an English (UK) prerecorded catalog using the **Balanced Lift** profile. Music and voice can be enabled and balanced independently, event announcements and ducking remain optional, and **Preview LYRA** verifies the bundled voice locally.
+The Audio & Voice panel controls the bundled **Celestial Transit** track, optional user-selected local music, and local prerecorded launcher announcements. LYRA is distinct from EVE's Aura: v1.0.38 ships an English (UK) prerecorded catalog using the **Balanced Lift** profile. Music and voice can be enabled and balanced independently, event announcements and ducking remain optional, and **Preview LYRA** verifies the bundled voice locally.
 
 Settings covers the EveJS root, EVE client path, proxy address, Native/Docker runtime selection, Compose target and control policy, launch timing, service auto-start, compatible local auto-login, soundtrack and LYRA controls, motion preferences, update checks, server-mode selection, hidden characters, and local-data cleanup.
 
@@ -147,7 +147,8 @@ Settings covers the EveJS root, EVE client path, proxy address, Native/Docker ru
 | Characters | Reads character data and current portraits; supports search, hiding, grouping, Native creation with optional GM/overview copy, and backup-first deletion. |
 | Mods | Discovers reviewed activation contracts, toggles state, removes installer-enrolled mods, and restarts Game when requested. |
 | Tools | Resolves 11 reviewed external utility wrappers with prerequisite and risk information. |
-| Audio and voice | Plays the bundled Deep Signal soundscape and local prerecorded LYRA announcements with separate volume, event, ducking, and preview controls. |
+| Audio and voice | Plays the bundled **Celestial Transit** track or user-selected local music, with local prerecorded LYRA announcements and separate volume, event, ducking, and preview controls. |
+| Languages | Switches the complete launcher interface live between English, Simplified Chinese, Japanese, Korean, French, German, Dutch, and Russian. |
 | Updates | Checks GitHub Releases, downloads the release ZIP, shows progress, stages replacement, restarts, and cleans validated update artifacts. |
 
 ## Service startup and detection
@@ -302,12 +303,20 @@ For an update, the launcher:
 1. Downloads the release ZIP with visible byte progress.
 2. Extracts and validates the new application folder in a staging location.
 3. Keeps the update window open while the old launcher exits.
-4. Renames the current installation to a rollback copy ending in `.old`.
-5. Copies and verifies the new onedir installation.
+4. Moves only the launcher-owned executable and `_internal` runtime into a private rollback directory.
+5. Copies and verifies only those two launcher-owned entries from the new onedir installation.
 6. Restarts the new executable.
 7. Removes only the validated staging and rollback artifacts after successful restart.
 
-The updater works with the complete application folder. Moving only the executable or deleting `_internal` breaks both normal startup and updates.
+The launcher folder is treated as a shared directory: every pre-existing file or folder outside the launcher executable and `_internal` is left in place, including a colocated EveJS installation. Update cleanup metadata lives inside the launcher-owned `_internal` directory; a private rollback directory may exist temporarily while an update is being verified. The executable and `_internal` must still remain together because they form the complete launcher application.
+
+## Language and Unicode paths
+
+The language selector sits in the bottom footer/status bar and in the first-run wizard. Each option uses a painted flag and its native language name, so it does not depend on emoji-font support. On a fresh profile, the launcher selects a supported system language automatically; otherwise it falls back to English, and a saved choice always wins. English, Simplified Chinese, Japanese, Korean, French, German, Dutch, and Russian cover the complete launcher interface, including the first-run wizard, main pages, Settings, dialogs, updater, and LYRA text captions. User data, server messages, paths, raw log output, and semantic combo-box values are deliberately preserved instead of being mistaken for translatable interface text.
+
+Launcher-owned paths use Windows Unicode APIs. Client discovery accepts UTF-8, UTF-8 with BOM, UTF-16 with BOM, and the active Windows legacy code page for `EvEJSConfig.bat` without discarding undecodable bytes. Real profile, AppData, temp, EveJS, and client paths remain unchanged when they contain Chinese, Japanese, Korean, or other non-ASCII characters.
+
+If a Docker project directory has no usable ASCII-derived name and the Compose file has no top-level `name`, set **Compose Project Name** to the stack's existing lowercase ASCII name, such as `evejs-local`. The launcher never invents a different stack identity automatically.
 
 ## Configuration reference
 
@@ -332,8 +341,9 @@ Configuration is stored in:
 | Auto-Start Market | Starts Market when required | Off |
 | Auto-Login Character | Uses the verified local auto-login path for a compatible Native client | Off |
 | Server Start Selection | Always ask or a detected vanilla/modded indicator | Always ask |
-| Music | Enables the bundled Deep Signal soundscape | On |
-| Music Volume | Playback level for the bundled soundscape | `50%` |
+| Launcher Language | Saved language for the complete launcher interface | English |
+| Music | Enables bundled **Celestial Transit** and configured local music | On |
+| Music Volume | Playback level for launcher music | `50%` |
 | LYRA Voice | Enables bundled prerecorded launcher announcements | On |
 | LYRA Voice Volume | Playback level for LYRA announcements | `100%` |
 | Announce Results | Announces supported completion and failure events | On |

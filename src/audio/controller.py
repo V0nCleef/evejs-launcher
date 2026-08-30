@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Callable, Iterable, Mapping
+import math
 import os
 from pathlib import Path
 import random
@@ -17,7 +18,9 @@ from .assets import (
     voice_catalog_ready,
 )
 from .backends import (
+    MUSIC_SPECTRUM_BANDS,
     MULTIMEDIA_SUPPORTED,
+    SILENT_MUSIC_SPECTRUM,
     VOICE_PLAYBACK_SUPPORTED,
     MusicBackend,
     SpeechBackend,
@@ -35,9 +38,13 @@ SpeechFactory = Callable[[AudioSettings, QObject], SpeechBackend]
 class AudioController(QObject):
     """Own optional audio backends while keeping launcher actions independent."""
 
+    MUSIC_SPECTRUM_BANDS = MUSIC_SPECTRUM_BANDS
+    _MUSIC_HISTORY_LIMIT = 256
+
     master_muted_changed = pyqtSignal(bool)
     music_muted_changed = pyqtSignal(bool)
     music_playback_changed = pyqtSignal(bool, str)
+    music_spectrum_changed = pyqtSignal(object)
     caption_requested = pyqtSignal(str)
     backend_availability_changed = pyqtSignal(bool, bool)
 
@@ -81,18 +88,22 @@ class AudioController(QObject):
         self._music_backend_reports_state = False
         self._music_backend_reports_finished = False
         self._music_backend_reports_failed = False
+        self._music_backend_reports_spectrum = False
         self._music_source: Path | None = None
         self._music_source_generation = 0
         self._music_playlist: tuple[Path, ...] = ()
         self._music_shuffle_bag: list[Path] = []
         self._music_failed_sources: set[str] = set()
         self._music_last_source: Path | None = None
+        self._music_history: list[Path] = []
+        self._music_forward: list[Path] = []
         self._music_uses_library = True
         self._advancing_music = False
         self._music_operation_depth = 0
         self._pending_music_failure_generation: int | None = None
         self._music_requested = False
         self._music_active = False
+        self._music_spectrum = SILENT_MUSIC_SPECTRUM
         self._voice_speaking = False
         self._voice_caption_queue: deque[tuple[Path, str]] = deque()
 
@@ -126,6 +137,11 @@ class AudioController(QObject):
     def music_active(self) -> bool:
         """Return whether the local backend reports the loop actively playing."""
         return self._music_active
+
+    @property
+    def music_spectrum(self) -> tuple[float, ...]:
+        """Return the latest fixed normalized visualization frame."""
+        return self._music_spectrum
 
     @property
     def music_track_name(self) -> str:
@@ -164,6 +180,7 @@ class AudioController(QObject):
             if music_output_muted or not updated.music_enabled:
                 self._music_backend.stop()
                 self._set_music_active(False)
+                self._reset_music_spectrum(force=True)
             elif self._music_requested and (
                 previous_music_output_muted
                 or not previous.music_enabled
@@ -197,6 +214,7 @@ class AudioController(QObject):
             if muted:
                 self._music_backend.stop()
                 self._set_music_active(False)
+                self._reset_music_spectrum(force=True)
             elif (
                 self._music_requested
                 and self._settings.music_enabled
@@ -229,6 +247,7 @@ class AudioController(QObject):
             if muted:
                 self._music_backend.stop()
                 self._set_music_active(False)
+                self._reset_music_spectrum(force=True)
             elif (
                 self._music_requested
                 and self._settings.music_enabled
@@ -253,6 +272,7 @@ class AudioController(QObject):
             self._music_backend.stop()
         self._set_music_active(False)
         self._set_music_source(None)
+        self._reset_music_spectrum(force=True)
         if path is None:
             playlist = self._available_music_tracks()
         else:
@@ -261,16 +281,19 @@ class AudioController(QObject):
         self._replace_music_playlist(playlist)
         if not self._music_playlist:
             self._set_music_active(False)
+            self._reset_music_spectrum(force=True)
             return False
 
         backend = self._ensure_music_backend()
         if not backend.available:
             self._set_music_active(False)
+            self._reset_music_spectrum(force=True)
             return False
         backend.set_muted(self._music_output_muted)
         self._apply_music_volume()
         if self._music_output_muted or not self._settings.music_enabled:
             self._set_music_active(False)
+            self._reset_music_spectrum(force=True)
             return False
         return self._request_music_playback()
 
@@ -279,6 +302,48 @@ class AudioController(QObject):
         if self._music_backend is not None:
             self._music_backend.stop()
         self._set_music_active(False)
+        self._reset_music_spectrum(force=True)
+
+    def next_music(self) -> bool:
+        """Move forward through navigation history, then resume shuffle order."""
+        backend = self._music_navigation_backend()
+        if backend is None:
+            return False
+        self._music_operation_depth += 1
+        try:
+            return self._advance_music(backend, stop_current=True)
+        finally:
+            self._complete_music_operation()
+
+    def previous_music(self) -> bool:
+        """Play the previous successful track and retain a forward path."""
+        backend = self._music_navigation_backend()
+        if backend is None or not self._music_history:
+            return False
+        current = self._music_source
+        self._set_music_active(False)
+        self._reset_music_spectrum(force=True)
+        backend.stop()
+
+        self._music_operation_depth += 1
+        try:
+            while self._music_history:
+                target = self._music_history.pop()
+                if target == current:
+                    continue
+                if not self._play_specific_music_source(backend, target):
+                    continue
+                if current is not None and current != self._music_source:
+                    self._music_forward.append(current)
+                return True
+
+            # A stale/deleted history entry should not turn Previous into an
+            # unexpected Stop. Restore the known-good current item when able.
+            if current is not None:
+                self._play_specific_music_source(backend, current)
+            return False
+        finally:
+            self._complete_music_operation()
 
     def prepare_voice_preview(self) -> bool:
         """Verify the complete local catalog and initialize its clip player."""
@@ -372,6 +437,7 @@ class AudioController(QObject):
         if self._music_backend is not None:
             self._music_backend.stop()
         self._set_music_active(False)
+        self._reset_music_spectrum(force=True)
         if self._speech_backend is not None:
             self._voice_caption_queue.clear()
             self._speech_backend.stop()
@@ -406,6 +472,15 @@ class AudioController(QObject):
             if callable(register_failed_callback):
                 self._music_backend_reports_failed = bool(
                     register_failed_callback(self._on_music_track_failed)
+                )
+            register_spectrum_callback = getattr(
+                self._music_backend,
+                "set_spectrum_callback",
+                None,
+            )
+            if callable(register_spectrum_callback):
+                self._music_backend_reports_spectrum = bool(
+                    register_spectrum_callback(self._on_music_backend_spectrum)
                 )
             self.backend_availability_changed.emit(
                 bool(self._music_backend.available),
@@ -484,22 +559,105 @@ class AudioController(QObject):
         try:
             return self._request_music_playback_impl(advance=advance)
         finally:
-            self._music_operation_depth -= 1
-            if (
-                self._music_operation_depth == 0
-                and self._pending_music_failure_generation is not None
-            ):
-                generation = self._pending_music_failure_generation
-                self._pending_music_failure_generation = None
-                # A backend double may report failure synchronously from
-                # set_source()/play(). Keep recovery outside that call stack,
-                # matching the queued contract of the real Qt backend.
-                QTimer.singleShot(
-                    0,
-                    lambda generation=generation: self._handle_music_track_failed(
-                        generation
-                    ),
-                )
+            self._complete_music_operation()
+
+    def _complete_music_operation(self) -> None:
+        self._music_operation_depth = max(0, self._music_operation_depth - 1)
+        if (
+            self._music_operation_depth != 0
+            or self._pending_music_failure_generation is None
+        ):
+            return
+        generation = self._pending_music_failure_generation
+        self._pending_music_failure_generation = None
+        # A backend double may report failure synchronously from
+        # set_source()/play(). Keep recovery outside that call stack, matching
+        # the queued contract of the real Qt backend.
+        QTimer.singleShot(
+            0,
+            lambda generation=generation: self._handle_music_track_failed(
+                generation
+            ),
+        )
+
+    def _music_navigation_backend(self) -> MusicBackend | None:
+        """Return a usable active backend without changing muted/disabled state."""
+        if (
+            not self._music_requested
+            or self._music_output_muted
+            or not self._settings.music_enabled
+            or not self._music_playlist
+        ):
+            self._reset_music_spectrum(force=True)
+            return None
+        backend = self._music_backend
+        if backend is None or not backend.available:
+            self._reset_music_spectrum(force=True)
+            return None
+        return backend
+
+    def _advance_music(
+        self,
+        backend: MusicBackend,
+        *,
+        stop_current: bool,
+    ) -> bool:
+        """Advance through forward history before consuming shuffled entries."""
+        current = self._music_source
+        self._set_music_active(False)
+        self._reset_music_spectrum(force=True)
+        if stop_current:
+            backend.stop()
+
+        while self._music_forward:
+            target = self._music_forward.pop()
+            if target == current:
+                continue
+            if not self._play_specific_music_source(backend, target):
+                continue
+            self._remember_music_history(current)
+            return True
+
+        selected = self._request_music_playback(advance=True)
+        if selected:
+            if self._music_source != current:
+                self._remember_music_history(current)
+            return True
+
+        # Manual navigation should not strand a previously playable track just
+        # because every other shuffled entry disappeared or failed to decode.
+        if stop_current and current is not None:
+            self._play_specific_music_source(backend, current)
+        return False
+
+    def _play_specific_music_source(
+        self,
+        backend: MusicBackend,
+        source: Path,
+    ) -> bool:
+        """Validate, select, and play one history entry without touching shuffle."""
+        identity = self._music_path_identity(source)
+        if identity in self._music_failed_sources:
+            return False
+        validated = self._validated_music_path(source)
+        if validated is None or not backend.set_source(validated):
+            self._music_failed_sources.add(identity)
+            return False
+        self._set_music_source(validated)
+        if self._play_selected_music_source(backend):
+            return True
+        self._retire_current_music_source()
+        return False
+
+    def _remember_music_history(self, source: Path | None) -> None:
+        if source is None or source == self._music_source:
+            return
+        if self._music_history and self._music_history[-1] == source:
+            return
+        self._music_history.append(source)
+        overflow = len(self._music_history) - self._MUSIC_HISTORY_LIMIT
+        if overflow > 0:
+            del self._music_history[:overflow]
 
     def _request_music_playback_impl(self, *, advance: bool = False) -> bool:
         backend = self._music_backend
@@ -552,7 +710,12 @@ class AudioController(QObject):
         self._advancing_music = True
         try:
             self._set_music_active(False)
-            self._request_music_playback(advance=True)
+            self._reset_music_spectrum(force=True)
+            self._music_operation_depth += 1
+            try:
+                self._advance_music(backend, stop_current=False)
+            finally:
+                self._complete_music_operation()
         finally:
             self._advancing_music = False
 
@@ -578,7 +741,14 @@ class AudioController(QObject):
         try:
             self._retire_current_music_source()
             self._set_music_active(False)
-            self._request_music_playback(advance=True)
+            self._reset_music_spectrum(force=True)
+            self._music_operation_depth += 1
+            try:
+                backend = self._music_backend
+                if backend is not None:
+                    self._advance_music(backend, stop_current=False)
+            finally:
+                self._complete_music_operation()
         finally:
             self._advancing_music = False
 
@@ -590,6 +760,18 @@ class AudioController(QObject):
             and self._settings.music_enabled
         )
         self._set_music_active(bool(active) and allowed)
+
+    def _on_music_backend_spectrum(self, values: object) -> None:
+        allowed = (
+            self._music_requested
+            and self._music_source is not None
+            and not self._music_output_muted
+            and self._settings.music_enabled
+        )
+        if not allowed:
+            self._reset_music_spectrum()
+            return
+        self._set_music_spectrum(values)
 
     @pyqtSlot(bool)
     def _set_voice_speaking(self, speaking: bool) -> None:
@@ -604,7 +786,34 @@ class AudioController(QObject):
         if self._music_active == active:
             return
         self._music_active = active
+        if not active:
+            self._reset_music_spectrum()
         self.music_playback_changed.emit(active, self.music_track_name)
+
+    def _set_music_spectrum(self, values: object, *, force: bool = False) -> None:
+        """Normalize a backend frame before publishing the controller contract."""
+        try:
+            raw = tuple(values)  # type: ignore[arg-type]
+            if len(raw) != MUSIC_SPECTRUM_BANDS:
+                raise ValueError("unexpected spectrum size")
+            frame: list[float] = []
+            for value in raw:
+                number = float(value)
+                frame.append(
+                    max(0.0, min(1.0, number))
+                    if math.isfinite(number)
+                    else 0.0
+                )
+            normalized = tuple(frame)
+        except (TypeError, ValueError, OverflowError):
+            normalized = SILENT_MUSIC_SPECTRUM
+        if not force and normalized == self._music_spectrum:
+            return
+        self._music_spectrum = normalized
+        self.music_spectrum_changed.emit(normalized)
+
+    def _reset_music_spectrum(self, *, force: bool = False) -> None:
+        self._set_music_spectrum(SILENT_MUSIC_SPECTRUM, force=force)
 
     def _set_music_source(self, source: Path | None) -> None:
         """Publish track identity changes even while playback remains stopped."""
@@ -612,6 +821,8 @@ class AudioController(QObject):
         if source != self._music_source:
             self._music_source_generation += 1
         self._music_source = source
+        if source is None:
+            self._reset_music_spectrum()
         if self.music_track_name != previous_name:
             self.music_playback_changed.emit(
                 self._music_active,
@@ -705,6 +916,8 @@ class AudioController(QObject):
         self._music_playlist = tracks
         self._music_shuffle_bag.clear()
         self._music_failed_sources.clear()
+        self._music_history.clear()
+        self._music_forward.clear()
 
     def _refresh_library_playlist(self) -> None:
         """Apply a saved library change while preserving a still-valid track."""
@@ -761,6 +974,7 @@ class AudioController(QObject):
         if source is not None:
             self._music_failed_sources.add(self._music_path_identity(source))
         self._set_music_source(None)
+        self._reset_music_spectrum(force=True)
 
     def _take_next_music_track(self) -> Path | None:
         if not self._music_playlist:

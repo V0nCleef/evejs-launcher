@@ -1,27 +1,244 @@
 """Lazy Qt adapters for launcher ambience and fixed LYRA voice clips."""
 from __future__ import annotations
 
+from array import array
 from collections import deque
 from collections.abc import Callable
+import math
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, QTimer, QUrl, pyqtSignal
 
 try:  # Optional in source installs and intentionally graceful when excluded.
-    from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer, QSoundEffect
+    from PyQt6.QtMultimedia import (
+        QAudioFormat,
+        QAudioOutput,
+        QMediaPlayer,
+        QSoundEffect,
+    )
 except (ImportError, OSError):  # pragma: no cover - depends on host Qt install
+    QAudioFormat = None  # type: ignore[assignment,misc]
     QAudioOutput = None  # type: ignore[assignment,misc]
     QMediaPlayer = None  # type: ignore[assignment,misc]
     QSoundEffect = None  # type: ignore[assignment,misc]
+
+try:  # Added in Qt 6.8; playback must remain usable on older Qt runtimes.
+    from PyQt6.QtMultimedia import QAudioBufferOutput
+except (ImportError, OSError):  # pragma: no cover - depends on host Qt install
+    QAudioBufferOutput = None  # type: ignore[assignment,misc]
 
 from .settings import AudioSettings
 
 MULTIMEDIA_SUPPORTED = QAudioOutput is not None and QMediaPlayer is not None
 VOICE_PLAYBACK_SUPPORTED = QSoundEffect is not None
 
+MUSIC_SPECTRUM_BANDS = 16
+SILENT_MUSIC_SPECTRUM = (0.0,) * MUSIC_SPECTRUM_BANDS
+_SPECTRUM_MAX_FRAMES = 1024
+_SPECTRUM_MIN_FFT_FRAMES = 64
+_SPECTRUM_MAX_DECODED_SAMPLES = 8192
+
 PlaybackStateCallback = Callable[[bool], None]
 TrackFinishedCallback = Callable[[], None]
 TrackFailedCallback = Callable[[], None]
+SpectrumCallback = Callable[[tuple[float, ...]], None]
+
+
+def _audio_buffer_pcm(buffer: object) -> tuple[tuple[float, ...], int]:
+    """Return bounded mono PCM and its sample rate from one ``QAudioBuffer``.
+
+    Qt supplies native-endian, interleaved decoded samples here. Keeping this
+    conversion independent from ``QtMusicBackend`` makes every supported Qt 6
+    sample format deterministic to unit test without starting a second decoder.
+    Invalid, truncated, or unknown data fails closed to an empty sample tuple.
+    """
+    if QAudioFormat is None:
+        return (), 0
+    try:
+        if not bool(buffer.isValid()):  # type: ignore[attr-defined]
+            return (), 0
+        audio_format = buffer.format()  # type: ignore[attr-defined]
+        channels = int(audio_format.channelCount())
+        sample_rate = int(audio_format.sampleRate())
+        byte_count = int(buffer.byteCount())  # type: ignore[attr-defined]
+        sample_format = audio_format.sampleFormat()
+        if channels <= 0 or channels > 64 or sample_rate <= 0 or byte_count <= 0:
+            return (), 0
+        data = buffer.constData()  # type: ignore[attr-defined]
+    except (AttributeError, BufferError, MemoryError, TypeError, ValueError):
+        return (), 0
+
+    formats = QAudioFormat.SampleFormat
+    if sample_format == formats.UInt8:
+        width = 1
+        kind = "B"
+        scale = 128.0
+        midpoint = 128.0
+    elif sample_format == formats.Int16:
+        width = 2
+        kind = "h"
+        scale = 32768.0
+        midpoint = 0.0
+    elif sample_format == formats.Int32:
+        width = 4
+        kind = "i"
+        scale = 2147483648.0
+        midpoint = 0.0
+    elif sample_format == formats.Float:
+        width = 4
+        kind = "f"
+        scale = 1.0
+        midpoint = 0.0
+    else:
+        return (), 0
+
+    complete_samples = byte_count // width
+    complete_frames = complete_samples // channels
+    frame_count = complete_frames
+    if frame_count <= 0:
+        return (), 0
+    frame_limit = min(
+        _SPECTRUM_MAX_FRAMES,
+        max(_SPECTRUM_MIN_FFT_FRAMES, _SPECTRUM_MAX_DECODED_SAMPLES // channels),
+    )
+    frame_count = min(frame_count, frame_limit)
+    kept_samples = frame_count * channels
+    # Prefer the newest decoded frames if a platform plugin delivers an
+    # unusually large buffer. This also places a strict ceiling on GUI work.
+    start_sample = complete_frames * channels - kept_samples
+    start_byte = start_sample * width
+    end_byte = start_byte + kept_samples * width
+    try:
+        set_size = getattr(data, "setsize", None)
+        if callable(set_size):
+            set_size(byte_count)
+            raw = memoryview(data)[start_byte:end_byte].tobytes()
+        else:
+            raw = bytes(data.asstring(byte_count))[start_byte:end_byte]
+    except (AttributeError, BufferError, MemoryError, OverflowError, TypeError, ValueError):
+        return (), 0
+    values = array(kind)
+    try:
+        values.frombytes(raw)
+    except (BufferError, MemoryError, ValueError):
+        return (), 0
+    if len(values) < kept_samples:
+        return (), 0
+
+    mono: list[float] = []
+    append = mono.append
+    for frame_start in range(0, kept_samples, channels):
+        mixed = 0.0
+        for channel in range(channels):
+            value = (float(values[frame_start + channel]) - midpoint) / scale
+            if not math.isfinite(value):
+                value = 0.0
+            mixed += max(-1.0, min(1.0, value))
+        append(mixed / channels)
+    return tuple(mono), sample_rate
+
+
+def _fft_magnitudes(samples: tuple[float, ...]) -> tuple[list[float], int]:
+    """Return Hann-windowed positive-bin magnitudes using a bounded radix-2 FFT."""
+    available = min(len(samples), _SPECTRUM_MAX_FRAMES)
+    if available <= 0:
+        return [], 0
+    frame_count = 1
+    while frame_count * 2 <= available:
+        frame_count *= 2
+    frame_count = max(_SPECTRUM_MIN_FFT_FRAMES, frame_count)
+    selected = list(samples[-min(available, frame_count) :])
+    if len(selected) < frame_count:
+        selected.extend([0.0] * (frame_count - len(selected)))
+
+    if not any(abs(value) > 1.0e-8 for value in selected):
+        return [0.0] * (frame_count // 2 + 1), frame_count
+
+    denominator = max(1, frame_count - 1)
+    window = [
+        0.5 - 0.5 * math.cos(2.0 * math.pi * index / denominator)
+        for index in range(frame_count)
+    ]
+    values = [
+        complex(sample * window[index], 0.0)
+        for index, sample in enumerate(selected)
+    ]
+
+    # In-place bit-reversal permutation.
+    target = 0
+    for index in range(1, frame_count):
+        bit = frame_count >> 1
+        while target & bit:
+            target ^= bit
+            bit >>= 1
+        target ^= bit
+        if index < target:
+            values[index], values[target] = values[target], values[index]
+
+    length = 2
+    while length <= frame_count:
+        angle = -2.0 * math.pi / length
+        step = complex(math.cos(angle), math.sin(angle))
+        half = length // 2
+        for offset in range(0, frame_count, length):
+            twiddle = 1.0 + 0.0j
+            for inner in range(half):
+                even = values[offset + inner]
+                odd = values[offset + inner + half] * twiddle
+                values[offset + inner] = even + odd
+                values[offset + inner + half] = even - odd
+                twiddle *= step
+        length *= 2
+
+    window_gain = max(sum(window), 1.0)
+    scale = 2.0 / window_gain
+    magnitudes = [
+        abs(values[index]) * scale for index in range(frame_count // 2 + 1)
+    ]
+    return magnitudes, frame_count
+
+
+def _music_spectrum_from_pcm(
+    samples: tuple[float, ...],
+    sample_rate: int,
+    *,
+    bands: int = MUSIC_SPECTRUM_BANDS,
+) -> tuple[float, ...]:
+    """Map decoded mono PCM into fixed logarithmic frequency-band levels."""
+    if bands <= 0:
+        return ()
+    silence = (0.0,) * bands
+    if sample_rate <= 0 or not samples:
+        return silence
+    magnitudes, frame_count = _fft_magnitudes(samples)
+    if frame_count <= 0 or not magnitudes or max(magnitudes, default=0.0) <= 1.0e-8:
+        return silence
+
+    nyquist = sample_rate / 2.0
+    bin_width = sample_rate / frame_count
+    low_hz = max(30.0, bin_width)
+    if nyquist <= low_hz:
+        peak = max(magnitudes[1:], default=0.0)
+        value = min(1.0, math.sqrt(max(0.0, peak)))
+        return tuple(round(value, 6) for _ in range(bands))
+
+    ratio = nyquist / low_hz
+    edges = [low_hz * ratio ** (index / bands) for index in range(bands + 1)]
+    last_bin = len(magnitudes) - 1
+    result: list[float] = []
+    for index in range(bands):
+        first = max(1, min(last_bin, int(math.floor(edges[index] / bin_width))))
+        after = max(
+            first + 1,
+            int(math.ceil(edges[index + 1] / bin_width)),
+        )
+        after = min(last_bin + 1, after)
+        peak = max(magnitudes[first:after], default=0.0)
+        # A square-root response makes quiet ambience visible while preserving
+        # the ordering and a hard normalized ceiling for the renderer.
+        level = min(1.0, math.sqrt(max(0.0, peak)))
+        result.append(round(level, 6))
+    return tuple(result)
 
 
 class MusicBackend:
@@ -74,6 +291,18 @@ class MusicBackend:
         del callback
         return False
 
+    def set_spectrum_callback(
+        self,
+        callback: SpectrumCallback,
+    ) -> bool:
+        """Register fixed normalized PCM spectrum reports when supported.
+
+        The no-op default is also the test-double seam: lightweight backends
+        can implement this one method without pretending to expose Qt objects.
+        """
+        del callback
+        return False
+
     def play(self) -> bool:
         return False
 
@@ -94,11 +323,15 @@ class QtMusicBackend(MusicBackend):
         self._playback_state_callback: PlaybackStateCallback | None = None
         self._track_finished_callback: TrackFinishedCallback | None = None
         self._track_failed_callback: TrackFailedCallback | None = None
+        self._spectrum_callback: SpectrumCallback | None = None
+        self._last_reported_spectrum = SILENT_MUSIC_SPECTRUM
+        self._smoothed_spectrum = SILENT_MUSIC_SPECTRUM
         self._last_reported_active: bool | None = None
         self._end_reported = False
         self._source_generation = 0
         self._failure_reported_generation: int | None = None
         self._player.setAudioOutput(self._output)
+        self._buffer_output = self._create_buffer_output(parent)
         once = getattr(QMediaPlayer.Loops, "Once", 1)  # type: ignore[union-attr]
         self._player.setLoops(once)
         self._player.playbackStateChanged.connect(self._on_player_state_changed)
@@ -114,6 +347,7 @@ class QtMusicBackend(MusicBackend):
         self._end_reported = False
         self._failure_reported_generation = None
         self._has_source = False
+        self._reset_spectrum(force=True)
         if not path.is_file():
             self._player.stop()
             self._player.setSource(QUrl())
@@ -142,11 +376,22 @@ class QtMusicBackend(MusicBackend):
         self._track_failed_callback = callback
         return True
 
+    def set_spectrum_callback(
+        self,
+        callback: SpectrumCallback,
+    ) -> bool:
+        self._spectrum_callback = callback
+        self._publish_spectrum(SILENT_MUSIC_SPECTRUM, force=True)
+        return self._buffer_output is not None
+
     def set_volume(self, percent: int) -> None:
         self._output.setVolume(max(0.0, min(1.0, percent / 100.0)))
 
     def set_muted(self, muted: bool) -> None:
-        self._output.setMuted(bool(muted))
+        muted = bool(muted)
+        self._output.setMuted(muted)
+        if muted:
+            self._reset_spectrum(force=True)
 
     def set_playback_state_callback(
         self,
@@ -182,6 +427,71 @@ class QtMusicBackend(MusicBackend):
         self._failure_reported_generation = None
         self._player.stop()
         self._publish_playback_state()
+        self._reset_spectrum(force=True)
+
+    def _create_buffer_output(self, parent: QObject) -> object | None:
+        """Attach decoded-buffer observation to this same media player."""
+        setter = getattr(self._player, "setAudioBufferOutput", None)
+        if QAudioBufferOutput is None or not callable(setter):
+            return None
+        try:
+            output = QAudioBufferOutput(parent)  # type: ignore[operator]
+            output.audioBufferReceived.connect(self._on_audio_buffer_received)
+            setter(output)
+            return output
+        except (AttributeError, OSError, RuntimeError, TypeError):
+            # Visualization is optional. Never sacrifice working playback
+            # because an older or incomplete platform plugin lacks this tap.
+            return None
+
+    def _on_audio_buffer_received(self, buffer: object) -> None:
+        try:
+            samples, sample_rate = _audio_buffer_pcm(buffer)
+            spectrum = _music_spectrum_from_pcm(samples, sample_rate)
+        except Exception:
+            # A malformed platform buffer must not escape a Qt signal callback
+            # and abort pythonw. Playback remains independent of visualization.
+            self._reset_spectrum()
+            return
+        if not self._has_source or not samples or not any(spectrum):
+            self._reset_spectrum()
+            return
+        smoothed = []
+        for previous, current in zip(self._smoothed_spectrum, spectrum):
+            response = 0.72 if current >= previous else 0.28
+            smoothed.append(previous + (current - previous) * response)
+        self._smoothed_spectrum = tuple(
+            round(max(0.0, min(1.0, value)), 6) for value in smoothed
+        )
+        self._publish_spectrum(self._smoothed_spectrum)
+
+    def _reset_spectrum(self, *, force: bool = False) -> None:
+        self._smoothed_spectrum = SILENT_MUSIC_SPECTRUM
+        self._publish_spectrum(SILENT_MUSIC_SPECTRUM, force=force)
+
+    def _publish_spectrum(
+        self,
+        values: tuple[float, ...],
+        *,
+        force: bool = False,
+    ) -> None:
+        values = tuple(
+            max(0.0, min(1.0, float(value)))
+            for value in values[:MUSIC_SPECTRUM_BANDS]
+        )
+        if len(values) < MUSIC_SPECTRUM_BANDS:
+            values += (0.0,) * (MUSIC_SPECTRUM_BANDS - len(values))
+        if not force and values == self._last_reported_spectrum:
+            return
+        self._last_reported_spectrum = values
+        callback = self._spectrum_callback
+        if callback is not None:
+            try:
+                callback(values)
+            except Exception:
+                # Visualization subscribers are optional and must never be
+                # allowed to unwind through Qt's decoded-audio signal stack.
+                return
 
     def _on_player_state_changed(self, _state: object = None) -> None:
         self._publish_playback_state()
@@ -194,6 +504,7 @@ class QtMusicBackend(MusicBackend):
             None,
         )
         if invalid_media is not None and status == invalid_media:
+            self._reset_spectrum(force=True)
             self._queue_track_failed()
             return
         end_of_media = getattr(
@@ -209,6 +520,7 @@ class QtMusicBackend(MusicBackend):
         ):
             return
         self._end_reported = True
+        self._reset_spectrum(force=True)
         generation = self._source_generation
         # Replacing QMediaPlayer's source from inside mediaStatusChanged can
         # re-enter platform multimedia plugins. Queue the controller edge and
@@ -222,6 +534,7 @@ class QtMusicBackend(MusicBackend):
 
     def _on_player_error(self, _error: object, _message: str = "") -> None:
         self._publish_playback_state()
+        self._reset_spectrum(force=True)
         self._queue_track_failed()
 
     def _source_has_failed(self) -> bool:

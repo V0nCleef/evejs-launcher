@@ -1,13 +1,16 @@
 """New-character tile and dialog interaction tests."""
 from __future__ import annotations
 
+import pytest
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtTest import QSignalSpy, QTest
-from PyQt6.QtWidgets import QApplication, QMenu
+from PyQt6.QtWidgets import QApplication, QLabel, QMenu
 
 from src.core.db import Account, Character
 from src.core.overview_patch import OverviewPatchState, OverviewPatchStatus
 from src.core.process_tracker import ProcessTracker
+from src.i18n import format_ui_phrase, set_language, translate_ui_phrase
 from src.pages.characters_page import CharactersPage
 from src.widgets.new_character_card import NewCharacterCard
 from src.widgets.new_character_dialog import NewCharacterDialog, NewCharacterDraft
@@ -174,6 +177,72 @@ def test_new_character_dialog_uses_native_responsive_deep_signal_shell(
     assert dialog.create_button.minimumHeight() >= 34
     assert dialog.account_edit.accessibleName() == "Local account name"
     dialog.deleteLater()
+
+
+def test_new_character_dialog_is_translated_when_created_after_language_switch(
+    qapp: QApplication,
+) -> None:
+    set_language("zh_CN")
+    status = OverviewPatchStatus(
+        OverviewPatchState.READY,
+        "Supported client; ready to patch.",
+        3396210,
+    )
+    dialog = NewCharacterDialog([_account()], status, set())
+
+    try:
+        title = dialog.findChild(QLabel, "dialogTitle")
+        assert dialog.windowTitle() == "创建新角色"
+        assert title is not None
+        assert title.text() == "创建新角色"
+
+        dialog.account_edit.setText("Settings")
+        dialog.character_edit.setText("Market")
+        assert dialog.account_edit.text() == "Settings"
+        assert dialog.character_edit.text() == "Market"
+    finally:
+        set_language("en")
+        dialog.deleteLater()
+
+
+@pytest.mark.parametrize("language", ["zh_CN", "ja", "ko", "fr", "de", "nl", "ru"])
+def test_new_character_header_and_initial_readiness_use_active_language(
+    qapp: QApplication,
+    language: str,
+) -> None:
+    set_language(language)
+    status = OverviewPatchStatus(
+        OverviewPatchState.READY,
+        "Supported client; ready to patch.",
+        3396210,
+    )
+    dialog = NewCharacterDialog(
+        [_account()],
+        status,
+        {140000007},
+        runtime_label="NATIVE RUNTIME",
+    )
+
+    try:
+        eyebrow = dialog.findChild(QLabel, "dialogEyebrow")
+        runtime_label = translate_ui_phrase("NATIVE RUNTIME")
+        expected_header = format_ui_phrase(
+            "CHARACTER PROVISIONING  /  {runtime_label}",
+            runtime_label=runtime_label,
+        )
+        assert eyebrow is not None
+        assert eyebrow.text() == expected_header
+        assert eyebrow.text() != "CHARACTER PROVISIONING  /  NATIVE RUNTIME"
+
+        source_row = dialog.overview_combo.itemText(1)
+        readiness = translate_ui_phrase("snapshot ready")
+        assert "Fixture Source" in source_row
+        assert "fixture-account" in source_row
+        assert readiness in source_row
+        assert readiness != "snapshot ready"
+    finally:
+        set_language("en")
+        dialog.deleteLater()
 
 
 def test_dialog_allows_creation_with_an_uncaptured_overview_source(

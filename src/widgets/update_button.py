@@ -14,6 +14,12 @@ from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QGraphicsOpacityEffect, QPushButton
 
 from src.constants import COLORS
+from src.widgets.ui_translation import (
+    set_translatable_text,
+    set_translatable_text_template,
+    set_translatable_tooltip,
+    set_translatable_tooltip_template,
+)
 
 
 class UpdateButton(QPushButton):
@@ -48,8 +54,11 @@ class UpdateButton(QPushButton):
 
         # Clean, readable text — no unicode glyphs that might not render
         clean_version = version.lstrip("vV")
-        self.setText(f"Update v{clean_version}")
-        self.setToolTip(f"A new version is available: v{clean_version}")
+        set_translatable_text_template(self, f"Update v{clean_version}")
+        set_translatable_tooltip_template(
+            self,
+            f"A new version is available: v{clean_version}",
+        )
 
         font = QFont("Segoe UI")
         font.setPixelSize(13)
@@ -88,8 +97,8 @@ class UpdateButton(QPushButton):
         """Show a muted spinner label while checking for updates."""
         self._cancel_pulse()
 
-        self.setText("Checking...")
-        self.setToolTip("Checking for updates...")
+        set_translatable_text(self, "Checking...")
+        set_translatable_tooltip(self, "Checking for updates...")
 
         font = QFont("Segoe UI")
         font.setPixelSize(12)

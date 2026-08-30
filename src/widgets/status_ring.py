@@ -14,6 +14,7 @@ from PyQt6.QtGui import QColor, QFont, QPaintEvent, QPainter, QPen
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 
 from src.constants import MOTION_DURATIONS_MS, SEMANTIC_COLORS, STATUS_COLORS
+from src.i18n import format_ui_phrase, translate_ui_phrase
 from src.ui.motion import MotionController
 
 
@@ -202,11 +203,22 @@ class StatusRing(QWidget):
         self.update()
 
     def _update_accessibility(self) -> None:
-        self.setAccessibleName(f"{self._label} status")
-        parts = [self._value, self._state]
+        translated_label = translate_ui_phrase(self._label)
+        self.setAccessibleName(
+            format_ui_phrase("{label} status", label=translated_label)
+        )
+        parts = [
+            translate_ui_phrase(self._value),
+            translate_ui_phrase(self._state),
+        ]
         if self._detail:
-            parts.append(self._detail)
+            parts.append(translate_ui_phrase(self._detail))
         self.setAccessibleDescription(". ".join(parts))
+
+    def retranslate_ui(self) -> None:
+        """Refresh custom-painted and accessible copy for the active language."""
+        self._update_accessibility()
+        self.update()
 
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
         del event
@@ -255,7 +267,7 @@ class StatusRing(QWidget):
         painter.drawText(
             QRectF(left, top + side * 0.27, side, side * 0.24),
             Qt.AlignmentFlag.AlignCenter,
-            self._value,
+            translate_ui_phrase(self._value),
         )
 
         label_font = QFont("Segoe UI")
@@ -266,7 +278,7 @@ class StatusRing(QWidget):
         painter.drawText(
             QRectF(left, top + side * 0.51, side, side * 0.13),
             Qt.AlignmentFlag.AlignCenter,
-            self._label.upper(),
+            translate_ui_phrase(self._label).upper(),
         )
 
         if self._detail:
@@ -277,7 +289,7 @@ class StatusRing(QWidget):
             painter.drawText(
                 QRectF(left + 10.0, top + side * 0.64, side - 20.0, side * 0.12),
                 Qt.AlignmentFlag.AlignCenter,
-                self._detail,
+                translate_ui_phrase(self._detail),
             )
 
     def showEvent(self, event) -> None:  # noqa: N802

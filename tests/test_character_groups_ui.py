@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import QApplication, QDialog, QMessageBox
 
 from src.core.db import Account, Character
 from src.core.groups import CharacterGroup, GroupMember, TargetGroupState
+from src.widgets import character_groups_dialog as groups_dialog_module
 from src.widgets.character_groups_dialog import CharacterGroupsDialog
 from src.pages.characters_page import CharactersPage
 from src.pages.home_page import HomePage
@@ -175,7 +176,7 @@ def test_delete_group_confirms_metadata_only(
         messages.append(args[2])
         return QMessageBox.StandardButton.Yes
 
-    monkeypatch.setattr(QMessageBox, "question", answer)
+    monkeypatch.setattr(groups_dialog_module.QMessageBox, "question", answer)
     dialog = CharacterGroupsDialog(_accounts(), set(), state)
 
     QTest.mouseClick(dialog.delete_button, Qt.MouseButton.LeftButton)

@@ -3,10 +3,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from PyQt6.QtGui import QCloseEvent
 from PyQt6.QtWidgets import QDialog
 
+from src.i18n import format_ui_phrase, set_language, translate_ui_phrase
 from src.updater.dialog import UpdateDialog
+from src.updater import handoff
 from src.updater.handoff import UpdateHandoff, UpdateHandoffWindow
 from src.updater.progress_dialog import UpdateProgressDialog
 
@@ -75,6 +79,63 @@ def test_available_update_preserves_remind_and_install_results(qapp) -> None:
         assert install_dialog.skip_requested is False
     finally:
         install_dialog.close()
+
+
+@pytest.mark.parametrize("language", ["zh_CN", "ja", "ko", "fr", "de", "nl", "ru"])
+def test_available_update_localizes_dynamic_release_framing(
+    qapp,
+    language: str,
+) -> None:
+    set_language(language)
+    changelog = "# Settings\n\nKeep Market and 用户 values verbatim."
+    dialog = UpdateDialog(
+        "1.0.32",
+        "v1.0.33",
+        changelog,
+        "https://example.invalid/EveJS-Launcher-V1.zip",
+        "2026-08-13T12:00:00Z",
+    )
+    try:
+        expected_header = format_ui_phrase(
+            "What's new in v{version}",
+            version="1.0.33",
+        )
+        expected_date = format_ui_phrase(
+            "Released: {date}",
+            date=dialog._format_date("2026-08-13T12:00:00Z"),
+        )
+        assert dialog.changelog_header.text() == expected_header
+        assert dialog.changelog_header.text() != "What's new in v1.0.33"
+        assert dialog.date_label.text() == expected_date
+        assert not dialog.date_label.text().startswith("Released:")
+        assert "Settings" in dialog._changelog_view.toPlainText()
+        assert "Market" in dialog._changelog_view.toPlainText()
+        assert "用户" in dialog._changelog_view.toPlainText()
+        assert dialog._install_btn.text() == translate_ui_phrase(
+            "Download && Install"
+        )
+    finally:
+        set_language("en")
+        dialog.close()
+
+
+def test_available_update_localizes_empty_changelog_fallback(qapp) -> None:
+    set_language("ja")
+    dialog = UpdateDialog(
+        "1.0.32",
+        "v1.0.33",
+        "",
+        "https://example.invalid/EveJS-Launcher-V1.zip",
+        "2026-08-13T12:00:00Z",
+    )
+    try:
+        assert dialog._changelog_view.toPlainText() == translate_ui_phrase(
+            "No changelog provided."
+        )
+        assert dialog._changelog_view.toPlainText() != "No changelog provided."
+    finally:
+        set_language("en")
+        dialog.close()
 
 
 def test_available_update_keeps_actions_visible_on_low_height_screen(qapp) -> None:
@@ -152,6 +213,95 @@ def test_progress_failure_is_visible_and_dismissable(qapp) -> None:
         assert dialog._close_button.isVisibleTo(dialog)
         assert _phase_states(dialog) == ["complete", "error", "pending", "pending"]
     finally:
+        dialog.allow_close()
+        dialog.close()
+
+
+@pytest.mark.parametrize("language", ["zh_CN", "ja", "ko", "fr", "de", "nl", "ru"])
+def test_progress_rail_and_formatted_progress_localize_without_touching_values(
+    qapp,
+    language: str,
+) -> None:
+    set_language(language)
+    dialog = UpdateProgressDialog("v1.0.33")
+    try:
+        sources = ("DOWNLOAD", "PREPARE", "INSTALL", "RESTART")
+        rendered = [label.text() for label in dialog._phase_labels]
+        assert rendered == [translate_ui_phrase(source) for source in sources]
+        assert rendered != list(sources)
+
+        dialog.set_download_progress(2 * 1024 * 1024, 4 * 1024 * 1024)
+        assert dialog.detail_label.text() == format_ui_phrase(
+            "{downloaded} of {total}",
+            downloaded="2.0 MB",
+            total="4.0 MB",
+        )
+
+        raw_error = r"C:\用户\EveJS\package Settings checksum failed"
+        dialog.show_error(raw_error)
+        assert dialog.detail_label.text() == raw_error
+    finally:
+        set_language("en")
+        dialog.allow_close()
+        dialog.close()
+
+
+@pytest.mark.parametrize(
+    ("language", "handoff_text"),
+    [
+        ("en", "Switching to the standalone updater…"),
+        ("zh_CN", "正在切换到独立更新程序…"),
+        ("ja", "スタンドアロンアップデーターに切り替え中…"),
+        ("ko", "독립 실행형 업데이터로 전환 중…"),
+        ("fr", "Passage à l’outil de mise à jour autonome…"),
+        ("de", "Wechsel zum eigenständigen Aktualisierungsprogramm…"),
+        ("nl", "Overschakelen naar het zelfstandige updateprogramma…"),
+        ("ru", "Переход к отдельной программе обновления…"),
+    ],
+)
+def test_handoff_stages_localize_countdown_but_preserve_values_and_diagnostics(
+    qapp,
+    language: str,
+    handoff_text: str,
+) -> None:
+    set_language(language)
+    dialog = UpdateProgressDialog("v1.0.33")
+    try:
+        dialog.set_stage("install", "Switching to the standalone updater…")
+        assert dialog.detail_label.text() == handoff_text
+
+        rendered_countdown: list[str] = []
+
+        def render_stage(stage: str, detail: str) -> None:
+            dialog.set_stage(stage, detail)
+            rendered_countdown.append(dialog.detail_label.text())
+
+        handoff._wait_for_file_locks_to_settle(
+            2,
+            render_stage,
+            lambda _seconds: None,
+        )
+        assert rendered_countdown == [
+            format_ui_phrase(
+                "Releasing old launcher files "
+                "({seconds_remaining} seconds remaining)…",
+                seconds_remaining=2,
+            ),
+            format_ui_phrase(
+                "Releasing old launcher files "
+                "({seconds_remaining} second remaining)…",
+                seconds_remaining=1,
+            ),
+        ]
+
+        # This intentionally resembles a short reviewed template.  Stage
+        # diagnostics are not trusted UI framing and must not be reverse-
+        # translated merely because they happen to start with ``Using:``.
+        raw_diagnostic = r"Using: C:\Users\Pilot\Settings"
+        dialog.set_stage("install", raw_diagnostic)
+        assert dialog.detail_label.text() == raw_diagnostic
+    finally:
+        set_language("en")
         dialog.allow_close()
         dialog.close()
 

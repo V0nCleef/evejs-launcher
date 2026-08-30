@@ -1,11 +1,20 @@
 """Visual contract tests for left-navigation actions."""
 from __future__ import annotations
 
+import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
 from src.constants import COLORS, Page
+from src.i18n import set_language
 from src.widgets.nav_panel import NavPanel
+
+
+@pytest.fixture(autouse=True)
+def reset_language() -> None:
+    set_language("en")
+    yield
+    set_language("en")
 
 
 def test_nav_kill_all_is_compact_danger_outline_and_keeps_room_for_its_label(
@@ -84,7 +93,7 @@ def test_deep_signal_navigation_preserves_public_actions_and_keyboard_focus(
             "Settings",
         ]
         assert all(button.focusPolicy() == Qt.FocusPolicy.StrongFocus for button in buttons)
-        assert all(button.height() == 56 for button in buttons)
+        assert all(button.height() == 52 for button in buttons)
         assert all(not button.icon().isNull() for button in buttons)
 
         panel.btn_characters.click()
@@ -115,6 +124,34 @@ def test_service_toggle_text_remains_logical_while_semantic_state_changes(
             panel.btn_server.setText(text)
             assert panel.btn_server.text() == text
             assert panel.btn_server.property("telemetryState") == expected_state
+    finally:
+        panel.close()
+        panel.deleteLater()
+
+
+def test_navigation_retranslates_without_owning_the_footer_language_selector(
+    qapp: QApplication,
+) -> None:
+    panel = NavPanel()
+    panel.resize(220, 640)
+    panel.show()
+    qapp.processEvents()
+
+    try:
+        assert not hasattr(panel, "language_combo")
+        assert not hasattr(panel, "language_changed")
+        assert panel.minimumSizeHint().height() <= 560
+
+        set_language("zh_CN")
+        panel.retranslate_ui()
+        assert panel.command_label.text() == "指挥台"
+        assert panel.btn_home.text() == "首页"
+        assert panel.btn_characters.text() == "角色"
+        assert panel.btn_kill_all.text() == "关闭所有客户端"
+
+        panel.set_service_action_text("server", "⏳ Starting Server…")
+        assert panel.btn_server.text() == "⏳ 正在启动游戏服务…"
+        assert panel.btn_server.property("telemetryState") == "warning"
     finally:
         panel.close()
         panel.deleteLater()

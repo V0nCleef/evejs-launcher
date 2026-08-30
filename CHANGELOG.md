@@ -2,6 +2,30 @@
 
 ## Changelog
 
+## v1.0.48 — 2026-08-30
+
+### Added
+- **Complete multilingual launcher** — English, Simplified Chinese, Japanese, Korean, French, German, Dutch, and Russian now cover launcher pages, controls, dialogs, setup wizard, updater, accessibility text, and first-run errors. The launcher selects a supported Windows language automatically on first use, falls back to English, and exposes language selectors in both the wizard and footer.
+- **Safer, friendlier mod discovery** — the Mods page remains available when `<EveJS>\\mods` does not exist, can create or open that exact folder, explains how to install a mod, and links mod authors to the public authoring guide.
+- **Real music visualization and navigation** — the title bar now includes previous and next controls, randomizes the initial track when a library contains multiple entries, and drives a responsive 16-band spectrum from the decoded audio actually being played.
+
+### Changed
+- **One approved bundled track** — v1.0.48 ships only the original **Celestial Transit** composition. Deep Signal Ambience has been removed; user-selected local music remains supported and is referenced in place rather than copied into the launcher.
+- **Language selector placement** — the compact flag and native language name now live in the launcher footer alongside server status, while the setup wizard presents the same choice before configuration is complete.
+
+### Fixed
+- **Updates preserve neighboring files** — replacement owns only `EveJS-Launcher-V1.exe` and `_internal`. Other files and folders beside the launcher, including an EveJS installation placed there, are left untouched even on the first update from v1.0.47 to v1.0.48.
+- **Unicode Windows identity and paths** — launcher startup, path handling, process launch, and helper boundaries accept non-ASCII Windows usernames, computer names, and folders, including Chinese, Japanese, Korean, and Cyrillic characters.
+- **Client Code Grabber window behavior** — the window opens within the usable screen area, and clicking its focused taskbar button minimizes it normally instead of leaving its controls above the display.
+
+### Safety and compatibility
+- The update hardening is constrained to launcher-owned files and has an explicit v1.0.47-to-v1.0.48 regression test. It does not delete, migrate, or rewrite EveJS databases, characters, accounts, profiles, items, Market data, mods, or arbitrary neighboring files.
+- Bundled playback uses the existing Qt media stack. The visualizer does not launch a second decoder, and mute, stop, playback failure, and track completion clear the spectrum immediately.
+
+### Verification
+- **1,917 automated tests passed** with 6 skipped, covering the complete launcher suite. A focused 350-test release boundary additionally exercised the one-track package contract, native Qt audio decode and spectrum reset, updater preservation, Unicode discovery, all translation catalogs, first-run wizard, Mods folder actions, and Windows tool-window behavior.
+- Tests and frozen-launcher smoke checks use disposable application-data directories so they do not read, rewrite, or depend on the operator's live launcher configuration.
+
 ## v1.0.47 — 2026-08-30
 
 ### Fixed

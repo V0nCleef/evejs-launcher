@@ -696,8 +696,8 @@ def test_create_directory_link_uses_a_short_explicit_timeout(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    target = tmp_path / "target"
-    link = tmp_path / "link"
+    target = tmp_path / "客户端"
+    link = tmp_path / "用户 配置"
     captured: dict[str, object] = {}
 
     def fake_run(argv, **kwargs):  # type: ignore[no-untyped-def]
@@ -721,6 +721,7 @@ def test_create_directory_link_uses_a_short_explicit_timeout(
         "stdin": subprocess.DEVNULL,
         "capture_output": True,
         "text": True,
+        "errors": "replace",
         "timeout": 10,
     }
 

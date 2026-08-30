@@ -54,6 +54,13 @@ def test_target_uses_absolute_paths_optional_validated_project_name_and_explicit
     )
     with pytest.raises(ValueError):
         ComposeTarget(Path("C:/Fixture/compose.yaml"), Path("C:/Fixture"), "bad name!")
+    for invalid_name in ("Uppercase", "has.dot", "日本"):
+        with pytest.raises(ValueError):
+            ComposeTarget(
+                Path("C:/Fixture/compose.yaml"),
+                Path("C:/Fixture"),
+                invalid_name,
+            )
 
 
 def test_target_rejects_relative_inputs_before_normalization(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -370,6 +377,163 @@ def test_preflight_classifies_missing_compose_file_without_running_cli(
     assert report.diagnostics == (
         "Compose configuration is invalid. Check the selected Compose file and its local paths.",
     )
+
+
+def test_preflight_accepts_top_level_name_in_unicode_only_folder(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "伊甸"
+    project.mkdir()
+    compose_file = project / "compose.yaml"
+    compose_file.write_text("name: fixture\nservices: {}\n", encoding="utf-8")
+    config = json.dumps({
+        "name": "fixture",
+        "services": {
+            "market": {"ports": ["127.0.0.1:40110:40110"]},
+            "server": {"ports": [
+                "127.0.0.1:32600:26000",
+                "127.0.0.1:32601:26001",
+                "127.0.0.1:32602:26002",
+                "127.0.0.1:34443:26003",
+                "127.0.0.1:35222:5222",
+            ]},
+        },
+    })
+    calls: list[tuple[str, ...]] = []
+
+    class Runner(ParsedRunnerMixin):
+        executable = "docker"
+
+        def run(
+            self,
+            args: tuple[str, ...],
+            *,
+            cwd: Path,
+            timeout: float = 10.0,
+        ) -> DockerCommandResult:
+            calls.append(args)
+            stdout = {
+                ("version", "--format", "{{.Server.Os}}|{{.Server.Version}}"): (
+                    "linux|29.5.2"
+                ),
+                ("compose", "version", "--format", "{{.Version}}"): "5.1.3",
+            }.get(args)
+            if stdout is None and args[-4:] == (
+                "--profile", "tools", "config", "--services",
+            ):
+                stdout = "market\nserver\n"
+            elif stdout is None and args[-2:] == ("config", "--services"):
+                stdout = "market\nserver\n"
+            elif stdout is None and args[-3:] == ("config", "--format", "json"):
+                stdout = config
+            elif stdout is None and args[-4:] == (
+                "ps", "--all", "--format", "json",
+            ):
+                stdout = "[]"
+            assert stdout is not None
+            return DockerCommandResult(args, 0, stdout, "", False, False)
+
+    report = ComposeInspector(Runner()).preflight(
+        ComposeTarget(compose_file, project)
+    )
+
+    assert report.ok
+    assert report.config is not None
+    assert report.config.project_name == "fixture"
+    assert not any("-p" in args for args in calls)
+
+
+def test_preflight_keeps_unrelated_named_config_failure_generic_in_unicode_folder(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "伊甸"
+    project.mkdir()
+    compose_file = project / "compose.yaml"
+    compose_file.write_text("name: fixture\nservices: invalid\n", encoding="utf-8")
+
+    class Runner(ParsedRunnerMixin):
+        executable = "docker"
+
+        def run(
+            self,
+            args: tuple[str, ...],
+            *,
+            cwd: Path,
+            timeout: float = 10.0,
+        ) -> DockerCommandResult:
+            stdout = {
+                ("version", "--format", "{{.Server.Os}}|{{.Server.Version}}"): (
+                    "linux|29.5.2"
+                ),
+                ("compose", "version", "--format", "{{.Version}}"): "5.1.3",
+            }.get(args)
+            if stdout is not None:
+                return DockerCommandResult(args, 0, stdout, "", False, False)
+            result = DockerCommandResult(args, 15, "", "", False, False)
+            raise DockerCommandError(args[0], result)
+
+    report = ComposeInspector(Runner()).preflight(
+        ComposeTarget(compose_file, project)
+    )
+
+    assert report.failure_kind is PreflightFailureKind.COMPOSE_CONFIG_INVALID
+    assert report.diagnostics == (
+        "Compose configuration is invalid. Check the selected Compose file and "
+        "its local paths.",
+    )
+
+
+@pytest.mark.parametrize("folder_name", ["伊甸", "ß"])
+def test_preflight_explains_actual_blank_project_name_failure(
+    tmp_path: Path,
+    folder_name: str,
+) -> None:
+    project = tmp_path / folder_name
+    project.mkdir()
+    compose_file = project / "compose.yaml"
+    compose_file.write_text("services: {}\n", encoding="utf-8")
+    config_service_calls: list[tuple[str, ...]] = []
+
+    class Runner(ParsedRunnerMixin):
+        executable = "docker"
+
+        def run(
+            self,
+            args: tuple[str, ...],
+            *,
+            cwd: Path,
+            timeout: float = 10.0,
+        ) -> DockerCommandResult:
+            stdout = {
+                ("version", "--format", "{{.Server.Os}}|{{.Server.Version}}"): (
+                    "linux|29.5.2"
+                ),
+                ("compose", "version", "--format", "{{.Version}}"): "5.1.3",
+            }.get(args)
+            if stdout is not None:
+                return DockerCommandResult(args, 0, stdout, "", False, False)
+            if args[-2:] == ("config", "--services"):
+                config_service_calls.append(args)
+                if "-p" in args:
+                    return DockerCommandResult(
+                        args, 0, "market\nserver\n", "", False, False
+                    )
+            result = DockerCommandResult(args, 15, "", "", False, False)
+            raise DockerCommandError(args[0], result)
+
+    report = ComposeInspector(Runner()).preflight(
+        ComposeTarget(compose_file, project)
+    )
+
+    assert report.failure_kind is PreflightFailureKind.COMPOSE_CONFIG_INVALID
+    assert report.diagnostics == (
+        "Compose could not derive a project name from this folder. Set the "
+        "advanced Compose Project Name to a stable lowercase ASCII value such "
+        "as evejs-local, or define a valid top-level name in the Compose file.",
+    )
+    assert len(config_service_calls) == 2
+    assert "-p" not in config_service_calls[0]
+    assert "-p" in config_service_calls[1]
 
 
 def test_preflight_classifies_malformed_effective_config_json(tmp_path: Path) -> None:

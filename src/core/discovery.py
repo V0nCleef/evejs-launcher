@@ -1,4 +1,6 @@
 """EveJS path discovery and validation."""
+import codecs
+import locale
 import os
 import re
 from pathlib import Path
@@ -146,7 +148,11 @@ def find_client_path(evejs_root: str) -> str | None:
     if not cfg.exists():
         return None
 
-    for line in cfg.read_text(encoding="utf-8", errors="ignore").splitlines():
+    contents = _read_batch_text(cfg)
+    if contents is None:
+        return None
+
+    for line in contents.splitlines():
         match = re.match(
             r'^\s*set\s+"?EVEJS_CLIENT_PATH\s*=\s*(.*?)"?\s*$',
             line,
@@ -156,6 +162,43 @@ def find_client_path(evejs_root: str) -> str | None:
             resolved = resolve_client_tq_path(match.group(1), evejs_root)
             return str(resolved) if resolved is not None else None
     return None
+
+
+def _legacy_batch_encoding() -> str:
+    """Return the active Windows ANSI code page for legacy batch files."""
+    if os.name == "nt":
+        return "mbcs"
+    getencoding = getattr(locale, "getencoding", None)
+    if callable(getencoding):
+        return getencoding()
+    return locale.getpreferredencoding(False)
+
+
+def _read_batch_text(path: Path) -> str | None:
+    """Decode modern and Windows-authored batch files without dropping bytes."""
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None
+
+    if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        try:
+            return raw.decode("utf-16")
+        except UnicodeDecodeError:
+            return None
+    if raw.startswith(codecs.BOM_UTF8):
+        try:
+            return raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            return None
+
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            return raw.decode(_legacy_batch_encoding())
+        except (LookupError, UnicodeDecodeError):
+            return None
 
 
 def get_play_bat_path(evejs_root: str) -> Path:

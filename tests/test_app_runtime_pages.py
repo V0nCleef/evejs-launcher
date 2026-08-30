@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import QApplication, QMainWindow
 
 from src import config
 from src.app import MainWindow
+from src.i18n import set_language
 from src.core.runtime.docker_tools import DockerToolAction
 from src.core.service_status import (
     DockerControlPolicy,
@@ -19,6 +20,8 @@ from src.core.service_status import (
 from src.core.tool_catalog import ToolDispatchKind, supported_tool_definitions
 from src.pages.mods_page import ModsPage
 from src.pages.tools_page import ToolsPage
+from src.widgets.nav_panel import NavPanel
+from src.widgets.status_bar import StatusBar
 
 
 class _Button:
@@ -359,4 +362,66 @@ def test_unrelated_settings_change_does_not_rescan_or_resync_runtime_pages(
             len(window._tools_page.contexts),
         ) == before
     finally:
+        _close_window(window)
+
+
+def test_language_selection_persists_and_refreshes_cached_runtime_labels(
+    qapp: QApplication,
+    monkeypatch,
+) -> None:
+    set_language("en")
+    window = MainWindow.__new__(MainWindow)
+    QMainWindow.__init__(window)
+    window._cfg = deepcopy(config.DEFAULT_CONFIG)
+    window._runtime_snapshot = _snapshot(RuntimeBackend.NATIVE)
+    window._nav = NavPanel(window)
+    window._status_bar = StatusBar(window)
+    saved: list[dict] = []
+    applied: list[RuntimeSnapshot] = []
+    monkeypatch.setattr(config, "save", lambda cfg: saved.append(deepcopy(cfg)))
+    window._apply_runtime_snapshot = applied.append
+    window._status_bar.language_changed.connect(window._on_language_changed)
+
+    try:
+        window._status_bar.language_combo.setCurrentIndex(
+            window._status_bar.language_combo.findData("zh_CN")
+        )
+        qapp.processEvents()
+
+        assert window._cfg["language"] == "zh_CN"
+        assert saved[-1]["language"] == "zh_CN"
+        assert applied == [window._runtime_snapshot]
+        assert window._nav.btn_home.text() == "首页"
+    finally:
+        set_language("en")
+        _close_window(window)
+
+
+def test_language_selection_still_applies_when_config_save_fails(
+    qapp: QApplication,
+    monkeypatch,
+) -> None:
+    set_language("en")
+    window = MainWindow.__new__(MainWindow)
+    QMainWindow.__init__(window)
+    window._cfg = deepcopy(config.DEFAULT_CONFIG)
+    window._runtime_snapshot = _snapshot(RuntimeBackend.NATIVE)
+    window._nav = NavPanel(window)
+    window._status_bar = StatusBar(window)
+    applied: list[RuntimeSnapshot] = []
+
+    def fail_save(_cfg: dict) -> None:
+        raise OSError("simulated read-only profile")
+
+    monkeypatch.setattr(config, "save", fail_save)
+    window._apply_runtime_snapshot = applied.append
+
+    try:
+        window._on_language_changed("zh_CN")
+
+        assert window._cfg["language"] == "zh_CN"
+        assert applied == [window._runtime_snapshot]
+        assert window._nav.btn_home.text() == "首页"
+    finally:
+        set_language("en")
         _close_window(window)

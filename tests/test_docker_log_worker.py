@@ -14,7 +14,11 @@ from src.workers.docker_log_worker import (
 )
 
 
-TARGET = lambda: ComposeTarget(Path("C:/Eve Root/compose.yaml"), Path("C:/Eve Root"), "eve.project")
+TARGET = lambda: ComposeTarget(
+    Path("C:/Eve Root/compose.yaml"),
+    Path("C:/Eve Root"),
+    "eve-project",
+)
 
 
 def test_log_argv_is_exact_and_rejects_noncanonical_inputs() -> None:

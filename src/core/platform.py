@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from .platform_win import (  # noqa: F401 — re-exported below
     build_tool_batch_command,
+    center_tool_window_for_process_tree,
     close_job,
     create_kill_on_close_job,
     create_directory_link,
@@ -42,6 +43,7 @@ from .platform_win import (  # noqa: F401 — re-exported below
 # Re-export everything so callers do ``from .platform import create_directory_link``.
 __all__ = [
     "build_tool_batch_command",
+    "center_tool_window_for_process_tree",
     "close_job",
     "create_kill_on_close_job",
     "create_directory_link",

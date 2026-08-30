@@ -201,6 +201,73 @@ def test_source_transform_schedules_non_blocking_one_shot_bridge() -> None:
     assert not source.rstrip().endswith("\nreturn")
 
 
+def test_python27_graft_script_supports_a_unicode_windows_temp_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Python 2 graft script must reconstruct Unicode paths from ASCII."""
+    output_path = tmp_path / "测试用户" / "临时文件.pyc"
+    output_path.parent.mkdir()
+    original_pyc = patcher._PY27_MAGIC + b"\0\0\0\0original"
+    compiled_pyc = patcher._PY27_MAGIC + b"\0\0\0\0compiled"
+    observed_scripts: list[str] = []
+
+    class TemporaryOutput:
+        name = str(output_path)
+
+        def __enter__(self):  # type: ignore[no-untyped-def]
+            output_path.touch()
+            return self
+
+        def __exit__(self, *_args):  # type: ignore[no-untyped-def]
+            return False
+
+    class Callable:
+        argtypes = None
+        restype = None
+
+        def __init__(self, callback):  # type: ignore[no-untyped-def]
+            self._callback = callback
+
+        def __call__(self, *args):  # type: ignore[no-untyped-def]
+            return self._callback(*args)
+
+    def run_script(payload: bytes) -> int:
+        source = payload.decode("ascii")
+        observed_scripts.append(source)
+        output_path.write_bytes(compiled_pyc)
+        return 0
+
+    class FakePython27:
+        Py_Initialize = Callable(lambda: None)
+        PyRun_SimpleString = Callable(run_script)
+
+    monkeypatch.setattr(
+        patcher.tempfile,
+        "NamedTemporaryFile",
+        lambda **_kwargs: TemporaryOutput(),
+    )
+    monkeypatch.setattr(
+        patcher.ctypes,
+        "WinDLL",
+        lambda _path: FakePython27(),
+        raising=False,
+    )
+
+    result = patcher._graft_original_overview_methods(
+        original_pyc,
+        compiled_pyc,
+        tmp_path / "客户端" / "python27.dll",
+    )
+
+    assert result == compiled_pyc
+    assert len(observed_scripts) == 1
+    assert observed_scripts[0].isascii()
+    assert "测试用户" not in observed_scripts[0]
+    assert str(output_path).encode("utf-8").hex() in observed_scripts[0]
+    assert "output_path = unicode(str(bytearray.fromhex(" in observed_scripts[0]
+
+
 def test_repack_preserves_duplicate_entries_by_zipinfo_index(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

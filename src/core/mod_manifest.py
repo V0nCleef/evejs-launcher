@@ -134,6 +134,17 @@ class Mod:
         return self.valid and value in self.supported_backends
 
 
+def legacy_mods_directory(evejs_root: str | Path) -> Path:
+    """Return the canonical launcher-compatible loader-mod directory.
+
+    Keeping this path contract beside :func:`scan_mods` prevents the Mods page
+    and discovery code from quietly disagreeing about where users should put
+    a legacy ``loader.js`` mod.
+    """
+
+    return Path(evejs_root) / "mods"
+
+
 def scan_mods(evejs_root: str | Path) -> list[Mod]:
     """Discover legacy loaders and explicit integrated-mod manifests.
 
@@ -239,7 +250,7 @@ def active_loader_names(mods: Iterable[Mod]) -> tuple[str, ...]:
 
 
 def _scan_legacy_mods(root: Path) -> list[Mod]:
-    mods_dir = root / "mods"
+    mods_dir = legacy_mods_directory(root)
     if not mods_dir.exists():
         return []
     if not mods_dir.is_dir():

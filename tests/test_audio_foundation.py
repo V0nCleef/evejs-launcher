@@ -1299,28 +1299,19 @@ def test_failed_voice_audition_does_not_disable_verified_capability() -> None:
     assert availability_changes == []
 
 
-def test_original_deep_signal_ambience_is_bundled_and_deterministically_discovered() -> None:
+def test_release_bundles_only_approved_celestial_transit_track() -> None:
     tracks = bundled_music_tracks()
     names = [track.name for track in tracks]
 
-    assert "deep_signal_ambience.wav" in names
-    assert names == sorted(names, key=str.casefold)
+    assert names == ["celestial_transit.wav"]
+    approved = tracks[0]
+    assert approved.stat().st_size > 1_000_000
 
-    import wave
-
-    original = next(
-        track for track in tracks if track.name == "deep_signal_ambience.wav"
-    )
-    assert original.stat().st_size > 1_000_000
-
-    with wave.open(str(original), "rb") as stream:
+    with wave.open(str(approved), "rb") as stream:
         assert stream.getnchannels() == 2
         assert stream.getsampwidth() == 2
-        assert stream.getframerate() == 22_050
-        assert stream.getnframes() == 22_050 * 96
-        first = stream.readframes(1)
-        stream.setpos(stream.getnframes() - 1)
-        assert stream.readframes(1) == first
+        assert stream.getframerate() == 44_100
+        assert stream.getnframes() == 2_419_200
 
 
 def test_close_stops_optional_audio_before_other_lifecycle_checks() -> None:

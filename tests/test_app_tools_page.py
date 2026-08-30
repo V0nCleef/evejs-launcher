@@ -45,6 +45,12 @@ def tools_window(
     monkeypatch.setattr(config, "load", lambda: deepcopy(cfg))
     monkeypatch.setattr(config, "save", lambda _cfg: None)
     monkeypatch.setattr(app_module, "load_accounts", lambda _root: [])
+    monkeypatch.setattr(
+        MainWindow,
+        "_update_status_bar",
+        lambda window: window._apply_runtime_snapshot(window._runtime_snapshot),
+    )
+    monkeypatch.setattr(MainWindow, "_refresh_characters", lambda _self: None)
 
     window = MainWindow()
     window._status_timer.stop()
@@ -158,6 +164,92 @@ def test_one_normal_tool_click_spawns_once_and_reports_launched(
     assert card.status_label.text() == "Launched"
     assert tools_window._server_proc is None
     assert tools_window._market_proc is None
+
+
+def test_client_code_grabber_centers_only_its_owned_exact_title_window(
+    tools_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class RunningWrapper:
+        pid = 4242
+
+        @staticmethod
+        def poll() -> None:
+            return None
+
+    wrapper = RunningWrapper()
+    center_calls: list[tuple[int, str, str, int]] = []
+    monkeypatch.setattr(
+        app_module,
+        "launch_tool_wrapper",
+        lambda _entrypoint, _arguments: wrapper,
+    )
+
+    def record_center(
+        root_pid: int,
+        expected_title: str,
+        expected_class_name: str,
+        *,
+        anchor_hwnd: int,
+    ) -> bool:
+        center_calls.append(
+            (root_pid, expected_title, expected_class_name, anchor_hwnd)
+        )
+        return True
+
+    monkeypatch.setattr(
+        app_module,
+        "center_tool_window_for_process_tree",
+        record_center,
+    )
+    card = tools_window._tools_page.card_for("client-code-grabber")
+    action = card.tool.definition.actions[0]
+
+    tools_window._on_tool_launch_requested(card.tool, action)
+
+    assert len(tools_window._tool_window_timers) == 1
+    timer = next(iter(tools_window._tool_window_timers))
+    timer.timeout.emit()
+    assert len(tools_window._tool_window_timers) == 1
+    timer.timeout.emit()
+
+    assert len(center_calls) == 2
+    assert all(
+        call[:3] == (4242, "EVE Client Code Grabber", "TkTopLevel")
+        and call[3] > 0
+        for call in center_calls
+    )
+    assert tools_window._tool_window_timers == set()
+
+
+def test_tool_window_centering_poll_is_bounded(
+    tools_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class RunningWrapper:
+        pid = 4242
+
+        @staticmethod
+        def poll() -> None:
+            return None
+
+    monotonic_values = iter((10.0, 200.0))
+    monkeypatch.setattr(app_module.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(
+        app_module,
+        "center_tool_window_for_process_tree",
+        lambda *_args, **_kwargs: pytest.fail("expired poll must not enumerate"),
+    )
+
+    tools_window._schedule_tool_window_centering(
+        RunningWrapper(),  # type: ignore[arg-type]
+        "EVE Client Code Grabber",
+        "TkTopLevel",
+    )
+    timer = next(iter(tools_window._tool_window_timers))
+    timer.timeout.emit()
+
+    assert tools_window._tool_window_timers == set()
 
 
 def test_central_handler_cancels_destructive_action_before_spawn(

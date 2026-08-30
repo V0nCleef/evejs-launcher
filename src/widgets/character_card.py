@@ -26,6 +26,18 @@ from PyQt6.QtWidgets import (
 )
 
 from src.constants import COLORS as C, SEMANTIC_COLORS as S, Status
+from src.i18n import (
+    current_language,
+    format_ui_phrase,
+    translate_ui_phrase,
+)
+from src.widgets.ui_translation import (
+    mark_translatable,
+    retranslate_widget_tree,
+    set_translatable_accessible_name,
+    set_translatable_text,
+    set_translatable_tooltip,
+)
 
 
 # Map status to bar color and button state
@@ -178,8 +190,8 @@ class HamburgerButton(QPushButton):
         self.setFixedSize(28, 28)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setAccessibleName("Character actions")
-        self.setToolTip("Character actions")
+        set_translatable_accessible_name(self, "Character actions")
+        set_translatable_tooltip(self, "Character actions")
         self._hovered = False
 
     def paintEvent(self, event) -> None:
@@ -278,6 +290,9 @@ class CharacterCard(QFrame):
         self._mouse_inside = False
         self._setup_ui()
         self._apply_status(status)
+        mark_translatable(self._status_label)
+        mark_translatable(self._launch_btn)
+        set_translatable_tooltip(self._selection_marker, "Selected character")
         self._restyle()
 
     def _setup_ui(self) -> None:
@@ -355,7 +370,11 @@ class CharacterCard(QFrame):
         self._launch_btn.setFixedHeight(28)
         self._launch_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._launch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._launch_btn.setAccessibleName(f"Launch {self.char_name}")
+        set_translatable_accessible_name(
+            self._launch_btn,
+            f"Launch {self.char_name}",
+            allow_templates=True,
+        )
         self._launch_btn.clicked.connect(self._on_launch_clicked)
         btn_layout.addWidget(self._launch_btn)
 
@@ -460,15 +479,20 @@ class CharacterCard(QFrame):
         self._status_dot.setStyleSheet(
             f"color: {cfg['bar_color']}; border: none; background: transparent; font-size: 9px;"
         )
-        self._status_label.setText(str(cfg["label"]))
+        set_translatable_text(self._status_label, str(cfg["label"]))
         if self._launch_available:
-            self._launch_btn.setText(cfg["btn_text"])
+            set_translatable_text(self._launch_btn, str(cfg["btn_text"]))
             self._launch_btn.setEnabled(cfg["btn_enabled"])
             self._launch_btn.setToolTip("")
         else:
-            self._launch_btn.setText("VIEW ONLY")
+            set_translatable_text(self._launch_btn, "VIEW ONLY")
             self._launch_btn.setEnabled(False)
-            self._launch_btn.setToolTip(self._launch_unavailable_reason)
+            set_translatable_tooltip(
+                self._launch_btn,
+                self._launch_unavailable_reason,
+            )
+        if self._launch_btn.property("evejsI18nTranslatable"):
+            retranslate_widget_tree(self._launch_btn, current_language())
         self._launch_btn.setStyleSheet(
             f"""
             QPushButton {{
@@ -498,14 +522,20 @@ class CharacterCard(QFrame):
     def _update_accessibility(self) -> None:
         cfg = _STATUS_CONFIG.get(self._status, _STATUS_CONFIG[Status.READY])
         self.setAccessibleName(self.char_name)
-        description = (
-            f"Character on account {self.username}. {cfg['label']}. "
-            f"Ship {self.ship}. Balance {self.isk} ISK."
+        description = format_ui_phrase(
+            "Character on account {username}. {status}. Ship {ship}. "
+            "Balance {isk} ISK.",
+            username=self.username,
+            status=translate_ui_phrase(str(cfg["label"])),
+            ship=self.ship,
+            isk=self.isk,
         )
         if self._selected:
-            description += " Selected."
+            description += " " + translate_ui_phrase("Selected.")
         if not self._launch_available and self._launch_unavailable_reason:
-            description += f" {self._launch_unavailable_reason}"
+            description += " " + translate_ui_phrase(
+                self._launch_unavailable_reason
+            )
         self.setAccessibleDescription(description)
 
     def set_status(self, status: Status) -> None:
@@ -517,6 +547,15 @@ class CharacterCard(QFrame):
         self._launch_available = bool(enabled)
         self._launch_unavailable_reason = "" if enabled else reason
         self._apply_status(self._status)
+
+    def retranslate_ui(self) -> None:
+        """Refresh retained status and accessibility copy in place."""
+        self._apply_status(self._status)
+        set_translatable_accessible_name(
+            self._launch_btn,
+            f"Launch {self.char_name}",
+            allow_templates=True,
+        )
 
     def set_portrait(self, pixmap: Optional[QPixmap]) -> None:
         """Set portrait pixmap (called from async loader)."""
@@ -532,7 +571,9 @@ class CharacterCard(QFrame):
 
     def _on_overflow_clicked(self) -> None:
         menu = QMenu(self)
-        menu.setAccessibleName(f"Actions for {self.char_name}")
+        menu.setAccessibleName(
+            format_ui_phrase("Actions for {character}", character=self.char_name)
+        )
         menu.setStyleSheet(
             f"""
             QMenu {{
@@ -549,20 +590,23 @@ class CharacterCard(QFrame):
             }}
             """
         )
-        menu.addAction("View Details", self._on_view_details)
+        menu.addAction(translate_ui_phrase("View Details"), self._on_view_details)
         menu.addAction(
-            "Manage Groups...",
+            translate_ui_phrase("Manage Groups..."),
             lambda: self.manage_groups_requested.emit(
                 self.username,
                 self.char_name,
                 self.char_id,
             ),
         )
-        menu.addAction("Hide Character", lambda: self.hide_requested.emit(self.char_name))
-        menu.addAction("View Log", lambda: None)
+        menu.addAction(
+            translate_ui_phrase("Hide Character"),
+            lambda: self.hide_requested.emit(self.char_name),
+        )
+        menu.addAction(translate_ui_phrase("View Log"), lambda: None)
         menu.addSeparator()
         menu.addAction(
-            "Delete Character...",
+            translate_ui_phrase("Delete Character..."),
             lambda: self.delete_character_requested.emit(
                 self.username,
                 self.char_name,
@@ -570,7 +614,7 @@ class CharacterCard(QFrame):
             ),
         )
         menu.addAction(
-            "Delete Account...",
+            translate_ui_phrase("Delete Account..."),
             lambda: self.delete_account_requested.emit(
                 self.username,
                 self.char_name,

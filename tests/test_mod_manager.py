@@ -18,10 +18,15 @@ from src.core.mod_manager import (
     ModActivationError,
     active_loader_mods,
     active_loader_names,
+    legacy_mods_directory,
     scan_mods,
     set_mod_active,
     toggle_mod,
 )
+
+
+def test_legacy_mods_directory_is_lowercase_direct_child(tmp_path: Path) -> None:
+    assert legacy_mods_directory(tmp_path) == tmp_path / "mods"
 
 
 def _loader(root: Path, mod_id: str, filename: str = "loader.js") -> Path:

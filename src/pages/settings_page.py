@@ -16,16 +16,14 @@ from __future__ import annotations
 from collections.abc import Callable
 import logging
 import shutil
-import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QWheelEvent
+from PyQt6.QtCore import QTimer, Qt, QUrl, pyqtSignal
+from PyQt6.QtGui import QDesktopServices, QWheelEvent
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QFileDialog,
     QFormLayout,
     QFrame,
     QGridLayout,
@@ -34,7 +32,6 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
-    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -91,6 +88,19 @@ from src.core.runtime.docker_setup import (
     docker_draft_fingerprint,
 )
 from src.widgets.toggle_switch import ToggleSwitch
+from src.widgets.localized_dialogs import (
+    LocalizedFileDialog as QFileDialog,
+    LocalizedMessageBox as QMessageBox,
+)
+from src.widgets.ui_translation import (
+    register_translatable_combo_item,
+    register_translatable_widget_tree,
+    set_translatable_accessible_description,
+    set_translatable_text,
+    set_translatable_text_template,
+    set_translatable_tooltip,
+    set_translatable_tooltip_template,
+)
 
 
 NATIVE_RUNTIME_HELP = (
@@ -112,7 +122,8 @@ PROJECT_NAME_HELP = (
     "Most users should leave this blank. Set a project name only to reconnect to "
     "a stack created with a custom -p name, keep a stable name after moving the "
     "folder, or separate multiple stacks. Changing it may target a different "
-    "Docker stack."
+    "Docker stack. If set, use lowercase ASCII letters, digits, hyphens, and "
+    "underscores, starting with a letter or digit."
 )
 CONNECT_ONLY_HELP = (
     "Connect only: the launcher shows status and logs but never starts, stops, "
@@ -159,6 +170,7 @@ class SettingsPage(QWidget):
         self._syncing_motion_toggles = False
         self._audio_layout_mode = ""
         self._build_ui()
+        register_translatable_widget_tree(self)
         self.load_settings()
 
     # ── UI construction ──────────────────────────────────────────────────────
@@ -639,7 +651,8 @@ class SettingsPage(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
-        heading = QLabel(title.upper())
+        heading = QLabel()
+        set_translatable_text(heading, title.upper())
         heading.setProperty("class", "panelTitle")
         layout.addWidget(heading)
         copy = QLabel(description)
@@ -691,7 +704,8 @@ class SettingsPage(QWidget):
 
         heading_row = QHBoxLayout()
         heading_row.setContentsMargins(0, 0, 0, 0)
-        name = QLabel(title.upper())
+        name = QLabel()
+        set_translatable_text(name, title.upper())
         name.setProperty("class", "audioControlTitle")
         heading_row.addWidget(name)
         heading_row.addStretch()
@@ -734,7 +748,8 @@ class SettingsPage(QWidget):
         copy = QVBoxLayout()
         copy.setContentsMargins(0, 0, 0, 0)
         copy.setSpacing(2)
-        name = QLabel(title.upper())
+        name = QLabel()
+        set_translatable_text(name, title.upper())
         name.setProperty("class", "audioControlTitle")
         copy.addWidget(name)
         detail = QLabel(description)
@@ -848,7 +863,8 @@ class SettingsPage(QWidget):
         copy = QVBoxLayout()
         copy.setContentsMargins(0, 0, 0, 0)
         copy.setSpacing(2)
-        name = QLabel(title.upper())
+        name = QLabel()
+        set_translatable_text(name, title.upper())
         name.setProperty("class", "audioEventName")
         copy.addWidget(name)
         description = QLabel(sample)
@@ -1022,15 +1038,22 @@ class SettingsPage(QWidget):
             preview_state = (
                 "available" if self._voice_preview_available else "unavailable"
             )
-        self.voice_preview_status_label.setText(preview_status)
-        self.voice_preview_status_label.setToolTip(preview_status)
-        self.voice_preview_status_label.setAccessibleDescription(preview_status)
+        set_translatable_text(self.voice_preview_status_label, preview_status)
+        set_translatable_tooltip(self.voice_preview_status_label, preview_status)
+        set_translatable_accessible_description(
+            self.voice_preview_status_label,
+            preview_status,
+        )
         self.voice_preview_status_label.setProperty("state", preview_state)
-        self.preview_voice_btn.setToolTip(preview_status)
-        self.preview_voice_btn.setAccessibleDescription(preview_status)
+        set_translatable_tooltip(self.preview_voice_btn, preview_status)
+        set_translatable_accessible_description(
+            self.preview_voice_btn,
+            preview_status,
+        )
         self._refresh_dynamic_style(self.voice_preview_status_label)
 
-        self.voice_event_status_label.setText(
+        set_translatable_text(
+            self.voice_event_status_label,
             "VOICE EVENTS ENABLED" if voice_enabled else "VOICE EVENTS DISABLED"
         )
         self.voice_event_status_label.setProperty(
@@ -1050,7 +1073,8 @@ class SettingsPage(QWidget):
         finally:
             self._syncing_motion_toggles = False
         self.hero_interval_spin.setEnabled(bool(enabled))
-        self.hero_interval_help.setText(
+        set_translatable_text(
+            self.hero_interval_help,
             "Used by rotating hero content. Reduce Motion pauses optional UI motion."
             if enabled
             else "Optional interface motion and rotating hero content are paused."
@@ -1257,7 +1281,10 @@ class SettingsPage(QWidget):
         self.update_interval_spin.setValue(int(cfg.get("update_check_interval_hours", 6)))
 
         last_checked = cfg.get("update_last_checked", "")
-        self.last_checked_label.setText(last_checked[:16] if last_checked else "Never")
+        if last_checked:
+            self.last_checked_label.setText(last_checked[:16])
+        else:
+            set_translatable_text(self.last_checked_label, "Never")
 
         self.hidden_list.clear()
         for name in cfg.get("hidden_characters", []):
@@ -1326,10 +1353,10 @@ class SettingsPage(QWidget):
             supported = capability.supported
             reason = capability.reason
         self.auto_login_toggle.setEnabled(supported)
-        self.auto_login_status_label.setText(reason)
+        set_translatable_text(self.auto_login_status_label, reason)
         color = COLORS["green"] if supported else COLORS["gold"]
         self.auto_login_status_label.setStyleSheet(f"color: {color};")
-        self.auto_login_status_label.setToolTip(reason)
+        set_translatable_tooltip(self.auto_login_status_label, reason)
 
     def save_settings(self) -> None:
         """Persist Native immediately or preflight the exact Docker draft."""
@@ -1505,7 +1532,8 @@ class SettingsPage(QWidget):
         self._save_after_docker_preflight = save_after
         self._sync_save_enabled()
         self.test_docker_setup_btn.setEnabled(False)
-        self.docker_preflight_result_label.setText(
+        set_translatable_text(
+            self.docker_preflight_result_label,
             "Checking Docker CLI, engine, Compose, services, endpoints, and data state..."
         )
         self.docker_preflight_result_label.show()
@@ -1637,7 +1665,7 @@ class SettingsPage(QWidget):
         self.docker_preflight_result_label.setStyleSheet(
             f"color: {color}; font-size: 12px;"
         )
-        self.docker_preflight_result_label.setText(message)
+        set_translatable_text(self.docker_preflight_result_label, message)
         self.docker_preflight_result_label.show()
 
     @staticmethod
@@ -1676,14 +1704,12 @@ class SettingsPage(QWidget):
         docker = self.runtime_backend_combo.currentData() == "docker_compose"
         self.docker_fields.setVisible(docker)
         self.scripts_box.setVisible(not docker)
-        self.runtime_backend_help_label.setText(
-            DOCKER_RUNTIME_HELP if docker else NATIVE_RUNTIME_HELP
-        )
-        self.runtime_backend_combo.setToolTip(
-            DOCKER_RUNTIME_HELP if docker else NATIVE_RUNTIME_HELP
-        )
-        self.runtime_backend_combo.setAccessibleDescription(
-            DOCKER_RUNTIME_HELP if docker else NATIVE_RUNTIME_HELP
+        runtime_help = DOCKER_RUNTIME_HELP if docker else NATIVE_RUNTIME_HELP
+        set_translatable_text(self.runtime_backend_help_label, runtime_help)
+        set_translatable_tooltip(self.runtime_backend_combo, runtime_help)
+        set_translatable_accessible_description(
+            self.runtime_backend_combo,
+            runtime_help,
         )
         self._update_docker_guidance()
 
@@ -1692,14 +1718,18 @@ class SettingsPage(QWidget):
         docker = self.runtime_backend_combo.currentData() == "docker_compose"
         managed = docker and self.docker_policy_combo.currentData() == "managed"
         self.docker_keep_running_toggle.setEnabled(managed)
-        self.docker_keep_running_toggle.setToolTip(
+        set_translatable_tooltip(
+            self.docker_keep_running_toggle,
             "Leave managed Compose services running when the launcher closes."
             if managed else "Available only for Docker Compose with Managed control."
         )
         policy_help = MANAGED_HELP if managed else CONNECT_ONLY_HELP
-        self.docker_policy_help_label.setText(policy_help)
-        self.docker_policy_combo.setToolTip(policy_help)
-        self.docker_policy_combo.setAccessibleDescription(policy_help)
+        set_translatable_text(self.docker_policy_help_label, policy_help)
+        set_translatable_tooltip(self.docker_policy_combo, policy_help)
+        set_translatable_accessible_description(
+            self.docker_policy_combo,
+            policy_help,
+        )
         self.docker_advanced_fields.setVisible(
             docker and self.docker_advanced_toggle.isChecked()
         )
@@ -1715,8 +1745,14 @@ class SettingsPage(QWidget):
                 "Using: <EveJS Root>\\compose.yaml after a root is selected "
                 "(automatic)"
             )
-        self.docker_compose_resolved_label.setText(resolved)
-        self.docker_compose_resolved_label.setToolTip(resolved)
+        set_translatable_text_template(
+            self.docker_compose_resolved_label,
+            resolved,
+        )
+        set_translatable_tooltip_template(
+            self.docker_compose_resolved_label,
+            resolved,
+        )
 
     def _show_save_feedback(self, message: str, *, success: bool) -> None:
         """Render a truthful inline result without interrupting form editing."""
@@ -1725,8 +1761,8 @@ class SettingsPage(QWidget):
         self.save_feedback_label.setStyleSheet(
             f"color: {color}; font-size: 12px; font-weight: 600;"
         )
-        self.save_feedback_label.setText(message)
-        self.save_feedback_label.setToolTip(message)
+        set_translatable_text(self.save_feedback_label, message)
+        set_translatable_tooltip(self.save_feedback_label, message)
         self.save_feedback_label.show()
         if success:
             self._save_feedback_timer.start()
@@ -1741,30 +1777,33 @@ class SettingsPage(QWidget):
     def _on_check_clicked(self) -> None:
         """User clicked Check for Updates — disable button and emit signal."""
         self.check_btn.setEnabled(False)
-        self.check_btn.setText("Checking...")
+        set_translatable_text(self.check_btn, "Checking...")
         self.settings_update_check.emit()
 
     def set_update_checking(self) -> None:
         """Called externally — show checking state on the button."""
         self.check_btn.setEnabled(False)
-        self.check_btn.setText("Checking...")
+        set_translatable_text(self.check_btn, "Checking...")
 
     def set_update_check_done(self, success: bool) -> None:
         """Called externally after check completes — reset button + update label."""
         self.check_btn.setEnabled(True)
-        self.check_btn.setText("Check for Updates")
+        set_translatable_text(self.check_btn, "Check for Updates")
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
         if success:
             self.last_checked_label.setText(now)
         else:
-            self.last_checked_label.setText(f"Failed — {now}")
+            set_translatable_text_template(
+                self.last_checked_label,
+                f"Failed — {now}",
+            )
             self.last_checked_label.setStyleSheet(f"color: {COLORS['red']}; font-size: 11px;")
 
     def _open_changelog(self) -> None:
         """Open CHANGELOG.md in the default text editor."""
         changelog_path = Path(__file__).resolve().parent.parent.parent / "CHANGELOG.md"
         if changelog_path.exists():
-            subprocess.Popen(["start", str(changelog_path)], shell=True)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(changelog_path)))
 
     # ── Hidden characters ────────────────────────────────────────────────────
     def _show_selected_characters(self) -> None:
@@ -1803,6 +1842,7 @@ class SettingsPage(QWidget):
         self.server_script_combo.blockSignals(True)
         self.server_script_combo.clear()
         self.server_script_combo.addItem("Always ask (default)", ASK_EVERY_TIME)
+        register_translatable_combo_item(self.server_script_combo, 0)
         selected_index = 0
         matched = preference.casefold() == ASK_EVERY_TIME
         for script in scripts:
@@ -1836,7 +1876,8 @@ class SettingsPage(QWidget):
                 )
 
         if self._stale_server_preference:
-            self.server_script_info.setText(
+            set_translatable_text_template(
+                self.server_script_info,
                 f"Saved script {self._stale_server_preference} is unavailable in this "
                 f"EveJS root. The preference was reset to Always ask.{one_script_note}"
             )
@@ -1844,16 +1885,21 @@ class SettingsPage(QWidget):
 
         selected = str(self.server_script_combo.currentData() or ASK_EVERY_TIME)
         if not scripts:
-            self.server_script_info.setText(
+            set_translatable_text(
+                self.server_script_info,
                 "No StartServer*.bat files detected. The legacy direct-Node mode "
                 "fallback will be used."
             )
             return
         if len(scripts) == 1:
-            self.server_script_info.setText(one_script_note.strip())
+            set_translatable_text_template(
+                self.server_script_info,
+                one_script_note.strip(),
+            )
             return
         if selected.casefold() == ASK_EVERY_TIME:
-            self.server_script_info.setText(
+            set_translatable_text(
+                self.server_script_info,
                 "A script chooser will appear whenever the game server is started."
             )
             return
@@ -1861,12 +1907,16 @@ class SettingsPage(QWidget):
         try:
             mode = mode_for_script(Path(selected))
         except ValueError:
-            self.server_script_info.setText(
+            set_translatable_text_template(
+                self.server_script_info,
                 f"{selected} is detected but unsupported as a mode indicator."
             )
             return
         detail = "mods enabled" if mode == "modded" else "no mods"
-        self.server_script_info.setText(f"Mode: {mode} ({detail}) — {selected}")
+        set_translatable_text_template(
+            self.server_script_info,
+            f"Mode: {mode} ({detail}) — {selected}",
+        )
 
     def _on_evejs_root_edited(self) -> None:
         """Rescan immediately when the root field finishes changing."""

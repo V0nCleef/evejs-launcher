@@ -3,12 +3,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QThread, Qt, pyqtSlot
+from PyQt6.QtCore import QSize, QThread, Qt, pyqtSlot
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
-    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -25,6 +24,15 @@ from PyQt6.QtWidgets import (
 
 from .config import load, save
 from .constants import COLORS as C, SEMANTIC_COLORS as S, SPACING
+from .i18n import (
+    LANGUAGES,
+    current_language,
+    format_ui_phrase,
+    set_language,
+    translate,
+    translate_discovery_diagnostic,
+    translate_ui_phrase,
+)
 from .core.discovery import (
     find_client_path,
     resolve_client_tq_path,
@@ -41,7 +49,18 @@ from .core.runtime.docker_setup import (
 from .workers.docker_preflight_worker import DockerPreflightWorker
 from .widgets.deep_signal_background import DeepSignalBackground
 from .widgets.glass_panel import GlassPanel
+from .widgets.localized_dialogs import LocalizedFileDialog as QFileDialog
 from .widgets.page_header import PageHeader
+from .widgets.status_bar import _language_flag_icon
+from .widgets.ui_translation import (
+    register_translatable_widget_tree,
+    retranslate_widget_tree,
+    set_translatable_accessible_description,
+    set_translatable_text,
+    set_translatable_text_template,
+    set_translatable_tooltip,
+    set_translatable_tooltip_template,
+)
 
 
 NATIVE_RUNTIME_HELP = (
@@ -63,7 +82,8 @@ PROJECT_NAME_HELP = (
     "Most users should leave this blank. Set a project name only to reconnect to "
     "a stack created with a custom -p name, keep a stable name after moving the "
     "folder, or separate multiple stacks. Changing it may target a different "
-    "Docker stack."
+    "Docker stack. If set, use lowercase ASCII letters, digits, hyphens, and "
+    "underscores, starting with a letter or digit."
 )
 CONNECT_ONLY_HELP = (
     "Connect only: the launcher shows status and logs but never starts, stops, "
@@ -75,6 +95,34 @@ MANAGED_HELP = (
 DOCKER_TEST_HELP = (
     "Testing is read-only. It checks Docker and the Compose project without "
     "starting containers or initializing data."
+)
+
+
+_WIZARD_STEP_LABELS = (
+    "STEP 01 / 04   WELCOME",
+    "STEP 02 / 04   RUNTIME",
+    "STEP 03 / 04   VERIFY",
+    "STEP 04 / 04   READY",
+)
+
+_DOCKER_REVIEW_TEMPLATE = (
+    "Runtime: Docker Compose\n"
+    "EveJS Root: {evejs_root}\n"
+    "Compose File: {compose_path}{compose_suffix}\n"
+    "Control: {policy}\n"
+    "Project Name: {project}\n"
+    "CLIENT Path: {client_path}\n\n"
+    "Docker configuration is valid. Game-data initialization is a separate "
+    "confirmed action. Market seeding/rebuild is also separate and is never "
+    "selected or run automatically.\n\n"
+    "Click Next to review completion."
+)
+
+_NATIVE_REVIEW_TEMPLATE = (
+    "Runtime: Native — directly on Windows\n"
+    "EveJS Root: {evejs_root}\n"
+    "CLIENT Path: {client_path}\n\n"
+    "Click Next to save these settings."
 )
 
 
@@ -375,6 +423,7 @@ class SetupWizard(QDialog):
 
         self._evejs_root = ""
         self._client_path = ""
+        self._review_route: str | None = None
         self._docker_preflight_token = 0
         self._docker_preflight_thread: QThread | None = None
         self._docker_preflight_worker: DockerPreflightWorker | None = None
@@ -383,6 +432,7 @@ class SetupWizard(QDialog):
         self._validated_docker_fingerprint: str | None = None
         self._close_after_docker_preflight = False
         self._build()
+        register_translatable_widget_tree(self)
 
     # ── UI ────────────────────────────────────────────────────────────
 
@@ -706,6 +756,28 @@ class SetupWizard(QDialog):
         nl.addLayout(progress_copy)
         nl.addStretch()
 
+        self._language_combo = QComboBox(nav)
+        self._language_combo.setObjectName("wizardLanguageSelector")
+        self._language_combo.setProperty("i18nIgnore", True)
+        self._language_combo.setAccessibleName(translate("nav.language_tooltip"))
+        self._language_combo.setToolTip(translate("nav.language_tooltip"))
+        self._language_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._language_combo.setFixedSize(190, 32)
+        self._language_combo.setIconSize(QSize(24, 16))
+        self._language_combo.setMaxVisibleItems(len(LANGUAGES))
+        for option in LANGUAGES:
+            self._language_combo.addItem(
+                _language_flag_icon(option.code),
+                option.display_name,
+                option.code,
+            )
+        language_index = self._language_combo.findData(current_language())
+        self._language_combo.setCurrentIndex(max(0, language_index))
+        self._language_combo.currentIndexChanged.connect(
+            self._on_language_selected
+        )
+        nl.addWidget(self._language_combo)
+
         self._back_btn = QPushButton("← Back")
         self._back_btn.setProperty("class", "signalSecondary")
         self._back_btn.clicked.connect(self._go_back)
@@ -719,6 +791,23 @@ class SetupWizard(QDialog):
         nl.addWidget(self._next_btn)
 
         root.addWidget(nav)
+
+    def _on_language_selected(self, index: int) -> None:
+        """Apply and persist the first-run language without restarting setup."""
+        code = self._language_combo.itemData(index)
+        selected = set_language(code)
+        cfg = load()
+        cfg["language"] = selected
+        try:
+            save(cfg)
+        except OSError:
+            pass
+        retranslate_widget_tree(self, selected)
+        self._sync_progress_chrome(self._stack.currentIndex())
+        self._refresh_review_summary()
+        tooltip = translate("nav.language_tooltip")
+        self._language_combo.setAccessibleName(tooltip)
+        self._language_combo.setToolTip(tooltip)
 
     @staticmethod
     def _make_section_label(text: str) -> QLabel:
@@ -776,9 +865,20 @@ class SetupWizard(QDialog):
         return label
 
     @staticmethod
-    def _set_status(label: QLabel, text: str, state: str = "idle") -> None:
+    def _set_status(
+        label: QLabel,
+        text: str,
+        state: str = "idle",
+        *,
+        allow_templates: bool = False,
+    ) -> None:
         """Update status copy and its semantic visual state together."""
-        label.setText(text)
+        setter = (
+            set_translatable_text_template
+            if allow_templates
+            else set_translatable_text
+        )
+        setter(label, text)
         if label.property("state") == state:
             return
         label.setProperty("state", state)
@@ -788,12 +888,61 @@ class SetupWizard(QDialog):
         label.update()
 
     def _sync_progress_chrome(self, index: int) -> None:
-        labels = ("WELCOME", "RUNTIME", "VERIFY", "READY")
-        safe_index = max(0, min(int(index), len(labels) - 1))
+        safe_index = max(0, min(int(index), len(_WIZARD_STEP_LABELS) - 1))
         self._progress.setValue(safe_index)
-        self._step_label.setText(
-            f"STEP {safe_index + 1:02d} / 04   {labels[safe_index]}"
+        set_translatable_text(
+            self._step_label,
+            _WIZARD_STEP_LABELS[safe_index],
         )
+
+    def _refresh_review_summary(self) -> None:
+        """Render reviewed framing while leaving paths and project names intact."""
+        if self._review_route == "docker":
+            explicit_compose = self._compose_input.text().strip()
+            compose_path = (
+                explicit_compose
+                or str(Path(self._evejs_root) / "compose.yaml")
+            )
+            compose_suffix = (
+                ""
+                if explicit_compose
+                else f" {translate_ui_phrase('(automatic)')}"
+            )
+            policy = translate_ui_phrase(
+                "Managed — launcher controls the stack"
+                if self._policy_combo.currentData() == "managed"
+                else "Connect only — observe an existing stack"
+            )
+            project = self._project_input.text().strip()
+            if not project:
+                project = translate_ui_phrase("Automatic")
+            client_path = self._client_path or translate_ui_phrase(
+                "(not detected)"
+            )
+            self._results.setText(
+                format_ui_phrase(
+                    _DOCKER_REVIEW_TEMPLATE,
+                    evejs_root=self._evejs_root,
+                    compose_path=compose_path,
+                    compose_suffix=compose_suffix,
+                    policy=policy,
+                    project=project,
+                    client_path=client_path,
+                )
+            )
+            return
+
+        if self._review_route == "native":
+            self._results.setText(
+                format_ui_phrase(
+                    _NATIVE_REVIEW_TEMPLATE,
+                    evejs_root=self._evejs_root,
+                    client_path=(
+                        self._client_path
+                        or translate_ui_phrase("(not detected)")
+                    ),
+                )
+            )
 
     # ── Navigation ────────────────────────────────────────────────────
 
@@ -838,26 +987,25 @@ class SetupWizard(QDialog):
                 self._compose_input.text().strip(),
             )
             if valid:
-                self._path_status.setText(
-                    "Docker project found. Run Test Docker setup to continue."
-                )
                 self._set_status(
                     self._path_status,
-                    self._path_status.text(),
+                    "Docker project found. Run Test Docker setup to continue.",
                     "notice",
                 )
             elif text:
-                self._path_status.setText(f"Docker setup: {msg}")
+                localized_message = translate_discovery_diagnostic(msg)
                 self._set_status(
                     self._path_status,
-                    self._path_status.text(),
+                    format_ui_phrase(
+                        "Docker setup: {message}",
+                        message=localized_message,
+                    ),
                     "error",
                 )
             else:
-                self._path_status.setText("Enter the path to your EveJS folder")
                 self._set_status(
                     self._path_status,
-                    self._path_status.text(),
+                    "Enter the path to your EveJS folder",
                     "idle",
                 )
             self._test_docker_btn.setEnabled(
@@ -872,34 +1020,38 @@ class SetupWizard(QDialog):
 
         valid, msg = validate_evejs_root(text)
         if valid:
-            self._path_status.setText("✓ Valid EveJS installation")
             self._set_status(
                 self._path_status,
-                self._path_status.text(),
+                "✓ Valid EveJS installation",
                 "ready",
             )
             self._next_btn.setEnabled(True)
         elif text:
-            self._path_status.setText(f"✗ {msg}")
+            localized_message = translate_discovery_diagnostic(msg)
             self._set_status(
                 self._path_status,
-                self._path_status.text(),
+                f"✗ {localized_message}",
                 "error",
             )
             self._next_btn.setEnabled(False)
         else:
-            self._path_status.setText("Enter the path to your EveJS folder")
             self._set_status(
                 self._path_status,
-                self._path_status.text(),
+                "Enter the path to your EveJS folder",
                 "idle",
             )
             self._next_btn.setEnabled(False)
 
         compose = Path(text) / "compose.yaml" if text else None
         if text and not valid and compose is not None and compose.is_file():
-            self._path_status.setText(
-                f"{msg}\nDocker Compose is available here; select Docker Compose to validate it."
+            self._set_status(
+                self._path_status,
+                localized_message
+                + "\n"
+                + translate_ui_phrase(
+                    "Docker Compose is available here; select Docker Compose to validate it."
+                ),
+                "notice",
             )
 
     def _docker_mode(self) -> bool:
@@ -919,9 +1071,12 @@ class SetupWizard(QDialog):
         docker = self._docker_mode()
         self._docker_fields.setVisible(docker)
         runtime_help = DOCKER_RUNTIME_HELP if docker else NATIVE_RUNTIME_HELP
-        self._backend_help.setText(runtime_help)
-        self._backend_combo.setToolTip(runtime_help)
-        self._backend_combo.setAccessibleDescription(runtime_help)
+        set_translatable_text(self._backend_help, runtime_help)
+        set_translatable_tooltip(self._backend_combo, runtime_help)
+        set_translatable_accessible_description(
+            self._backend_combo,
+            runtime_help,
+        )
         self._invalidate_docker_preflight()
         self._update_docker_guidance()
         self._on_path_changed(self._path_input.text())
@@ -931,11 +1086,15 @@ class SetupWizard(QDialog):
         docker = self._docker_mode()
         managed = docker and self._policy_combo.currentData() == "managed"
         policy_help = MANAGED_HELP if managed else CONNECT_ONLY_HELP
-        self._policy_help.setText(policy_help)
-        self._policy_combo.setToolTip(policy_help)
-        self._policy_combo.setAccessibleDescription(policy_help)
+        set_translatable_text(self._policy_help, policy_help)
+        set_translatable_tooltip(self._policy_combo, policy_help)
+        set_translatable_accessible_description(
+            self._policy_combo,
+            policy_help,
+        )
         self._keep_running_check.setEnabled(managed)
-        self._keep_running_check.setToolTip(
+        set_translatable_tooltip(
+            self._keep_running_check,
             "Leave managed Compose services running when the launcher closes."
             if managed
             else "Available only with Managed control."
@@ -955,8 +1114,8 @@ class SetupWizard(QDialog):
                 "Using: <EveJS Root>\\compose.yaml after a root is selected "
                 "(automatic)"
             )
-        self._compose_resolved.setText(resolved)
-        self._compose_resolved.setToolTip(resolved)
+        set_translatable_text_template(self._compose_resolved, resolved)
+        set_translatable_tooltip_template(self._compose_resolved, resolved)
 
     def _invalidate_docker_preflight(self, *_args: object) -> None:
         self._validated_docker_fingerprint = None
@@ -1051,7 +1210,15 @@ class SetupWizard(QDialog):
                     if result.report.diagnostics
                     else "Docker setup validation failed."
                 )
-                self._set_status(self._docker_status, diagnostic, "error")
+                localized_diagnostic = translate_discovery_diagnostic(diagnostic)
+                self._set_status(
+                    self._docker_status,
+                    format_ui_phrase(
+                        "Docker setup: {message}",
+                        message=localized_diagnostic,
+                    ),
+                    "error",
+                )
         self._docker_preflight_result_received = True
         self._finish_docker_preflight_if_complete()
 
@@ -1085,7 +1252,7 @@ class SetupWizard(QDialog):
         prev = cur - 1
         self._stack.setCurrentIndex(prev)
         self._sync_progress_chrome(prev)
-        self._next_btn.setText("Next →")
+        set_translatable_text(self._next_btn, "Next →")
         if prev == 1:
             self._on_path_changed(self._path_input.text())
         else:
@@ -1112,13 +1279,10 @@ class SetupWizard(QDialog):
                     self._evejs_root,
                 )
                 if resolved_client is None:
-                    self._path_status.setText(
-                        "✗ EVE Client must be the copied tq folder containing "
-                        "start.ini and bin64\\exefile.exe."
-                    )
                     self._set_status(
                         self._path_status,
-                        self._path_status.text(),
+                        "✗ EVE Client must be the copied tq folder containing "
+                        "start.ini and bin64\\exefile.exe.",
                         "error",
                     )
                     return
@@ -1127,39 +1291,18 @@ class SetupWizard(QDialog):
             else:
                 self._client_path = ""
             if self._docker_mode():
-                self._review_badge.setText("DOCKER ROUTE VERIFIED")
-                explicit_compose = self._compose_input.text().strip()
-                compose_path = (
-                    explicit_compose
-                    or str(Path(self._evejs_root) / "compose.yaml")
-                )
-                compose_suffix = "" if explicit_compose else " (automatic)"
-                policy = (
-                    "Managed — launcher controls the stack"
-                    if self._policy_combo.currentData() == "managed"
-                    else "Connect only — observe an existing stack"
-                )
-                project = self._project_input.text().strip() or "Automatic"
-                self._results.setText(
-                    "Runtime: Docker Compose\n"
-                    f"EveJS Root: {self._evejs_root}\n"
-                    f"Compose File: {compose_path}{compose_suffix}\n"
-                    f"Control: {policy}\n"
-                    f"Project Name: {project}\n"
-                    f"CLIENT Path: {self._client_path or '(not detected)'}\n\n"
-                    "Docker configuration is valid. Game-data initialization is a "
-                    "separate confirmed action. Market seeding/rebuild is also "
-                    "separate and is never selected or run automatically.\n\n"
-                    "Click Next to review completion."
+                self._review_route = "docker"
+                set_translatable_text(
+                    self._review_badge,
+                    "DOCKER ROUTE VERIFIED",
                 )
             else:
-                self._review_badge.setText("NATIVE ROUTE VERIFIED")
-                self._results.setText(
-                    "Runtime: Native — directly on Windows\n"
-                    f"EveJS Root: {self._evejs_root}\n"
-                    f"CLIENT Path: {self._client_path or '(not detected)'}\n\n"
-                    "Click Next to save these settings."
+                self._review_route = "native"
+                set_translatable_text(
+                    self._review_badge,
+                    "NATIVE ROUTE VERIFIED",
                 )
+            self._refresh_review_summary()
 
         nxt = cur + 1
         if nxt < self._stack.count():
@@ -1168,12 +1311,12 @@ class SetupWizard(QDialog):
             self._back_btn.setVisible(True)
 
             if nxt == self._stack.count() - 1:
-                self._next_btn.setText("✓ Finish")
+                set_translatable_text(self._next_btn, "✓ Finish")
             elif nxt == 1:
-                self._next_btn.setText("Next →")
+                set_translatable_text(self._next_btn, "Next →")
                 self._on_path_changed(self._path_input.text())
             else:
-                self._next_btn.setText("Next →")
+                set_translatable_text(self._next_btn, "Next →")
                 self._next_btn.setEnabled(True)
         else:
             self._save_and_accept()

@@ -70,6 +70,7 @@ from src.core.runtime.portraits import (
     PortraitRequest,
     PortraitTarget,
 )
+from src.i18n import format_ui_phrase, translate_ui_phrase
 from src.ui.motion import MotionController
 from src.utils.cache import PortraitCache
 from src.widgets.character_card import CharacterCard
@@ -78,6 +79,12 @@ from src.widgets.detail_panel import DetailPanel
 from src.widgets.new_character_card import NewCharacterCard
 from src.widgets.skeleton_card import SkeletonCard
 from src.widgets.page_header import PageHeader
+from src.widgets.ui_translation import (
+    register_translatable_widget_tree,
+    set_translatable_text,
+    set_translatable_text_template,
+    set_translatable_tooltip,
+)
 from src.workers.portrait_worker import PortraitLoadFailure, PortraitLoader
 
 GRID_COLUMNS = 6
@@ -209,6 +216,7 @@ class CharactersPage(QWidget):
         self._group_launch_in_progress = False
 
         self._build_ui()
+        register_translatable_widget_tree(self)
         self.set_group_state(TargetGroupState())
         self.show_skeletons()
 
@@ -519,7 +527,7 @@ class CharactersPage(QWidget):
             skeleton = SkeletonCard()
             self._grid.addWidget(skeleton, i // 3, i % 3)
         self._relayout_skeletons()
-        self.count_label.setText("Loading…")
+        set_translatable_text(self.count_label, "Loading…")
 
     def _relayout_skeletons(self) -> bool:
         skeletons = [
@@ -960,11 +968,18 @@ class CharactersPage(QWidget):
         self._group_state = state
         self.group_combo.blockSignals(True)
         self.group_combo.clear()
-        self.group_combo.addItem("All Visible Characters", None)
+        self.group_combo.addItem(
+            translate_ui_phrase("All Visible Characters"),
+            None,
+        )
         selected_index = 0
         for index, group in enumerate(state.groups, start=1):
             self.group_combo.addItem(
-                f"{group.name} ({len(group.members)})",
+                format_ui_phrase(
+                    "{group_name} ({member_count})",
+                    group_name=group.name,
+                    member_count=len(group.members),
+                ),
                 group.group_id,
             )
             if group.group_id == state.selected_group_id:
@@ -974,6 +989,16 @@ class CharactersPage(QWidget):
         self._update_group_launch_button()
         self._apply_filter(self.search_edit.text())
 
+    def retranslate_ui(self) -> None:
+        """Rebuild retained group framing while preserving names and IDs."""
+        self.set_group_state(self._group_state)
+        self.page_header.set_subtitle(self._data_error or _ROSTER_SUBTITLE)
+        for card in self._cards.values():
+            card.retranslate_ui()
+        self.detail_panel.retranslate_ui()
+        if self._new_character_card is not None:
+            self._new_character_card.retranslate_ui()
+
     def set_group_management_available(
         self,
         enabled: bool,
@@ -981,7 +1006,10 @@ class CharactersPage(QWidget):
     ) -> None:
         """Enable group editing only when an attributed data source is loaded."""
         self.manage_groups_button.setEnabled(enabled)
-        self.manage_groups_button.setToolTip("" if enabled else reason)
+        set_translatable_tooltip(
+            self.manage_groups_button,
+            "" if enabled else reason,
+        )
 
     def set_group_launch_available(
         self,
@@ -1008,11 +1036,13 @@ class CharactersPage(QWidget):
         self._group_launch_in_progress = True
         self.group_combo.setEnabled(False)
         label = f" {group_name.upper()}" if group_name else ""
-        self.launch_group_button.setText(
+        set_translatable_text_template(
+            self.launch_group_button,
             f"LAUNCHING{label} {attempted} OF {total}…"
         )
         self.launch_group_button.setEnabled(True)
-        self.launch_group_button.setToolTip(
+        set_translatable_tooltip(
+            self.launch_group_button,
             "Cancel remaining queued launches; clients already started will continue"
         )
 
@@ -1035,11 +1065,19 @@ class CharactersPage(QWidget):
         if self._group_launch_in_progress:
             return
         group = self._selected_group()
-        target = group.name.upper() if group is not None else "ALL"
+        target = (
+            group.name.upper()
+            if group is not None
+            else translate_ui_phrase("ALL")
+        )
         count = self._group_launch_ready_count
-        self.launch_group_button.setText(f"LAUNCH {target} ({count})")
+        set_translatable_text_template(
+            self.launch_group_button,
+            f"LAUNCH {target} ({count})",
+        )
         self.launch_group_button.setEnabled(self._group_launch_available)
-        self.launch_group_button.setToolTip(
+        set_translatable_tooltip(
+            self.launch_group_button,
             "Launch every ready character in this group"
             if self._group_launch_available and group is not None
             else (
@@ -1070,7 +1108,7 @@ class CharactersPage(QWidget):
         if message == self._data_error:
             return
         self._data_error = message
-        self.count_label.setToolTip(message)
+        set_translatable_tooltip(self.count_label, message)
         self.count_label.setProperty("state", "error" if message else "")
         self.count_label.style().unpolish(self.count_label)
         self.count_label.style().polish(self.count_label)
@@ -1359,13 +1397,19 @@ class CharactersPage(QWidget):
             else sum(card.char_id in group_member_ids for card in self._cards.values())
         )
         if self._data_error and not self._cards:
-            self.count_label.setText("DATA UNAVAILABLE")
+            set_translatable_text(self.count_label, "DATA UNAVAILABLE")
         elif needle or status_filter is not None:
-            self.count_label.setText(f"({visible} / {group_total})")
+            set_translatable_text_template(
+                self.count_label,
+                f"({visible} / {group_total})",
+            )
         elif group_member_ids is not None:
-            self.count_label.setText(f"({group_total} of {total})")
+            set_translatable_text_template(
+                self.count_label,
+                f"({group_total} of {total})",
+            )
         else:
-            self.count_label.setText(f"({total})")
+            set_translatable_text_template(self.count_label, f"({total})")
 
         if self._selected_key is not None:
             selected_card = self._cards.get(self._selected_key)

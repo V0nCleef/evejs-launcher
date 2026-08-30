@@ -5,6 +5,8 @@ from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from src.constants import COLORS
+from src.i18n import format_ui_phrase, translate_ui_phrase
+from src.widgets.ui_translation import register_translatable_widget_tree
 
 
 class ShipboardCaption(QFrame):
@@ -69,6 +71,8 @@ class ShipboardCaption(QFrame):
         self._timer.setSingleShot(True)
         self._timer.setInterval(self.DISPLAY_MS)
         self._timer.timeout.connect(self.hide)
+        self._source_message = ""
+        register_translatable_widget_tree(self)
         self.hide()
 
     def show_caption(self, text: str) -> None:
@@ -76,14 +80,26 @@ class ShipboardCaption(QFrame):
         message = " ".join(str(text).split())
         if not message:
             return
-        self.message_label.setText(message)
-        self.message_label.setAccessibleDescription(message)
-        self.setAccessibleDescription(f"LYRA says: {message}")
+        self._source_message = message
+        self._render_message()
         self.adjustSize()
         self.reposition()
         self.show()
         self.raise_()
         self._timer.start()
+
+    def _render_message(self) -> None:
+        message = translate_ui_phrase(self._source_message)
+        self.message_label.setText(message)
+        self.message_label.setAccessibleDescription(message)
+        self.setAccessibleDescription(
+            format_ui_phrase("LYRA says: {message}", message=message)
+        )
+
+    def retranslate_ui(self) -> None:
+        """Refresh the visible fixed caption without replaying its audio."""
+        if self._source_message:
+            self._render_message()
 
     def reposition(self) -> None:
         """Keep the caption centered above the footer across window resizes."""

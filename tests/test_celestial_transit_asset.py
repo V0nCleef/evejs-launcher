@@ -22,7 +22,11 @@ def test_approved_celestial_transit_asset_is_exact_and_release_packaged() -> Non
         assert stream.getnframes() == 2_419_200
 
     spec = (ROOT / "build.spec").read_text(encoding="utf-8")
-    assert "assets/audio/music/*.wav" in spec
+    assert (
+        "('assets/audio/music/celestial_transit.wav', 'assets/audio/music')"
+        in spec
+    )
+    assert "assets/audio/music/*" not in spec
     assert "assets/audio/music/*.mp3" not in spec
 
 

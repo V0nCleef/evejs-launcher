@@ -34,16 +34,28 @@ from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
     QHBoxLayout,
-    QInputDialog,
     QMainWindow,
-    QMessageBox,
     QProgressDialog,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from .widgets.localized_dialogs import (
+    LocalizedInputDialog as QInputDialog,
+    LocalizedMessageBox as QMessageBox,
+)
+
 from . import config
+from .i18n import (
+    current_language,
+    format_character_deletion_confirmation,
+    format_ui_phrase,
+    set_language,
+    translate,
+    translate_ui_phrase,
+    translate_service_tooltip,
+)
 from .audio.controller import AudioController
 from .audio.events import (
     VoiceEvent,
@@ -142,7 +154,11 @@ from .core.overview_state import (
     process_overview_ack_files,
     remove_characters_from_overview_state,
 )
-from .core.platform import hard_exit, launch_tool_wrapper
+from .core.platform import (
+    center_tool_window_for_process_tree,
+    hard_exit,
+    launch_tool_wrapper,
+)
 from .core.process_tracker import ProcessTracker
 from .core.profiles import (
     PROFILES_ROOT,
@@ -229,9 +245,11 @@ from .widgets.console_panel import ConsolePanel
 from .widgets.shipboard_caption import ShipboardCaption
 from .widgets.character_groups_dialog import CharacterGroupsDialog
 from .widgets.nav_panel import NavPanel
+from .widgets.ui_translation import retranslate_widget_tree
 from .widgets.new_character_dialog import NewCharacterDialog, NewCharacterDraft
 from .widgets.status_bar import StatusBar
 from .widgets.title_bar import TitleBar
+from .widgets.window_behavior import launcher_window_flags
 from .workers.docker_lifecycle_worker import DockerLifecycleWorker
 from .workers.docker_character_creation_worker import (
     DockerCharacterCreationWorker,
@@ -390,6 +408,10 @@ class MainWindow(QMainWindow):
     _MARGIN = 8  # px resize-hit border around the frame
     _VOICE_PREPARE_MAX_ATTEMPTS = 3
     _VOICE_PREPARE_RETRY_DELAY_MS = 250
+    _TOOL_WINDOW_POLL_INTERVAL_MS = 500
+    _TOOL_WINDOW_POLL_TIMEOUT_SECONDS = 180.0
+    _CLIENT_CODE_GRABBER_WINDOW_TITLE = "EVE Client Code Grabber"
+    _CLIENT_CODE_GRABBER_WINDOW_CLASS = "TkTopLevel"
 
     def __init__(self) -> None:
         super().__init__()
@@ -398,7 +420,7 @@ class MainWindow(QMainWindow):
         self.resize(1366, 768)
 
         # Frameless window with custom title bar
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+        self.setWindowFlags(launcher_window_flags())
 
         # Window icon
         icon_path = Path(__file__).resolve().parent.parent / "assets" / "logo.png"
@@ -407,6 +429,7 @@ class MainWindow(QMainWindow):
 
         # ── State ──────────────────────────────────────────────────────
         self._cfg = config.load()
+        set_language(self._cfg.get("language", "en"))
         # Backends remain lazy until music or an announcement is requested.
         self._audio_controller = AudioController(self._cfg, self)
         self._voice_prepare_attempts = 0
@@ -420,6 +443,7 @@ class MainWindow(QMainWindow):
         if resolved_client_path is not None:
             self._cfg["client_path"] = str(resolved_client_path)
         self._tracker = ProcessTracker()
+        self._tool_window_timers: set[QTimer] = set()
         self._server_proc: subprocess.Popen | None = None
         self._market_proc: subprocess.Popen | None = None
         self._server_intent: ServiceState | None = None
@@ -598,6 +622,7 @@ class MainWindow(QMainWindow):
         self._nav.server_toggled.connect(self._on_server_toggle)
         self._nav.market_toggled.connect(self._on_market_toggle)
         self._nav.kill_all_clicked.connect(self._kill_all_clients)
+        self._status_bar.language_changed.connect(self._on_language_changed)
 
         self._home_page.launch_all_clicked.connect(self._launch_all)
         self._home_page.cancel_launches_clicked.connect(self._cancel_launch_queue)
@@ -654,6 +679,7 @@ class MainWindow(QMainWindow):
         self._audio_controller.music_playback_changed.connect(
             self._title_bar.set_audio_status
         )
+        self._wire_title_bar_music_controls()
 
         self._active_update_checkers: list[UpdateChecker] = []
         self._update_checker = self._create_update_checker()
@@ -707,6 +733,7 @@ class MainWindow(QMainWindow):
         # Initial paint
         self._update_status_bar()
         self._refresh_characters()
+        self._retranslate_application_ui()
 
     # ── UI Construction ────────────────────────────────────────────────
 
@@ -768,6 +795,55 @@ class MainWindow(QMainWindow):
         root.addWidget(self._status_bar)
 
     # ── Page switching with cross-fade ─────────────────────────────────
+
+    def _on_language_changed(self, code: str) -> None:
+        """Persist a language change and refresh reviewed UI phrases."""
+        normalized = set_language(code)
+        self._cfg["language"] = normalized
+        try:
+            config.save(self._cfg)
+        except OSError as exc:
+            log.warning("Could not persist launcher language: %s", exc)
+        self._apply_runtime_snapshot(self._runtime_snapshot)
+        self._retranslate_application_ui()
+
+    def _retranslate_application_ui(self) -> None:
+        """Refresh navigation plus reviewed phrases in the current widget tree."""
+        self._nav.retranslate_ui()
+        self._status_bar.retranslate_ui()
+        for page in (
+            getattr(self, "_title_bar", None),
+            getattr(self, "_home_page", None),
+            getattr(self, "_characters_page", None),
+            getattr(self, "_shipboard_caption", None),
+        ):
+            refresh = getattr(page, "retranslate_ui", None)
+            if callable(refresh):
+                refresh()
+        language = current_language()
+        for root in (
+            getattr(self, "_title_bar", None),
+            getattr(self, "_stack", None),
+            getattr(self, "_status_bar", None),
+            getattr(self, "_console_panel", None),
+            getattr(self, "_shipboard_caption", None),
+        ):
+            if isinstance(root, QObject):
+                retranslate_widget_tree(root, language)
+        from .widgets.status_ring import StatusRing
+
+        for ring in self.findChildren(StatusRing):
+            ring.retranslate_ui()
+
+    def _retranslate_runtime_ui(self) -> None:
+        """Keep high-frequency runtime labels in the selected language."""
+        language = current_language()
+        for root in (
+            getattr(self, "_home_page", None),
+            getattr(self, "_status_bar", None),
+        ):
+            if isinstance(root, QObject):
+                retranslate_widget_tree(root, language)
 
     def _switch_page(self, index: int) -> None:
         """Switch the center stack to a different page."""
@@ -1065,7 +1141,7 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            launch_tool_wrapper(entrypoint, action.arguments)
+            process = launch_tool_wrapper(entrypoint, action.arguments)
         except (OSError, RuntimeError, ValueError) as exc:
             message = str(exc)
             log.error("Tool launch failed for %s: %s", tool.definition.id, message)
@@ -1075,12 +1151,25 @@ class MainWindow(QMainWindow):
                 success=False,
                 message=message,
             )
+            launch_failure = (
+                f"{tool.definition.name} could not be launched."
+                if current_language() == "en"
+                else f"{tool.definition.name}: "
+                f"{translate_ui_phrase('Tool wrapper could not be launched')}"
+            )
             QMessageBox.critical(
                 self,
                 "Tool Launch Failed",
-                f"{tool.definition.name} could not be launched.\n\n{message}",
+                f"{launch_failure}\n\n{message}",
             )
             return
+
+        if tool.definition.id == "client-code-grabber":
+            self._schedule_tool_window_centering(
+                process,
+                self._CLIENT_CODE_GRABBER_WINDOW_TITLE,
+                self._CLIENT_CODE_GRABBER_WINDOW_CLASS,
+            )
 
         log.info(
             "Launched tool %s via %s",
@@ -1093,6 +1182,67 @@ class MainWindow(QMainWindow):
             success=True,
             message="Tool wrapper launched",
         )
+
+    def _schedule_tool_window_centering(
+        self,
+        process: subprocess.Popen,
+        expected_title: str,
+        expected_class_name: str,
+    ) -> None:
+        """Poll briefly for one reviewed tool GUI, then center it safely."""
+        root_pid = getattr(process, "pid", None)
+        if (
+            not isinstance(root_pid, int)
+            or isinstance(root_pid, bool)
+            or root_pid <= 0
+        ):
+            log.warning("Could not center tool window: wrapper PID is unavailable")
+            return
+
+        timer = QTimer(self)
+        timer.setInterval(self._TOOL_WINDOW_POLL_INTERVAL_MS)
+        deadline = time.monotonic() + self._TOOL_WINDOW_POLL_TIMEOUT_SECONDS
+        anchor_hwnd = int(self.winId())
+        successful_passes = 0
+
+        def finish() -> None:
+            timer.stop()
+            self._tool_window_timers.discard(timer)
+            timer.deleteLater()
+
+        def poll() -> None:
+            nonlocal successful_passes
+            if process.poll() is not None:
+                finish()
+                return
+            if time.monotonic() >= deadline:
+                log.debug(
+                    "Tool window did not appear before centering timeout pid=%s",
+                    root_pid,
+                )
+                finish()
+                return
+            try:
+                centered = center_tool_window_for_process_tree(
+                    root_pid,
+                    expected_title,
+                    expected_class_name,
+                    anchor_hwnd=anchor_hwnd,
+                )
+            except (OSError, ValueError) as exc:
+                log.warning("Could not center tool window pid=%s: %s", root_pid, exc)
+                finish()
+                return
+
+            # A second pass prevents the child GUI's own late geometry call
+            # from undoing the first correction during startup.
+            successful_passes = successful_passes + 1 if centered else 0
+            if successful_passes >= 2:
+                finish()
+
+        timer.timeout.connect(poll)
+        self._tool_window_timers.add(timer)
+        timer.start()
 
     def _begin_docker_tool(
         self,
@@ -4254,17 +4404,20 @@ class MainWindow(QMainWindow):
         if action is OverviewPatchAction.RESTORE and not status.can_restore:
             dialog.set_patch_status(status)
             return
-        verb = (
-            "install the optional overview bridge"
+        question_source = (
+            "Install the optional overview bridge?\n\n"
+            "The launcher verifies build 3396210, keeps the original beside "
+            "code.ccp, stages the replacement, and validates the completed archive."
             if action is OverviewPatchAction.PATCH
-            else "restore the original client archive"
+            else
+            "Restore the original client archive?\n\n"
+            "The launcher verifies build 3396210, keeps the original beside "
+            "code.ccp, stages the replacement, and validates the completed archive."
         )
         reply = QMessageBox.question(
             self,
             "EVE Client Overview Patch",
-            f"{verb.capitalize()}?\n\n"
-            "The launcher verifies build 3396210, keeps the original beside "
-            "code.ccp, stages the replacement, and validates the completed archive.",
+            translate_ui_phrase(question_source),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -4823,29 +4976,38 @@ class MainWindow(QMainWindow):
             if dialog is not None:
                 dialog.set_busy(False)
                 dialog.accept()
-            created = "The Docker account and character were created and verified."
+            created = translate_ui_phrase(
+                "The Docker account and character were created and verified."
+            )
             if result.cleanup_confirmed is False:
                 QMessageBox.warning(
                     self,
                     "Character Created — Cleanup Unconfirmed",
-                    f"{created}\n\nDo not retry creation. EveJS did not confirm "
-                    "final maintenance cleanup, so the Compose services were kept "
-                    "stopped. Retain the scoped backup and verify the game store "
-                    "before starting services.",
+                    f"{created}\n\n"
+                    + translate_ui_phrase(
+                        "Do not retry creation. EveJS did not confirm final maintenance "
+                        "cleanup, so the Compose services were kept stopped. Retain the "
+                        "scoped backup and verify the game store before starting services."
+                    ),
                 )
             elif restore_succeeded is False:
                 QMessageBox.warning(
                     self,
                     "Character Created — Services Not Restored",
-                    f"{created}\n\nThe prior Compose service state could not be "
-                    "restored automatically.",
+                    f"{created}\n\n"
+                    + translate_ui_phrase(
+                        "The prior Compose service state could not be restored automatically."
+                    ),
                 )
             elif overview_error:
                 QMessageBox.warning(
                     self,
                     "Character Created — Overview Not Queued",
-                    f"{created}\n\nThe pending overview import could not be saved: "
-                    f"{overview_error}",
+                    f"{created}\n\n"
+                    + format_ui_phrase(
+                        "The pending overview import could not be saved: {error}",
+                        error=overview_error,
+                    ),
                 )
             else:
                 QMessageBox.information(self, "Character Created", created)
@@ -4981,8 +5143,9 @@ class MainWindow(QMainWindow):
                 overview_note = ""
                 if source_id is not None:
                     if source_id in self._snapshot_ready_ids():
-                        overview_note = (
-                            " Its copied overview will be applied on first launcher login."
+                        overview_note = " " + translate_ui_phrase(
+                            "The captured source overview will be imported on the new "
+                            "character's first launcher login."
                         )
                     else:
                         source_name = next(
@@ -4994,21 +5157,29 @@ class MainWindow(QMainWindow):
                             ),
                             "the selected source character",
                         )
-                        overview_note = (
-                            f" Next, launch '{source_name}' once through the launcher "
-                            "to capture its overview. Then launch the new character to "
-                            "apply the queued copy."
+                        overview_note = " " + format_ui_phrase(
+                            "Next, launch '{source_name}' once through the launcher to "
+                            "capture its overview. Then launch the new character to apply "
+                            "the queued copy.",
+                            source_name=source_name,
                         )
                 created_message = (
-                    f"Created account '{outcome.request.username}' and character "
-                    f"'{outcome.request.character_name}'.{overview_note}"
+                    format_ui_phrase(
+                        "Created account '{username}' and character '{character_name}'.",
+                        username=outcome.request.username,
+                        character_name=outcome.request.character_name,
+                    )
+                    + overview_note
                 )
                 if overview_state_error:
                     QMessageBox.warning(
                         self,
                         "Character Created — Overview Not Queued",
-                        f"{created_message}\n\nThe pending overview import could not "
-                        f"be saved: {overview_state_error}",
+                        f"{created_message}\n\n"
+                        + format_ui_phrase(
+                            "The pending overview import could not be saved: {error}",
+                            error=overview_state_error,
+                        ),
                     )
                 else:
                     QMessageBox.information(
@@ -5176,27 +5347,24 @@ class MainWindow(QMainWindow):
                 return
             restart_mode = resolved[0]
 
-        if scope is CharacterDeletionScope.ACCOUNT:
-            names = ", ".join(candidate.name for candidate in account.characters)
-            subject = f"account '{username}' and {len(account.characters)} character(s)"
-            detail = f"Characters: {names}"
-            confirmation_target = username
-        else:
-            subject = f"character '{character_name}'"
-            detail = f"Account '{username}' will be retained."
-            confirmation_target = character_name
-        service_note = (
-            "\n\nLauncher-owned EveJS services will be stopped and restored."
-            if game_owned or market_owned
-            else ""
+        names = ", ".join(candidate.name for candidate in account.characters)
+        confirmation_target = (
+            username
+            if scope is CharacterDeletionScope.ACCOUNT
+            else character_name
+        )
+        confirmation_text = format_character_deletion_confirmation(
+            scope.value,
+            username=username,
+            character_name=character_name,
+            character_names=names,
+            character_count=len(account.characters),
+            services_owned=game_owned or market_owned,
         )
         reply = QMessageBox.question(
             self,
             "Confirm EveJS Deletion",
-            f"Delete {subject}?\n\n{detail}\n\n"
-            "EveJS will run its native character cleanup. The launcher will keep "
-            "a recoverable backup of every affected table and portrait. Account "
-            f"profile/settings folders are preserved.{service_note}",
+            confirmation_text,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -5231,8 +5399,10 @@ class MainWindow(QMainWindow):
         self._character_deletion_restart_market = market_owned
         self._character_deletion_restart_mode = restart_mode
         progress = QProgressDialog(self)
-        progress.setWindowTitle("EveJS Deletion")
-        progress.setLabelText("Preparing a recoverable backup...")
+        progress.setWindowTitle(translate_ui_phrase("EveJS Deletion"))
+        progress.setLabelText(
+            translate_ui_phrase("Preparing a recoverable backup...")
+        )
         progress.setRange(0, 0)
         progress.setCancelButton(None)
         progress.setMinimumDuration(0)
@@ -5283,7 +5453,9 @@ class MainWindow(QMainWindow):
             return
         progress = self._character_deletion_progress
         if progress is not None:
-            progress.setLabelText("Backing up, deleting, and verifying...")
+            progress.setLabelText(
+                translate_ui_phrase("Backing up, deleting, and verifying...")
+            )
 
         worker_factory = getattr(self, "_character_deletion_worker_factory", None)
         worker = (
@@ -5399,33 +5571,46 @@ class MainWindow(QMainWindow):
             self._refresh_characters()
             if not self._close_in_progress:
                 if outcome.account_deleted:
-                    summary = (
-                        f"Deleted account '{outcome.request.username}' and "
-                        f"{len(outcome.deleted_character_ids)} character(s)."
+                    summary = format_ui_phrase(
+                        "Deleted account '{username}' and {count} character(s).",
+                        username=outcome.request.username,
+                        count=len(outcome.deleted_character_ids),
                     )
                 else:
-                    summary = (
-                        f"Deleted character '{outcome.request.character_name}'. "
-                        f"Account '{outcome.request.username}' was retained."
+                    summary = format_ui_phrase(
+                        "Deleted character '{character_name}'. Account '{username}' "
+                        "was retained.",
+                        character_name=outcome.request.character_name,
+                        username=outcome.request.username,
                     )
+                recovery = format_ui_phrase(
+                    "Account profile/settings folders were preserved. A recovery "
+                    "backup is retained at:\n{backup_path}",
+                    backup_path=outcome.backup_path,
+                )
+                group_note = (
+                    "\n\n"
+                    + translate_ui_phrase(
+                        "One or more group memberships could not be saved; open Manage "
+                        "Groups to remove missing entries."
+                    )
+                    if group_cleanup_error
+                    else ""
+                )
                 QMessageBox.information(
                     self,
                     "Deletion Complete",
-                    f"{summary}\n\nAccount profile/settings folders were preserved. "
-                    f"A recovery backup is retained at:\n{outcome.backup_path}"
-                    + (
-                        "\n\nOne or more group memberships could not be saved; "
-                        "open Manage Groups to remove missing entries."
-                        if group_cleanup_error
-                        else ""
-                    ),
+                    f"{summary}\n\n{recovery}{group_note}",
                 )
         elif not self._close_in_progress:
             QMessageBox.critical(
                 self,
                 "Deletion Failed",
-                f"{outcome.message}\n\nThe launcher attempted automatic rollback; "
-                "no unverified deletion was accepted.",
+                f"{outcome.message}\n\n"
+                + translate_ui_phrase(
+                    "The launcher attempted automatic rollback; no unverified deletion "
+                    "was accepted."
+                ),
             )
 
         if self._close_in_progress:
@@ -6415,38 +6600,63 @@ class MainWindow(QMainWindow):
             cancelled=cancelled,
         )
         if cancelled:
-            message = (
-                f"Launched {succeeded} client(s); remaining queued launches were cancelled."
+            message = format_ui_phrase(
+                "Launched {count} client(s); remaining queued launches were cancelled.",
+                count=succeeded,
             )
             if skipped_running:
-                message += f" Skipped {skipped_running} already-running account(s)."
+                message += " " + format_ui_phrase(
+                    "Skipped {count} already-running account(s).",
+                    count=skipped_running,
+                )
             if skipped_unavailable:
-                message += (
-                    f" Skipped {skipped_unavailable} hidden, banned, missing, "
-                    "or otherwise unavailable character(s)."
+                message += " " + format_ui_phrase(
+                    "Skipped {count} hidden, banned, missing, or otherwise unavailable "
+                    "character(s).",
+                    count=skipped_unavailable,
                 )
             if failure_messages:
-                message += f"\n\nLaunch sequence stopped:\n{failure_messages[0]}"
+                message += "\n\n" + format_ui_phrase(
+                    "Launch sequence stopped:\n{message}",
+                    message=failure_messages[0],
+                )
             QMessageBox.information(self, "Launch Cancelled", message)
         else:
             failures = max(0, attempted - succeeded)
             details: list[str] = []
             if skipped_running:
-                details.append(f"{skipped_running} already running")
+                details.append(
+                    format_ui_phrase(
+                        "{count} already running",
+                        count=skipped_running,
+                    )
+                )
             if skipped_unavailable:
                 details.append(
-                    f"{skipped_unavailable} hidden, banned, missing, or unavailable"
+                    format_ui_phrase(
+                        "{count} hidden, banned, missing, or unavailable",
+                        count=skipped_unavailable,
+                    )
                 )
             if failures:
-                details.append(f"{failures} failed")
-            suffix = f" Skipped: {', '.join(details)}." if details else ""
+                details.append(format_ui_phrase("{count} failed", count=failures))
+            suffix = (
+                " " + format_ui_phrase("Skipped: {details}.", details=", ".join(details))
+                if details
+                else ""
+            )
             failure_detail = ""
             if failures and failure_messages:
-                failure_detail = f"\n\nFirst failure:\n{failure_messages[0]}"
+                failure_detail = "\n\n" + format_ui_phrase(
+                    "First failure:\n{message}",
+                    message=failure_messages[0],
+                )
             QMessageBox.information(
                 self,
                 "Launch Complete",
-                f"Launched {succeeded} client(s).{suffix}{failure_detail}",
+                format_ui_phrase("Launched {count} client(s).", count=succeeded)
+                + suffix
+                + failure_detail,
             )
 
     def _kill_all_clients(self) -> None:
@@ -6457,7 +6667,11 @@ class MainWindow(QMainWindow):
         self._update_status_bar()
         if count > 0:
             self._announce_shipboard(VoiceEvent.CLIENTS_TERMINATED)
-            QMessageBox.information(self, "Killed", f"Terminated {count} client(s).")
+            QMessageBox.information(
+                self,
+                "Killed",
+                format_ui_phrase("Terminated {count} client(s).", count=count),
+            )
 
     def _on_hide_character(self, character_name: str) -> None:
         """Add a character name to hidden_characters and refresh the grid.
@@ -7513,6 +7727,14 @@ class MainWindow(QMainWindow):
                 )
         self._runtime_page_context = current_context
 
+    def _set_nav_service_action_text(self, service: str, source_text: str) -> None:
+        """Use localized navigation when available, retaining test adapters."""
+        setter = getattr(self._nav, "set_service_action_text", None)
+        if callable(setter):
+            setter(service, source_text)
+            return
+        getattr(self._nav, f"btn_{service}").setText(source_text)
+
     def _apply_runtime_snapshot(self, snapshot: RuntimeSnapshot) -> None:
         """Fan one snapshot out to footer, navigation, and Home."""
         self._sync_runtime_pages(snapshot)
@@ -7526,23 +7748,25 @@ class MainWindow(QMainWindow):
         )
         self._status_bar.set_client_count(snapshot.running_clients)
 
-        self._nav.btn_server.setText(
+        self._set_nav_service_action_text(
+            "server",
             self._service_action_text(
                 "Server",
                 snapshot.game,
                 snapshot.game_owned,
                 snapshot.backend,
                 snapshot.docker_control_policy,
-            )
+            ),
         )
-        self._nav.btn_market.setText(
+        self._set_nav_service_action_text(
+            "market",
             self._service_action_text(
                 "Market",
                 snapshot.market,
                 snapshot.market_owned,
                 snapshot.backend,
                 snapshot.docker_control_policy,
-            )
+            ),
         )
         self._nav.btn_server.setEnabled(
             self._service_action_enabled(
@@ -7557,21 +7781,25 @@ class MainWindow(QMainWindow):
             )
         )
         self._nav.btn_server.setToolTip(
-            self._service_action_tooltip(
-                "Server",
-                snapshot.game,
-                snapshot.game_owned,
-                snapshot.backend,
-                snapshot.docker_control_policy,
+            translate_service_tooltip(
+                self._service_action_tooltip(
+                    "Server",
+                    snapshot.game,
+                    snapshot.game_owned,
+                    snapshot.backend,
+                    snapshot.docker_control_policy,
+                )
             )
         )
         self._nav.btn_market.setToolTip(
-            self._service_action_tooltip(
-                "Market",
-                snapshot.market,
-                snapshot.market_owned,
-                snapshot.backend,
-                snapshot.docker_control_policy,
+            translate_service_tooltip(
+                self._service_action_tooltip(
+                    "Market",
+                    snapshot.market,
+                    snapshot.market_owned,
+                    snapshot.backend,
+                    snapshot.docker_control_policy,
+                )
             )
         )
         self._nav.set_badge_count(
@@ -7580,9 +7808,9 @@ class MainWindow(QMainWindow):
         )
         self._nav.btn_kill_all.setEnabled(snapshot.running_clients > 0)
         self._nav.btn_kill_all.setToolTip(
-            "Terminate every running EVE client"
+            translate("tooltip.kill_all_active")
             if snapshot.running_clients > 0
-            else "No EVE clients are running"
+            else translate("tooltip.kill_all_inactive")
         )
         self._home_page.apply_runtime_snapshot(snapshot)
         self._refresh_character_creation_availability(snapshot)
@@ -7601,13 +7829,17 @@ class MainWindow(QMainWindow):
             self._nav.btn_server.setEnabled(game_enabled)
             self._nav.btn_market.setEnabled(market_enabled)
             if not managed:
-                reason = "Connect-only Docker mode cannot change containers."
+                reason = translate_service_tooltip(
+                    "Connect-only Docker mode cannot change containers."
+                )
                 self._nav.btn_server.setToolTip(reason)
                 self._nav.btn_market.setToolTip(reason)
                 self._home_page.btn_start_servers.setEnabled(False)
                 self._home_page.btn_start_servers.setToolTip(reason)
             elif market_blocked:
-                self._nav.btn_market.setToolTip("Stop Server first")
+                self._nav.btn_market.setToolTip(
+                    translate_service_tooltip("Stop Server first")
+                )
             self._nav.btn_characters.setEnabled(True)
             self._nav.btn_characters.setToolTip("")
             set_character_launch = getattr(
@@ -7638,6 +7870,7 @@ class MainWindow(QMainWindow):
             self._nav.btn_mods.setToolTip("")
             self._nav.btn_tools.setEnabled(True)
             self._nav.btn_tools.setToolTip("")
+        self._retranslate_runtime_ui()
 
     def _on_service_probe(
         self, probe: ServiceProbe, generation: int | None = None
@@ -7898,7 +8131,10 @@ class MainWindow(QMainWindow):
             self._stop_docker_log_stream(clear_pending=False)
             return
         self._log_generation += 1
-        self._console_panel.begin_stream(f"Docker Compose — {service.title()} logs")
+        self._console_panel.begin_stream(
+            f"Docker Compose — {service.title()} logs",
+            allow_templates=True,
+        )
         thread = QThread(self)
         token = object()
         worker = DockerLogWorker(self._docker_log_target_factory(), service=service, token=token)
@@ -8352,6 +8588,31 @@ class MainWindow(QMainWindow):
             bool(getattr(controller, "music_active", False)),
             track_name,
         )
+
+    def _wire_title_bar_music_controls(self) -> None:
+        """Connect the optional spectrum and track navigation exactly once."""
+
+        if getattr(self, "_title_bar_music_controls_wired", False):
+            return
+        controller = getattr(self, "_audio_controller", None)
+        title_bar = getattr(self, "_title_bar", None)
+        if controller is None or title_bar is None:
+            return
+
+        spectrum_signal = getattr(controller, "music_spectrum_changed", None)
+        spectrum_connect = getattr(spectrum_signal, "connect", None)
+        if callable(spectrum_connect):
+            spectrum_connect(title_bar.set_music_spectrum)
+
+        previous_music = getattr(controller, "previous_music", None)
+        if callable(previous_music):
+            title_bar.previous_music_requested.connect(previous_music)
+
+        next_music = getattr(controller, "next_music", None)
+        if callable(next_music):
+            title_bar.next_music_requested.connect(next_music)
+
+        self._title_bar_music_controls_wired = True
 
     @pyqtSlot()
     def _preview_shipboard_voice(self) -> None:

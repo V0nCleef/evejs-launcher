@@ -201,3 +201,7 @@ def test_spawn_errors_include_the_wrapper_name(
 def test_tool_launch_helpers_are_reexported_by_platform_module() -> None:
     assert platform.build_tool_batch_command is platform_win.build_tool_batch_command
     assert platform.launch_tool_wrapper is platform_win.launch_tool_wrapper
+    assert (
+        platform.center_tool_window_for_process_tree
+        is platform_win.center_tool_window_for_process_tree
+    )

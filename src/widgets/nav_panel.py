@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.constants import COLORS, Page
+from src.i18n import translate, translate_service_action
 
 
 def logo_asset_path(module_file: str | Path | None = None) -> Path:
@@ -174,7 +175,7 @@ class NavButton(QPushButton):
         self.setCheckable(True)
         self.setAutoExclusive(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(56)
+        self.setFixedHeight(52)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._badge_count: int = 0
         self._setup_style()
@@ -291,6 +292,11 @@ class ToggleButton(QPushButton):
         super().setText(text)
         self._update_telemetry_state(text)
 
+    def set_semantic_text(self, display_text: str, semantic_text: str) -> None:
+        """Show translated text while deriving colour from stable English state."""
+        super().setText(display_text)
+        self._update_telemetry_state(semantic_text)
+
     def _update_telemetry_state(self, text: str) -> None:
         normalized = text.casefold()
         if any(
@@ -373,7 +379,7 @@ class OrbitalEmblem(QWidget):
 
 
 class NavPanel(QFrame):
-    """Left navigation panel with logo, page buttons, service toggles, and kill button."""
+    """Left navigation with page, service, and client controls."""
 
     page_changed = pyqtSignal(int)
     server_toggled = pyqtSignal()
@@ -383,7 +389,7 @@ class NavPanel(QFrame):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("navPanel")
-        self.setAccessibleName("Primary launcher navigation")
+        self.setAccessibleName(translate("nav.accessible_name"))
         self.setFixedWidth(220)
         self.setStyleSheet(f"""
             NavPanel#navPanel {{
@@ -455,7 +461,7 @@ class NavPanel(QFrame):
         logo_layout.addWidget(brand_secondary)
         layout.addWidget(logo_area)
 
-        self.command_label = QLabel("COMMAND DECK")
+        self.command_label = QLabel(translate("nav.command_deck"))
         self.command_label.setObjectName("navCommandLabel")
         self.command_label.setFixedHeight(24)
         self.command_label.setContentsMargins(16, 4, 0, 0)
@@ -465,11 +471,15 @@ class NavPanel(QFrame):
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
 
-        self.btn_home = NavButton("Home", _nav_icon("home"))
-        self.btn_characters = NavButton("Characters", _nav_icon("characters"))
-        self.btn_mods = NavButton("Mods", _nav_icon("mods"))
-        self.btn_tools = NavButton("Tools", _nav_icon("tools"))
-        self.btn_settings = NavButton("Settings", _nav_icon("settings"))
+        self.btn_home = NavButton(translate("nav.home"), _nav_icon("home"))
+        self.btn_characters = NavButton(
+            translate("nav.characters"), _nav_icon("characters")
+        )
+        self.btn_mods = NavButton(translate("nav.mods"), _nav_icon("mods"))
+        self.btn_tools = NavButton(translate("nav.tools"), _nav_icon("tools"))
+        self.btn_settings = NavButton(
+            translate("nav.settings"), _nav_icon("settings")
+        )
 
         nav_buttons = [
             (self.btn_home, Page.HOME),
@@ -488,13 +498,15 @@ class NavPanel(QFrame):
         layout.addStretch()
 
         # Server / Market toggles
-        self.systems_label = QLabel("SYSTEM CONTROL")
+        self.systems_label = QLabel(translate("nav.system_control"))
         self.systems_label.setObjectName("navSystemsLabel")
         self.systems_label.setFixedHeight(20)
         self.systems_label.setContentsMargins(16, 2, 0, 0)
         layout.addWidget(self.systems_label)
-        self.btn_server = ToggleButton("Server")
-        self.btn_market = ToggleButton("Market")
+        self._server_source_text = "Server"
+        self._market_source_text = "Market"
+        self.btn_server = ToggleButton(translate("nav.server"))
+        self.btn_market = ToggleButton(translate("nav.market"))
         self.btn_server.clicked.connect(self.server_toggled.emit)
         self.btn_market.clicked.connect(self.market_toggled.emit)
         layout.addWidget(self.btn_server)
@@ -508,7 +520,7 @@ class NavPanel(QFrame):
         layout.addWidget(divider)
 
         # Kill All Clients
-        self.btn_kill_all = QPushButton("Kill All Clients")
+        self.btn_kill_all = QPushButton(translate("nav.kill_all"))
         self.btn_kill_all.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_kill_all.setFixedHeight(28)
         self.btn_kill_all.setStyleSheet(f"""
@@ -538,6 +550,35 @@ class NavPanel(QFrame):
         """)
         self.btn_kill_all.clicked.connect(self.kill_all_clicked.emit)
         layout.addWidget(self.btn_kill_all)
+
+    def retranslate_ui(self) -> None:
+        """Refresh every translatable label owned by the navigation shell."""
+        self.setAccessibleName(translate("nav.accessible_name"))
+        self.command_label.setText(translate("nav.command_deck"))
+        self.btn_home.setText(translate("nav.home"))
+        self.btn_characters.setText(translate("nav.characters"))
+        self.btn_mods.setText(translate("nav.mods"))
+        self.btn_tools.setText(translate("nav.tools"))
+        self.btn_settings.setText(translate("nav.settings"))
+        self.systems_label.setText(translate("nav.system_control"))
+        self.btn_kill_all.setText(translate("nav.kill_all"))
+        self.set_service_action_text("server", self._server_source_text)
+        self.set_service_action_text("market", self._market_source_text)
+
+    def set_service_action_text(self, service: str, source_text: str) -> None:
+        """Display a localized service action without losing its state colour."""
+        if service == "server":
+            button = self.btn_server
+            self._server_source_text = source_text
+        elif service == "market":
+            button = self.btn_market
+            self._market_source_text = source_text
+        else:
+            raise ValueError(f"unsupported navigation service: {service}")
+        button.set_semantic_text(
+            translate_service_action(source_text),
+            source_text,
+        )
 
     def set_badge_count(self, page: int, count: int) -> None:
         """Set badge count for a specific nav page."""

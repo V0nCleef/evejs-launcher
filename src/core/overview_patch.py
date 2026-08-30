@@ -450,12 +450,11 @@ def _graft_original_overview_methods(
     try:
         with tempfile.NamedTemporaryFile(suffix=".pyc", delete=False) as output:
             output_path = Path(output.name)
-        script = r'''
-import marshal
+        script = r'''import marshal
 
 original_pyc = str(bytearray.fromhex('__ORIGINAL_HEX__'))
 compiled_pyc = str(bytearray.fromhex('__COMPILED_HEX__'))
-output_path = r'__OUTPUT__'
+output_path = unicode(str(bytearray.fromhex('__OUTPUT_HEX__')), 'utf-8')
 
 original_module = marshal.loads(original_pyc[8:])
 compiled_module = marshal.loads(compiled_pyc[8:])
@@ -545,8 +544,8 @@ with open(output_path, 'wb') as output_file:
             "__COMPILED_HEX__",
             compiled_pyc.hex(),
         ).replace(
-            "__OUTPUT__",
-            str(output_path).replace("\\", "\\\\").replace("'", "\\'"),
+            "__OUTPUT_HEX__",
+            str(output_path).encode("utf-8").hex(),
         )
         with _COMPILE_LOCK:
             library = ctypes.WinDLL(str(python_dll))

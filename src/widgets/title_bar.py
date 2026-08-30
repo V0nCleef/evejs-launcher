@@ -7,12 +7,14 @@ launcher actions use explicit signals.
 """
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QPoint, QPointF, QRectF, QSize, pyqtSignal
+from PyQt6.QtCore import Qt, QPoint, QPointF, QRectF, QSize, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
     QFont,
+    QLinearGradient,
     QMouseEvent,
     QPainter,
     QPaintEvent,
@@ -32,7 +34,15 @@ from PyQt6.QtWidgets import (
 )
 
 from src.constants import COLORS, APP_TITLE
+from src.i18n import format_ui_phrase, translate_ui_phrase
 from src.widgets.update_button import UpdateButton
+from src.widgets.ui_translation import (
+    register_translatable_widget_tree,
+    set_translatable_accessible_description,
+    set_translatable_accessible_name,
+    set_translatable_text,
+    set_translatable_tooltip,
+)
 
 # Simple universally-available glyphs for window controls
 _GLYPH_MIN = "—"       # em dash for minimize
@@ -75,82 +85,275 @@ class _TitleButton(QPushButton):
         )
 
 
-class _SignalWaveform(QWidget):
-    """Paint a fixed signal motif, not simulated playback progress."""
+class _AudioTransportButton(QPushButton):
+    """Compact keyboard-accessible previous/next soundtrack control."""
 
-    _LEVELS = (
-        0.30,
-        0.58,
-        0.82,
-        0.46,
-        0.70,
-        1.00,
-        0.64,
-        0.38,
-        0.76,
-        0.54,
-        0.88,
-        0.44,
-        0.68,
-        0.34,
-        0.60,
-    )
+    def __init__(
+        self,
+        glyph: str,
+        accessible_name: str,
+        accessible_description: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(glyph, parent)
+        self.setFixedSize(22, 26)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAutoDefault(False)
+        font = QFont(_WIN_BTN_FONT)
+        font.setPixelSize(16)
+        font.setBold(True)
+        self.setFont(font)
+        self.setStyleSheet(
+            f"""
+            QPushButton {{
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 4px;
+                color: {COLORS["teal_dim"]};
+                padding: 0;
+            }}
+            QPushButton:hover {{
+                background: {COLORS["steel"]};
+                border-color: {COLORS["teal_dim"]};
+                color: {COLORS["white"]};
+            }}
+            QPushButton:pressed {{
+                background: {COLORS["carbon"]};
+                color: {COLORS["gold"]};
+            }}
+            QPushButton:focus {{
+                border: 1px solid {COLORS["teal"]};
+                color: {COLORS["teal"]};
+            }}
+            """
+        )
+        set_translatable_tooltip(self, accessible_name)
+        set_translatable_accessible_name(self, accessible_name)
+        set_translatable_accessible_description(
+            self,
+            accessible_description,
+        )
+
+
+class _MusicSpectrum(QWidget):
+    """Render the controller's real deterministic 16-band music spectrum."""
+
+    BAND_COUNT = 16
+    FRAME_INTERVAL_MS = 33
+    ATTACK = 0.48
+    FALLOFF = 0.18
+    PEAK_HOLD_FRAMES = 6
+    PEAK_DECAY = 0.035
+    SETTLE_EPSILON = 0.002
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._active = False
-        self.setObjectName("audioSignalWaveform")
+        self._target_levels = (0.0,) * self.BAND_COUNT
+        self._display_levels = [0.0] * self.BAND_COUNT
+        self._peak_levels = [0.0] * self.BAND_COUNT
+        self._peak_holds = [0] * self.BAND_COUNT
+        self._animation_timer = QTimer(self)
+        self._animation_timer.setInterval(self.FRAME_INTERVAL_MS)
+        self._animation_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._animation_timer.timeout.connect(self._advance_animation)
+
+        self.setObjectName("musicSpectrum")
         self.setMinimumWidth(30)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(18)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self.setAccessibleName("Ambience signal")
+        set_translatable_accessible_name(self, "Live music spectrum")
         self._sync_accessibility()
 
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(86, 18)
+
+    @staticmethod
+    def _normalized_levels(levels: object) -> tuple[float, ...]:
+        """Clamp, truncate, and zero-pad one untrusted spectrum payload."""
+
+        try:
+            supplied = tuple(levels)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            supplied = ()
+        normalized: list[float] = []
+        for value in supplied[: _MusicSpectrum.BAND_COUNT]:
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError, OverflowError):
+                numeric = 0.0
+            if not math.isfinite(numeric):
+                numeric = 0.0
+            normalized.append(min(1.0, max(0.0, numeric)))
+        normalized.extend(
+            0.0 for _ in range(_MusicSpectrum.BAND_COUNT - len(normalized))
+        )
+        return tuple(normalized)
+
+    def set_levels(self, levels: object) -> None:
+        """Target one real controller frame; inactive displays stay at zero."""
+
+        normalized = self._normalized_levels(levels)
+        self._target_levels = (
+            normalized if self._active else (0.0,) * self.BAND_COUNT
+        )
+        if self._needs_animation() and not self._animation_timer.isActive():
+            self._animation_timer.start()
 
     def set_active(self, active: bool) -> None:
         active = bool(active)
         if self._active == active:
             return
         self._active = active
+        if not active:
+            self._target_levels = (0.0,) * self.BAND_COUNT
         self._sync_accessibility()
+        if self._needs_animation() and not self._animation_timer.isActive():
+            self._animation_timer.start()
         self.update()
 
     def is_active(self) -> bool:
         return self._active
 
+    def levels(self) -> tuple[float, ...]:
+        """Return the currently painted smoothed levels for verification."""
+
+        return tuple(self._display_levels)
+
+    def target_levels(self) -> tuple[float, ...]:
+        """Return the normalized target frame for verification."""
+
+        return self._target_levels
+
+    def peak_levels(self) -> tuple[float, ...]:
+        """Return the currently painted peak markers for verification."""
+
+        return tuple(self._peak_levels)
+
+    def is_animating(self) -> bool:
+        return self._animation_timer.isActive()
+
     def _sync_accessibility(self) -> None:
-        state = "active" if self._active else "inactive"
-        self.setAccessibleDescription(
-            f"A decorative, non-progress soundscape signal. Soundscape is {state}."
+        set_translatable_accessible_description(
+            self,
+            (
+                "Live 16-band music spectrum visualization."
+                if self._active
+                else "Music spectrum is inactive."
+            ),
         )
+
+    def _needs_animation(self) -> bool:
+        if any(
+            abs(target - current) > self.SETTLE_EPSILON
+            for target, current in zip(
+                self._target_levels,
+                self._display_levels,
+                strict=True,
+            )
+        ):
+            return True
+        return any(
+            peak - current > self.SETTLE_EPSILON
+            for peak, current in zip(
+                self._peak_levels,
+                self._display_levels,
+                strict=True,
+            )
+        )
+
+    def _advance_animation(self) -> None:
+        """Advance one deterministic attack/falloff and peak-decay frame."""
+
+        zero_target = not any(self._target_levels)
+        for index, target in enumerate(self._target_levels):
+            current = self._display_levels[index]
+            smoothing = self.ATTACK if target > current else self.FALLOFF
+            current += (target - current) * smoothing
+            if abs(target - current) <= self.SETTLE_EPSILON:
+                current = target
+            self._display_levels[index] = min(1.0, max(0.0, current))
+
+            if current >= self._peak_levels[index]:
+                self._peak_levels[index] = current
+                self._peak_holds[index] = self.PEAK_HOLD_FRAMES
+            elif self._peak_holds[index] > 0:
+                self._peak_holds[index] -= 1
+            else:
+                self._peak_levels[index] = max(
+                    current,
+                    self._peak_levels[index] - self.PEAK_DECAY,
+                )
+
+        if not self._needs_animation():
+            if zero_target:
+                self._display_levels = [0.0] * self.BAND_COUNT
+                self._peak_levels = [0.0] * self.BAND_COUNT
+                self._peak_holds = [0] * self.BAND_COUNT
+            self._animation_timer.stop()
+        self.update()
 
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
         del event
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        color = QColor(COLORS["teal"] if self._active else COLORS["teal_dim"])
-        color.setAlpha(225 if self._active else 92)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(color)
+        baseline = QColor(COLORS["teal_dim"])
+        baseline.setAlpha(35 if self._active else 20)
+        painter.setPen(QPen(baseline, 1.0))
+        bottom = float(self.height() - 2)
+        painter.drawLine(QPointF(1.0, bottom), QPointF(self.width() - 1.0, bottom))
 
-        count = len(self._LEVELS)
-        bar_width = 2.0
-        usable_width = max(bar_width * count, float(self.width() - 2))
-        gap = max(1.0, (usable_width - bar_width * count) / max(1, count - 1))
+        count = self.BAND_COUNT
+        usable_width = max(1.0, float(self.width() - 2))
+        gap = max(0.4, min(1.8, usable_width / count * 0.28))
+        bar_width = max(
+            0.7,
+            (usable_width - gap * (count - 1)) / count,
+        )
         total_width = bar_width * count + gap * (count - 1)
         start_x = max(1.0, (self.width() - total_width) / 2.0)
-        available_height = max(4.0, float(self.height() - 4))
-        center_y = self.height() / 2.0
+        available_height = max(4.0, bottom - 1.0)
 
-        for index, level in enumerate(self._LEVELS):
-            height = max(3.0, available_height * level)
+        painter.setPen(Qt.PenStyle.NoPen)
+        for index, level in enumerate(self._display_levels):
+            if level > 0.0:
+                height = max(1.0, available_height * level)
+                x = start_x + index * (bar_width + gap)
+                rect = QRectF(x, bottom - height, bar_width, height)
+
+                glow = QColor(COLORS["teal"])
+                glow.setAlpha(int(20 + 42 * level))
+                painter.setBrush(glow)
+                painter.drawRoundedRect(rect.adjusted(-1.0, -1.0, 1.0, 1.0), 1.4, 1.4)
+
+                gradient = QLinearGradient(0.0, rect.bottom(), 0.0, rect.top())
+                low = QColor(COLORS["teal_dim"])
+                high = QColor(COLORS["teal"])
+                low.setAlpha(170)
+                high.setAlpha(245)
+                gradient.setColorAt(0.0, low)
+                gradient.setColorAt(1.0, high)
+                painter.setBrush(gradient)
+                painter.drawRoundedRect(rect, 0.9, 0.9)
+
+            peak = self._peak_levels[index]
+            if peak <= 0.0:
+                continue
             x = start_x + index * (bar_width + gap)
-            rect = QRectF(x, center_y - height / 2.0, bar_width, height)
-            painter.drawRoundedRect(rect, 1.0, 1.0)
+            peak_y = bottom - available_height * peak
+            gold = QColor(COLORS["gold"])
+            gold.setAlpha(int(85 + 80 * peak))
+            peak_pen = QPen(gold, 1.0)
+            peak_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(peak_pen)
+            painter.drawLine(
+                QPointF(x + 0.2, peak_y),
+                QPointF(x + bar_width - 0.2, peak_y),
+            )
+            painter.setPen(Qt.PenStyle.NoPen)
 
 
 class _SpeakerGlyph(QWidget):
@@ -186,8 +389,8 @@ class _SpeakerGlyph(QWidget):
             description = "Launcher music soundscape is active."
         else:
             description = "Launcher music soundscape is off."
-        self.setAccessibleDescription(description)
-        self.setToolTip(description)
+        set_translatable_accessible_description(self, description)
+        set_translatable_tooltip(self, description)
 
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
         del event
@@ -238,6 +441,8 @@ class TitleBar(QWidget):
 
     update_clicked = pyqtSignal()
     music_mute_changed = pyqtSignal(bool)
+    previous_music_requested = pyqtSignal()
+    next_music_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None, title: str = APP_TITLE):
         super().__init__(parent)
@@ -349,8 +554,33 @@ class TitleBar(QWidget):
         )
         self._audio_layout.addWidget(self.audio_track_label)
 
-        self.audio_waveform = _SignalWaveform(self.audio_capsule)
-        self._audio_layout.addWidget(self.audio_waveform, 1)
+        self.audio_previous_btn = _AudioTransportButton(
+            "‹",
+            "Previous music track",
+            "Play the previous launcher music track.",
+            self.audio_capsule,
+        )
+        self.audio_previous_btn.setObjectName("previousMusicButton")
+        self.audio_previous_btn.clicked.connect(
+            self.previous_music_requested.emit
+        )
+        self._audio_layout.addWidget(self.audio_previous_btn)
+
+        self.music_spectrum = _MusicSpectrum(self.audio_capsule)
+        # Keep the established attribute as a compatibility alias for tests
+        # and callers written before the display represented real FFT data.
+        self.audio_waveform = self.music_spectrum
+        self._audio_layout.addWidget(self.music_spectrum, 1)
+
+        self.audio_next_btn = _AudioTransportButton(
+            "›",
+            "Next music track",
+            "Play the next launcher music track.",
+            self.audio_capsule,
+        )
+        self.audio_next_btn.setObjectName("nextMusicButton")
+        self.audio_next_btn.clicked.connect(self.next_music_requested.emit)
+        self._audio_layout.addWidget(self.audio_next_btn)
 
         self.audio_speaker_glyph = _SpeakerGlyph(self.audio_capsule)
         self._audio_layout.addWidget(self.audio_speaker_glyph)
@@ -409,6 +639,7 @@ class TitleBar(QWidget):
         self.btn_close.clicked.connect(self._on_close)
         layout.addWidget(self.btn_close)
 
+        register_translatable_widget_tree(self)
         self._sync_audio_capsule_layout(self.width())
 
     # ── Public API ───────────────────────────────────────────────────────
@@ -433,14 +664,26 @@ class TitleBar(QWidget):
         previous = self.audio_mute_btn.blockSignals(True)
         self.audio_mute_btn.setChecked(muted)
         self.audio_mute_btn.blockSignals(previous)
-        self.audio_mute_btn.setText("MUTED" if muted else "MUTE")
+        set_translatable_text(
+            self.audio_mute_btn,
+            "MUTED" if muted else "MUTE",
+        )
         action = "Unmute" if muted else "Mute"
         state = "muted" if muted else "on"
-        self.audio_mute_btn.setToolTip(f"{action} launcher music")
-        self.audio_mute_btn.setAccessibleName(f"{action} launcher music")
+        set_translatable_tooltip(
+            self.audio_mute_btn,
+            f"{action} launcher music",
+        )
+        self.audio_mute_btn.setAccessibleName(
+            translate_ui_phrase(f"{action} launcher music")
+        )
         self.audio_mute_btn.setAccessibleDescription(
-            f"Launcher music is {state}. Activate to {action.casefold()} music; "
-            "This control does not affect LYRA voice."
+            format_ui_phrase(
+                "Launcher music is {state}. Activate to {action} music; "
+                "This control does not affect LYRA voice.",
+                state=translate_ui_phrase(state),
+                action=translate_ui_phrase(action.casefold()),
+            )
         )
         self.audio_speaker_glyph.set_state(
             muted=muted,
@@ -471,6 +714,11 @@ class TitleBar(QWidget):
         )
         self._sync_audio_capsule_accessibility()
 
+    def set_music_spectrum(self, levels: object) -> None:
+        """Consume one normalized controller spectrum frame without synthesis."""
+
+        self.music_spectrum.set_levels(levels)
+
     def is_audio_active(self) -> bool:
         """Return the soundscape state displayed by the capsule."""
         return self._ambience_active
@@ -485,30 +733,57 @@ class TitleBar(QWidget):
 
     def _sync_audio_capsule_accessibility(self) -> None:
         soundscape = (
-            f"playing {self._ambience_track_name}"
+            format_ui_phrase(
+                "playing {track}",
+                track=self._ambience_track_name,
+            )
             if self._ambience_active
-            else "off"
+            else translate_ui_phrase("off")
         )
-        music = "muted" if self.is_music_muted() else "unmuted"
+        music = translate_ui_phrase(
+            "muted" if self.is_music_muted() else "unmuted"
+        )
         self.audio_capsule.setAccessibleDescription(
-            f"Launcher soundscape is {soundscape}; music is {music}. "
-            "This control does not affect LYRA voice."
+            format_ui_phrase(
+                "Launcher soundscape is {soundscape}; music is {music}. "
+                "This control does not affect LYRA voice.",
+                soundscape=soundscape,
+                music=music,
+            )
         )
 
     def _set_audio_track_text(self, text: str) -> None:
         """Show a compact elided title while retaining the complete identity."""
         self._audio_track_full_text = str(text)
-        self.audio_track_label.setToolTip(self._audio_track_full_text)
+        rendered_text = translate_ui_phrase(self._audio_track_full_text)
+        self.audio_track_label.setToolTip(rendered_text)
         self.audio_track_label.setAccessibleName(
-            f"Current launcher music: {self._audio_track_full_text}"
+            format_ui_phrase(
+                "Current launcher music: {track}",
+                track=rendered_text,
+            )
         )
+        # A deliberately collapsed label has no useful contents geometry.
+        # Keep its complete state text intact; the responsive layout elides it
+        # again after making the label visible at a wider breakpoint.
+        if self.audio_track_label.isHidden():
+            self.audio_track_label.setText(rendered_text)
+            return
         available = max(1, self.audio_track_label.contentsRect().width())
         self.audio_track_label.setText(
             self.audio_track_label.fontMetrics().elidedText(
-                self._audio_track_full_text,
+                rendered_text,
                 Qt.TextElideMode.ElideRight,
                 available,
             )
+        )
+
+    def retranslate_ui(self) -> None:
+        """Refresh retained audio state without emitting user actions."""
+        self.set_music_muted(self.is_music_muted())
+        self.set_audio_status(
+            self._ambience_active,
+            self._ambience_track_name,
         )
 
     def _sync_audio_capsule_layout(self, width: int) -> None:
@@ -517,35 +792,44 @@ class TitleBar(QWidget):
             capsule_width = 410
             track_width = 180
             show_note, show_track, show_waveform, show_speaker = True, True, True, True
+            show_transport = True
         elif width >= 920:
             capsule_width = 340
             track_width = 112
             show_note, show_track, show_waveform, show_speaker = True, True, True, True
+            show_transport = True
         elif width >= 760:
             capsule_width = 282
             track_width = 82
             show_note, show_track, show_waveform, show_speaker = False, True, True, True
+            show_transport = True
         elif width >= 620:
             capsule_width = 206
             track_width = 0
             show_note, show_track, show_waveform, show_speaker = False, False, True, True
+            show_transport = True
         elif width >= 520:
             capsule_width = 124
             track_width = 0
             show_note, show_track, show_waveform, show_speaker = False, False, False, True
+            show_transport = False
         else:
             capsule_width = 88
             track_width = 0
             show_note, show_track, show_waveform, show_speaker = False, False, False, False
+            show_transport = False
 
         compact = capsule_width == 88
         self._audio_layout.setContentsMargins(4 if compact else 6, 1, 4, 1)
+        self._audio_layout.setSpacing(3 if width < 920 else 4)
         self.audio_capsule.setFixedWidth(capsule_width)
         self.audio_note_label.setVisible(show_note)
         if show_track:
             self.audio_track_label.setFixedWidth(track_width)
         self.audio_track_label.setVisible(show_track)
+        self.audio_previous_btn.setVisible(show_transport)
         self.audio_waveform.setVisible(show_waveform)
+        self.audio_next_btn.setVisible(show_transport)
         self.audio_speaker_glyph.setVisible(show_speaker)
         if show_track:
             self._set_audio_track_text(self._audio_track_full_text)
@@ -575,11 +859,11 @@ class TitleBar(QWidget):
         if win.isMaximized():
             win.showNormal()
             self.btn_max.setText(_GLYPH_MAX)
-            self.btn_max.setToolTip("Maximize")
+            set_translatable_tooltip(self.btn_max, "Maximize")
         else:
             win.showMaximized()
             self.btn_max.setText(_GLYPH_RESTORE)
-            self.btn_max.setToolTip("Restore")
+            set_translatable_tooltip(self.btn_max, "Restore")
 
     # ── Drag-to-move / double-click maximize ─────────────────────────────
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802

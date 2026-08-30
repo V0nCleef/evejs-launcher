@@ -1,7 +1,22 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller build spec for EveJS Launcher V2 — onedir mode."""
 
+import os
+
 from PyInstaller.utils.hooks import collect_submodules
+
+from build_support import reject_contaminated_binaries, sanitize_build_path
+
+
+_clean_path, _removed_build_paths = sanitize_build_path(
+    os.environ.get("PATH", "")
+)
+os.environ["PATH"] = _clean_path
+if _removed_build_paths:
+    print(
+        "PyInstaller build guard removed foreign PATH entries:\n  "
+        + "\n  ".join(_removed_build_paths)
+    )
 
 block_cipher = None
 
@@ -73,9 +88,10 @@ a = Analysis(
     datas=[
         ('assets/hero/*.png', 'assets/hero'),
         ('assets/deep_signal/*.png', 'assets/deep_signal'),
-        # Launcher-owned originals only. Personal playlist paths remain local
-        # config references and user MP3s are never copied into a release.
-        ('assets/audio/music/*.wav', 'assets/audio/music'),
+        # Explicit release allowlist: review renders and future drafts must not
+        # become bundled merely because somebody placed a WAV beside this file.
+        # Personal playlist paths remain local config references.
+        ('assets/audio/music/celestial_transit.wav', 'assets/audio/music'),
         ('assets/audio/voice/lyra/*.wav', 'assets/audio/voice/lyra'),
         ('assets/audio/voice/lyra/manifest.json', 'assets/audio/voice/lyra'),
         ('assets/*.png', 'assets'),
@@ -99,6 +115,7 @@ a = Analysis(
         'pathlib', 'dataclasses', 'subprocess', 'webbrowser',
         'calendar',  # required by urllib → email → calendar chain when frozen
         'src', 'src.app', 'src.config', 'src.constants', 'src.theme',
+        'src.i18n', 'src.translations_ru',
         'src.audio', 'src.audio.assets', 'src.audio.backends',
         'src.audio.controller', 'src.audio.events', 'src.audio.settings',
         'src.core.db', 'src.core.discovery', 'src.core.launcher',
@@ -139,6 +156,10 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
+
+# PATH sanitization should prevent these selections.  Keep a second fail-closed
+# check so a future hook or absolute lookup cannot silently reintroduce them.
+reject_contaminated_binaries(a.binaries)
 
 # Filter out excluded binaries
 a.binaries = [b for b in a.binaries if not any(

@@ -20,7 +20,7 @@ from src.core.service_status import ServiceState
 
 
 _REQUIRED_SERVICES = frozenset({"server", "market"})
-_PROJECT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
+_PROJECT_NAME = re.compile(r"[a-z0-9][a-z0-9_-]*\Z")
 _ENDPOINTS = {
     "game": ("server", 26000), "image": ("server", 26001),
     "proxy": ("server", 26002), "assets": ("server", 26003),
@@ -78,10 +78,28 @@ _PREFLIGHT_DIAGNOSTICS = {
     ),
 }
 
+_EXPLICIT_PROJECT_NAME_DIAGNOSTIC = (
+    "Compose could not derive a project name from this folder. Set the "
+    "advanced Compose Project Name to a stable lowercase ASCII value such as "
+    "evejs-local, or define a valid top-level name in the Compose file."
+)
+_PROJECT_NAME_DIAGNOSTIC_PROBE = "evejs-local"
+
 
 def preflight_failure_diagnostic(kind: PreflightFailureKind) -> str:
     """Return the static user guidance for one typed preflight failure."""
     return _PREFLIGHT_DIAGNOSTICS[kind]
+
+
+def _normalized_derived_project_name(folder_name: str) -> str:
+    """Mirror Compose's normalization for a project-directory basename."""
+    allowed = "abcdefghijklmnopqrstuvwxyz0123456789_-"
+    normalized = "".join(
+        character
+        for character in folder_name.lower()
+        if character in allowed
+    )
+    return normalized.lstrip("_-")
 
 
 @dataclass(frozen=True)
@@ -240,8 +258,32 @@ class ComposeInspector:
             try:
                 services_result = self._compose(target, "config", "--services")
             except DockerCommandError:
+                diagnostic = None
+                if (
+                    target.project_name is None
+                    and not _normalized_derived_project_name(
+                        target.project_directory.name
+                    )
+                ):
+                    # Command failures deliberately expose no stderr. Confirm
+                    # the cause with the same read-only command, changing only
+                    # the otherwise-empty derived project name.
+                    try:
+                        self._compose(
+                            replace(
+                                target,
+                                project_name=_PROJECT_NAME_DIAGNOSTIC_PROBE,
+                            ),
+                            "config",
+                            "--services",
+                        )
+                    except DockerCommandError:
+                        pass
+                    else:
+                        diagnostic = _EXPLICIT_PROJECT_NAME_DIAGNOSTIC
                 return PreflightReport.failed(
-                    PreflightFailureKind.COMPOSE_CONFIG_INVALID
+                    PreflightFailureKind.COMPOSE_CONFIG_INVALID,
+                    diagnostic=diagnostic,
                 )
             services = {line.strip() for line in services_result.stdout.splitlines() if line.strip()}
             missing = _REQUIRED_SERVICES - services

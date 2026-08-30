@@ -10,6 +10,7 @@ from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QFileDialog
 
 from src import config
+from src.i18n import current_language, set_language
 from src.core.discovery import validate_docker_evejs_root, validate_evejs_root
 from src.core.runtime.docker_compose import PreflightReport
 from src.core.runtime.docker_setup import (
@@ -200,6 +201,42 @@ def _select_docker(wizard: SetupWizard, root: Path, compose: Path) -> None:
     )
     wizard._path_input.setText(str(root))
     wizard._compose_input.setText(str(compose))
+
+
+def test_wizard_language_selector_switches_and_persists_without_restart(
+    qapp,
+    isolated_config: Path,
+) -> None:
+    set_language("en")
+    wizard = SetupWizard()
+    try:
+        assert [
+            (
+                wizard._language_combo.itemData(combo_index),
+                wizard._language_combo.itemText(combo_index),
+            )
+            for combo_index in range(wizard._language_combo.count())
+        ] == [
+            ("en", "English"),
+            ("zh_CN", "简体中文"),
+            ("ja", "日本語"),
+            ("ko", "한국어"),
+            ("fr", "Français"),
+            ("de", "Deutsch"),
+            ("nl", "Nederlands"),
+            ("ru", "Русский"),
+        ]
+        index = wizard._language_combo.findData("ru")
+        assert index >= 0
+        assert wizard._language_combo.itemText(index) == "Русский"
+
+        wizard._language_combo.setCurrentIndex(index)
+
+        assert current_language() == "ru"
+        assert config.load()["language"] == "ru"
+    finally:
+        wizard.close()
+        set_language("en")
 
 
 def test_wizard_accepts_fresh_native_root_before_first_server_run(

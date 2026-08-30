@@ -30,12 +30,24 @@ from src.core.service_status import (
     RuntimeSnapshot,
     ServiceState,
 )
+from src.i18n import (
+    format_ui_phrase,
+    translate_ui_phrase,
+)
 from src.ui.motion import MotionController
 from src.widgets.hero_banner import HeroBanner
 from src.widgets.deep_signal_background import DeepSignalBackground
 from src.widgets.docking_traffic_overlay import DockingTrafficOverlay
 from src.widgets.page_header import PageHeader
 from src.widgets.status_ring import StatusRing
+from src.widgets.ui_translation import (
+    register_translatable_widget_tree,
+    set_translatable_accessible_name,
+    set_translatable_text,
+    set_translatable_text_template,
+    set_translatable_tooltip,
+    set_translatable_tooltip_template,
+)
 
 DISCORD_INVITE_URL = "https://discord.gg/HVTfKeqX3t"
 _CHANGELOG_PATH = Path(__file__).resolve().parent.parent.parent / "CHANGELOG.md"
@@ -120,7 +132,11 @@ class ServiceRow(QFrame):
         )
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setAccessibleName(f"{label} service status")
+        set_translatable_accessible_name(
+            self,
+            f"{label} service status",
+            allow_templates=True,
+        )
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
@@ -234,21 +250,23 @@ class ServiceRow(QFrame):
             detail="",
             progress=1.0 if state is ServiceState.ONLINE else 0.72,
         )
-        self._state_label.setText(self._state_text)
-        self._detail_label.setToolTip(self._detail_text)
+        set_translatable_text(self._state_label, self._state_text)
+        set_translatable_tooltip(self._detail_label, self._detail_text)
         self._render_detail()
         self.setAccessibleDescription(
-            f"{self._state_text}. {self._detail_text}".strip()
+            f"{translate_ui_phrase(self._state_text)}. "
+            f"{translate_ui_phrase(self._detail_text)}".strip()
         )
 
     def _render_detail(self) -> None:
         available = self._detail_label.contentsRect().width()
+        rendered = translate_ui_phrase(self._detail_text)
         if available <= 0:
-            self._detail_label.setText(self._detail_text)
+            self._detail_label.setText(rendered)
             return
         self._detail_label.setText(
             self._detail_label.fontMetrics().elidedText(
-                self._detail_text,
+                rendered,
                 Qt.TextElideMode.ElideRight,
                 available,
             )
@@ -311,7 +329,7 @@ class ServicesCard(QFrame):
         self.market_row.activated.connect(self.console_requested.emit)
 
     def set_mode(self, label: str) -> None:
-        self.mode_label.setText(label.upper())
+        set_translatable_text(self.mode_label, label.upper())
 
     def apply_snapshot(self, snapshot: RuntimeSnapshot) -> None:
         self.game_row.set_state(
@@ -419,18 +437,20 @@ class ClientSignalCard(QFrame):
             detail="",
             progress=1.0 if count > 0 else 0.72,
         )
-        self._state_label.setText(
+        set_translatable_text_template(
+            self._state_label,
             f"{count} RUNNING" if count > 0 else "NONE RUNNING"
         )
         self._dot.setStyleSheet(f"color: {color}; font-size: 14px;")
         self._state_label.setStyleSheet(f"color: {color};")
         self.setProperty("statusState", state.value)
         self._state_label.setProperty("statusState", state.value)
-        self._detail_label.setText(
+        set_translatable_text(
+            self._detail_label,
             "CAPSULE LINK ACTIVE" if count > 0 else "CAPSULES IDLE"
         )
         self.setAccessibleDescription(
-            f"{count} EVE client{'s' if count != 1 else ''} running"
+            format_ui_phrase("{count} EVE client(s) running", count=count)
         )
 
 
@@ -472,8 +492,8 @@ class ActivityRow(QFrame):
     def set_entry(self, timestamp: str, message: str, state: str, label: str) -> None:
         self.time_label.setText(timestamp)
         self._full_message = message
-        self.message_label.setToolTip(message)
-        self.state_label.setText(label.upper())
+        set_translatable_tooltip(self.message_label, message)
+        set_translatable_text(self.state_label, label.upper())
         self.state_label.setProperty("state", state)
         style = self.state_label.style()
         style.unpolish(self.state_label)
@@ -484,7 +504,7 @@ class ActivityRow(QFrame):
         self.time_label.setText("--:--")
         self._full_message = "Awaiting runtime transition"
         self.message_label.setToolTip("")
-        self.state_label.setText("WAIT")
+        set_translatable_text(self.state_label, "WAIT")
         self.state_label.setProperty("state", "idle")
         style = self.state_label.style()
         style.unpolish(self.state_label)
@@ -492,13 +512,14 @@ class ActivityRow(QFrame):
         self._render_message()
 
     def _render_message(self) -> None:
+        rendered = translate_ui_phrase(self._full_message)
         available = self.message_label.contentsRect().width()
         if available <= 0:
-            self.message_label.setText(self._full_message)
+            self.message_label.setText(rendered)
             return
         self.message_label.setText(
             self.message_label.fontMetrics().elidedText(
-                self._full_message,
+                rendered,
                 Qt.TextElideMode.ElideRight,
                 available,
             )
@@ -614,6 +635,10 @@ class RecentActivityCard(QFrame):
             else:
                 row.clear_entry()
 
+    def retranslate_ui(self) -> None:
+        """Refresh retained activity entries without inventing new events."""
+        self._render_entries()
+
     @property
     def messages(self) -> tuple[str, ...]:
         return tuple(entry[1] for entry in self._entries)
@@ -659,10 +684,16 @@ class LatestReleaseCard(QFrame):
     def set_release(self, version: str, highlights: list[str]) -> None:
         """Render a bounded release summary suitable for the dashboard."""
         self.version_label.setText(version)
-        self.highlights_label.setText(
-            "\n".join(f"• {highlight}" for highlight in highlights)
-            or "No release highlights are available."
-        )
+        if highlights:
+            # Release-note content belongs to the publisher and stays verbatim.
+            self.highlights_label.setText(
+                "\n".join(f"• {highlight}" for highlight in highlights)
+            )
+        else:
+            set_translatable_text(
+                self.highlights_label,
+                "No release highlights are available.",
+            )
 
 
 class ResourcesCard(QFrame):
@@ -744,11 +775,13 @@ class HomePage(QWidget):
         self._motion = MotionController(parent=self)
         self._stack_action = "start"
         self._launch_in_progress = False
+        self._launch_progress: tuple[int, int, int, str | None] | None = None
         self._group_state = TargetGroupState()
         self._launch_available = True
         self._launch_unavailable_reason = ""
         self._launch_ready_count = 0
         self._build_ui()
+        register_translatable_widget_tree(self)
         self.set_group_state(TargetGroupState())
         self._load_latest_release()
 
@@ -988,17 +1021,24 @@ class HomePage(QWidget):
         self._group_state = state
         self.group_combo.blockSignals(True)
         self.group_combo.clear()
-        self.group_combo.addItem("All Visible", None)
+        self.group_combo.addItem(translate_ui_phrase("All Visible"), None)
         selected_index = 0
         for index, group in enumerate(state.groups, start=1):
             self.group_combo.addItem(
-                f"{group.name} ({len(group.members)})",
+                format_ui_phrase(
+                    "{group_name} ({member_count})",
+                    group_name=group.name,
+                    member_count=len(group.members),
+                ),
                 group.group_id,
             )
             if group.group_id == state.selected_group_id:
                 selected_index = index
         self.group_combo.insertSeparator(self.group_combo.count())
-        self.group_combo.addItem("Manage Groups…", "__manage_groups__")
+        self.group_combo.addItem(
+            translate_ui_phrase("Manage Groups…"),
+            "__manage_groups__",
+        )
         self.group_combo.setCurrentIndex(selected_index)
         self.group_combo.blockSignals(False)
         self._restore_launch_button()
@@ -1027,11 +1067,24 @@ class HomePage(QWidget):
     ) -> None:
         """Make Launch All a cancellation control while its serial queue runs."""
         self._launch_in_progress = True
+        self._launch_progress = (attempted, total, succeeded, group_name)
         self.group_combo.setEnabled(False)
-        prefix = f"Launching {group_name}" if group_name else "Launching"
-        self.btn_launch_all.setText(f"{prefix} {attempted} of {total}…")
+        prefix = (
+            format_ui_phrase("Launching {group_name}", group_name=group_name)
+            if group_name
+            else translate_ui_phrase("Launching")
+        )
+        self.btn_launch_all.setText(
+            format_ui_phrase(
+                "{prefix} {attempted} of {total}…",
+                prefix=prefix,
+                attempted=attempted,
+                total=total,
+            )
+        )
         self.btn_launch_all.setEnabled(True)
-        self.btn_launch_all.setToolTip(
+        set_translatable_tooltip(
+            self.btn_launch_all,
             "Cancel remaining queued launches; clients already started will continue running"
         )
 
@@ -1043,10 +1096,12 @@ class HomePage(QWidget):
     ) -> None:
         """Restore the primary action after its serial launch queue finishes."""
         self._launch_in_progress = False
+        self._launch_progress = None
         self.group_combo.setEnabled(True)
         self._restore_launch_button()
         if cancelled:
-            self.btn_launch_all.setToolTip(
+            set_translatable_tooltip_template(
+                self.btn_launch_all,
                 f"Cancelled after launching {succeeded} of {attempted} account(s)"
             )
 
@@ -1055,9 +1110,10 @@ class HomePage(QWidget):
             return
         group = self._group_state.selected_group
         if group is None:
-            self.btn_launch_all.setText("Launch All")
+            set_translatable_text(self.btn_launch_all, "Launch All")
         else:
-            self.btn_launch_all.setText(
+            set_translatable_text_template(
+                self.btn_launch_all,
                 f"Launch {group.name} ({self._launch_ready_count})"
             )
         self.btn_launch_all.setEnabled(self._launch_available)
@@ -1066,8 +1122,8 @@ class HomePage(QWidget):
         elif group is None:
             tooltip = "Launch every eligible visible account"
         else:
-            tooltip = f"Launch every ready character in {group.name}"
-        self.btn_launch_all.setToolTip(tooltip)
+            tooltip = "Launch every ready character in this group"
+        set_translatable_tooltip(self.btn_launch_all, tooltip)
 
     def _on_group_combo_changed(self, index: int) -> None:
         value = self.group_combo.itemData(index)
@@ -1086,7 +1142,8 @@ class HomePage(QWidget):
         self._update_stack_action(snapshot)
         has_running_clients = snapshot.running_clients > 0
         self.btn_kill_all.setEnabled(has_running_clients)
-        self.btn_kill_all.setToolTip(
+        set_translatable_tooltip(
+            self.btn_kill_all,
             "Terminate every running EVE client"
             if has_running_clients
             else "No EVE clients are running"
@@ -1138,12 +1195,12 @@ class HomePage(QWidget):
                 "offline",
             )
 
-        self.overall_status_label.setText(label)
+        set_translatable_text(self.overall_status_label, label)
         self.overall_status_label.setProperty("state", state)
         style = self.overall_status_label.style()
         style.unpolish(self.overall_status_label)
         style.polish(self.overall_status_label)
-        self.overall_detail_label.setText(detail)
+        set_translatable_text(self.overall_detail_label, detail)
 
     def _update_stack_action(self, snapshot: RuntimeSnapshot) -> None:
         """Describe the next safe stack operation from the shared snapshot."""
@@ -1171,9 +1228,9 @@ class HomePage(QWidget):
                 self._stack_action = "start"
             if not enabled:
                 self._stack_action = "none"
-            self.btn_start_servers.setText(label)
+            set_translatable_text(self.btn_start_servers, label)
             self.btn_start_servers.setEnabled(enabled)
-            self.btn_start_servers.setToolTip(tooltip)
+            set_translatable_tooltip(self.btn_start_servers, tooltip)
             return
         services = (
             (snapshot.game, snapshot.game_owned),
@@ -1228,9 +1285,18 @@ class HomePage(QWidget):
             self._stack_action = "start"
         if not enabled:
             self._stack_action = "none"
-        self.btn_start_servers.setText(label)
+        set_translatable_text(self.btn_start_servers, label)
         self.btn_start_servers.setEnabled(enabled)
-        self.btn_start_servers.setToolTip(tooltip)
+        set_translatable_tooltip(self.btn_start_servers, tooltip)
+
+    def retranslate_ui(self) -> None:
+        """Refresh dynamic controls that contain retained group/user values."""
+        self.set_group_state(self._group_state)
+        self.recent_activity.retranslate_ui()
+        if self._launch_in_progress and self._launch_progress is not None:
+            self.set_launch_progress(*self._launch_progress)
+        else:
+            self._restore_launch_button()
 
     def _emit_stack_action(self) -> None:
         if self._stack_action == "stop":

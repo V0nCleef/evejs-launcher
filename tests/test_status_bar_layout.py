@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
 
 from src.constants import APP_VERSION, COLORS
 from src.core.service_status import ServiceState
+from src.i18n import LANGUAGES, set_language
 from src.theme import build_qss
 from src.widgets.nav_panel import NavPanel
 from src.widgets.status_bar import StatusBar
@@ -58,6 +59,58 @@ def test_footer_keeps_a_safe_baseline_and_intentional_text_fit_at_minimum_width(
         bar.close()
         bar.deleteLater()
         qapp.setStyleSheet(original_style)
+
+
+def test_language_selector_lives_in_footer_and_retranslates_live(
+    qapp: QApplication,
+) -> None:
+    set_language("en")
+    bar = StatusBar()
+    bar.resize(1000, StatusBar.HEIGHT)
+    selected: list[str] = []
+    bar.language_changed.connect(selected.append)
+    bar.show()
+    qapp.processEvents()
+
+    try:
+        combo = bar.language_combo
+        assert [
+            combo.itemData(index)
+            for index in range(combo.count())
+        ] == [option.code for option in LANGUAGES]
+        assert [
+            combo.itemText(index)
+            for index in range(combo.count())
+        ] == [
+            "English",
+            "简体中文",
+            "日本語",
+            "한국어",
+            "Français",
+            "Deutsch",
+            "Nederlands",
+            "Русский",
+        ]
+        assert all(
+            not combo.itemIcon(index).isNull()
+            for index in range(combo.count())
+        )
+        assert combo.height() == 28
+        assert combo.geometry().left() < 220
+        assert combo.geometry().right() < bar.server_section.geometry().left()
+        assert combo.geometry().top() >= 0
+        assert combo.geometry().bottom() < bar.height()
+
+        combo.setCurrentIndex(combo.findData("zh_CN"))
+        qapp.processEvents()
+
+        assert selected == ["zh_CN"]
+        assert combo.accessibleName() == "启动器语言"
+        assert combo.toolTip() == "启动器语言"
+    finally:
+        set_language("en")
+        bar.close()
+        bar.deleteLater()
 
 
 def test_footer_semantic_states_keep_logical_text_and_pulse_lifecycle(
@@ -193,10 +246,13 @@ def test_footer_owns_the_full_bottom_edge_without_a_painted_shoulder(
         assert nav.geometry().bottom() + 1 == bar.geometry().top()
         assert nav.geometry().right() + 1 == 220
 
-        shoulder = bar.layout().itemAt(0)
-        assert shoulder.spacerItem() is not None
-        assert shoulder.geometry().width() >= 76
-        assert bar.childAt(20, bar.height() // 2) is None
+        language_item = bar.layout().itemAt(0)
+        assert language_item.widget() is bar.language_combo
+        assert bar.language_combo.geometry().left() < 220
+        assert bar.language_combo.geometry().right() < (
+            bar.server_section.geometry().left()
+        )
+        assert bar.server_section.geometry().left() >= 220
 
         for section in (
             bar.server_section,

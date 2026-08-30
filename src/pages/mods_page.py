@@ -6,14 +6,15 @@ manager; the widgets only request an explicit desired state and report it.
 """
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from pathlib import Path
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QUrl, Qt, pyqtSignal
+from PyQt6.QtGui import QDesktopServices, QShowEvent
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -23,6 +24,7 @@ from PyQt6.QtWidgets import (
 
 from src import config
 from src.constants import SPACING
+from src.i18n import translate_ui_phrase
 from src.core.mod_activation_state import (
     ModActivationProjection,
     ModActivationStateError,
@@ -34,6 +36,7 @@ from src.core.mod_manager import (
     ActivationKind,
     Mod,
     active_loader_names,
+    legacy_mods_directory,
     request_mod_activation,
     scan_mods,
 )
@@ -47,7 +50,101 @@ from src.core.mod_management import (
 from src.core.mod_runtime_state import ModRuntimeSnapshot
 from src.core.service_status import DockerControlPolicy, RuntimeBackend
 from src.widgets.page_header import PageHeader
+from src.widgets.localized_dialogs import LocalizedMessageBox as QMessageBox
 from src.widgets.toggle_switch import ToggleSwitch
+from src.widgets.ui_translation import (
+    mark_translatable,
+    register_translatable_widget_tree,
+    set_translatable_accessible_description,
+    set_translatable_accessible_name,
+    set_translatable_text,
+    set_translatable_text_template,
+    set_translatable_tooltip,
+    set_translatable_tooltip_template,
+)
+
+
+MOD_AUTHORING_GUIDE_URL = (
+    "https://github.com/V0nCleef/evejs-launcher/blob/v1.0.45/"
+    "docs/MOD_AUTHORING.md"
+)
+
+
+class ModFolderError(RuntimeError):
+    """A configured Mods-folder path is missing, unsafe, or unusable."""
+
+
+def _localized_mod_folder_detail(exc: BaseException) -> str:
+    """Translate launcher-owned framing while preserving inserted diagnostics."""
+
+    detail = str(exc) or type(exc).__name__
+    return translate_ui_phrase(
+        detail,
+        allow_templates=True,
+        template_min_literal=8,
+    )
+
+
+def _path_entry_exists(path: Path) -> bool:
+    """Return whether *path* exists, including a broken link or junction."""
+
+    return os.path.lexists(str(path))
+
+
+def _validated_mod_folder(
+    evejs_root: str,
+    *,
+    require_existing: bool = False,
+) -> tuple[Path, Path, bool]:
+    """Resolve the canonical ``<EveJS>/mods`` path without escaping its root.
+
+    The return value is ``(resolved_root, folder, exists)``. Missing folders
+    are reported without creating anything so that filesystem mutation only
+    happens after the user presses the explicit Create button.
+    """
+
+    raw_root = str(evejs_root or "")
+    if not raw_root.strip():
+        raise ModFolderError("No EveJS root is configured.")
+
+    selected_root = Path(raw_root).expanduser()
+    if not selected_root.is_absolute():
+        raise ModFolderError(
+            f"The configured EveJS root is not an absolute path: {raw_root}"
+        )
+    try:
+        resolved_root = selected_root.resolve(strict=True)
+    except OSError as exc:
+        raise ModFolderError(
+            f"The configured EveJS root could not be resolved: {raw_root}. {exc}"
+        ) from exc
+    if not resolved_root.is_dir():
+        raise ModFolderError(
+            f"The configured EveJS root is not a folder: {raw_root}"
+        )
+
+    folder = legacy_mods_directory(resolved_root)
+    if not _path_entry_exists(folder):
+        if require_existing:
+            raise ModFolderError(f"The Mods folder does not exist: {folder}")
+        return resolved_root, folder, False
+    if not folder.is_dir():
+        raise ModFolderError(
+            f"The Mods path exists but is not a folder: {folder}"
+        )
+
+    try:
+        resolved_folder = folder.resolve(strict=True)
+    except OSError as exc:
+        raise ModFolderError(
+            f"The Mods folder could not be resolved: {folder}. {exc}"
+        ) from exc
+    if resolved_root not in resolved_folder.parents:
+        raise ModFolderError(
+            "The Mods folder resolves outside the configured EveJS root: "
+            f"{folder} -> {resolved_folder}"
+        )
+    return resolved_root, resolved_folder, True
 
 
 class ModRow(QFrame):
@@ -88,8 +185,13 @@ class ModRow(QFrame):
         self.setProperty("class", "modInstrument")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setMinimumHeight(64)
-        self.setAccessibleName(f"Mod {mod.name}")
-        self.setAccessibleDescription(
+        set_translatable_accessible_name(
+            self,
+            f"Mod {mod.name}",
+            allow_templates=True,
+        )
+        set_translatable_accessible_description(
+            self,
             disabled_reason
             or (
                 "Toggle this JavaScript preload mod. The configured state "
@@ -122,6 +224,7 @@ class ModRow(QFrame):
         text_col.setSpacing(2)
 
         self.name_label = QLabel(mod.name)
+        self.name_label.setProperty("i18nIgnore", True)
         self.name_label.setProperty("class", "modName")
         self.name_label.setSizePolicy(
             QSizePolicy.Policy.Ignored,
@@ -142,6 +245,7 @@ class ModRow(QFrame):
             display_path = f"config / mods / {config_name} → {config_key}"
             troubleshooting_path = config_path or mod.manifest_path or mod.path
         self.path_label = QLabel(display_path)
+        self.path_label.setProperty("i18nIgnore", True)
         self.path_label.setProperty("class", "modPath")
         self.path_label.setSizePolicy(
             QSizePolicy.Policy.Ignored,
@@ -156,19 +260,26 @@ class ModRow(QFrame):
         self.state_label.setProperty("class", "modState")
         self.state_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.state_label.setMinimumWidth(124)
+        mark_translatable(self.state_label)
         layout.addWidget(self.state_label)
 
         self.remove_btn = QPushButton()
         self.remove_btn.setProperty("class", "modManagementAction")
         self.remove_btn.setFixedSize(94, 32)
-        self.remove_btn.setAccessibleName(f"Remove {mod.name}")
+        set_translatable_accessible_name(
+            self.remove_btn,
+            f"Remove {mod.name}",
+            allow_templates=True,
+        )
         if management is not None:
             self.remove_btn.setProperty("managementRole", "remove")
             self.remove_btn.setText("REMOVE")
-            self.remove_btn.setAccessibleDescription(
+            set_translatable_accessible_description(
+                self.remove_btn,
                 "Remove this mod through its verified launcher-compatible installer."
             )
-            self.remove_btn.setToolTip(
+            set_translatable_tooltip(
+                self.remove_btn,
                 "Remove this mod from EveJS. Saved data handling is chosen next."
                 if can_remove
                 else management_error
@@ -176,11 +287,16 @@ class ModRow(QFrame):
         elif management_error:
             self.remove_btn.setProperty("managementRole", "repair")
             self.remove_btn.setText("REPAIR")
-            self.remove_btn.setAccessibleName(
-                f"Explain removal repair for {mod.name}"
+            set_translatable_accessible_name(
+                self.remove_btn,
+                f"Explain removal repair for {mod.name}",
+                allow_templates=True,
             )
-            self.remove_btn.setAccessibleDescription(management_error)
-            self.remove_btn.setToolTip(management_error)
+            set_translatable_accessible_description(
+                self.remove_btn,
+                management_error,
+            )
+            set_translatable_tooltip(self.remove_btn, management_error)
         else:
             self.remove_btn.setProperty("managementRole", "external")
             self.remove_btn.setText("EXTERNAL")
@@ -188,8 +304,12 @@ class ModRow(QFrame):
                 "This mod was installed outside a launcher-compatible Setup. "
                 "Run its matching Setup once to add launcher removal support."
             )
-            self.remove_btn.setAccessibleDescription(unmanaged_reason)
-            self.remove_btn.setToolTip(unmanaged_reason)
+            set_translatable_accessible_description(
+                self.remove_btn,
+                unmanaged_reason,
+            )
+            set_translatable_tooltip(self.remove_btn, unmanaged_reason)
+        mark_translatable(self.remove_btn)
         self.remove_btn.setEnabled(can_remove or self._can_show_repair)
         self._sync_remove_cursor()
         self.remove_btn.clicked.connect(self._on_remove_clicked)
@@ -198,9 +318,17 @@ class ModRow(QFrame):
         self.toggle = ToggleSwitch(self)
         self.toggle.setChecked(mod.active)
         self.toggle.setEnabled(can_toggle)
-        self.toggle.setToolTip(disabled_reason if not can_toggle else "")
-        self.toggle.setAccessibleName(f"Enable {mod.name}")
-        self.toggle.setAccessibleDescription(
+        set_translatable_tooltip(
+            self.toggle,
+            disabled_reason if not can_toggle else "",
+        )
+        set_translatable_accessible_name(
+            self.toggle,
+            f"Enable {mod.name}",
+            allow_templates=True,
+        )
+        set_translatable_accessible_description(
+            self.toggle,
             disabled_reason
             or (
                 "Set the reviewed loader mod to the selected state."
@@ -212,6 +340,7 @@ class ModRow(QFrame):
         self.toggle.toggled.connect(self._on_toggled)
         layout.addWidget(self.toggle)
         self._update_state_presentation()
+        register_translatable_widget_tree(self)
 
     def _update_state_presentation(self) -> None:
         if not self.mod.valid:
@@ -237,7 +366,7 @@ class ModRow(QFrame):
                 text, state = "VERIFICATION FAILED", "error"
             else:
                 text, state = "CONTRACT CHANGED", "error"
-        self.state_label.setText(text)
+        set_translatable_text(self.state_label, text)
         self.state_label.setProperty("state", state)
         self.setProperty("state", state)
         for widget in (self, self.state_label):
@@ -283,8 +412,8 @@ class ModRow(QFrame):
             failure_message = (
                 f"Failed to change this mod's state: {self._operation_error}"
             )
-            self.setToolTip(failure_message)
-            self.toggle.setToolTip(failure_message)
+            set_translatable_tooltip_template(self, failure_message)
+            set_translatable_tooltip_template(self.toggle, failure_message)
             self._update_state_presentation()
             self.state_changed.emit()
 
@@ -321,7 +450,7 @@ class ModRow(QFrame):
             reason = "A Game server lifecycle operation is currently running."
         else:
             reason = self._disabled_reason if not self._can_toggle else ""
-        self.toggle.setToolTip(reason)
+        set_translatable_tooltip(self.toggle, reason)
         self._update_state_presentation()
 
     def _sync_remove_cursor(self) -> None:
@@ -353,7 +482,11 @@ class ModsPage(QWidget):
         self._mod_runtime_snapshot: ModRuntimeSnapshot | None = None
         self._activation_state_error = ""
         self._lifecycle_busy = False
+        self._mod_folder_path: Path | None = None
+        self._mod_folder_error = ""
+        self._mod_folder_can_create = False
         self._build_ui()
+        register_translatable_widget_tree(self)
         self.refresh_mods()
 
     # ── UI construction ──────────────────────────────────────────────────────
@@ -425,6 +558,87 @@ class ModsPage(QWidget):
         runtime_layout.addWidget(self.runtime_state_label)
         root.addWidget(self.runtime_panel)
 
+        self.folder_panel = QFrame(self)
+        self.folder_panel.setProperty("class", "modsFolderPanel")
+        folder_layout = QHBoxLayout(self.folder_panel)
+        folder_layout.setContentsMargins(16, 11, 16, 11)
+        folder_layout.setSpacing(SPACING["md"])
+
+        self.folder_mark = QLabel("DIR")
+        self.folder_mark.setProperty("class", "modsRuntimeMark")
+        self.folder_mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.folder_mark.setFixedSize(38, 38)
+        folder_layout.addWidget(self.folder_mark)
+
+        folder_copy = QVBoxLayout()
+        folder_copy.setSpacing(2)
+        self.folder_title = QLabel("MOD FOLDER")
+        self.folder_title.setProperty("class", "modsRuntimeEyebrow")
+        folder_copy.addWidget(self.folder_title)
+        self.folder_guidance = QLabel()
+        self.folder_guidance.setProperty("class", "modsRuntimeDescription")
+        self.folder_guidance.setWordWrap(True)
+        self.folder_guidance.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        folder_copy.addWidget(self.folder_guidance)
+
+        self.author_guide_label = QLabel(
+            "Making a mod? Read the launcher compatibility guide for mod authors."
+        )
+        self.author_guide_label.setProperty("class", "modsRuntimeDescription")
+        self.author_guide_label.setWordWrap(True)
+        folder_copy.addWidget(self.author_guide_label)
+        folder_layout.addLayout(folder_copy, stretch=1)
+
+        self.create_mod_folder_btn = QPushButton("CREATE MOD FOLDER")
+        self.create_mod_folder_btn.setProperty("class", "signalSecondary")
+        self.create_mod_folder_btn.setCursor(
+            Qt.CursorShape.PointingHandCursor
+        )
+        set_translatable_accessible_name(
+            self.create_mod_folder_btn,
+            "Create Mod Folder",
+        )
+        set_translatable_accessible_description(
+            self.create_mod_folder_btn,
+            "Create the canonical Mods folder inside the configured EveJS root.",
+        )
+        self.create_mod_folder_btn.clicked.connect(
+            self._create_mod_folder
+        )
+        folder_layout.addWidget(self.create_mod_folder_btn)
+
+        self.open_mod_folder_btn = QPushButton("OPEN MOD FOLDER")
+        self.open_mod_folder_btn.setProperty("class", "signalSecondary")
+        self.open_mod_folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        set_translatable_accessible_name(
+            self.open_mod_folder_btn,
+            "Open Mod Folder",
+        )
+        set_translatable_accessible_description(
+            self.open_mod_folder_btn,
+            "Open the configured Mods folder in File Explorer.",
+        )
+        self.open_mod_folder_btn.clicked.connect(self._open_mod_folder)
+        folder_layout.addWidget(self.open_mod_folder_btn)
+
+        self.mod_author_guide_btn = QPushButton("MOD AUTHOR GUIDE ↗")
+        self.mod_author_guide_btn.setProperty("class", "signalSecondary")
+        self.mod_author_guide_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        set_translatable_accessible_name(
+            self.mod_author_guide_btn,
+            "Open Mod Author Guide",
+        )
+        set_translatable_accessible_description(
+            self.mod_author_guide_btn,
+            "Open the EveJS Launcher mod-authoring guide on GitHub.",
+        )
+        self.mod_author_guide_btn.clicked.connect(self._open_mod_author_guide)
+        folder_layout.addWidget(self.mod_author_guide_btn)
+        root.addWidget(self.folder_panel)
+
         self.manifest_panel = QFrame(self)
         self.manifest_panel.setProperty("class", "modsManifestPanel")
         manifest_layout = QVBoxLayout(self.manifest_panel)
@@ -494,6 +708,150 @@ class ModsPage(QWidget):
         root.addWidget(self.action_rail)
         self._apply_runtime_presentation()
 
+    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 - Qt API
+        """Rescan folder state whenever the user opens the Mods page."""
+
+        super().showEvent(event)
+        self.refresh_mods()
+
+    def _refresh_mod_folder_controls(self) -> None:
+        """Render the canonical Mods-folder state without mutating the disk."""
+
+        self._mod_folder_path = None
+        self._mod_folder_error = ""
+        self._mod_folder_can_create = False
+
+        if not self._evejs_root.strip():
+            guidance = "Set the EveJS root folder in Settings first."
+        else:
+            try:
+                _root, folder, exists = _validated_mod_folder(
+                    self._evejs_root
+                )
+            except ModFolderError as exc:
+                self._mod_folder_error = str(exc)
+                guidance = (
+                    "The Mods folder is unavailable. Check the configured "
+                    "EveJS root in Settings."
+                )
+            else:
+                self._mod_folder_path = folder
+                if exists:
+                    guidance = (
+                        "To add a mod, place the mod's folder inside this "
+                        "folder, then click Refresh."
+                    )
+                else:
+                    guidance = (
+                        "Create the Mods folder first. Then place each mod's "
+                        "folder inside it and click Refresh."
+                    )
+                    self._mod_folder_can_create = True
+
+        set_translatable_text(self.folder_guidance, guidance)
+        set_translatable_tooltip_template(
+            self.folder_guidance,
+            self._mod_folder_error,
+        )
+
+        folder_exists = self._mod_folder_path is not None and not (
+            self._mod_folder_can_create or self._mod_folder_error
+        )
+        self.create_mod_folder_btn.setVisible(not folder_exists)
+        self.create_mod_folder_btn.setEnabled(
+            self._mod_folder_can_create
+            and self._can_mutate()
+            and not self._lifecycle_busy
+        )
+        self.create_mod_folder_btn.setCursor(
+            Qt.CursorShape.PointingHandCursor
+            if self.create_mod_folder_btn.isEnabled()
+            else Qt.CursorShape.ArrowCursor
+        )
+        set_translatable_tooltip_template(
+            self.create_mod_folder_btn,
+            self._mod_folder_error
+            or (
+                self._disabled_reason()
+                if self._mod_folder_can_create and not self._can_mutate()
+                else ""
+            ),
+        )
+
+        self.open_mod_folder_btn.setVisible(folder_exists)
+        self.open_mod_folder_btn.setEnabled(folder_exists)
+        self.open_mod_folder_btn.setCursor(
+            Qt.CursorShape.PointingHandCursor
+            if folder_exists
+            else Qt.CursorShape.ArrowCursor
+        )
+        set_translatable_tooltip(
+            self.open_mod_folder_btn,
+            str(self._mod_folder_path) if folder_exists else "",
+        )
+
+    def _create_mod_folder(self, _checked: bool = False) -> None:
+        """Create only the canonical child after an explicit user click."""
+
+        if self._lifecycle_busy or not self._can_mutate():
+            return
+        try:
+            _root, folder, exists = _validated_mod_folder(self._evejs_root)
+            if not exists:
+                folder.mkdir()
+            _root, folder, _exists = _validated_mod_folder(
+                self._evejs_root,
+                require_existing=True,
+            )
+            self._mod_folder_path = folder
+        except (ModFolderError, OSError) as exc:
+            detail = _localized_mod_folder_detail(exc)
+            QMessageBox.critical(
+                self,
+                "Mod Folder Error",
+                "The Mods folder could not be created.\n\n"
+                f"Details: {detail}",
+            )
+            self._refresh_mod_folder_controls()
+            return
+        self.refresh_mods()
+
+    def _open_mod_folder(self, _checked: bool = False) -> None:
+        """Open the validated local folder through Qt's Unicode-safe URL API."""
+
+        try:
+            _root, folder, _exists = _validated_mod_folder(
+                self._evejs_root,
+                require_existing=True,
+            )
+            opened = QDesktopServices.openUrl(
+                QUrl.fromLocalFile(str(folder))
+            )
+            if not opened:
+                raise ModFolderError(
+                    f"File Explorer did not accept the folder URL: {folder}"
+                )
+        except (ModFolderError, OSError) as exc:
+            detail = _localized_mod_folder_detail(exc)
+            QMessageBox.warning(
+                self,
+                "Mod Folder Error",
+                "The Mods folder could not be opened.\n\n"
+                f"Details: {detail}",
+            )
+            self._refresh_mod_folder_controls()
+
+    def _open_mod_author_guide(self, _checked: bool = False) -> None:
+        """Open the pinned launcher-compatible authoring guide."""
+
+        if QDesktopServices.openUrl(QUrl(MOD_AUTHORING_GUIDE_URL)):
+            return
+        QMessageBox.warning(
+            self,
+            "Mod Author Guide",
+            "The mod-authoring guide could not be opened in your default browser.",
+        )
+
     def set_evejs_root(self, evejs_root: str) -> None:
         """Select the root scanned by both Native and Docker mod views."""
         if evejs_root != self._evejs_root:
@@ -539,6 +897,7 @@ class ModsPage(QWidget):
         for row in self._rows:
             row.set_lifecycle_busy(busy)
         self.refresh_btn.setEnabled(not busy)
+        self._refresh_mod_folder_controls()
         self._update_summary_and_actions()
 
     def selected_loader_names(self) -> tuple[str, ...]:
@@ -605,7 +964,7 @@ class ModsPage(QWidget):
         return True, "", ""
 
     def _set_runtime_state(self, text: str, state: str) -> None:
-        self.runtime_state_label.setText(text)
+        set_translatable_text(self.runtime_state_label, text)
         self.runtime_state_label.setProperty("state", state)
         style = self.runtime_state_label.style()
         style.unpolish(self.runtime_state_label)
@@ -614,43 +973,56 @@ class ModsPage(QWidget):
 
     def _apply_runtime_presentation(self) -> None:
         if self._runtime_backend is RuntimeBackend.NATIVE:
-            self.lbl_backend.setText(
+            set_translatable_text(
+                self.lbl_backend,
                 "Native: configured mod changes take effect after a Game server restart."
             )
-            self.warning_label.setText(
+            set_translatable_text(
+                self.warning_label,
                 "Configured changes are confirmed only after a verified Game restart."
             )
-            self.apply_btn.setText("Apply && Restart Server")
-            self.apply_btn.setToolTip("")
-            self.apply_btn.setAccessibleDescription(
+            set_translatable_text(self.apply_btn, "Apply && Restart Server")
+            set_translatable_tooltip(self.apply_btn, "")
+            set_translatable_accessible_description(
+                self.apply_btn,
                 "Apply the configured mod state and restart the Native Game server."
             )
             self._set_runtime_state("NATIVE HOST", "ready")
             return
         if self._docker_policy is DockerControlPolicy.MANAGED:
-            self.lbl_backend.setText(
+            set_translatable_text(
+                self.lbl_backend,
                 "Managed Docker: supported loader.js preloads are bind-mounted "
                 "and applied by recreating the server container."
             )
-            self.warning_label.setText(
+            set_translatable_text(
+                self.warning_label,
                 "Applying disconnects clients while the server container is recreated."
             )
-            self.apply_btn.setText("Apply && Recreate Server")
-            self.apply_btn.setToolTip(
+            set_translatable_text(self.apply_btn, "Apply && Recreate Server")
+            set_translatable_tooltip(
+                self.apply_btn,
                 "Write the launcher-owned override and recreate the server container."
             )
-            self.apply_btn.setAccessibleDescription(self.apply_btn.toolTip())
+            set_translatable_accessible_description(
+                self.apply_btn,
+                "Write the launcher-owned override and recreate the server container.",
+            )
             self._set_runtime_state("DOCKER · MANAGED", "online")
             return
         reason = self._disabled_reason()
-        self.lbl_backend.setText(
+        set_translatable_text(
+            self.lbl_backend,
             "Connect-only Docker: mods are visible, but the launcher cannot "
             "change mod or Compose state."
         )
-        self.warning_label.setText("Connect-only mode is observational and read-only.")
-        self.apply_btn.setText("Connect-only — Read Only")
-        self.apply_btn.setToolTip(reason)
-        self.apply_btn.setAccessibleDescription(reason)
+        set_translatable_text(
+            self.warning_label,
+            "Connect-only mode is observational and read-only.",
+        )
+        set_translatable_text(self.apply_btn, "Connect-only — Read Only")
+        set_translatable_tooltip(self.apply_btn, reason)
+        set_translatable_accessible_description(self.apply_btn, reason)
         self._set_runtime_state("DOCKER · CONNECT ONLY", "idle")
 
     def _on_apply_clicked(self) -> None:
@@ -683,6 +1055,7 @@ class ModsPage(QWidget):
     def refresh_mods(self) -> None:
         """Rescan supported mod locations and rebuild the list."""
         evejs_root = self._evejs_root
+        self._refresh_mod_folder_controls()
         mods: list[Mod] = scan_mods(evejs_root) if evejs_root else []
         activation_state = None
         self._activation_state_error = ""
@@ -725,6 +1098,7 @@ class ModsPage(QWidget):
             empty_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
             empty_message.setWordWrap(True)
             empty_layout.addWidget(empty_message)
+            register_translatable_widget_tree(empty)
             self._list_layout.insertWidget(0, empty)
         else:
             for index, mod in enumerate(mods):
@@ -794,10 +1168,12 @@ class ModsPage(QWidget):
         """Refresh count and Apply capability after an in-row mutation."""
         mods = self.mods()
         active = sum(1 for mod in mods if mod.valid and mod.active)
-        self.count_label.setText(
+        set_translatable_text_template(
+            self.count_label,
             f"{active} CONFIGURED ON / {len(mods)} INSTALLED"
         )
-        self.count_label.setToolTip(
+        set_translatable_tooltip_template(
+            self.count_label,
             f"{active} configured enabled mods out of {len(mods)} installed"
         )
 

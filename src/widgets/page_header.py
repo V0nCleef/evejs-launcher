@@ -11,6 +11,11 @@ from PyQt6.QtWidgets import (
 )
 
 from src.constants import SPACING
+from src.widgets.ui_translation import (
+    set_translatable_accessible_description,
+    set_translatable_accessible_name,
+    set_translatable_text,
+)
 
 
 class PageHeader(QWidget):
@@ -66,19 +71,19 @@ class PageHeader(QWidget):
 
     def set_eyebrow(self, text: str) -> None:
         text = str(text)
-        self.eyebrow_label.setText(text.upper())
+        set_translatable_text(self.eyebrow_label, text.upper())
         self.eyebrow_label.setVisible(bool(text))
 
     def set_title(self, text: str) -> None:
         text = str(text)
-        self.title_label.setText(text)
-        self.setAccessibleName(text)
+        set_translatable_text(self.title_label, text)
+        set_translatable_accessible_name(self, text)
 
     def set_subtitle(self, text: str) -> None:
         text = str(text)
-        self.subtitle_label.setText(text)
+        set_translatable_text(self.subtitle_label, text)
         self.subtitle_label.setVisible(bool(text))
-        self.setAccessibleDescription(text)
+        set_translatable_accessible_description(self, text)
 
     def add_action(self, widget: QWidget) -> None:
         self.action_layout.addWidget(widget)

@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 import tempfile
 
+from .i18n import normalize_language
+
 log = logging.getLogger(__name__)
 
 APP_NAME = "EveJS-Launcher"
@@ -31,6 +33,7 @@ DEFAULT_CONFIG = {
     "stagger_delay_sec": 3,
     "auto_login_enabled": False,
     "theme": "dark",
+    "language": "en",
     "hidden_characters": [],  # list of character names hidden from UI
     "hide_test_characters": True,  # auto-hide characters belonging to test/GM accounts
     "never_hide_characters": [],  # characters the user explicitly un-hid — auto-hide skips these
@@ -110,6 +113,7 @@ def _migrate(stored: dict) -> dict:
     migrated["deep_signal_enabled"] = _bool_setting(
         migrated.get("deep_signal_enabled"), default=True
     )
+    migrated["language"] = normalize_language(migrated.get("language"))
     _migrate_audio_settings(migrated)
     for legacy_key in (
         "server_start_script",

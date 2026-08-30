@@ -24,6 +24,12 @@ ProcessRunningCheck = Callable[[int], bool]
 SleepFunction = Callable[[float], None]
 
 
+_LAUNCHER_RUNTIME_DIR = "_internal"
+_UPDATE_BACKUP_DIR = ".evejs-launcher-update-backup"
+_UPDATE_CLEANUP_MARKER = Path(_LAUNCHER_RUNTIME_DIR) / ".evejs-update-cleanup.json"
+_UPDATE_STAGING_PREFIX = "evejs_launcher_update_"
+
+
 @dataclass(frozen=True)
 class UpdateHandoff:
     """Arguments passed from the old launcher to the staged new build."""
@@ -85,9 +91,16 @@ def apply_staged_update(
     settle_seconds: int = 15,
     sleep_func: SleepFunction | None = None,
 ) -> UpdateApplyResult:
-    """Swap the install directory while preserving a rollback copy until verified."""
-    source_dir = handoff.source_dir.resolve()
-    target_dir = handoff.target_dir.resolve()
+    """Replace only launcher-owned entries and retain a rollback until verified."""
+    try:
+        source_dir = handoff.source_dir.resolve()
+        target_dir = handoff.target_dir.resolve()
+    except (OSError, RuntimeError) as exc:
+        return UpdateApplyResult(
+            False,
+            "The update paths could not be resolved. Your existing installation "
+            f"has not been changed. Details: {exc}",
+        )
     validation_error = _validate_handoff(source_dir, target_dir, handoff.exe_name)
     if validation_error:
         return UpdateApplyResult(False, validation_error)
@@ -112,39 +125,66 @@ def apply_staged_update(
         sleep_func or time.sleep,
     )
 
-    backup_dir = target_dir.with_name(f"{target_dir.name}.old")
-    _emit_stage(stage_callback, "install", "Creating a safe backup…")
-    if not _remove_path_with_retry(backup_dir, retry_delay_seconds):
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
         return UpdateApplyResult(
             False,
-            "A previous update backup is still in use. Your existing installation "
-            "has not been changed.",
+            "The launcher installation folder is unavailable. Your existing "
+            f"installation has not been changed. Details: {exc}",
         )
 
-    if target_dir.exists() and not _rename_with_retry(
+    backup_dir = target_dir / _UPDATE_BACKUP_DIR
+    _emit_stage(stage_callback, "install", "Creating a safe backup…")
+    if _path_exists(backup_dir):
+        return UpdateApplyResult(
+            False,
+            "A previous launcher update backup is still present. It was left "
+            "untouched, and your existing installation has not been changed. "
+            "Restart the launcher to retry cleanup before updating again.",
+        )
+
+    moved_old_install, backup_error = _backup_owned_install(
         target_dir,
         backup_dir,
+        handoff.exe_name,
         retry_delay_seconds,
-    ):
+    )
+    if backup_error:
         return UpdateApplyResult(
             False,
-            "The existing launcher files are still in use. Your existing installation "
-            "has not been changed.",
+            backup_error,
         )
 
-    moved_old_install = backup_dir.exists()
     _emit_stage(stage_callback, "install", "Copying new launcher files…")
     try:
-        _copy_install_tree(source_dir, target_dir, copy_progress_callback)
+        _copy_install_tree(
+            source_dir,
+            target_dir,
+            handoff.exe_name,
+            copy_progress_callback,
+        )
         installed_exe = target_dir / handoff.exe_name
         if not installed_exe.is_file():
             raise OSError("The copied launcher executable was not found")
+        if not (target_dir / _LAUNCHER_RUNTIME_DIR).is_dir():
+            raise OSError("The copied launcher runtime directory was not found")
     except OSError as exc:
-        _restore_old_install(target_dir, backup_dir, retry_delay_seconds)
+        restored = _restore_old_install(
+            target_dir,
+            backup_dir,
+            handoff.exe_name,
+            retry_delay_seconds,
+        )
+        recovery = (
+            "The previous launcher was restored."
+            if restored
+            else f"The previous launcher files remain in {backup_dir}."
+        )
         return UpdateApplyResult(
             False,
-            "The new files could not be copied. The previous launcher was restored. "
-            f"Details: {exc}",
+            "The new launcher files could not be copied. "
+            f"{recovery} Other files in the folder were left untouched. Details: {exc}",
         )
 
     _emit_stage(stage_callback, "install", "Verifying installed launcher…")
@@ -164,15 +204,12 @@ def launch_installed_launcher(exe_path: Path) -> None:
     )
 
 
-_UPDATE_CLEANUP_MARKER = ".evejs-update-cleanup.json"
-_UPDATE_STAGING_PREFIX = "evejs_launcher_update_"
-
-
 def schedule_update_cleanup(
     install_dir: Path,
     source_dir: Path,
     backup_dir: Path | None,
-) -> None:
+    exe_name: str,
+) -> bool:
     """Record validated artifacts for cleanup by the restarted launcher.
 
     Keeping the cleanup inside the normal launcher process avoids spawning a
@@ -180,36 +217,54 @@ def schedule_update_cleanup(
     """
     try:
         install_dir = install_dir.resolve()
-    except OSError:
-        return
+    except (OSError, RuntimeError):
+        return False
 
     staging_root = _find_update_staging_root(source_dir)
-    if staging_root is None or not install_dir.is_dir():
-        return
+    if (
+        staging_root is None
+        or _paths_overlap(staging_root, install_dir)
+        or not install_dir.is_dir()
+    ):
+        return False
 
-    payload: dict[str, str] = {"source_root": str(staging_root)}
+    if not _is_valid_exe_name(exe_name):
+        return False
+
+    payload: dict[str, str] = {
+        "source_root": str(staging_root),
+        "exe_name": exe_name,
+    }
     if backup_dir is not None:
-        if not _is_expected_backup_dir(backup_dir, install_dir):
-            return
-        payload["backup_dir"] = str(backup_dir.resolve())
+        if not _is_expected_backup_dir(
+            backup_dir,
+            install_dir,
+        ) or not _is_launcher_backup_tree(backup_dir, exe_name):
+            return False
+        try:
+            payload["backup_dir"] = str(backup_dir.resolve())
+        except (OSError, RuntimeError):
+            return False
 
     marker_path = install_dir / _UPDATE_CLEANUP_MARKER
     temporary_marker = marker_path.with_suffix(".tmp")
     try:
         temporary_marker.write_text(json.dumps(payload), encoding="utf-8")
         temporary_marker.replace(marker_path)
-    except OSError:
+    except (OSError, RuntimeError):
         try:
             temporary_marker.unlink(missing_ok=True)
         except OSError:
             pass
+        return False
+    return True
 
 
 def cleanup_pending_update(install_dir: Path) -> bool:
     """Remove only the validated artifacts left by a completed update."""
     try:
         install_dir = install_dir.resolve()
-    except OSError:
+    except (OSError, RuntimeError):
         return False
 
     marker_path = install_dir / _UPDATE_CLEANUP_MARKER
@@ -223,24 +278,37 @@ def cleanup_pending_update(install_dir: Path) -> bool:
 
     source_value = payload.get("source_root") if isinstance(payload, dict) else None
     backup_value = payload.get("backup_dir") if isinstance(payload, dict) else None
-    if not isinstance(source_value, str) or not isinstance(backup_value, (str, type(None))):
+    exe_name = payload.get("exe_name") if isinstance(payload, dict) else None
+    if (
+        not isinstance(source_value, str)
+        or not isinstance(backup_value, (str, type(None)))
+        or not isinstance(exe_name, str)
+        or not _is_valid_exe_name(exe_name)
+    ):
         _remove_cleanup_marker(marker_path)
         return False
 
     staging_root = _find_update_staging_root(Path(source_value))
     backup_dir = Path(backup_value) if backup_value else None
-    if staging_root is None or (
+    if staging_root is None or _paths_overlap(staging_root, install_dir) or (
         backup_dir is not None and not _is_expected_backup_dir(backup_dir, install_dir)
     ):
         _remove_cleanup_marker(marker_path)
+        return False
+    if backup_dir is not None and not _is_launcher_backup_tree(backup_dir, exe_name):
         return False
 
     try:
         if staging_root.exists():
             shutil.rmtree(staging_root)
-        if backup_dir is not None and backup_dir.exists():
-            shutil.rmtree(backup_dir)
     except OSError:
+        return False
+
+    if backup_dir is not None and not _remove_launcher_backup(
+        backup_dir,
+        exe_name,
+        retry_delay_seconds=0.1,
+    ):
         return False
 
     _remove_cleanup_marker(marker_path)
@@ -270,10 +338,11 @@ class UpdateHandoffWorker(QThread):
             return
 
         try:
-            schedule_update_cleanup(
+            cleanup_scheduled = schedule_update_cleanup(
                 self._handoff.target_dir,
                 self._handoff.source_dir,
                 result.backup_dir,
+                self._handoff.exe_name,
             )
             launch_installed_launcher(result.installed_exe)
         except OSError as exc:
@@ -281,6 +350,17 @@ class UpdateHandoffWorker(QThread):
                 False,
                 "The new launcher was installed, but could not be restarted. "
                 f"You can launch it manually. Details: {exc}",
+            )
+            return
+
+        if not cleanup_scheduled:
+            retained_path = result.backup_dir or self._handoff.source_dir
+            self.completed.emit(
+                False,
+                "The new launcher was installed and restarted, but its rollback "
+                f"cleanup could not be scheduled. Keep {retained_path} until "
+                "the restarted launcher has been checked, then remove only that "
+                "launcher backup before the next update.",
             )
             return
 
@@ -357,12 +437,31 @@ def _emit_stage(callback: StageCallback | None, stage: str, detail: str) -> None
 
 
 def _validate_handoff(source_dir: Path, target_dir: Path, exe_name: str) -> str:
+    if not _is_valid_exe_name(exe_name):
+        return "The downloaded update has an invalid launcher name. The installation is unchanged."
     if not source_dir.is_dir():
         return "The downloaded update files are missing. Your existing installation is unchanged."
-    if not (source_dir / exe_name).is_file():
+    source_exe = source_dir / exe_name
+    source_runtime = source_dir / _LAUNCHER_RUNTIME_DIR
+    if (
+        not source_exe.is_file()
+        or _is_reparse_point(source_exe)
+        or not source_runtime.is_dir()
+        or _is_reparse_point(source_runtime)
+        or not _runtime_tree_is_complete(source_runtime)
+    ):
         return "The downloaded update is incomplete. Your existing installation is unchanged."
-    if source_dir == target_dir or source_dir in target_dir.parents or target_dir in source_dir.parents:
-        return "The update source overlaps the installation folder. Your existing installation is unchanged."
+    if _path_exists(target_dir) and not target_dir.is_dir():
+        return "The launcher installation path is not a folder. The installation is unchanged."
+    if (
+        source_dir == target_dir
+        or source_dir in target_dir.parents
+        or target_dir in source_dir.parents
+    ):
+        return (
+            "The update source overlaps the installation folder. "
+            "Your existing installation is unchanged."
+        )
     return ""
 
 
@@ -371,7 +470,7 @@ def _find_update_staging_root(source_dir: Path) -> Path | None:
     try:
         source_dir = source_dir.resolve()
         temp_dir = Path(tempfile.gettempdir()).resolve()
-    except OSError:
+    except (OSError, RuntimeError):
         return None
 
     for candidate in (source_dir, *source_dir.parents):
@@ -381,12 +480,81 @@ def _find_update_staging_root(source_dir: Path) -> Path | None:
 
 
 def _is_expected_backup_dir(backup_dir: Path, install_dir: Path) -> bool:
-    """Accept only the adjacent rollback directory created by this updater."""
+    """Accept only the launcher-owned rollback directory inside the install root."""
     try:
-        expected = install_dir.with_name(f"{install_dir.name}.old")
+        expected = install_dir / _UPDATE_BACKUP_DIR
         return backup_dir.resolve() == expected
+    except (OSError, RuntimeError):
+        return False
+
+
+def _paths_overlap(first: Path, second: Path) -> bool:
+    """Return whether either resolved directory contains the other."""
+    return first == second or first in second.parents or second in first.parents
+
+
+def _is_valid_exe_name(exe_name: str) -> bool:
+    return Path(exe_name).name == exe_name and exe_name.lower().endswith(".exe")
+
+
+def _launcher_owned_names(exe_name: str) -> tuple[str, str]:
+    return (exe_name, _LAUNCHER_RUNTIME_DIR)
+
+
+def _path_exists(path: Path) -> bool:
+    """Like ``lexists``: include broken links so they are never ignored."""
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def _is_reparse_point(path: Path) -> bool:
+    """Reject links/junctions at launcher-owned paths without following them."""
+    try:
+        attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return path.is_symlink() or bool(attributes & 0x400)
+
+
+def _runtime_tree_is_complete(runtime_dir: Path) -> bool:
+    """Require at least one ordinary runtime file and no linked descendants."""
+    found_file = False
+    try:
+        for path in runtime_dir.rglob("*"):
+            if _is_reparse_point(path):
+                return False
+            if path.is_file():
+                found_file = True
+            elif not path.is_dir():
+                return False
     except OSError:
         return False
+    return found_file
+
+
+def _is_launcher_backup_tree(backup_dir: Path, exe_name: str) -> bool:
+    """Ensure cleanup can never recurse through user-owned backup content."""
+    if not _path_exists(backup_dir):
+        return True
+    if not backup_dir.is_dir() or _is_reparse_point(backup_dir):
+        return False
+
+    owned_names = set(_launcher_owned_names(exe_name))
+    try:
+        children = list(backup_dir.iterdir())
+    except OSError:
+        return False
+    return all(
+        child.name in owned_names and not _is_reparse_point(child)
+        for child in children
+    )
 
 
 def _remove_cleanup_marker(marker_path: Path) -> None:
@@ -455,18 +623,28 @@ def _is_process_running(process_id: int) -> bool:
 def _remove_path_with_retry(path: Path, retry_delay_seconds: float, attempts: int = 20) -> bool:
     for _attempt in range(attempts):
         try:
-            if path.is_dir():
+            if _is_reparse_point(path):
+                if path.is_dir():
+                    path.rmdir()
+                else:
+                    path.unlink()
+            elif path.is_dir():
                 shutil.rmtree(path)
-            elif path.exists():
+            elif _path_exists(path):
                 path.unlink()
         except OSError:
             time.sleep(max(0.05, retry_delay_seconds))
             continue
-        return not path.exists()
-    return not path.exists()
+        return not _path_exists(path)
+    return not _path_exists(path)
 
 
-def _rename_with_retry(source: Path, destination: Path, retry_delay_seconds: float, attempts: int = 20) -> bool:
+def _rename_with_retry(
+    source: Path,
+    destination: Path,
+    retry_delay_seconds: float,
+    attempts: int = 20,
+) -> bool:
     for _attempt in range(attempts):
         try:
             source.rename(destination)
@@ -476,24 +654,109 @@ def _rename_with_retry(source: Path, destination: Path, retry_delay_seconds: flo
     return False
 
 
+def _backup_owned_install(
+    target_dir: Path,
+    backup_dir: Path,
+    exe_name: str,
+    retry_delay_seconds: float,
+) -> tuple[bool, str]:
+    """Move only the EXE and ``_internal`` into the rollback directory."""
+    try:
+        backup_dir.mkdir()
+    except OSError:
+        return False, (
+            "The launcher rollback directory could not be created. "
+            "Your existing installation and all neighboring files were left untouched."
+        )
+
+    moved_names: list[str] = []
+    for name in _launcher_owned_names(exe_name):
+        source_path = target_dir / name
+        if not _path_exists(source_path):
+            continue
+        if _is_reparse_point(source_path) or not _rename_with_retry(
+            source_path,
+            backup_dir / name,
+            retry_delay_seconds,
+        ):
+            restored = _restore_backup_entries(
+                target_dir,
+                backup_dir,
+                moved_names,
+                retry_delay_seconds,
+            )
+            if restored:
+                return False, (
+                    "The existing launcher files are still in use. The original "
+                    "launcher was restored, and all neighboring files were left untouched."
+                )
+            return False, (
+                "The existing launcher files could not be moved or fully restored. "
+                f"Recovery files remain in {backup_dir}. All neighboring files "
+                "were left untouched."
+            )
+        moved_names.append(name)
+
+    if not moved_names:
+        try:
+            backup_dir.rmdir()
+        except OSError:
+            return False, (
+                "The empty launcher rollback directory could not be removed. "
+                f"It was left at {backup_dir}; neighboring files were not changed."
+            )
+        return False, ""
+    return True, ""
+
+
+def _restore_backup_entries(
+    target_dir: Path,
+    backup_dir: Path,
+    names: Sequence[str],
+    retry_delay_seconds: float,
+) -> bool:
+    restored = True
+    for name in reversed(names):
+        backup_path = backup_dir / name
+        if _path_exists(backup_path) and not _rename_with_retry(
+            backup_path,
+            target_dir / name,
+            retry_delay_seconds,
+        ):
+            restored = False
+    if restored:
+        try:
+            backup_dir.rmdir()
+        except OSError:
+            restored = False
+    return restored
+
+
 def _copy_install_tree(
     source_dir: Path,
     target_dir: Path,
+    exe_name: str,
     progress_callback: CopyProgressCallback | None,
 ) -> None:
-    files: list[Path] = []
-    for source_path in source_dir.rglob("*"):
+    """Copy exactly the two launcher-owned roots; ignore every other sibling."""
+    source_runtime = source_dir / _LAUNCHER_RUNTIME_DIR
+    target_runtime = target_dir / _LAUNCHER_RUNTIME_DIR
+    target_runtime.mkdir(parents=True, exist_ok=True)
+
+    files: list[Path] = [source_dir / exe_name]
+    for source_path in sorted(source_runtime.rglob("*")):
+        if _is_reparse_point(source_path):
+            raise OSError(f"Update package contains a linked path: {source_path.name}")
         relative_path = source_path.relative_to(source_dir)
         target_path = target_dir / relative_path
         if source_path.is_dir():
             target_path.mkdir(parents=True, exist_ok=True)
         elif source_path.is_file():
             files.append(source_path)
+        else:
+            raise OSError(f"Update package contains an unsupported path: {source_path.name}")
 
     total = len(files)
-    if total == 0:
-        raise OSError("The update package has no files")
-
     for completed, source_path in enumerate(files, start=1):
         target_path = target_dir / source_path.relative_to(source_dir)
         target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -502,7 +765,62 @@ def _copy_install_tree(
             progress_callback(completed, total)
 
 
-def _restore_old_install(target_dir: Path, backup_dir: Path, retry_delay_seconds: float) -> None:
-    _remove_path_with_retry(target_dir, retry_delay_seconds)
-    if backup_dir.exists() and not target_dir.exists():
-        _rename_with_retry(backup_dir, target_dir, retry_delay_seconds)
+def _restore_old_install(
+    target_dir: Path,
+    backup_dir: Path,
+    exe_name: str,
+    retry_delay_seconds: float,
+) -> bool:
+    """Remove/restore only launcher-owned entries; never delete the install root."""
+    restored = True
+    for name in _launcher_owned_names(exe_name):
+        target_path = target_dir / name
+        if _path_exists(target_path) and not _remove_path_with_retry(
+            target_path,
+            retry_delay_seconds,
+        ):
+            restored = False
+
+    for name in reversed(_launcher_owned_names(exe_name)):
+        backup_path = backup_dir / name
+        target_path = target_dir / name
+        if not _path_exists(backup_path):
+            continue
+        if _path_exists(target_path) or not _rename_with_retry(
+            backup_path,
+            target_path,
+            retry_delay_seconds,
+        ):
+            restored = False
+
+    if _path_exists(backup_dir):
+        try:
+            backup_dir.rmdir()
+        except OSError:
+            restored = False
+    return restored
+
+
+def _remove_launcher_backup(
+    backup_dir: Path,
+    exe_name: str,
+    retry_delay_seconds: float,
+) -> bool:
+    """Delete only validated launcher-owned backup entries, then the empty shell."""
+    if not _is_launcher_backup_tree(backup_dir, exe_name):
+        return False
+    if not _path_exists(backup_dir):
+        return True
+
+    for name in _launcher_owned_names(exe_name):
+        backup_path = backup_dir / name
+        if _path_exists(backup_path) and not _remove_path_with_retry(
+            backup_path,
+            retry_delay_seconds,
+        ):
+            return False
+    try:
+        backup_dir.rmdir()
+    except OSError:
+        return False
+    return not _path_exists(backup_dir)
