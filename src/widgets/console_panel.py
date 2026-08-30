@@ -28,6 +28,7 @@ class ConsolePanel(QFrame):
     """
 
     MAX_LINES = 2000
+    MAX_POLL_BYTES = 100_000
     DEFAULT_HEIGHT = 230
     MIN_AUTO_CLOSE_HEIGHT = 50
     STATUS_BAR_OFFSET = 24
@@ -123,6 +124,7 @@ class ConsolePanel(QFrame):
         self._log.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._log.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._log.setAccessibleName("Console output")
+        self._log.document().setMaximumBlockCount(self.MAX_LINES)
         layout.addWidget(self._log)
 
         self._set_monospace_font(10)
@@ -315,10 +317,10 @@ class ConsolePanel(QFrame):
 
         if self._log_path.exists():
             file_size = self._log_path.stat().st_size
-            # Only load the last ~100KB for large files
-            if file_size > 100_000:
+            # Only load the newest bounded tail for large files.
+            if file_size > self.MAX_POLL_BYTES:
                 with open(self._log_path, "r", encoding="utf-8", errors="replace") as f:
-                    f.seek(file_size - 100_000)
+                    f.seek(file_size - self.MAX_POLL_BYTES)
                     f.readline()  # discard partial line
                     self._append_lines(f.read().splitlines())
             else:
@@ -392,28 +394,29 @@ class ConsolePanel(QFrame):
                 self._log.clear()
                 self._log_offset = 0
             if size > self._log_offset:
-                with self._log_path.open("r", encoding="utf-8", errors="replace") as fh:
-                    fh.seek(self._log_offset)
-                    new_text = fh.read()
+                read_offset = max(self._log_offset, size - self.MAX_POLL_BYTES)
+                with self._log_path.open("rb") as fh:
+                    fh.seek(read_offset)
+                    if read_offset > self._log_offset:
+                        fh.seek(read_offset - 1)
+                        if fh.read(1) != b"\n":
+                            fh.readline()
+                    remaining = max(0, size - fh.tell())
+                    new_bytes = fh.read(remaining)
                 self._log_offset = size
-                self._append_lines(new_text.splitlines())
+                self._append_lines(
+                    new_bytes.decode("utf-8", errors="replace").splitlines()
+                )
         except OSError:
             pass
 
     def _append_lines(self, lines: list[str]) -> None:
         if not lines:
             return
+        lines = lines[-self.MAX_LINES :]
         cursor = self._log.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-        for line in lines:
-            cursor.insertText(line + "\n")
-        # Enforce ring-buffer line limit
-        doc = self._log.document()
-        while doc.blockCount() > self.MAX_LINES:
-            cursor.movePosition(QTextCursor.MoveOperation.Start)
-            cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
-            cursor.removeSelectedText()
-            cursor.deleteChar()  # remove the newline
+        cursor.insertText("\n".join(lines) + "\n")
         self._log.ensureCursorVisible()
 
     # ── Header actions ───────────────────────────────────────────────────────

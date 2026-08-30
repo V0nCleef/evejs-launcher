@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 import logging
+from queue import Empty, SimpleQueue
+import threading
 import time
 from typing import TypeVar
 
@@ -39,6 +41,11 @@ class ClientWindowReadinessGate(QObject):
         self._deadline = 0.0
         self._active = False
         self._started = False
+        self._probe_generation = 0
+        self._probe_in_flight = False
+        self._probe_results: SimpleQueue[
+            tuple[int, bool, str | None, float]
+        ] = SimpleQueue()
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._poll)
@@ -64,6 +71,7 @@ class ClientWindowReadinessGate(QObject):
         """Stop polling without emitting a terminal result."""
         self._active = False
         self._timer.stop()
+        self._invalidate_probe()
 
     @pyqtSlot()
     def _poll(self) -> None:
@@ -83,28 +91,99 @@ class ClientWindowReadinessGate(QObject):
                 self._complete(False, f"process-exited:{return_code}")
                 return
 
+        if self._consume_probe_result():
+            return
+
+        remaining_ms = self._remaining_ms()
+        if remaining_ms <= 0:
+            self._complete(False, "window-timeout")
+            return
+
+        if not self._probe_in_flight:
+            self._start_window_probe()
+        if not self._active:
+            return
+        self._timer.start(min(self._poll_interval_ms, remaining_ms))
+
+    def _start_window_probe(self) -> None:
+        """Run one potentially blocking window observation on a daemon thread."""
+        if not self._active or self._probe_in_flight:
+            return
+
+        self._probe_generation += 1
+        generation = self._probe_generation
+        self._probe_in_flight = True
+        pid = self._pid
+        probe = self._window_probe
+        results = self._probe_results
+
+        def run_probe() -> None:
+            error: str | None = None
+            try:
+                visible = bool(probe(pid))
+            except Exception as exc:  # noqa: BLE001 - reported to the Qt owner
+                visible = False
+                error = f"{type(exc).__name__}: {exc}"
+            results.put((generation, visible, error, time.monotonic()))
+
+        worker = threading.Thread(
+            target=run_probe,
+            name=f"client-window-probe-{pid}-{generation}",
+            daemon=True,
+        )
         try:
-            if self._window_probe(self._pid):
-                self._complete(True, "window-visible")
-                return
-        except Exception:  # noqa: BLE001 - observation failure is retried until timeout
+            worker.start()
+        except Exception:  # noqa: BLE001 - retry until the unchanged deadline
+            self._probe_in_flight = False
             log.debug(
-                "Unable to inspect client window pid=%s while awaiting readiness",
+                "Unable to start client window probe pid=%s",
                 self._pid,
                 exc_info=True,
             )
 
-        remaining_ms = max(0, int((self._deadline - time.monotonic()) * 1_000))
-        if remaining_ms <= 0:
-            self._complete(False, "window-timeout")
-            return
-        self._timer.start(min(self._poll_interval_ms, remaining_ms))
+    def _consume_probe_result(self) -> bool:
+        """Apply only the current probe result; discard cancelled/stale work."""
+        while True:
+            try:
+                generation, visible, error, completed_at = (
+                    self._probe_results.get_nowait()
+                )
+            except Empty:
+                return False
+
+            if generation != self._probe_generation or not self._probe_in_flight:
+                continue
+
+            self._probe_in_flight = False
+            if completed_at > self._deadline:
+                self._complete(False, "window-timeout")
+                return True
+            if error is not None:
+                log.debug(
+                    "Unable to inspect client window pid=%s while awaiting "
+                    "readiness: %s",
+                    self._pid,
+                    error,
+                )
+                return False
+            if visible:
+                self._complete(True, "window-visible")
+                return True
+            return False
+
+    def _remaining_ms(self) -> int:
+        return max(0, int((self._deadline - time.monotonic()) * 1_000))
+
+    def _invalidate_probe(self) -> None:
+        self._probe_generation += 1
+        self._probe_in_flight = False
 
     def _complete(self, ready: bool, reason: str) -> None:
         if not self._active:
             return
         self._active = False
         self._timer.stop()
+        self._invalidate_probe()
         self.finished.emit(ready, reason)
 
 

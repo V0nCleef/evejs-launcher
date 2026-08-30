@@ -2,6 +2,22 @@
 
 ## Changelog
 
+## v1.0.47 — 2026-08-30
+
+### Fixed
+- **Native services no longer depend on launcher log draining** — Game and Market output is written directly to durable log files instead of crossing launcher-owned stdout pipes. A frozen or force-closed launcher can therefore no longer backpressure Node.js until compatibility handshakes and remote calls stall.
+- **Client-window checks no longer freeze the interface** — potentially blocking Win32 window discovery for Launch All runs away from the Qt GUI thread, with only one probe in flight and stale results ignored after cancellation or timeout.
+- **Live clients remain tracked through temporary window loss** — periodic tracking now uses process exit as its liveness boundary and no longer performs synchronous window enumeration or retires a running client merely because its top-level window temporarily disappears.
+- **Large console bursts stay bounded** — the visible console tails only the newest 100 KB per refresh and inserts at most 2,000 lines in one Qt operation, preventing multi-second interface stalls from line-by-line insertion and cleanup.
+
+### Safety and compatibility
+- This release changes process supervision, window-readiness observation, log transport, and console rendering only. It does not alter EveJS databases, characters, accounts, profiles, items, Industry jobs, Market data, or mod configuration.
+- Native mod launch evidence remains isolated per launch while Game output continues independently of launcher health.
+
+### Verification
+- **1,661 automated tests passed** with 4 skipped, including delayed child output after the launcher's file handle closes, blocked Win32 probes while Qt remains responsive, stale-result suppression after timeout and deletion, live-process tracking through window loss, exact mod-attestation boundaries, and bounded large console bursts.
+- Manual testing of the exact packaged build confirmed that all configured clients launched successfully without a launcher freeze or stalled final logins.
+
 ## v1.0.46 — 2026-08-28
 
 ### Fixed

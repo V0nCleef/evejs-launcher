@@ -230,7 +230,7 @@ def test_process_tracker_status_reads_do_not_consume_exit_event() -> None:
     assert tracker.prune_dead() == 1
 
 
-def test_process_tracker_retires_only_the_pid_whose_seen_window_closed() -> None:
+def test_process_tracker_keeps_live_pids_when_a_seen_window_disappears() -> None:
     visible = {4242: False, 4343: True}
     tracker = ProcessTracker(
         window_probe=lambda pid: visible.get(pid, False),
@@ -247,8 +247,8 @@ def test_process_tracker_retires_only_the_pid_whose_seen_window_closed() -> None
 
     visible[4242] = False
 
-    assert tracker.prune_dead() == 1
-    assert tracker.get_running_character("first-account") is None
+    assert tracker.prune_dead() == 0
+    assert tracker.get_running_character("first-account") == "First Character"
     assert tracker.get_running_character("second-account") == "Second Character"
 
 

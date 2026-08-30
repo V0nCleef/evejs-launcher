@@ -41,31 +41,17 @@ def test_prune_logs_account_neutral_exit_diagnostics(caplog, monkeypatch) -> Non
     assert "Private Character" not in message
 
 
-def test_prune_logs_live_window_missing_diagnostics(caplog, monkeypatch) -> None:
-    test_logger = logging.getLogger("tests.process_tracker_observability")
-    monkeypatch.setattr(process_tracker_module, "log", test_logger)
-    visible = True
+def test_prune_does_not_probe_or_retire_a_live_process_for_a_missing_window() -> None:
+    probe_calls: list[int] = []
     process = _MutableProcess(4242)
     tracker = ProcessTracker(
-        window_probe=lambda _pid: visible,
+        window_probe=lambda pid: probe_calls.append(pid) or False,
         window_close_grace_seconds=0,
     )
     client = tracker.add("private-account", "Private Character", process)
     client.started_at = datetime.now() - timedelta(seconds=23.4)
+    client.has_seen_window = True
 
     assert tracker.prune_dead() == 0
-    visible = False
-
-    with caplog.at_level(logging.INFO, logger=test_logger.name):
-        assert tracker.prune_dead() == 1
-
-    message = caplog.records[-1].getMessage()
-    assert "pid=4242" in message
-    assert "reason=window-missing" in message
-    assert "process_alive=True" in message
-    assert "uptime_seconds=23." in message
-    assert "window_seen=True" in message
-    assert "window_missing_seconds=" in message
-    assert "return_code=" not in message
-    assert "private-account" not in message
-    assert "Private Character" not in message
+    assert probe_calls == []
+    assert tracker.get_running_character("private-account") == "Private Character"

@@ -6,8 +6,6 @@ from typing import Optional
 import logging
 import subprocess
 
-from .platform import has_visible_window_for_pid
-
 CLIENT_LAUNCH_GRACE_SECONDS = 20.0
 CLIENT_WINDOW_CLOSE_GRACE_SECONDS = 2.0
 
@@ -60,11 +58,9 @@ class ProcessTracker:
         window_close_grace_seconds: float = CLIENT_WINDOW_CLOSE_GRACE_SECONDS,
     ):
         self._clients: list[LaunchedClient] = []
-        self._window_probe = window_probe or has_visible_window_for_pid
-        self._window_close_grace_seconds = max(
-            0.0,
-            float(window_close_grace_seconds),
-        )
+        # Retain the keyword arguments for compatibility with callers from
+        # earlier releases. Window visibility is deliberately not consulted
+        # by the GUI-thread prune path: a live process owns its tracking state.
 
     def add(self, username: str, character_name: str, proc: subprocess.Popen) -> LaunchedClient:
         """Register a newly launched client."""
@@ -106,11 +102,15 @@ class ProcessTracker:
         return killed
 
     def prune_dead(self) -> int:
-        """Remove exited or post-window cleanup processes.
+        """Remove processes that have exited or become unavailable.
 
         This is the tracker's sole deletion boundary. Read APIs deliberately
         filter dead processes without consuming them so the UI cannot miss the
         removal event when an unrelated status poll wins a timer race.
+
+        Window presence is not a liveness signal. EVE can temporarily lose its
+        top-level HWND, and synchronous Win32 enumeration can block this method's
+        GUI-thread caller.
         """
         before = len(self._clients)
         self._clients = [c for c in self._clients if self._retain_client(c)]
@@ -138,33 +138,7 @@ class ProcessTracker:
                 client.has_seen_window,
             )
             return False
-        try:
-            window_visible = bool(self._window_probe(client.pid))
-        except Exception:
-            # A failed observation must never make a live client launchable.
-            return True
-        if window_visible:
-            client.has_seen_window = True
-            client.window_missing_since = None
-            return True
-        if not client.has_seen_window:
-            # EVE legitimately has no top-level window during startup.
-            return True
-        now = datetime.now()
-        if client.window_missing_since is None:
-            client.window_missing_since = now
-        missing_seconds = (now - client.window_missing_since).total_seconds()
-        if missing_seconds < self._window_close_grace_seconds:
-            return True
-        log.info(
-            "Client tracking retired pid=%s reason=window-missing "
-            "process_alive=True uptime_seconds=%.1f window_seen=True "
-            "window_missing_seconds=%.1f",
-            client.pid,
-            max(0.0, client.uptime_seconds),
-            max(0.0, missing_seconds),
-        )
-        return False
+        return True
 
     @property
     def running(self) -> list[LaunchedClient]:

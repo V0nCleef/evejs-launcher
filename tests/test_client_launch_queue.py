@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import threading
 import time
 
 import pytest
@@ -202,6 +203,142 @@ def test_window_readiness_gate_waits_without_blocking_qt(
     assert completion.wait(100)
     assert list(completion[0]) == [True, "window-visible"]
     assert gate.is_active is False
+
+
+def test_window_readiness_gate_keeps_qt_responsive_while_probe_blocks(
+    qapp: QApplication,
+) -> None:
+    main_thread_id = threading.get_ident()
+    probe_started = threading.Event()
+    release_probe = threading.Event()
+    probe_calls: list[int] = []
+    probe_thread_ids: list[int] = []
+    qt_ticks: list[bool] = []
+
+    def blocking_probe(pid: int) -> bool:
+        probe_calls.append(pid)
+        probe_thread_ids.append(threading.get_ident())
+        probe_started.set()
+        release_probe.wait()
+        return True
+
+    gate = ClientWindowReadinessGate(
+        4242,
+        lambda: None,
+        blocking_probe,
+        timeout_ms=1_000,
+        poll_interval_ms=5,
+    )
+    completion = QSignalSpy(gate.finished)
+    watchdog = threading.Timer(1.0, release_probe.set)
+    watchdog.daemon = True
+    watchdog.start()
+
+    try:
+        QTimer.singleShot(10, lambda: qt_ticks.append(True))
+        gate.start()
+
+        assert not release_probe.is_set()
+        deadline = time.monotonic() + 0.5
+        while not probe_started.is_set() and time.monotonic() < deadline:
+            qapp.processEvents()
+            QTest.qWait(1)
+        assert probe_started.is_set()
+
+        QTest.qWait(30)
+        assert qt_ticks == [True]
+        assert len(completion) == 0
+        assert probe_calls == [4242]
+        assert len(probe_thread_ids) == 1
+        assert probe_thread_ids[0] != main_thread_id
+
+        release_probe.set()
+        assert completion.wait(500)
+        assert list(completion[0]) == [True, "window-visible"]
+    finally:
+        release_probe.set()
+        watchdog.cancel()
+        gate.stop()
+
+
+def test_window_readiness_gate_timeout_suppresses_late_probe_result(
+    qapp: QApplication,
+) -> None:
+    probe_started = threading.Event()
+    release_probe = threading.Event()
+
+    def blocking_probe(_pid: int) -> bool:
+        probe_started.set()
+        release_probe.wait()
+        return True
+
+    gate = ClientWindowReadinessGate(
+        4242,
+        lambda: None,
+        blocking_probe,
+        timeout_ms=30,
+        poll_interval_ms=5,
+    )
+    completion = QSignalSpy(gate.finished)
+    watchdog = threading.Timer(0.5, release_probe.set)
+    watchdog.daemon = True
+    watchdog.start()
+
+    try:
+        gate.start()
+        assert completion.wait(250)
+        assert list(completion[0]) == [False, "window-timeout"]
+
+        release_probe.set()
+        QTest.qWait(50)
+        assert len(completion) == 1
+    finally:
+        release_probe.set()
+        watchdog.cancel()
+        gate.stop()
+
+
+def test_window_readiness_gate_stop_discards_blocked_probe_after_delete(
+    qapp: QApplication,
+) -> None:
+    probe_started = threading.Event()
+    release_probe = threading.Event()
+
+    def blocking_probe(_pid: int) -> bool:
+        probe_started.set()
+        release_probe.wait()
+        return True
+
+    gate = ClientWindowReadinessGate(
+        4242,
+        lambda: None,
+        blocking_probe,
+        timeout_ms=1_000,
+        poll_interval_ms=5,
+    )
+    completion = QSignalSpy(gate.finished)
+    watchdog = threading.Timer(0.5, release_probe.set)
+    watchdog.daemon = True
+    watchdog.start()
+
+    try:
+        gate.start()
+        deadline = time.monotonic() + 0.5
+        while not probe_started.is_set() and time.monotonic() < deadline:
+            qapp.processEvents()
+            QTest.qWait(1)
+        assert probe_started.is_set()
+
+        gate.stop()
+        gate.deleteLater()
+        QTest.qWait(10)
+        release_probe.set()
+        QTest.qWait(50)
+
+        assert len(completion) == 0
+    finally:
+        release_probe.set()
+        watchdog.cancel()
 
 
 def test_window_readiness_gate_fails_when_process_exits_before_window(

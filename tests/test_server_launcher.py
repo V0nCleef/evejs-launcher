@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, replace
-import io
 import json
 import sqlite3
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -77,30 +77,61 @@ def test_vanilla_command_has_no_mod_preloads(tmp_path: Path) -> None:
     assert not any(argument.casefold().endswith(".bat") for argument in command)
 
 
-def test_console_pipe_preserves_exact_child_stdout_bytes(tmp_path: Path) -> None:
-    output = b"noise-\xff\nEVEJS_MOD_STATUS {\"id\":\"fixture\"}\n"
-    destination = tmp_path / "console.log"
-
-    server_launcher._pipe_to_file(io.BytesIO(output), destination, "w")
-
-    assert destination.read_bytes() == output
-
-
-def test_console_pipe_mirrors_exact_bytes_to_both_destinations(
+def test_console_slice_preserves_exact_child_stdout_bytes(
     tmp_path: Path,
 ) -> None:
+    prefix = b"launcher dependency diagnostics\n"
     output = b"noise-\xff\r\nEVEJS_MOD_STATUS {\"id\":\"fixture\"}\npartial"
+    final_output = b"-final-child-bytes"
     console = tmp_path / "console.log"
     attestation = tmp_path / "attestation.log"
+    console.write_bytes(prefix + output)
+    attestation.write_bytes(b"")
 
-    server_launcher._pipe_to_files(
-        io.BytesIO(output),
-        (console, attestation),
-        "w",
+    class ExitedProcess:
+        polled = False
+
+        def poll(self) -> int:
+            if not self.polled:
+                with console.open("ab", buffering=0) as stream:
+                    stream.write(final_output)
+                self.polled = True
+            return 0
+
+    server_launcher._copy_console_slice_to_file(
+        console,
+        attestation,
+        len(prefix),
+        ExitedProcess(),
+        poll_interval_sec=0,
     )
 
-    assert console.read_bytes() == output
-    assert attestation.read_bytes() == output
+    assert attestation.read_bytes() == output + final_output
+
+
+def test_direct_console_output_survives_without_a_launcher_reader(
+    tmp_path: Path,
+) -> None:
+    console = tmp_path / "console.log"
+    stdout_bytes = b"stdout after launcher-side handle close\n"
+    stderr_bytes = b"stderr after launcher-side handle close\n"
+
+    process = server_launcher._popen_with_console_log(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import os, time; time.sleep(0.1); "
+                f"os.write(1, {stdout_bytes!r}); os.write(2, {stderr_bytes!r})"
+            ),
+        ],
+        console,
+        stdin=subprocess.DEVNULL,
+    )
+
+    assert process.stdout is None
+    assert process.wait(timeout=5) == 0
+    assert console.read_bytes() == stdout_bytes + stderr_bytes
 
 
 def test_modded_command_includes_only_active_loader_preloads(tmp_path: Path) -> None:
@@ -864,11 +895,12 @@ def test_start_game_server_honors_explicit_mode(
 
     class FakeProcess:
         pid = 1234
-        stdout = object()
+        stdout = None
 
     def fake_popen(command: list[str], **kwargs: object) -> FakeProcess:
         observed["command"] = command
         observed["popen_kwargs"] = kwargs
+        observed["console_handle"] = kwargs["stdout"]
         return FakeProcess()
 
     class FakeThread:
@@ -905,15 +937,20 @@ def test_start_game_server_honors_explicit_mode(
     assert observed["command"] == ["node", f"mode={mode}", "."]
     assert observed["popen_kwargs"]["cwd"] == str(server_dir)
     assert observed["popen_kwargs"]["stdin"] is subprocess.DEVNULL
+    assert observed["popen_kwargs"]["stdout"] is not subprocess.PIPE
+    assert observed["popen_kwargs"]["stderr"] is subprocess.STDOUT
+    assert observed["console_handle"].closed is True
+    assert process.stdout is None
     assert observed["popen_kwargs"]["env"]["EVEJS_GAMESTORE_DATA_DIR"] == str(
         local_game_data.resolve()
     )
     assert (server_dir / "logs" / "node-reports").is_dir()
     status_log = server_launcher.get_native_mod_status_log(tmp_path)
     assert observed["thread_kwargs"]["args"] == (
-        process.stdout,
-        (tmp_path / "server.log", status_log),
-        "a",
+        tmp_path / "server.log",
+        status_log,
+        (tmp_path / "server.log").stat().st_size,
+        process,
     )
     assert status_log.read_bytes() == b""
     assert "Dependency bootstrap preserved" in (tmp_path / "server.log").read_text(
@@ -948,12 +985,18 @@ def test_plan_bound_start_truncates_raw_attestation_after_dependency_work(
 
     class FakeProcess:
         pid = 2468
-        stdout = io.BytesIO(child_output)
+        stdout = None
+
+        @staticmethod
+        def poll() -> int:
+            return 0
 
     def fake_popen(command: list[str], **kwargs: object) -> FakeProcess:
         observed["command"] = command
         observed["popen_kwargs"] = kwargs
         observed["status_at_spawn"] = status_log.read_bytes()
+        observed["console_handle"] = kwargs["stdout"]
+        kwargs["stdout"].write(child_output)
         return FakeProcess()
 
     class ImmediateThread:
@@ -987,12 +1030,15 @@ def test_plan_bound_start_truncates_raw_attestation_after_dependency_work(
     )
 
     assert observed["status_at_spawn"] == b""
-    assert observed["thread_target"] is server_launcher._pipe_to_files
-    assert observed["thread_args"] == (
-        process.stdout,
-        (console_log, status_log),
-        "a",
-    )
+    assert observed["thread_target"] is server_launcher._copy_console_slice_to_file
+    assert observed["thread_args"][:2] == (console_log, status_log)
+    console_spawn_offset = observed["thread_args"][2]
+    assert observed["thread_args"][3] is process
+    assert console_log.read_bytes()[console_spawn_offset:] == child_output
+    assert observed["popen_kwargs"]["stdout"] is not subprocess.PIPE
+    assert observed["popen_kwargs"]["stderr"] is subprocess.STDOUT
+    assert observed["console_handle"].closed is True
+    assert process.stdout is None
     assert status_log.read_bytes() == child_output
     assert console_log.read_bytes().endswith(child_output)
     assert b"dependency output must stay human-only" in console_log.read_bytes()
@@ -1024,28 +1070,19 @@ def test_start_market_server_appends_attempt_pid_and_child_output(
 
     class FakeProcess:
         pid = 4321
-        stdout = io.BytesIO(b"child output\n")
+        stdout = None
 
     def fake_popen(command: list[str], **kwargs: object) -> FakeProcess:
         observed["command"] = command
         observed["popen_kwargs"] = kwargs
+        observed["console_handle"] = kwargs["stdout"]
+        kwargs["stdout"].write(b"child output\n")
         return FakeProcess()
-
-    class ImmediateThread:
-        def __init__(self, *, target, args, daemon: bool) -> None:
-            observed["thread_args"] = args
-            self._target = target
-            self._args = args
-            assert daemon is True
-
-        def start(self) -> None:
-            self._target(*self._args)
 
     monkeypatch.setattr(server_launcher, "MARKET_CONSOLE_LOG", console_log)
     monkeypatch.setattr(server_launcher, "get_market_binary_name", lambda: binary.name)
     monkeypatch.setattr(server_launcher, "get_hidden_process_flags", lambda: {})
     monkeypatch.setattr(server_launcher.subprocess, "Popen", fake_popen)
-    monkeypatch.setattr(server_launcher.threading, "Thread", ImmediateThread)
 
     process = server_launcher.start_market_server(str(tmp_path))
 
@@ -1058,7 +1095,10 @@ def test_start_market_server_appends_attempt_pid_and_child_output(
     ]
     assert observed["popen_kwargs"]["cwd"] == str(market_dir)
     assert observed["popen_kwargs"]["stdin"] is subprocess.DEVNULL
-    assert observed["thread_args"] == (process.stdout, console_log, "a")
+    assert observed["popen_kwargs"]["stdout"] is not subprocess.PIPE
+    assert observed["popen_kwargs"]["stderr"] is subprocess.STDOUT
+    assert observed["console_handle"].closed is True
+    assert process.stdout is None
     output = console_log.read_text(encoding="utf-8")
     assert "previous attempt" in output
     assert "Market start attempt:" in output

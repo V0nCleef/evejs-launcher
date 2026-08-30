@@ -1,8 +1,8 @@
 """Server launcher — starts EveJS game server and market server.
 
-Both processes redirect their stdout/stderr to temp log files so the
-launcher's built-in console panel can tail them for a 1:1 mirror of
-what would normally appear in a CMD window.
+Both processes write stdout/stderr directly to launcher console-log files so
+the built-in console panel can tail a 1:1 mirror without making service output
+dependent on a Python pipe-reader thread.
 """
 from dataclasses import dataclass
 from datetime import datetime
@@ -173,43 +173,68 @@ def native_market_database_status(
     return True, ""
 
 
-# ── Pipe reader thread ────────────────────────────────────────────────
+# ── Child-owned console output ────────────────────────────────────────
 
-def _pipe_to_files(
-    pipe,
-    paths: tuple[Path, ...],
-    mode: str = "a",
+def _popen_with_console_log(
+    command: list[str],
+    console_log: Path,
+    **popen_kwargs,
+) -> subprocess.Popen:
+    """Spawn a child whose stdout/stderr write directly to ``console_log``.
+
+    ``Popen`` gives the child its own standard-output handle.  Closing the
+    launcher's copy immediately after process creation prevents a frozen or
+    terminated Python process from backpressuring the child through a PIPE.
+    """
+
+    console_log.parent.mkdir(parents=True, exist_ok=True)
+    with console_log.open("ab", buffering=0) as output_stream:
+        return subprocess.Popen(
+            command,
+            stdout=output_stream,
+            stderr=subprocess.STDOUT,
+            **popen_kwargs,
+        )
+
+
+def _copy_console_slice_to_file(
+    source_path: Path,
+    destination_path: Path,
+    start_offset: int,
+    process: subprocess.Popen,
+    *,
+    poll_interval_sec: float = 0.05,
 ) -> None:
-    """Mirror one child pipe byte-for-byte to every destination in one read."""
+    """Best-effort copy of child bytes from one console-log launch boundary.
 
-    streams = []
+    Native mod attestation still consumes a dedicated raw-output file.  This
+    copier starts at the exact pre-spawn console offset, so dependency and
+    launcher diagnostics stay out of that evidence.  It never owns a child
+    pipe: if the launcher stalls, only this derivative evidence is delayed.
+    """
+
     try:
-        binary_mode = mode if "b" in mode else f"{mode}b"
-        for path in paths:
-            streams.append(open(path, binary_mode))
-        while True:
-            line = pipe.readline()
-            if line == b"" or line == "":
-                break
-            if isinstance(line, str):
-                line = line.encode("utf-8", errors="strict")
-            for stream in streams:
-                stream.write(line)
-                stream.flush()
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        with source_path.open("rb", buffering=0) as source_stream:
+            source_stream.seek(start_offset)
+            with destination_path.open("ab", buffering=0) as destination_stream:
+                while True:
+                    chunk = source_stream.read(64 * 1024)
+                    if chunk:
+                        destination_stream.write(chunk)
+                        continue
+                    if process.poll() is not None:
+                        # The child can write and exit between the EOF read and
+                        # this poll. Drain once more after termination so those
+                        # final bytes remain part of the attestation evidence.
+                        final_chunk = source_stream.read(64 * 1024)
+                        if final_chunk:
+                            destination_stream.write(final_chunk)
+                            continue
+                        break
+                    time.sleep(poll_interval_sec)
     except (OSError, ValueError):
-        pass  # pipe closed
-    finally:
-        for stream in streams:
-            try:
-                stream.close()
-            except OSError:
-                pass
-
-
-def _pipe_to_file(pipe, path: Path, mode: str = "a") -> None:
-    """Mirror child stdout bytes exactly to one destination."""
-
-    _pipe_to_files(pipe, (path,), mode)
+        pass  # process exit or log teardown can close either file
 
 
 # ── Mod discovery ──────────────────────────────────────────────────────
@@ -281,7 +306,7 @@ def build_game_server_command(
     return command
 
 
-# ── Game server (direct Node.js launch with stdout capture) ────────────
+# ── Game server (direct Node.js launch with file-backed output) ───────
 
 def _npm_executable() -> str:
     """Return the npm shim name that can be executed without a shell."""
@@ -697,8 +722,8 @@ def start_game_server(
 ) -> subprocess.Popen:
     """Start the game server by launching Node.js directly.
 
-    Stdout and stderr are piped to a temp log file so the launcher's
-    console panel shows a 1:1 mirror of the server's terminal output.
+    Stdout and stderr write directly to a temp log file so the launcher's
+    console panel can tail the server without owning its output lifecycle.
     """
     server_dir = Path(evejs_root) / "server"
     index_js = server_dir / "index.js"
@@ -732,14 +757,14 @@ def start_game_server(
     mod_status_log = get_native_mod_status_log(evejs_root)
     mod_status_log.parent.mkdir(parents=True, exist_ok=True)
     mod_status_log.write_bytes(b"")
+    console_spawn_offset = SERVER_CONSOLE_LOG.stat().st_size
 
-    proc = subprocess.Popen(
+    proc = _popen_with_console_log(
         cmd,
+        SERVER_CONSOLE_LOG,
         cwd=str(server_dir),
         env=env,
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
         **get_graceful_server_process_flags(),
     )
 
@@ -754,24 +779,24 @@ def start_game_server(
             ),
         )
 
-    # One reader owns the pipe.  Two readers would split lines nondeterministically
-    # and make both the human console and runtime evidence incomplete.
+    # Preserve the dedicated child-only attestation file without putting a
+    # Python reader between Node and its stdout destination.
     threading.Thread(
-        target=_pipe_to_files,
-        args=(proc.stdout, (SERVER_CONSOLE_LOG, mod_status_log), "a"),
+        target=_copy_console_slice_to_file,
+        args=(SERVER_CONSOLE_LOG, mod_status_log, console_spawn_offset, proc),
         daemon=True,
     ).start()
 
     return proc
 
 
-# ── Market server (direct cargo launch with stdout capture) ────────────
+# ── Market server (direct cargo launch with file-backed output) ───────
 
 def start_market_server(evejs_root: str) -> subprocess.Popen:
     """Start the market server directly via cargo (no batch wrapper).
 
-    Stdout and stderr are piped to a temp log file so the launcher's
-    console panel shows a 1:1 mirror of the market server's output.
+    Stdout and stderr write directly to a temp log file so the launcher's
+    console panel can tail Market without owning its output lifecycle.
     """
     market_dir = Path(evejs_root) / "externalservices" / "market-server"
     cargo_toml = market_dir / "Cargo.toml"
@@ -799,13 +824,12 @@ def start_market_server(evejs_root: str) -> subprocess.Popen:
         f"Market start attempt: {subprocess.list2cmdline(cmd)}"
     )
     try:
-        proc = subprocess.Popen(
+        proc = _popen_with_console_log(
             cmd,
+            MARKET_CONSOLE_LOG,
             cwd=str(market_dir),
             env=env,
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
             **get_hidden_process_flags(),
         )
     except Exception as exc:
@@ -815,12 +839,6 @@ def start_market_server(evejs_root: str) -> subprocess.Popen:
         )
         raise
     _append_market_console_marker(f"Market process started with PID {proc.pid}.")
-
-    threading.Thread(
-        target=_pipe_to_file,
-        args=(proc.stdout, MARKET_CONSOLE_LOG, "a"),
-        daemon=True,
-    ).start()
 
     return proc
 
