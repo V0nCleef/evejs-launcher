@@ -2,6 +2,19 @@
 
 ## Changelog
 
+## v1.0.49 — 2026-08-31
+
+### Fixed
+- **Docker stays available after Windows line-ending rewrites** — the launcher now accepts its exact managed Compose mod override when external Windows tools change only LF line endings to CRLF. Monitoring, Home status, character roster, lifecycle controls, and Tool Deck no longer fail because of that harmless formatting change.
+- Thanks to Darius Tumas ([@Tokeiito](https://github.com/Tokeiito)) for reproducing, diagnosing, testing, and contributing the fix. 🫡
+
+### Safety and compatibility
+- Only CRLF-to-LF equivalence is allowed at the final exact-renderer comparison. Extra Compose content, changed preload values, invalid UTF-8, BOMs, truncation, and all other tested line separators remain rejected.
+- This release changes only validation of the launcher-owned Docker mod override. It does not rewrite the primary Compose file, change Native launch behavior, or alter EveJS databases, characters, accounts, items, Market data, profiles, or installed mods.
+
+### Verification
+- The complete isolated release suite passed **2,017 tests** with 6 skipped. The focused Docker-mod suite passed **28 tests** with 2 skipped; an exact v1.0.48 parent/PR comparison reproduced the CRLF failure before the fix and passed it afterward, while an expanded mutation matrix continued rejecting semantic changes and malformed documents.
+
 ## v1.0.48 — 2026-08-30
 
 ### Added
