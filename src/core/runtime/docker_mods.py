@@ -735,11 +735,28 @@ def _parse_owned_override(root: Path, content: bytes) -> DockerModOverride:
     node_options = encoded_node_options.replace("$$", "$")
     selected = _selection_from_node_options(node_options)
     expected = build_docker_mod_override(root, selected)
-    if content != expected.content.encode("utf-8"):
+    if _normalized_terminators(content) != expected.content.encode("utf-8"):
         raise DockerModBridgeError(
             "The Docker mod override differs from the exact launcher renderer."
         )
     return expected
+
+
+def _normalized_terminators(content: bytes) -> bytes:
+    """Accept a CRLF copy of the owned override as the same exact document.
+
+    The launcher always writes LF, but Windows tooling outside it rewrites the
+    terminators of a text file without changing one byte of Compose meaning:
+    a ``core.autocrlf`` checkout of a project that tracks this file, an editor
+    save, an archive extraction.  YAML reads both forms identically, so a
+    strict byte compare would fail every Docker lifecycle path closed over
+    pure whitespace while Settings — which builds its target without the mod
+    override — still reported Docker as reachable.
+
+    Only ``\\r\\n`` is folded.  Every other separator ``splitlines`` recognizes
+    still has to survive the comparison below unchanged.
+    """
+    return content.replace(b"\r\n", b"\n")
 
 
 def _selection_from_node_options(value: str) -> tuple[str, ...]:

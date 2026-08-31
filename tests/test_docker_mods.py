@@ -490,3 +490,40 @@ def test_explicit_apply_resumes_exact_stranded_desired_transaction(
     assert resumed.committed_content == first.committed_content
     finalize_docker_mod_override(resumed, policy=DockerControlPolicy.MANAGED)
     assert not docker_mod_transaction_path(tmp_path).exists()
+
+
+def test_attach_accepts_a_crlf_rewrite_of_the_exact_owned_override(
+    tmp_path: Path,
+) -> None:
+    """A ``core.autocrlf`` checkout must not fail every Docker path closed."""
+    _loader(tmp_path, "alpha")
+    base = (tmp_path / "compose.yaml").resolve()
+    base.write_text("services: {}\n", encoding="utf-8")
+    path = docker_mod_override_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    material = build_docker_mod_override(tmp_path, ("alpha",)).content
+    path.write_bytes(material.replace("\n", "\r\n").encode("utf-8"))
+    target = ComposeTarget(base, tmp_path.resolve(), "fixture")
+
+    attached = attach_docker_mod_override(target)
+
+    assert attached.override_files == (path.resolve(),)
+
+
+@pytest.mark.parametrize("separator", ["\r", "\x0b", "\x0c", "\x85", " "])
+def test_attach_still_rejects_every_other_rewritten_line_separator(
+    tmp_path: Path,
+    separator: str,
+) -> None:
+    """Only CRLF is folded; ``splitlines`` accepts more than YAML does."""
+    _loader(tmp_path, "alpha")
+    base = (tmp_path / "compose.yaml").resolve()
+    base.write_text("services: {}\n", encoding="utf-8")
+    path = docker_mod_override_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    material = build_docker_mod_override(tmp_path, ("alpha",)).content
+    path.write_bytes(material.replace("\n", separator).encode("utf-8"))
+    target = ComposeTarget(base, tmp_path.resolve(), "fixture")
+
+    with pytest.raises(DockerModBridgeError):
+        attach_docker_mod_override(target)
