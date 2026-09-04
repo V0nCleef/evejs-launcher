@@ -1,11 +1,143 @@
 """Atomic per-launch EVE game endpoint profile configuration."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 from src.core import profiles
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
+def test_create_profile_rebinds_existing_junction_to_current_client(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profiles_root = tmp_path / "profiles"
+    old_client = tmp_path / "old-client" / "tq"
+    new_client = tmp_path / "new-client" / "tq"
+    old_client.mkdir(parents=True)
+    new_client.mkdir(parents=True)
+    monkeypatch.setattr(profiles, "PROFILES_ROOT", profiles_root)
+    monkeypatch.setattr(profiles, "_bootstrap_settings", lambda *_args: None)
+
+    profile_dir = profiles.create_profile("fixture-account", str(old_client))
+    junction = profile_dir / "tq"
+    try:
+        assert os.path.samefile(junction, old_client)
+
+        rebound_dir = profiles.create_profile("fixture-account", str(new_client))
+
+        assert rebound_dir == profile_dir
+        assert os.path.samefile(junction, new_client)
+        assert old_client.is_dir()
+        assert new_client.is_dir()
+    finally:
+        if profiles._path_entry_exists(junction):
+            profiles.remove_directory_link(junction)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
+def test_create_profile_recovers_a_dangling_junction_after_client_move(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profiles_root = tmp_path / "profiles"
+    old_client = tmp_path / "old-client" / "tq"
+    new_client = tmp_path / "new-client" / "tq"
+    old_client.mkdir(parents=True)
+    new_client.mkdir(parents=True)
+    monkeypatch.setattr(profiles, "PROFILES_ROOT", profiles_root)
+    monkeypatch.setattr(profiles, "_bootstrap_settings", lambda *_args: None)
+
+    profile_dir = profiles.create_profile("fixture-account", str(old_client))
+    junction = profile_dir / "tq"
+    old_client.rmdir()
+    assert not junction.exists()
+
+    try:
+        rebound_dir = profiles.create_profile("fixture-account", str(new_client))
+
+        assert rebound_dir == profile_dir
+        assert os.path.samefile(junction, new_client)
+        assert new_client.is_dir()
+    finally:
+        if profiles._path_entry_exists(junction):
+            profiles.remove_directory_link(junction)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
+def test_delete_profile_removes_a_dangling_junction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profiles_root = tmp_path / "profiles"
+    old_client = tmp_path / "old-client" / "tq"
+    old_client.mkdir(parents=True)
+    monkeypatch.setattr(profiles, "PROFILES_ROOT", profiles_root)
+    monkeypatch.setattr(profiles, "_bootstrap_settings", lambda *_args: None)
+
+    profile_dir = profiles.create_profile("fixture-account", str(old_client))
+    junction = profile_dir / "tq"
+    old_client.rmdir()
+    assert not junction.exists()
+
+    profiles.delete_profile("fixture-account")
+
+    assert not profiles._path_entry_exists(junction)
+    assert not profile_dir.exists()
+
+
+def test_create_profile_refuses_to_replace_a_real_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profiles_root = tmp_path / "profiles"
+    target = tmp_path / "client" / "tq"
+    target.mkdir(parents=True)
+    profile_tq = profiles_root / "fixture-account" / "tq"
+    profile_tq.mkdir(parents=True)
+    monkeypatch.setattr(profiles, "PROFILES_ROOT", profiles_root)
+    monkeypatch.setattr(profiles, "_bootstrap_settings", lambda *_args: None)
+
+    with pytest.raises(RuntimeError, match="Refusing to replace non-junction"):
+        profiles.create_profile("fixture-account", str(target))
+
+    assert profile_tq.is_dir()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
+def test_profile_rebind_restores_previous_target_when_new_link_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profiles_root = tmp_path / "profiles"
+    old_client = tmp_path / "old-client" / "tq"
+    new_client = tmp_path / "new-client" / "tq"
+    old_client.mkdir(parents=True)
+    new_client.mkdir(parents=True)
+    monkeypatch.setattr(profiles, "PROFILES_ROOT", profiles_root)
+    monkeypatch.setattr(profiles, "_bootstrap_settings", lambda *_args: None)
+
+    profile_dir = profiles.create_profile("fixture-account", str(old_client))
+    junction = profile_dir / "tq"
+    real_create = profiles.create_directory_link
+
+    def fail_new_target(target: Path, link: Path) -> None:
+        if os.path.samefile(target, new_client):
+            raise RuntimeError("fixture bind failure")
+        real_create(target, link)
+
+    monkeypatch.setattr(profiles, "create_directory_link", fail_new_target)
+    try:
+        with pytest.raises(RuntimeError, match="previous target .* was restored"):
+            profiles.create_profile("fixture-account", str(new_client))
+
+        assert os.path.samefile(junction, old_client)
+    finally:
+        if profiles._path_entry_exists(junction):
+            profiles.remove_directory_link(junction)
 
 
 def _paths(tmp_path: Path) -> tuple[Path, Path]:

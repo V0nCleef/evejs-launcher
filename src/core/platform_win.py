@@ -714,7 +714,7 @@ def create_directory_link(target: Path, link: Path) -> None:
 
 def remove_directory_link(link: Path) -> None:
     """Remove a directory junction (``rmdir`` — safe, doesn't delete target)."""
-    if link.exists():
+    if os.path.lexists(link):
         subprocess.run(["cmd", "/c", "rmdir", str(link)], check=True)
 
 

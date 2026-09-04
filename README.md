@@ -426,11 +426,12 @@ git clone https://github.com/V0nCleef/evejs-launcher.git
 cd evejs-launcher
 python -m venv .venv
 .venv\Scripts\activate
-python -m pip install -r requirements.txt -r requirements-dev.txt
+python -m pip install -r requirements.txt
 python main.py
 ```
 
-Run the automated checks with:
+The full developer repository also contains automated tests. In that checkout,
+install its development requirements before running:
 
 ```text
 python -m pytest
@@ -464,6 +465,40 @@ The application is built with PyQt6 and packaged for Windows with PyInstaller in
 The launcher is Windows-only. Releases are published as portable ZIP archives on the [Releases page](https://github.com/V0nCleef/evejs-launcher/releases).
 
 Bug reports and focused pull requests are welcome. When reporting a service problem, include the launcher version, which service failed, whether it was started inside or outside the launcher, and the relevant console output. Do not include account names, character names, passwords, or tokens in public reports.
+
+## Optional DLSS5 package
+
+DLSS5 is a separate optional project, not bundled with this launcher. Updating
+the launcher does not install DLSS5 or change the renderer for users without it.
+See [EveJS-DLSS5](https://github.com/V0nCleef/EveJS-DLSS5) for its package,
+supported client build, requirements and separate component licence notices.
+
+For launcher-managed installation, extract the complete `DLSS5` folder into
+the selected EveJS root's `mods` directory and refresh Mods. The enabled package
+is detected automatically. Dependencies are prepared on the first client launch,
+not on server startup; that first launch can take longer while downloads and
+verification complete. Use its Mods-page Uninstall action with all clients
+sharing that physical client folder closed. Keep the retained rollback state.
+
+The standalone installer remains available for users who use `Play.bat`, and a
+verified standalone installation can also be launched here without creating a
+Mods entry. Do not stack separate installations on the same physical client.
+An incomplete or unknown DLSS5 installation is reported rather than guessed safe.
+
+## Matching source and build
+
+Each published binary must be accompanied by the matching source revision or
+source archive and clear source access on the release page. The source package
+contains `src`, `main.py`, `build.spec`, `build_support.py`, required repository
+assets, licence files and dependency requirements. Do not build from an unrelated
+branch and assume it matches a downloaded executable.
+
+The candidate build uses Python 3.11.15, PyInstaller 6.21.0 and the dependency
+versions listed in `THIRD_PARTY_NOTICES.md`. From a clean Windows environment
+with those dependencies installed, run `python -m PyInstaller build.spec` from
+the source root. Distribute the complete resulting onedir folder, including
+`_internal`, not its EXE alone. This is a build recipe, not a byte-identical
+reproducible-build guarantee.
 
 ## License
 

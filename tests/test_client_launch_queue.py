@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 import threading
 import time
 
@@ -400,6 +401,7 @@ def test_window_readiness_gate_stop_suppresses_terminal_signal(
 def test_launch_all_uses_shared_queue_and_cancellation_preserves_started_clients(
     qapp: QApplication,
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     accounts = [
         Account(
@@ -439,7 +441,15 @@ def test_launch_all_uses_shared_queue_and_cancellation_preserves_started_clients
     monkeypatch.setattr(app_module, "load_accounts", load_accounts)
     monkeypatch.setattr(app_module.CharactersPage, "refresh", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(app_module, "is_server_running", lambda **_kwargs: False)
-    monkeypatch.setattr(app_module, "profile_exists", lambda _username: True)
+    profiles_root = tmp_path / "profiles"
+    monkeypatch.setattr(app_module, "PROFILES_ROOT", profiles_root)
+
+    def create_profile(username, _client_path, captured_profiles_root):
+        profile_dir = Path(captured_profiles_root) / username
+        (profile_dir / "tq").mkdir(parents=True, exist_ok=True)
+        return profile_dir
+
+    monkeypatch.setattr(app_module, "create_profile", create_profile)
     monkeypatch.setattr(app_module, "prefill_username", lambda _username: None)
     monkeypatch.setattr(app_module.QMessageBox, "information", lambda *_args: None)
     monkeypatch.setattr(

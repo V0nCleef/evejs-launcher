@@ -1,0 +1,959 @@
+{
+  "applicationModuleCount": 121,
+  "binary": {
+    "bytes": 4833410,
+    "file": "EveJS-Launcher-V1.exe",
+    "sha256": "D0FF21B5B40B85D352A0A38E3B81C9B7458D4F56CFBD66ABD0C8C540D9D31B54"
+  },
+  "buildInputCount": 180,
+  "files": {
+    "BUILDING.md": {
+      "bytes": 4952,
+      "kind": "source-only-extra",
+      "sha256": "C3F59C568241096D8F0ABACFC8EB306C094BE9FF8EE21D1D62A55A9EED729494"
+    },
+    "CHANGELOG.md": {
+      "bytes": 66405,
+      "kind": "exact-build-input",
+      "sha256": "27FF781ACCE8319F824B8E8B67457EF532E82755FA9126410BCEA4E2403AC829"
+    },
+    "LICENSE": {
+      "bytes": 35147,
+      "kind": "exact-build-input",
+      "sha256": "8CEB4B9EE5ADEDDE47B31E975C1D90C73AD27B6B165A1DCD80C7C545EB65B903"
+    },
+    "README.md": {
+      "bytes": 38886,
+      "kind": "exact-build-input",
+      "sha256": "8BC006DB99BF8FF62ECB616D9BF44C0D8926C697E1291F9950889FCE9DE7C787"
+    },
+    "THIRD_PARTY_NOTICES.md": {
+      "bytes": 4219,
+      "kind": "exact-build-input",
+      "sha256": "B49035E11F14F5029772E3158742792194FEA29F66C351639818C7BBD156BB1C"
+    },
+    "VERSION": {
+      "bytes": 7,
+      "kind": "exact-build-input",
+      "sha256": "B3F00324FEE996912AE7744390BB04DE887DDDCC9F10C269B0FD4A0AC99BDC6F"
+    },
+    "assets/audio/music/celestial_transit.wav": {
+      "bytes": 9676844,
+      "kind": "exact-build-input",
+      "sha256": "451978321C360315010E8871945CDB99A92E05BEE2D81148DEB0600E64D66FC9"
+    },
+    "assets/audio/voice/lyra/character_launch_failed.wav": {
+      "bytes": 82464,
+      "kind": "exact-build-input",
+      "sha256": "96C77BC0216531EDFB1F4564CB2C2145E1A3DD51C70D25C0CE2728A44C950975"
+    },
+    "assets/audio/voice/lyra/character_launching.wav": {
+      "bytes": 89958,
+      "kind": "exact-build-input",
+      "sha256": "B3E078861225D5EF1C8A29433328FFADE3AF53C872F718FA614B9DB6741B1011"
+    },
+    "assets/audio/voice/lyra/clients_terminated.wav": {
+      "bytes": 91206,
+      "kind": "exact-build-input",
+      "sha256": "03EE12AEB3851CE9A5FE2AB341FB0B19F774D04553268943ED93CBBF5BF9F383"
+    },
+    "assets/audio/voice/lyra/clients_terminating.wav": {
+      "bytes": 94954,
+      "kind": "exact-build-input",
+      "sha256": "4BB06BFBF3FCC57DCE4C4757CC1495CD6E7DF9448E80BC2AA07FF4B4378B4734"
+    },
+    "assets/audio/voice/lyra/game_server_launch_failed.wav": {
+      "bytes": 92456,
+      "kind": "exact-build-input",
+      "sha256": "DE9E0A1CC3B32863192BA6B9C78D85D8F7CEB66F367EF923B45753C6766F794D"
+    },
+    "assets/audio/voice/lyra/game_server_launching.wav": {
+      "bytes": 80438,
+      "kind": "exact-build-input",
+      "sha256": "9050623457A04AE53DA3EE88572534A0B0F5BF2786746399B8FDA5DB144D8F14"
+    },
+    "assets/audio/voice/lyra/game_server_offline.wav": {
+      "bytes": 76222,
+      "kind": "exact-build-input",
+      "sha256": "F7D3DCE9CE185FAB1807456A0AB21619A9EA206E139A16B1AB87F000EE426225"
+    },
+    "assets/audio/voice/lyra/game_server_online.wav": {
+      "bytes": 67480,
+      "kind": "exact-build-input",
+      "sha256": "6E94DBFC823494927FB92A6A789B6E0D1C872029DA057FFBC7D1E997FE8AA980"
+    },
+    "assets/audio/voice/lyra/game_server_stopping.wav": {
+      "bytes": 78094,
+      "kind": "exact-build-input",
+      "sha256": "A15C61C463C0309DB740DEBAD62C504BD8862DFB0BB69F96E8355AE9736ADF25"
+    },
+    "assets/audio/voice/lyra/group_launching.wav": {
+      "bytes": 83714,
+      "kind": "exact-build-input",
+      "sha256": "6379728120BA3AC707639C7A0C7E56885CF577D3731018CC7DA4BB7AD7FE5354"
+    },
+    "assets/audio/voice/lyra/launch_sequence_cancelled.wav": {
+      "bytes": 79344,
+      "kind": "exact-build-input",
+      "sha256": "43BBBB17194FBA2ECB22A925A51EBDED4F42BD845B6A674E5B3E3E03133B6915"
+    },
+    "assets/audio/voice/lyra/launch_sequence_complete.wav": {
+      "bytes": 88028,
+      "kind": "exact-build-input",
+      "sha256": "58A8F122B31E15C6C32D7262A0F64C85373DE0E174A3A579C6B8C83D6A917BCB"
+    },
+    "assets/audio/voice/lyra/launch_sequence_partial.wav": {
+      "bytes": 150524,
+      "kind": "exact-build-input",
+      "sha256": "B34D1ABA3DE37652C93362A71CC9E20533B83BA241CB72C8046C61BA03E1806A"
+    },
+    "assets/audio/voice/lyra/manifest.json": {
+      "bytes": 17998,
+      "kind": "exact-build-input",
+      "sha256": "DC982C052C0F276FDFAA8E4B721A0D3BD88949A41DA5646A079DD0D486D74617"
+    },
+    "assets/audio/voice/lyra/market_server_launch_failed.wav": {
+      "bytes": 96202,
+      "kind": "exact-build-input",
+      "sha256": "C14FAAE4A19A9E10433972B5B6C48F6B7010A3E2DF4BC4656F7D4ABF740B5825"
+    },
+    "assets/audio/voice/lyra/market_server_launching.wav": {
+      "bytes": 83090,
+      "kind": "exact-build-input",
+      "sha256": "B4F1CBCD91CAF2AD3F7F0292364F518E5C5C661053033AE1A79C6E095E14EC30"
+    },
+    "assets/audio/voice/lyra/market_server_offline.wav": {
+      "bytes": 86836,
+      "kind": "exact-build-input",
+      "sha256": "9B82BB942E232F8565FF3267340A472BDF2EEA233D68400B14D75256C14FA9AC"
+    },
+    "assets/audio/voice/lyra/market_server_online.wav": {
+      "bytes": 90580,
+      "kind": "exact-build-input",
+      "sha256": "A7CEA81592AED25B38108498290BD8212736B9B628E0944DA01AF9EEC457D9F1"
+    },
+    "assets/audio/voice/lyra/market_server_stopping.wav": {
+      "bytes": 80592,
+      "kind": "exact-build-input",
+      "sha256": "68471C4988892E448F4A733A9BDC5CD91D6155123AE7E2E157646B2D8FC3B20D"
+    },
+    "assets/audio/voice/lyra/preview.wav": {
+      "bytes": 145960,
+      "kind": "exact-build-input",
+      "sha256": "437B813F2A34DF74959D8E915FD2A3E7717D02319726C40840256F5986A2483D"
+    },
+    "assets/audio/voice/lyra/server_stack_failed.wav": {
+      "bytes": 95578,
+      "kind": "exact-build-input",
+      "sha256": "8073E9678B10802BC58A050F82BE1BFCC43F49687E062293C7F52068B0DF35A0"
+    },
+    "assets/audio/voice/lyra/server_stack_launching.wav": {
+      "bytes": 75598,
+      "kind": "exact-build-input",
+      "sha256": "5887D7A6938D15FE4488FEA7F9561065A0CB3D65E54E88AF7374183BDE16559F"
+    },
+    "assets/audio/voice/lyra/server_stack_offline.wav": {
+      "bytes": 73724,
+      "kind": "exact-build-input",
+      "sha256": "27D9EA1B62C18C688084F35BE723C9398ECF63901AF5FA2EAF7D41B5FF98B4B4"
+    },
+    "assets/audio/voice/lyra/server_stack_online.wav": {
+      "bytes": 85586,
+      "kind": "exact-build-input",
+      "sha256": "2065F6BD647C5344BA480D58BAC2202293AC6A0DAFB896FC825F5F81D1ED67E1"
+    },
+    "assets/audio/voice/lyra/server_stack_stopping.wav": {
+      "bytes": 79966,
+      "kind": "exact-build-input",
+      "sha256": "94FF36129E6C2533DD80E4D25511E9AD47851CCA38AEFD2E6A4662B9F5C78982"
+    },
+    "assets/audio/voice/lyra/service_stop_failed.wav": {
+      "bytes": 97448,
+      "kind": "exact-build-input",
+      "sha256": "342714A55A89B3030FD8F96D8E46259867035FBA95CFC3A4DA290AD453C85325"
+    },
+    "assets/deep_signal/operations_orbital.png": {
+      "bytes": 1648056,
+      "kind": "exact-build-input",
+      "sha256": "C9E4D0F59306684402B1E7B73A7D54A57E36F5F283438B64060F66B4C0384D36"
+    },
+    "assets/hero/hero_fleet.png": {
+      "bytes": 175371,
+      "kind": "exact-build-input",
+      "sha256": "B91F880044F6C3B04278D8337889184B5A9284CCF7CBAFED365222FE26EAF008"
+    },
+    "assets/hero/hero_mining.png": {
+      "bytes": 286818,
+      "kind": "exact-build-input",
+      "sha256": "64E119E869C40FDF6C4C47418794E2539E1116AEBA3968F48BF60ED912048829"
+    },
+    "assets/hero/hero_nebula.png": {
+      "bytes": 267591,
+      "kind": "exact-build-input",
+      "sha256": "C9B5661F1C8A29E5F84922CA5EFDA868074A0250C34AAD2F955C660D935CE539"
+    },
+    "assets/hero/hero_station.png": {
+      "bytes": 275670,
+      "kind": "exact-build-input",
+      "sha256": "E43AF3FE2C43C5694EA44BFAB91A26D5DA4924F145913FAC4D293B19CF4AE568"
+    },
+    "assets/hero/hero_undock.png": {
+      "bytes": 303935,
+      "kind": "exact-build-input",
+      "sha256": "45BFE413E9366FB243FBAC0E9FB1A6183D448A0D29F909421D95157B6258AEAB"
+    },
+    "assets/logo.ico": {
+      "bytes": 5519,
+      "kind": "exact-build-input",
+      "sha256": "F26E608843976019F1676B839332C543D9B7675D7FC62192A9DC0A61DB46E0A5"
+    },
+    "assets/logo.png": {
+      "bytes": 3096,
+      "kind": "exact-build-input",
+      "sha256": "99A2F98A52E101E046AA547F3D20E746493FC9CBB18BED01D5427A27EF847434"
+    },
+    "build.spec": {
+      "bytes": 9197,
+      "kind": "exact-build-input",
+      "sha256": "38C1A78D0610A5613FFC6AE154677287A114D360ECF53377DC63F0DF7428D719"
+    },
+    "build_support.py": {
+      "bytes": 2577,
+      "kind": "exact-build-input",
+      "sha256": "977477605178B866B47C08FB08C7B6C4A4BB8A70C32430581C263C877B5EB47C"
+    },
+    "docs/MOD_AUTHORING.md": {
+      "bytes": 29806,
+      "kind": "exact-build-input",
+      "sha256": "F35B51578E8CC816169A95A5DD65BBE3774F3FC0A8A20C34239427BB973A1273"
+    },
+    "licenses/PYINSTALLER.txt": {
+      "bytes": 32135,
+      "kind": "exact-build-input",
+      "sha256": "571F650C741AE1F6D8B689EF639B02C93297B84CEF32DB7C5211674D7B6FC094"
+    },
+    "licenses/PYQT6-SIP-BSD-2-CLAUSE.txt": {
+      "bytes": 1312,
+      "kind": "exact-build-input",
+      "sha256": "76BD80985BD865231822D0E87840217CF9CB6A1AE3A29B4F75B89B702BF6C9E8"
+    },
+    "licenses/PYTHON-3.11.txt": {
+      "bytes": 24918,
+      "kind": "exact-build-input",
+      "sha256": "900B46B56A68337104DFF265CB312A69E5C7E0E8F62C4A40ACFA40ED05118E79"
+    },
+    "licenses/QT-LGPL-3.0.txt": {
+      "bytes": 7761,
+      "kind": "exact-build-input",
+      "sha256": "2A85364FD07782FA2FE78028E66F9235317218925CA469F65C738FB4E5B0E2D3"
+    },
+    "licenses/SPARK-PARSER-MIT.txt": {
+      "bytes": 1204,
+      "kind": "exact-build-input",
+      "sha256": "1017766E84B6E5CC675AAAC7138B3B1CB7F9CC3E6527D5C45145887F8DA2E141"
+    },
+    "licenses/XDIS-GPL-2.0.txt": {
+      "bytes": 18046,
+      "kind": "exact-build-input",
+      "sha256": "DB296F2F7F35BCA3A174EFB0EB392B3B17BD94B341851429A3DFF411B1C2FC73"
+    },
+    "main.py": {
+      "bytes": 6881,
+      "kind": "exact-build-input",
+      "sha256": "03C61A475A987C64CAB018F725993321B146F58C015610D650F056310CE9B997"
+    },
+    "requirements-build.txt": {
+      "bytes": 434,
+      "kind": "source-only-extra",
+      "sha256": "5290B82B6ED5106EA37193BA91D8EB33A012ECC52B93C5F8CB9C26789405AF46"
+    },
+    "requirements.txt": {
+      "bytes": 50,
+      "kind": "exact-build-input",
+      "sha256": "8C0CE7EC12A5B9AAD71BD871AF3D1B753BCBC6D3EF75FB33841D96B8C25C25CD"
+    },
+    "scripts/celestial_transit_synthesis.py": {
+      "bytes": 11302,
+      "kind": "source-only-extra",
+      "sha256": "2168713C0CD6109FCF23D893308862E3800D106DDE8F61B962B9110DD3DB436E"
+    },
+    "scripts/generate_celestial_transit.py": {
+      "bytes": 1615,
+      "kind": "source-only-extra",
+      "sha256": "95944341BC6FFAE48D5639CAF5642232A349C372B5C4838395F3D8F04D401C0E"
+    },
+    "scripts/generate_lyra_voice_catalog.py": {
+      "bytes": 8932,
+      "kind": "source-only-extra",
+      "sha256": "37492FE600703B850B2D7A6A4142DB3A337F895BD315ACE51EF3727D888A1D4E"
+    },
+    "scripts/process_lyra_voice_catalog.py": {
+      "bytes": 20113,
+      "kind": "source-only-extra",
+      "sha256": "6C9913A5C1343D13F38249E9FE1DB3687EE5A763ACDFDA57E5B8F3D5119A4C07"
+    },
+    "src/__init__.py": {
+      "bytes": 0,
+      "kind": "exact-build-input",
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    "src/app.py": {
+      "bytes": 377941,
+      "kind": "exact-build-input",
+      "sha256": "DEDA2943773B898C5F32745263AC07489AE30544BFC4BEDF49CF3D1005C7D0A0"
+    },
+    "src/audio/__init__.py": {
+      "bytes": 506,
+      "kind": "exact-build-input",
+      "sha256": "6E64B6324C6823559D6952B216B092CCA040EC13797E1892A25998B3C4732010"
+    },
+    "src/audio/assets.py": {
+      "bytes": 3810,
+      "kind": "exact-build-input",
+      "sha256": "6BAC50ACEFB7E4CCAE34537CE17CD87A8CD9C73F871DC7961781C67F89CDE0BA"
+    },
+    "src/audio/backends.py": {
+      "bytes": 29676,
+      "kind": "exact-build-input",
+      "sha256": "4C4422BE9CD3BE12C027A21FAA04149D8328DAB5047EFAC0812C633EB9722EA9"
+    },
+    "src/audio/controller.py": {
+      "bytes": 39637,
+      "kind": "exact-build-input",
+      "sha256": "86CCA67D84CDC7605E90BFD79768EAFB1ABB77ADAA67D6F02F2A631F89121E0B"
+    },
+    "src/audio/events.py": {
+      "bytes": 11772,
+      "kind": "exact-build-input",
+      "sha256": "7672E9FAEB1F7864B81AE4B825FAE3994659BFB8F6C8E9F5C3A4EDA171EE6DA3"
+    },
+    "src/audio/music_catalog.py": {
+      "bytes": 5620,
+      "kind": "exact-build-input",
+      "sha256": "C9DA4A6083F2EF7C9E97EB8C6075FC7C7B9E2586F6A27B9F76B52562E0097EF8"
+    },
+    "src/audio/settings.py": {
+      "bytes": 2974,
+      "kind": "exact-build-input",
+      "sha256": "F4FD6486CD153B079C09B3F5D0B60093C7A27BE5A4AA955651FA1B0087279870"
+    },
+    "src/config.py": {
+      "bytes": 13752,
+      "kind": "exact-build-input",
+      "sha256": "F3C9C6EDB095464C5E26DF26BBF53143BA68576DF208CC184AB5123E2FB16896"
+    },
+    "src/constants.py": {
+      "bytes": 5244,
+      "kind": "exact-build-input",
+      "sha256": "837166508F8BCB047AD7F5B4D03714A29E3D06919E43363595B8C471DACB2158"
+    },
+    "src/core/__init__.py": {
+      "bytes": 0,
+      "kind": "exact-build-input",
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    "src/core/character_creation.py": {
+      "bytes": 16168,
+      "kind": "exact-build-input",
+      "sha256": "7F3AC0E70E66EFA4A38E5BDD2A4545AF3CDD9ED41D2CCF652A90EF18E81075CF"
+    },
+    "src/core/character_deletion.py": {
+      "bytes": 22657,
+      "kind": "exact-build-input",
+      "sha256": "6227FB52104FA458D52CDC2E07AA87140757CB88F70804B5D674E74FD8400B6F"
+    },
+    "src/core/client_autologin.py": {
+      "bytes": 6563,
+      "kind": "exact-build-input",
+      "sha256": "00566058BD05C707D6D6808DEEB3BDFC0F23EAEF9FDDBCB6B54DB74773F0592D"
+    },
+    "src/core/client_launch_queue.py": {
+      "bytes": 12151,
+      "kind": "exact-build-input",
+      "sha256": "95DA962F104438C23CE4DC4CACF3F15CF07C8549A6A9557385E169BA16960D1A"
+    },
+    "src/core/dashboard.py": {
+      "bytes": 993,
+      "kind": "exact-build-input",
+      "sha256": "CD5FBB391487D59ECC256D963EFED12C40DCACD687FD6C40DF0ABB846B7F7A20"
+    },
+    "src/core/db.py": {
+      "bytes": 8473,
+      "kind": "exact-build-input",
+      "sha256": "8657F3073FE30703F64B04006D32E0C558B33A80AE75AEDE03E13FECBF8C79FC"
+    },
+    "src/core/discovery.py": {
+      "bytes": 9975,
+      "kind": "exact-build-input",
+      "sha256": "6B4CBC229AB2CB0ACA1879D763AC9749345E35C90874102BAAE2C311516E7725"
+    },
+    "src/core/dlss5.py": {
+      "bytes": 42300,
+      "kind": "exact-build-input",
+      "sha256": "5668A2761521D3F0764EC979BC8B15D367AD5C5513CB0BFFA83B12F9DE678F0C"
+    },
+    "src/core/dlss5_uninstall.py": {
+      "bytes": 17822,
+      "kind": "exact-build-input",
+      "sha256": "86407D3F710C21793D8C7E3314245B6AC985FEFFF66C2C2E89EB49F603A12759"
+    },
+    "src/core/groups.py": {
+      "bytes": 18694,
+      "kind": "exact-build-input",
+      "sha256": "764198371E069F873ADD39535AFE39933B423198B250E7DF19DC129D03022B41"
+    },
+    "src/core/helpers/create_character.js": {
+      "bytes": 4596,
+      "kind": "exact-build-input",
+      "sha256": "54361E752BA60FE72420D9429F21EFDDAF5589254364A4B703DF982F89A139FB"
+    },
+    "src/core/helpers/delete_character.js": {
+      "bytes": 5843,
+      "kind": "exact-build-input",
+      "sha256": "C55E6AA146CC58413B5DC5503FB17B8B86E3202292C808BED1D2B28B8658E333"
+    },
+    "src/core/helpers/docker_create_character.js": {
+      "bytes": 80706,
+      "kind": "exact-build-input",
+      "sha256": "D5A32BD491C93C81023A67F1AB18B331112759FD753BA6F0BA72F6145E832964"
+    },
+    "src/core/helpers/game_store_maintenance.js": {
+      "bytes": 9246,
+      "kind": "exact-build-input",
+      "sha256": "2E30E4B02AC265032EBC00632AF460E6979C2F88B360B511C36AF286FF5B6671"
+    },
+    "src/core/helpers/maintenance_lease_guard.js": {
+      "bytes": 2188,
+      "kind": "exact-build-input",
+      "sha256": "2FFB436F3F3C41B7347C02C0EB45DF0B0D8784583165B6EFD4D6B5EF0FC57732"
+    },
+    "src/core/helpers/terminal_result.js": {
+      "bytes": 1852,
+      "kind": "exact-build-input",
+      "sha256": "2A096FF3BEA9C0C9D9B95354F14AACC266CBFE83CC8B51940E1016FDBECC3273"
+    },
+    "src/core/launcher.py": {
+      "bytes": 19239,
+      "kind": "exact-build-input",
+      "sha256": "09C049A357B10235A86DEBB8FEB9B4447C5261BACA800E0ABB249A7290DC5CE1"
+    },
+    "src/core/mod_activation_service.py": {
+      "bytes": 3147,
+      "kind": "exact-build-input",
+      "sha256": "6A79948C09FE89F261509A7D29E0B31185A1620DBF966FC6934DD9F52C9869AA"
+    },
+    "src/core/mod_activation_state.py": {
+      "bytes": 39237,
+      "kind": "exact-build-input",
+      "sha256": "AA14551F50C6E58E199C792A4D5C6FAA47D823B265B20F6B244D1C328F6AEF04"
+    },
+    "src/core/mod_lifecycle_lock.py": {
+      "bytes": 6704,
+      "kind": "exact-build-input",
+      "sha256": "FFEF279C0965C53663CF9B002ED9D6D3302BE1CBCFEDE57233172B241870248C"
+    },
+    "src/core/mod_management.py": {
+      "bytes": 43084,
+      "kind": "exact-build-input",
+      "sha256": "A23AFC8500D2E03A153287E5EBA34933C32145AE1763B03F6BAC0DC43DB38C9B"
+    },
+    "src/core/mod_manager.py": {
+      "bytes": 962,
+      "kind": "exact-build-input",
+      "sha256": "B7DF0CEADC022DBCB0B20E19EBBDFC2745EBED7381171DEF3D2007EB214224F3"
+    },
+    "src/core/mod_manifest.py": {
+      "bytes": 36606,
+      "kind": "exact-build-input",
+      "sha256": "612318FE2B4432C2117BE51F7A1905E68273234D368AD6C8EAEB3EDCFF65D955"
+    },
+    "src/core/mod_runtime_state.py": {
+      "bytes": 71953,
+      "kind": "exact-build-input",
+      "sha256": "15A8D8FF9B07CC08E5DB16CE097AF1335977A4F7B113B9060A201F24FB00DD41"
+    },
+    "src/core/native_maintenance.py": {
+      "bytes": 18114,
+      "kind": "exact-build-input",
+      "sha256": "5B87CC169E2142766F789635AC19979319DFB43A240EC9921B5E082D3B3D23E3"
+    },
+    "src/core/overview_patch.py": {
+      "bytes": 29576,
+      "kind": "exact-build-input",
+      "sha256": "522799553D2A803125C9BB51D5B5FF0362C9734EF5119E784F14E7AB694E4EBC"
+    },
+    "src/core/overview_state.py": {
+      "bytes": 8523,
+      "kind": "exact-build-input",
+      "sha256": "289513CE7FC1E82B558F6C42BD0A7C573B4BD8CFC802D89571FDF0021CD74614"
+    },
+    "src/core/platform.py": {
+      "bytes": 2174,
+      "kind": "exact-build-input",
+      "sha256": "64195661C7F53451B4A2E410D79E344B2AE7CAD850A4281C21D7A7958B2A12DA"
+    },
+    "src/core/platform_win.py": {
+      "bytes": 45695,
+      "kind": "exact-build-input",
+      "sha256": "9EC850E8C2F3A9CA69485F0E9E99ECF51A53DE0D68A99FF07531B5C05E98BF30"
+    },
+    "src/core/process_tracker.py": {
+      "bytes": 6661,
+      "kind": "exact-build-input",
+      "sha256": "C071B7A505DF6A3F18CB4C21E9CEAC3F416A4B9A5ACA462247AFB1AAF2F0B87D"
+    },
+    "src/core/profiles.py": {
+      "bytes": 22851,
+      "kind": "exact-build-input",
+      "sha256": "9B15AD0B522EC24C0B502B4BB9B95694C4A6C48BEF1C51894E1CFAAB3374C150"
+    },
+    "src/core/runtime/__init__.py": {
+      "bytes": 265,
+      "kind": "exact-build-input",
+      "sha256": "B981D1FF4CCBF20EC8EF2A2117573C3E9ED463D680AC1C40097CFD009A25740F"
+    },
+    "src/core/runtime/data.py": {
+      "bytes": 26187,
+      "kind": "exact-build-input",
+      "sha256": "AA36E33B8CE45C0938A7D54B623DF520358BF02F0EBB18582C5466B6BA733C76"
+    },
+    "src/core/runtime/docker_character_creation.py": {
+      "bytes": 22603,
+      "kind": "exact-build-input",
+      "sha256": "F90B7EE22AD621013ACF585B2A9644D79F9CA602878DCF92CE20EF65A5EED800"
+    },
+    "src/core/runtime/docker_cli.py": {
+      "bytes": 16080,
+      "kind": "exact-build-input",
+      "sha256": "11D5529417F04527CBBD875FFBD0D1572FDBE765EA57017AFF268E61B6DD3F3F"
+    },
+    "src/core/runtime/docker_compose.py": {
+      "bytes": 30228,
+      "kind": "exact-build-input",
+      "sha256": "5B254091057D49824253A6FA471B065E847E9A4683031EFC546FB173731C3F55"
+    },
+    "src/core/runtime/docker_controller.py": {
+      "bytes": 14867,
+      "kind": "exact-build-input",
+      "sha256": "26E8A1572CFCE6268CFAAB77D9DA5A248DAE12A6FF7FBB9BC36DD9FBF02AF850"
+    },
+    "src/core/runtime/docker_mods.py": {
+      "bytes": 35686,
+      "kind": "exact-build-input",
+      "sha256": "01F2C0C1EBE639038A5B1727D781B049DF3695A4BBBEDD39CB67F8E9FFFB8784"
+    },
+    "src/core/runtime/docker_setup.py": {
+      "bytes": 3307,
+      "kind": "exact-build-input",
+      "sha256": "4B735921D8142EB9AD6B15F00A53CB26F55AE4525273D206C8E2AA4AEB83B422"
+    },
+    "src/core/runtime/docker_tools.py": {
+      "bytes": 9240,
+      "kind": "exact-build-input",
+      "sha256": "EE20339A515134388467C8E0A016BFBDEBE1CCC211E3B83ECB90C1232A6C192E"
+    },
+    "src/core/runtime/endpoints.py": {
+      "bytes": 2712,
+      "kind": "exact-build-input",
+      "sha256": "3B137A1D100378FA93CFE1D85DBC73463D99947536BCEE923BA211C1ED5FF971"
+    },
+    "src/core/runtime/portraits.py": {
+      "bytes": 16852,
+      "kind": "exact-build-input",
+      "sha256": "7612C4C5FFE4FF04252712533F1A20C4F03B60B16C5E1B48CFFFD243DA325424"
+    },
+    "src/core/server_launcher.py": {
+      "bytes": 34453,
+      "kind": "exact-build-input",
+      "sha256": "7902A1E050B0B70C9155FFF7194F943FF8A2A53484479F324A4A72A5406C1272"
+    },
+    "src/core/server_selection.py": {
+      "bytes": 1514,
+      "kind": "exact-build-input",
+      "sha256": "B06A109DF8F3982E651117163A1AC224AF336AD26C193B579348F916F0654688"
+    },
+    "src/core/service_status.py": {
+      "bytes": 3611,
+      "kind": "exact-build-input",
+      "sha256": "69823D95D22B94B6628CE301391B1255E013C52DD248BA00C95A2C8AF77A52C4"
+    },
+    "src/core/template_settings/core_public__.yaml": {
+      "bytes": 2143,
+      "kind": "exact-build-input",
+      "sha256": "2004A65CB7BBFED91843D1B9A3D6A1647519B7A58EC69BE0E924CDC263140F99"
+    },
+    "src/core/template_settings/prefs.ini": {
+      "bytes": 180,
+      "kind": "exact-build-input",
+      "sha256": "A43859DA26E00D140B50E099143C4477A856E30F7754A072279F5274ED10FD86"
+    },
+    "src/core/tool_catalog.py": {
+      "bytes": 23246,
+      "kind": "exact-build-input",
+      "sha256": "DFC2978FCADF408A5495110B93B2523CE29BA3A091509F7641BC91FBBEFAEB4A"
+    },
+    "src/i18n.py": {
+      "bytes": 48746,
+      "kind": "exact-build-input",
+      "sha256": "77F4AFE711AF36CA39CF8B39D8F1E95A4BD3EC5EA3FDE5D665BE910ED85370D0"
+    },
+    "src/pages/__init__.py": {
+      "bytes": 0,
+      "kind": "exact-build-input",
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    "src/pages/characters_page.py": {
+      "bytes": 64333,
+      "kind": "exact-build-input",
+      "sha256": "B823C3EC1FE786E649772F47AC7060D821746699227D437727F9B69CE0650AD7"
+    },
+    "src/pages/home_page.py": {
+      "bytes": 51689,
+      "kind": "exact-build-input",
+      "sha256": "D818CF00610A2CAC48C4F3AC5BC057AC40986EED0BF280F455577EA973D4E946"
+    },
+    "src/pages/mods_page.py": {
+      "bytes": 53016,
+      "kind": "exact-build-input",
+      "sha256": "D3DB9BC43450B1BFF66F5E4D6E087BB6E747E9AA800A0D656E07F1C24BA3307E"
+    },
+    "src/pages/settings_page.py": {
+      "bytes": 81763,
+      "kind": "exact-build-input",
+      "sha256": "40AA84A6FCCFE785CAF307D72B56A2443783072022FF68DFF8D70C92E2CC74B9"
+    },
+    "src/pages/tools_page.py": {
+      "bytes": 30170,
+      "kind": "exact-build-input",
+      "sha256": "7709BC3AD3C54CC16634940DB72314FFC67A787D5B7B2F0C0C2D62CA71764971"
+    },
+    "src/theme.py": {
+      "bytes": 34679,
+      "kind": "exact-build-input",
+      "sha256": "748E89FA8EE8A90BA120124FF32B1A4C15F4AD68728ADF7F39BF637474491CF3"
+    },
+    "src/translations_eu.py": {
+      "bytes": 239030,
+      "kind": "exact-build-input",
+      "sha256": "B548CB52B1462138BE20B381B534D37B772905E4100F4A073FBAB536386B281F"
+    },
+    "src/translations_ja_additional_modals.py": {
+      "bytes": 31794,
+      "kind": "exact-build-input",
+      "sha256": "F1AC262418DD7822B48D571BC39BAE6BA8B81A3E2B132DBA982F703D9FC0F508"
+    },
+    "src/translations_ja_additional_ui.py": {
+      "bytes": 88094,
+      "kind": "exact-build-input",
+      "sha256": "9488F8490C5B1CB59323256592C01E3548913AFEA3E4D51B72A98D07F8E54D8D"
+    },
+    "src/translations_ja_ko.py": {
+      "bytes": 14225,
+      "kind": "exact-build-input",
+      "sha256": "ADB018E9110283E77DEAE9023ECA159315F540D99F4D74B5FDFFA9C307821371"
+    },
+    "src/translations_ko_full.py": {
+      "bytes": 112089,
+      "kind": "exact-build-input",
+      "sha256": "30AE55845231E58A6B71139A7CE006257BF4146861064E428BBA073EC208F0C4"
+    },
+    "src/translations_ru.py": {
+      "bytes": 100064,
+      "kind": "exact-build-input",
+      "sha256": "52A4CCE3F94DFE070D239C419370EC2AF9966477364CD6C6711F6CD803229E7A"
+    },
+    "src/translations_source.py": {
+      "bytes": 51643,
+      "kind": "exact-build-input",
+      "sha256": "00C362C19A472A851EE1A51285BC6F1D0244BE7E025834B359BEC93D836C7E3B"
+    },
+    "src/translations_zh_cn.py": {
+      "bytes": 6127,
+      "kind": "exact-build-input",
+      "sha256": "CD625A85AACAA3575062D2BCE7EDE421D814E51CE4B067652B4693E9E44CFFD1"
+    },
+    "src/translations_zh_cn_additional.py": {
+      "bytes": 93456,
+      "kind": "exact-build-input",
+      "sha256": "36E030A41131B52AC3F14ED7642FFB66DC1B6B1D5BD0F1E544F137B7B56D5FDC"
+    },
+    "src/ui/__init__.py": {
+      "bytes": 181,
+      "kind": "exact-build-input",
+      "sha256": "4B5AF70DE043588D015145F4DA4A7A94BDA6AB31F3B40881FA94BD685400590E"
+    },
+    "src/ui/motion.py": {
+      "bytes": 4687,
+      "kind": "exact-build-input",
+      "sha256": "F8A6191CE6C39B15288D0CF5AFFF6A246119CBE015490F553DCF4403FDB41843"
+    },
+    "src/updater/__init__.py": {
+      "bytes": 611,
+      "kind": "exact-build-input",
+      "sha256": "59AB9788C244A3088F1445298A9EF0BBE74A226A7C6382104D24C502A3436280"
+    },
+    "src/updater/checker.py": {
+      "bytes": 6293,
+      "kind": "exact-build-input",
+      "sha256": "A2098C76BB76A3E2F8F59267F9D1A240699EC61D26662C2E1F5639D0BDFE30F6"
+    },
+    "src/updater/dialog.py": {
+      "bytes": 20410,
+      "kind": "exact-build-input",
+      "sha256": "07C005E4A2C333097131E160720BA034DE76A954CAD6E2B3B0AC7D924F993A4C"
+    },
+    "src/updater/github.py": {
+      "bytes": 5855,
+      "kind": "exact-build-input",
+      "sha256": "2E71FDDBEB297B1070907514D9732BC1F4DE904F1FC4CEAA5F3F702494F349A2"
+    },
+    "src/updater/handoff.py": {
+      "bytes": 27293,
+      "kind": "exact-build-input",
+      "sha256": "114BB5BC8103113529F9BCA18B806EFDB6BEFA75E4DF686EFF5DAB760E69DE4C"
+    },
+    "src/updater/installer.py": {
+      "bytes": 2635,
+      "kind": "exact-build-input",
+      "sha256": "12A81C6E71279A6EBB8A20DA620A226F4329A1F71E3C0F175A6F71D734B46414"
+    },
+    "src/updater/progress_dialog.py": {
+      "bytes": 23337,
+      "kind": "exact-build-input",
+      "sha256": "02E2F24C81BFC3CDB47452F64B05F537B022D323608A5FFAD5C6EC839FD3DC46"
+    },
+    "src/utils/__init__.py": {
+      "bytes": 0,
+      "kind": "exact-build-input",
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    "src/utils/cache.py": {
+      "bytes": 1644,
+      "kind": "exact-build-input",
+      "sha256": "13E4EB135B6450D19A2C993D3495E77A6D7B24D64733DCC52CE795386A6B7C6F"
+    },
+    "src/utils/logger.py": {
+      "bytes": 1408,
+      "kind": "exact-build-input",
+      "sha256": "C0B6BACE078252754975BCFFF85B1C27219BBA0ADCC20AA3BED8E79A86315AB6"
+    },
+    "src/widgets/__init__.py": {
+      "bytes": 0,
+      "kind": "exact-build-input",
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    "src/widgets/character_card.py": {
+      "bytes": 22795,
+      "kind": "exact-build-input",
+      "sha256": "EA2A3859AE61013A56F24E06E735873C9CD2BB6FA0F4905EE235AA6677607153"
+    },
+    "src/widgets/character_groups_dialog.py": {
+      "bytes": 34222,
+      "kind": "exact-build-input",
+      "sha256": "C54337AFD7CF75453F44BF98AF0A51978AA6A5E159FCAECA0EF01E2B2F41EFC9"
+    },
+    "src/widgets/console_panel.py": {
+      "bytes": 17710,
+      "kind": "exact-build-input",
+      "sha256": "5C25DD91B8A1102BF16CB6E31FF9D49AB00C07F98FA6ABFE94ECD0FED57D6B70"
+    },
+    "src/widgets/deep_signal_background.py": {
+      "bytes": 10449,
+      "kind": "exact-build-input",
+      "sha256": "D2C39933AD59451AC5158835F68FF2E174D8FC7E4032214E17E8E2F304870E8C"
+    },
+    "src/widgets/detail_panel.py": {
+      "bytes": 20457,
+      "kind": "exact-build-input",
+      "sha256": "CAD520F743EF701617CAC2124C6FA11CD26466C1959CD4368BF93141F6A73F6C"
+    },
+    "src/widgets/docking_traffic_overlay.py": {
+      "bytes": 19613,
+      "kind": "exact-build-input",
+      "sha256": "955B8B008A379EBDCA7C6A9B3BB95B5DF61A1DCD189CBA0EC869C15A6D966730"
+    },
+    "src/widgets/glass_panel.py": {
+      "bytes": 3927,
+      "kind": "exact-build-input",
+      "sha256": "D6589910769242D0ACA1004241BD9E9B00085B71ADB9B72C71505F8AE5CB8B30"
+    },
+    "src/widgets/hero_banner.py": {
+      "bytes": 13757,
+      "kind": "exact-build-input",
+      "sha256": "4C95E667F820776D497A81F7F7F14AA87C36A6927D1E749EC565360247723F2A"
+    },
+    "src/widgets/localized_dialogs.py": {
+      "bytes": 10098,
+      "kind": "exact-build-input",
+      "sha256": "8FCE6ACDD34021829FCC652DE200BCCABBEC9ACFF6475F024247917275D844D1"
+    },
+    "src/widgets/nav_panel.py": {
+      "bytes": 21995,
+      "kind": "exact-build-input",
+      "sha256": "9DC90122CA0513C81BAB3D6E03C32265BDCB97C203F018CD25FBC9DEC5AB5190"
+    },
+    "src/widgets/new_character_card.py": {
+      "bytes": 10126,
+      "kind": "exact-build-input",
+      "sha256": "1E2FB7387D2652B8C2BAF8B6F9EFA88EE0F20FC899A4D7D4B5513CFE22C214E7"
+    },
+    "src/widgets/new_character_dialog.py": {
+      "bytes": 18402,
+      "kind": "exact-build-input",
+      "sha256": "802DF8F58D6A486A93F91EDEF20220202EEC13BFD6506AB82446B0B4E1CB2C45"
+    },
+    "src/widgets/page_header.py": {
+      "bytes": 2782,
+      "kind": "exact-build-input",
+      "sha256": "BA84491309EBEF8B40837A850B709E13DD76F5EFA779C219F70464D519120988"
+    },
+    "src/widgets/shipboard_caption.py": {
+      "bytes": 4407,
+      "kind": "exact-build-input",
+      "sha256": "CA1742E905AA99DFCC753389085EA1DBCD33959556974A11811FF5559C874A1E"
+    },
+    "src/widgets/skeleton_card.py": {
+      "bytes": 4283,
+      "kind": "exact-build-input",
+      "sha256": "C6243256F733C603386C1C6642D1261BD102C3385F0E3E429B66AD27C415433C"
+    },
+    "src/widgets/status_bar.py": {
+      "bytes": 23270,
+      "kind": "exact-build-input",
+      "sha256": "E6DF300F1693AD63D8951D024C5536309CBAA85F221EC3C1A5A194E96FFB9790"
+    },
+    "src/widgets/status_ring.py": {
+      "bytes": 10714,
+      "kind": "exact-build-input",
+      "sha256": "143F049FC725F69C269F1F8490250AE1C3E98102912D00136BE5AF4B26306E5E"
+    },
+    "src/widgets/title_bar.py": {
+      "bytes": 34692,
+      "kind": "exact-build-input",
+      "sha256": "5504CC93C51DDEAE9769B54F6D8C464E62FC72D8235F97EB98CE183AFB76CEFE"
+    },
+    "src/widgets/toggle_switch.py": {
+      "bytes": 3959,
+      "kind": "exact-build-input",
+      "sha256": "7C28018C75C45D4926C23EBC2A6BE5393F496515738E17A564758206DFBCFA03"
+    },
+    "src/widgets/ui_translation.py": {
+      "bytes": 17331,
+      "kind": "exact-build-input",
+      "sha256": "3750A5557ABC667D58A44BB3B84BDB178974271E32AB2545044F7C726045A4E8"
+    },
+    "src/widgets/update_button.py": {
+      "bytes": 5080,
+      "kind": "exact-build-input",
+      "sha256": "8CEF54BC2B029F5E927CD205AEDD41DB34A189354105F6CE39879D855A0A6A42"
+    },
+    "src/widgets/window_behavior.py": {
+      "bytes": 852,
+      "kind": "exact-build-input",
+      "sha256": "FD15AAEF4AB0976FBB85CEAD138626B4C24DFB9347787D8710CC99FCC6ED972C"
+    },
+    "src/wizard.py": {
+      "bytes": 52322,
+      "kind": "exact-build-input",
+      "sha256": "DB915586D4154FFA94726E631466712DDA7EBA9663D3923137DCA40E71076291"
+    },
+    "src/workers/__init__.py": {
+      "bytes": 349,
+      "kind": "exact-build-input",
+      "sha256": "ECBF7D5C187A78FDF74F0C8C2519E7D98CD509494E88638168634158D90E39CB"
+    },
+    "src/workers/character_creation_worker.py": {
+      "bytes": 1670,
+      "kind": "exact-build-input",
+      "sha256": "26BB0D8AF160670D3DEBFCDA5B9223F783CEEC8FEBE4D0662BD4A69B3BDF931E"
+    },
+    "src/workers/character_deletion_worker.py": {
+      "bytes": 1692,
+      "kind": "exact-build-input",
+      "sha256": "57ADA89E390DC8283CBA01B929C57FE996A82DED1771404516AFF3B9913F17CE"
+    },
+    "src/workers/client_launch_worker.py": {
+      "bytes": 2728,
+      "kind": "exact-build-input",
+      "sha256": "6F4922048BF6C4CA22874EA3110E88CC3D197EC264F935D2609B86888E1640DA"
+    },
+    "src/workers/db_worker.py": {
+      "bytes": 4374,
+      "kind": "exact-build-input",
+      "sha256": "A1A4E498D13E5BF4844860F159F5EB0085A310C39A00CB5D5F02AA65C9BBAD61"
+    },
+    "src/workers/dlss5_uninstall_worker.py": {
+      "bytes": 1404,
+      "kind": "exact-build-input",
+      "sha256": "6C964CD84615DC446D7F2C620ED4A7881251C88DF84531D06974045CBF057E6C"
+    },
+    "src/workers/docker_character_creation_worker.py": {
+      "bytes": 3179,
+      "kind": "exact-build-input",
+      "sha256": "13C16AA5FF66B3AA68E37C39E67AC2EB242D819759E121B0445C57E8D988058C"
+    },
+    "src/workers/docker_lifecycle_worker.py": {
+      "bytes": 2605,
+      "kind": "exact-build-input",
+      "sha256": "2662C64A87CEA3302FF651ECE50348B23B26A133865D28CF4B4172F58C3C183F"
+    },
+    "src/workers/docker_log_worker.py": {
+      "bytes": 11349,
+      "kind": "exact-build-input",
+      "sha256": "6A1256A600DE3613D06F7E78E0E615A1968C34CFCB1A2924960D2C149B3EA33C"
+    },
+    "src/workers/docker_monitor.py": {
+      "bytes": 13426,
+      "kind": "exact-build-input",
+      "sha256": "397BE8427DA357CF7BA1F3166F306AF173F10CB84059FDDF6F93E12D9851C026"
+    },
+    "src/workers/docker_preflight_worker.py": {
+      "bytes": 2470,
+      "kind": "exact-build-input",
+      "sha256": "696A2597E05C612D99A7B8DD11948D423053FF62103CD8A0991DA6E96AA34901"
+    },
+    "src/workers/docker_tool_worker.py": {
+      "bytes": 3039,
+      "kind": "exact-build-input",
+      "sha256": "D505320C2F2F483334DB45BF5380E78843B7F38F73834B61B52A27195D4C2285"
+    },
+    "src/workers/mod_management_worker.py": {
+      "bytes": 1438,
+      "kind": "exact-build-input",
+      "sha256": "37D6CADF331A8EA9DB76B061B7CC974087A42588BF02CB0E26634C5BF7AA9089"
+    },
+    "src/workers/overview_patch_worker.py": {
+      "bytes": 2055,
+      "kind": "exact-build-input",
+      "sha256": "42086FEF2C4BB2B4476B5A6230B0FBA325BAE1655D2AC07310CE1F3B7831B8AB"
+    },
+    "src/workers/portrait_worker.py": {
+      "bytes": 2576,
+      "kind": "exact-build-input",
+      "sha256": "93C0C8E5B0CD8A5E25326F8927405CEA954E8480CB6546CBA74FA013D8DA1297"
+    },
+    "src/workers/server_worker.py": {
+      "bytes": 21118,
+      "kind": "exact-build-input",
+      "sha256": "6676795D64D91125ACBCFD07435B64D706F4EE569571D923CE7C921212C76E57"
+    }
+  },
+  "license": "GPL-3.0; preserve individual dependency notices",
+  "limits": [
+    "Source inputs match the identified binary; no byte-identical rebuild claim.",
+    "Historical voice reference inputs and model/tool binaries are not included.",
+    "Static packaging proof is not manual acceptance or publication authorization."
+  ],
+  "packagedDataInputCount": 55,
+  "project": "EveJS Launcher",
+  "schemaVersion": 1,
+  "sourceOnlyExtras": [
+    "BUILDING.md",
+    "requirements-build.txt",
+    "scripts/celestial_transit_synthesis.py",
+    "scripts/generate_celestial_transit.py",
+    "scripts/generate_lyra_voice_catalog.py",
+    "scripts/process_lyra_voice_catalog.py"
+  ],
+  "version": "1.0.50"
+}

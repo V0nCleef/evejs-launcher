@@ -2,6 +2,77 @@
 
 ## Changelog
 
+## v1.0.50 — release candidate
+
+### DLSS5 0.5.5 package support
+
+- Recognizes the optional DLSS5 mod automatically when its folder is placed in
+  the selected EveJS root's `mods` directory. First client launch prepares its
+  verified dependencies; starting the server alone does not install it.
+- Adds an Uninstall action with verified rollback and a recoverable package
+  archive. Backups and audit receipts are retained; uninstall completion is
+  reported once.
+- Supports the separately installed standalone package without requiring a Mods
+  entry or routing client launches through `Play.bat`.
+- Accepts the reviewed 0.5.5 package while preserving older development-package
+  trust records for existing installations and rollback.
+- Clients without DLSS5 retain the normal launch path. No global DX12 setting
+  or DLSS5 installation is applied merely by updating the launcher.
+
+### DLSS5 launcher routing
+
+- The launcher now recognizes the managed `EVEJS_DLSS5=on` and
+  `TRINITYPLATFORM=dx12` assignments in the selected EveJS root and carries
+  them into direct client launches when the configured copied-client path is
+  an exact match.
+- Installations without the DLSS5 marker retain the previous client launch
+  environment—including any user-supplied ReShade base-path override; DX12 is
+  not enabled globally or guessed from loose DLL files.
+- Each launcher character profile now receives its own ReShade configuration,
+  transition log, and Neural Rendering preference. Multiple clients can share
+  the installed DLSS binaries without fighting over `ReShade.ini`, and a
+  user's F6 choice affects the foreground client only. With the current DLSS5
+  package, switching from another upscaler into DLSS enables NR; switching away
+  disables it. F6 can override NR while DLSS remains selected.
+- Marked installations fail closed when the ReShade proxy or RenoDX add-on is
+  missing, or when a shared ReShade `BasePath` would defeat profile isolation.
+- Per-account client junctions are checked before every launch and safely
+  rebound when Settings points the launcher at a different copied client.
+  A real directory is never replaced, and a failed rebind restores the prior
+  junction target when possible.
+- Dangling profile junctions left behind when an older copied client is moved
+  or deleted are now recognized as existing links, rebound on launch, and
+  removable during profile deletion instead of failing with "file already
+  exists".
+- The launcher MOD contract now accepts an explicit schema-2 compatibility
+  list for EveJS 0.12.6 and 0.12.7. It also validates the selected root's real
+  `package.json`, so a package cannot claim compatibility with a different
+  EveJS version or crash discovery with malformed version metadata.
+- The windowed launcher now gives the trusted DLSS5 manager an explicit null
+  input handle. This prevents Windows error 50 after Native service console
+  handling leaves no supported standard-input handle to inherit.
+- The reviewed `0.5.5` PowerShell manager is an explicit launcher trust
+  anchor. That manager in turn pins its download helper and raw payload
+  manifest; package metadata cannot redirect execution or silently replace its
+  verified sources.
+- First-time DLSS5 preparation now has a one-hour outer budget covering the
+  manager's three independently bounded downloads, verification, extraction,
+  and local client-guard generation. Existing installations retain the
+  manager's read-only fast path and do not redownload or rewrite mapped DLLs.
+- Preparation uses the launcher's existing Windows Job Object containment:
+  PowerShell is assigned before it starts, and timeout/launcher-exit cleanup
+  includes its local guard-builder descendants rather than killing only the
+  parent. The game client is not part of this preparation job.
+- A completed standalone `0.5.5` DLSS5 installation works without a
+  `mods/DLSS5` folder. Direct launch verifies its receipt, selected roots,
+  launcher-pinned installed payload hashes, unchanged executable, and profile
+  isolation settings offline. This path performs no install, repair, download,
+  or package-script execution. Standalone installations do not become MOD rows.
+
+The current candidate preserves the previously user-tested renderer. New final
+package identity, launcher routing and packaging still require exact-artifact
+manual acceptance. This is not a publication or blanket compatibility claim.
+
 ## v1.0.49 — 2026-08-31
 
 ### Fixed

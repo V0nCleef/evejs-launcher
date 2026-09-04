@@ -539,6 +539,109 @@ def test_launch_client_resfiles_come_from_configured_client_not_profile_junction
     assert captured["arguments"] == ("/port:26000",)
 
 
+def test_launch_client_does_not_inject_dlss5_or_change_inherited_reshade_without_package(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _accept_fixture_cache(monkeypatch)
+    monkeypatch.delenv("TRINITYPLATFORM", raising=False)
+    monkeypatch.delenv("EVEJS_DLSS5", raising=False)
+    monkeypatch.setenv("RESHADE_BASE_PATH_OVERRIDE", str(tmp_path / "stale"))
+    profile_tq = tmp_path / "profiles" / "account" / "tq"
+    exe = profile_tq / "bin64" / "exefile.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"")
+    configured_tq = tmp_path / "client" / "tq"
+    _create_client_cache(configured_tq)
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(launcher, "get_client_exe_path", lambda _path: exe)
+    monkeypatch.setattr(
+        launcher,
+        "launch_eve_client",
+        lambda executable, env, cwd, *, arguments: captured.update(env=env) or object(),
+    )
+
+    launcher.launch_client(
+        evejs_root=str(tmp_path / "evejs"),
+        profile_tq_path=profile_tq,
+        client_path=str(configured_tq),
+    )
+
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert "TRINITYPLATFORM" not in env
+    assert "EVEJS_DLSS5" not in env
+    # No-package launches retain their historical inherited environment. A
+    # verified DLSS5 launch replaces this value with its profile-owned path.
+    assert env["RESHADE_BASE_PATH_OVERRIDE"] == str(tmp_path / "stale")
+
+
+def test_launch_client_injects_dx12_for_verified_dlss5_integration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _accept_fixture_cache(monkeypatch)
+    profile_tq = tmp_path / "profiles" / "account" / "tq"
+    exe = profile_tq / "bin64" / "exefile.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"")
+    configured_tq = tmp_path / "client" / "tq"
+    _create_client_cache(configured_tq)
+    configured_exe = configured_tq / "bin64" / "exefile.exe"
+    configured_exe.parent.mkdir(parents=True, exist_ok=True)
+    configured_exe.write_bytes(b"")
+    (configured_exe.parent / "dxgi.dll").write_bytes(b"reshade")
+    (configured_exe.parent / "renodx-dlss5.addon64").write_bytes(b"renodx")
+    (configured_exe.parent / "ReShade.ini").write_text(
+        "[RenoDX.DLSS5]\nNeuralUplift=1\n",
+        encoding="utf-8",
+    )
+    (configured_tq / "start.ini").write_text("build=fixture\n", encoding="utf-8")
+    evejs_root = tmp_path / "evejs"
+    client_config = (
+        evejs_root / "tools" / "ClientSETUP" / "scripts" / "EvEJSConfig.bat"
+    )
+    client_config.parent.mkdir(parents=True)
+    client_config.write_text(
+        f'set "EVEJS_CLIENT_PATH={configured_tq}"\n'
+        'set "TRINITYPLATFORM=dx12"\n'
+        'set "EVEJS_DLSS5=on"\n',
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+    ensured: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(launcher, "get_client_exe_path", lambda _path: exe)
+    monkeypatch.setattr(
+        launcher,
+        "ensure_dlss5_client_mod",
+        lambda root, client: ensured.append((str(root), str(client)))
+        or {"TRINITYPLATFORM": "dx12", "EVEJS_DLSS5": "on"},
+    )
+    monkeypatch.setattr(
+        launcher,
+        "launch_eve_client",
+        lambda executable, env, cwd, *, arguments: captured.update(env=env) or object(),
+    )
+
+    launcher.launch_client(
+        evejs_root=str(evejs_root),
+        profile_tq_path=profile_tq,
+        client_path=str(configured_tq),
+    )
+
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert ensured == [(str(evejs_root), str(configured_tq))]
+    assert env["TRINITYPLATFORM"] == "dx12"
+    assert env["EVEJS_DLSS5"] == "on"
+    assert env["RESHADE_BASE_PATH_OVERRIDE"] == str(profile_tq.parent / "DLSS5")
+    profile_config = profile_tq.parent / "DLSS5" / "ReShade.ini"
+    assert profile_config.is_file()
+    assert "AddonPath=..\\tq\\bin64" in profile_config.read_text(encoding="utf-8")
+
+
 def test_launch_client_preserves_unicode_paths_through_the_spawn_boundary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

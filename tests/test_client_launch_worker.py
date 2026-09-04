@@ -751,7 +751,13 @@ def test_perform_launch_forwards_exact_character_as_typed_auto_login_intent(
         "require_client_endpoints_ready",
         endpoint_checks.append,
     )
-    monkeypatch.setattr(app_module, "profile_exists", lambda _username: True)
+    monkeypatch.setattr(
+        app_module,
+        "create_profile",
+        lambda _username, _client_path, _profiles_root: (
+            request.profiles_root / request.username
+        ),
+    )
     monkeypatch.setattr(app_module, "prefill_username", lambda _username: None)
     monkeypatch.setattr(
         app_module,
@@ -786,7 +792,13 @@ def test_perform_launch_keeps_manual_mode_argument_free(
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(app_module, "wait_for_client_endpoints", lambda _context: None)
-    monkeypatch.setattr(app_module, "profile_exists", lambda _username: True)
+    monkeypatch.setattr(
+        app_module,
+        "create_profile",
+        lambda _username, _client_path, _profiles_root: (
+            request.profiles_root / request.username
+        ),
+    )
     monkeypatch.setattr(app_module, "prefill_username", lambda _username: None)
     monkeypatch.setattr(
         app_module,
@@ -812,7 +824,13 @@ def test_perform_launch_logs_bounded_preparation_stages(
     (request.profiles_root / request.username / "tq").mkdir(parents=True)
     messages: list[str] = []
     monkeypatch.setattr(app_module, "wait_for_client_endpoints", lambda _context: None)
-    monkeypatch.setattr(app_module, "profile_exists", lambda _username: True)
+    monkeypatch.setattr(
+        app_module,
+        "create_profile",
+        lambda _username, _client_path, _profiles_root: (
+            request.profiles_root / request.username
+        ),
+    )
     monkeypatch.setattr(app_module, "prefill_username", lambda _username: None)
     monkeypatch.setattr(
         app_module,
@@ -856,8 +874,8 @@ def test_perform_launch_does_not_mutate_profile_when_runtime_is_not_ready(
     )
     monkeypatch.setattr(
         app_module,
-        "profile_exists",
-        lambda _username: pytest.fail("profile must not be inspected or mutated"),
+        "create_profile",
+        lambda *_args: pytest.fail("profile must not be inspected or mutated"),
     )
 
     with pytest.raises(RuntimeError, match="proxy not ready"):

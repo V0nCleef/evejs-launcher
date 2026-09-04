@@ -1789,10 +1789,6 @@ def test_single_client_launch_aborts_when_auto_start_is_cancelled(
     bare_window._ensure_server_if_needed = lambda _on_ready: False
     downstream_calls: list[str] = []
     monkeypatch.setattr(
-        "src.app.profile_exists",
-        lambda _username: downstream_calls.append("profile") or False,
-    )
-    monkeypatch.setattr(
         "src.app.create_profile",
         lambda *_args: downstream_calls.append("create-profile"),
     )
@@ -1882,7 +1878,11 @@ def test_native_client_launch_preserves_configured_endpoint_context(
     bare_window._tracker = Tracker()
     monkeypatch.setattr(app_module, "PROFILES_ROOT", tmp_path / "profiles")
     monkeypatch.setattr(app_module, "wait_for_client_endpoints", lambda _context: None)
-    monkeypatch.setattr(app_module, "profile_exists", lambda _username: True)
+    monkeypatch.setattr(
+        app_module,
+        "create_profile",
+        lambda _username, _client_path, _profiles_root: profile_root,
+    )
     monkeypatch.setattr(
         app_module,
         "prefill_username",

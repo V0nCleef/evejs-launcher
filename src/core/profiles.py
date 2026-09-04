@@ -7,6 +7,7 @@ import ipaddress
 import json
 import os
 import re
+import stat
 from pathlib import Path
 import uuid
 
@@ -33,8 +34,87 @@ def get_settings_key(client_path: str) -> str:
     return f"{key}_127.0.0.1"
 
 
-def create_profile(username: str, real_client_path: str) -> Path:
-    """Create a junction profile for the given account.
+def _path_entry_exists(path: Path) -> bool:
+    """Return whether *path* exists without following a broken link."""
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return False
+    return True
+
+
+def _is_directory_link(path: Path) -> bool:
+    """Return whether *path* is a symlink or Windows reparse-point link."""
+    metadata = path.lstat()
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    file_attributes = int(getattr(metadata, "st_file_attributes", 0))
+    return stat.S_ISLNK(metadata.st_mode) or bool(file_attributes & reparse_flag)
+
+
+def _same_directory_target(link: Path, target: Path) -> bool:
+    """Compare a directory link and target using filesystem identity."""
+    try:
+        return os.path.samefile(link, target)
+    except OSError:
+        return False
+
+
+def _ensure_profile_junction(junction: Path, target: Path) -> None:
+    """Create or safely rebind one launcher-owned profile junction."""
+    if not target.is_dir():
+        raise FileNotFoundError(f"EVE client directory does not exist: {target}")
+
+    if not _path_entry_exists(junction):
+        create_directory_link(target, junction)
+        return
+
+    if not _is_directory_link(junction):
+        raise RuntimeError(
+            f"Refusing to replace non-junction profile path: {junction}"
+        )
+
+    if _same_directory_target(junction, target):
+        return
+
+    previous_target: Path | None
+    try:
+        previous_target = junction.resolve(strict=True)
+    except OSError:
+        previous_target = None
+
+    remove_directory_link(junction)
+    try:
+        create_directory_link(target, junction)
+    except Exception as bind_error:
+        if _path_entry_exists(junction):
+            raise RuntimeError(
+                f"Failed to rebind profile junction and an unexpected path remains: "
+                f"{junction}"
+            ) from bind_error
+        if previous_target is None:
+            raise RuntimeError(
+                f"Failed to rebind profile junction to {target}; the previous "
+                "junction target could not be resolved for rollback."
+            ) from bind_error
+        try:
+            create_directory_link(previous_target, junction)
+        except Exception as rollback_error:
+            raise RuntimeError(
+                f"Failed to rebind profile junction to {target}, and restoring "
+                f"the previous target {previous_target} also failed: {rollback_error}"
+            ) from bind_error
+        raise RuntimeError(
+            f"Failed to rebind profile junction to {target}; the previous target "
+            f"{previous_target} was restored."
+        ) from bind_error
+
+
+def create_profile(
+    username: str,
+    real_client_path: str,
+    profiles_root: Path | None = None,
+) -> Path:
+    """Create or rebind a junction profile for the given account.
 
     Bootstraps only safe text settings. Binary account caches and browser state
     remain isolated to the account that created them.
@@ -42,16 +122,17 @@ def create_profile(username: str, real_client_path: str) -> Path:
     Args:
         username: Account username (used as profile folder name).
         real_client_path: Path to the real EVE client's tq folder.
+        profiles_root: Optional profile root captured by the launch request.
 
     Returns:
         Path to the profile directory.
     """
-    profile_dir = PROFILES_ROOT / username
+    root = PROFILES_ROOT if profiles_root is None else Path(profiles_root)
+    profile_dir = root / username
     profile_dir.mkdir(parents=True, exist_ok=True)
 
     junction = profile_dir / "tq"
-    if not junction.exists():
-        create_directory_link(Path(real_client_path), junction)
+    _ensure_profile_junction(junction, Path(real_client_path))
 
     # ── Bootstrap EVE settings from real client (or template fallback) ──
     try:
@@ -99,7 +180,7 @@ def delete_profile(username: str) -> None:
     profile_dir = PROFILES_ROOT / username
     junction = profile_dir / "tq"
 
-    if junction.exists():
+    if _path_entry_exists(junction):
         remove_directory_link(junction)
 
     # Remove empty profile dir (only if empty after junction removal)

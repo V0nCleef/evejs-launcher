@@ -832,7 +832,7 @@ def test_docker_identity_change_publishes_clean_unknown_and_rejects_old_observat
     )
     monkeypatch.setattr(
         app_module,
-        "profile_exists",
+        "create_profile",
         lambda *_args: pytest.fail("stale context reached profile work"),
     )
     assert not docker_window._launch_account(
@@ -920,7 +920,7 @@ def test_docker_missing_endpoints_fail_before_profile_and_client_work(
     )
     messages: list[str] = []
     docker_window._docker_unavailable = messages.append
-    monkeypatch.setattr("src.app.profile_exists", lambda *_args: pytest.fail("profile work"))
+    monkeypatch.setattr("src.app.create_profile", lambda *_args: pytest.fail("profile work"))
     monkeypatch.setattr("src.app.launch_client", lambda **_kwargs: pytest.fail("client work"))
 
     assert docker_window._launch_account("account", "character", show_errors=True) is False
@@ -983,8 +983,10 @@ def test_complete_connect_only_endpoints_use_one_context_for_profile_and_client(
     monkeypatch.setattr(app_module, "wait_for_client_endpoints", lambda _context: None)
     monkeypatch.setattr(
         app_module,
-        "profile_exists",
-        lambda username: events.append(("profile", username)) or True,
+        "create_profile",
+        lambda username, _client_path, _profiles_root: (
+            events.append(("profile", username)) or profile_root
+        ),
     )
     monkeypatch.setattr(
         app_module,
@@ -1067,7 +1069,7 @@ def test_captured_docker_context_is_rejected_after_generation_changes(
     docker_window._docker_unavailable = messages.append
     monkeypatch.setattr(
         app_module,
-        "profile_exists",
+        "create_profile",
         lambda *_args: pytest.fail("stale queue context reached profile work"),
     )
 

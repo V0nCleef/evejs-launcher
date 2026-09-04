@@ -12,6 +12,7 @@ import time
 from urllib.parse import urlsplit
 
 from .client_autologin import AutoLoginLaunch, require_auto_login_arguments
+from .dlss5 import ensure_dlss5_client_mod, prepare_dlss5_profile_environment
 from .overview_state import OverviewBridgeLaunch
 from .platform import (
     get_client_exe_path,
@@ -316,7 +317,6 @@ def build_env(evejs_root: str, proxy_url: str = "http://127.0.0.1:26002") -> dic
     # inherit a command or acknowledgement path from the launcher process.
     env.pop("EVEJS_OVERVIEW_BRIDGE", None)
     env.pop("EVEJS_OVERVIEW_ACK_PATH", None)
-
     # ── Proxy ──────────────────────────────────────────────────────────
     for key in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
                  "all_proxy", "ALL_PROXY"):
@@ -425,8 +425,17 @@ def launch_client(
         proxy_url=effective_proxy,
     )
     resfiles = _resolve_client_resource_cache(profile_tq_path, client_path)
+    selected_client_path = client_path or str(profile_tq_path.resolve())
 
     with serialize_evejs_client_trust_and_spawn():
+        # The cross-process client-launch mutex also serializes the DLSS5
+        # manager. Initial install/update may mutate the copied client; the
+        # exact-package path is read-only and remains safe when client one is
+        # already running while client two is prepared.
+        dlss5_environment = ensure_dlss5_client_mod(
+            evejs_root,
+            selected_client_path,
+        )
         certificate_client_path = (
             Path(client_path) if client_path else profile_tq_path.resolve()
         )
@@ -437,6 +446,18 @@ def launch_client(
             log.info("Prepared EveJS certificate trust for the selected installation.")
 
         env = build_env(evejs_root, effective_proxy)
+        if dlss5_environment:
+            env.update(dlss5_environment)
+            env.update(
+                prepare_dlss5_profile_environment(
+                    profile_tq_path,
+                    selected_client_path,
+                )
+            )
+            log.info(
+                "Verified DLSS5 integration for selected client; "
+                "launching Trinity in DX12 mode with isolated profile state."
+            )
         if overview_bridge is not None:
             env["EVEJS_OVERVIEW_BRIDGE"] = overview_bridge.command
             env["EVEJS_OVERVIEW_ACK_PATH"] = str(overview_bridge.ack_path)

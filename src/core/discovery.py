@@ -144,7 +144,7 @@ def resolve_client_tq_path(
 
 def find_client_path(evejs_root: str) -> str | None:
     """Extract and canonicalize the copied EVE client path from its batch config."""
-    cfg = Path(evejs_root) / "tools" / "ClientSETUP" / "scripts" / "EvEJSConfig.bat"
+    cfg = _client_config_path(evejs_root)
     if not cfg.exists():
         return None
 
@@ -161,6 +161,94 @@ def find_client_path(evejs_root: str) -> str | None:
         if match:
             resolved = resolve_client_tq_path(match.group(1), evejs_root)
             return str(resolved) if resolved is not None else None
+    return None
+
+
+def find_dlss5_launch_environment(
+    evejs_root: str,
+    client_path: str | Path,
+) -> dict[str, str]:
+    """Return the verified DLSS5 renderer environment for one copied client.
+
+    The DLSS5 integration manager records its intent in ``EvEJSConfig.bat``.
+    Launcher users do not execute ``Play.bat``, so honor only the two exact
+    managed assignments and only when that config targets the selected client.
+    An installation without the DLSS5 marker keeps the launcher's historical
+    environment unchanged.
+    """
+    cfg = _client_config_path(evejs_root)
+    contents = _read_batch_text(cfg)
+    if contents is None:
+        return {}
+
+    marker = _find_batch_assignment(contents, "EVEJS_DLSS5")
+    if marker is None or marker.casefold() != "on":
+        return {}
+
+    platform = _find_batch_assignment(contents, "TRINITYPLATFORM")
+    if platform is None or platform.casefold() != "dx12":
+        raise RuntimeError(
+            "The selected EveJS root has the DLSS5 marker, but its "
+            "TRINITYPLATFORM setting is not dx12. Repair or restore the "
+            "DLSS5 integration before launching a client."
+        )
+
+    configured_raw = _find_batch_assignment(contents, "EVEJS_CLIENT_PATH")
+    configured_client = (
+        resolve_client_tq_path(configured_raw, evejs_root)
+        if configured_raw is not None
+        else None
+    )
+    selected_client = resolve_client_tq_path(client_path, evejs_root)
+    if configured_client is None or selected_client is None:
+        raise RuntimeError(
+            "The selected EveJS root has the DLSS5 marker, but its copied "
+            "client path cannot be verified. Repair the DLSS5 integration "
+            "before launching a client."
+        )
+
+    try:
+        same_client = os.path.samefile(configured_client, selected_client)
+    except OSError:
+        same_client = False
+    if not same_client:
+        raise RuntimeError(
+            "The selected EveJS root has the DLSS5 marker for a different "
+            "copied EVE client. Select the matching client path or repair the "
+            "DLSS5 integration before launching."
+        )
+
+    return {
+        "TRINITYPLATFORM": "dx12",
+        "EVEJS_DLSS5": "on",
+    }
+
+
+def _client_config_path(evejs_root: str | Path) -> Path:
+    return (
+        Path(evejs_root)
+        / "tools"
+        / "ClientSETUP"
+        / "scripts"
+        / "EvEJSConfig.bat"
+    )
+
+
+def _find_batch_assignment(contents: str, variable: str) -> str | None:
+    """Read one literal ``set`` assignment without executing batch code."""
+    escaped = re.escape(variable)
+    quoted = re.compile(
+        rf'^\s*set\s+"{escaped}\s*=\s*([^\"]*)"\s*$',
+        flags=re.IGNORECASE,
+    )
+    plain = re.compile(
+        rf"^\s*set\s+{escaped}\s*=\s*(.*?)\s*$",
+        flags=re.IGNORECASE,
+    )
+    for line in contents.splitlines():
+        match = quoted.match(line) or plain.match(line)
+        if match:
+            return match.group(1).strip()
     return None
 
 

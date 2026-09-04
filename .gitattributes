@@ -1,0 +1,2 @@
+# Preserve exact source/build-input bytes represented by SOURCE-MANIFEST.json.
+* -text

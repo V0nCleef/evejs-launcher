@@ -1,8 +1,8 @@
 """Deep Signal presentation for installed EveJS mods.
 
-The page presents both legacy ``loader.js`` preloads and reviewed,
-manifest-declared source integrations.  Filesystem mutation stays in the mod
-manager; the widgets only request an explicit desired state and report it.
+The page presents legacy ``loader.js`` preloads, reviewed manifest-declared
+source integrations, and automatic client packages. Filesystem mutation stays
+outside the widgets; controls only request supported explicit state changes.
 """
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
 from src import config
 from src.constants import SPACING
 from src.i18n import translate_ui_phrase
+from src.core.dlss5 import discover_dlss5_client_mod
 from src.core.mod_activation_state import (
     ModActivationProjection,
     ModActivationStateError,
@@ -147,6 +148,24 @@ def _validated_mod_folder(
     return resolved_root, resolved_folder, True
 
 
+def _client_package_projection(mod: Mod) -> ModActivationProjection:
+    """Build the non-server UI projection for one automatic client package."""
+
+    return ModActivationProjection(
+        status=(
+            ModActivationStatus.VERIFIED
+            if mod.valid
+            else ModActivationStatus.STALE_CONTRACT
+        ),
+        configured=bool(mod.valid and mod.active),
+        effective=bool(mod.valid and mod.active) if mod.valid else None,
+        desired=bool(mod.valid and mod.active),
+        intent_phase=None,
+        error_code=None,
+        reason_code="automatic-client-package",
+    )
+
+
 class ModRow(QFrame):
     """One keyboard-accessible installed-mod instrument."""
 
@@ -181,6 +200,7 @@ class ModRow(QFrame):
         self._operation_error = ""
         self._lifecycle_busy = False
         is_loader = mod.activation_kind is ActivationKind.LOADER_RENAME
+        is_client_package = mod.activation_kind is ActivationKind.CLIENT_PACKAGE
         self.setObjectName(f"modRow-{mod.name.casefold().replace(' ', '-')}")
         self.setProperty("class", "modInstrument")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -197,9 +217,14 @@ class ModRow(QFrame):
                 "Toggle this JavaScript preload mod. The configured state "
                 "takes effect after the server restarts."
                 if is_loader
-                else "Toggle this source-integrated mod through its declared "
-                "configuration. The configured state takes effect after the "
-                "Game server restarts."
+                else (
+                    "This client package is detected automatically and verified "
+                    "before every client launch."
+                    if is_client_package
+                    else "Toggle this source-integrated mod through its declared "
+                    "configuration. The configured state takes effect after the "
+                    "Game server restarts."
+                )
             )
         )
 
@@ -207,12 +232,20 @@ class ModRow(QFrame):
         layout.setContentsMargins(14, 10, 14, 10)
         layout.setSpacing(SPACING["md"])
 
-        self.kind_badge = QLabel("JS" if is_loader else "CFG")
+        self.kind_badge = QLabel(
+            "JS" if is_loader else ("GPU" if is_client_package else "CFG")
+        )
         self.kind_badge.setProperty("class", "modIconPlate")
         self.kind_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.kind_badge.setFixedSize(40, 40)
         self.kind_badge.setToolTip(
-            "PRELOAD MOD" if is_loader else "SOURCE-INTEGRATED MOD"
+            "PRELOAD MOD"
+            if is_loader
+            else (
+                "AUTOMATIC CLIENT MOD"
+                if is_client_package
+                else "SOURCE-INTEGRATED MOD"
+            )
         )
         self.kind_badge.setAccessibleName(self.kind_badge.toolTip())
         self.kind_badge.setAttribute(
@@ -238,6 +271,16 @@ class ModRow(QFrame):
             folder_name = mod.path.name or mod.name
             display_path = f"mods / {folder_name} / loader.js"
             troubleshooting_path = mod.path
+        elif is_client_package:
+            folder_name = mod.path.name or "DLSS5"
+            manifest_path = mod.manifest_path
+            manifest_name = (
+                manifest_path.name
+                if manifest_path is not None
+                else "evejs-launcher.client-mod.json"
+            )
+            display_path = f"mods / {folder_name} / {manifest_name}"
+            troubleshooting_path = manifest_path or mod.path
         else:
             config_path = mod.config_path
             config_name = config_path.name if config_path else "configuration.json"
@@ -271,7 +314,19 @@ class ModRow(QFrame):
             f"Remove {mod.name}",
             allow_templates=True,
         )
-        if management is not None:
+        if is_client_package and mod.id == "evejs-dlss5":
+            self.remove_btn.setProperty("managementRole", "remove")
+            self.remove_btn.setText("UNINSTALL")
+            set_translatable_accessible_name(self.remove_btn, "Uninstall EveJS DLSS5")
+            uninstall_reason = (
+                "Restore the original client files and archive this DLSS5 package. "
+                "Backups and saved game data are kept. Close all clients first."
+                if can_remove else
+                "DLSS5 uninstall requires a valid, trusted package and the Native backend."
+            )
+            set_translatable_accessible_description(self.remove_btn, uninstall_reason)
+            set_translatable_tooltip(self.remove_btn, uninstall_reason)
+        elif management is not None:
             self.remove_btn.setProperty("managementRole", "remove")
             self.remove_btn.setText("REMOVE")
             set_translatable_accessible_description(
@@ -333,8 +388,12 @@ class ModRow(QFrame):
             or (
                 "Set the reviewed loader mod to the selected state."
                 if is_loader
-                else "Set the source-integrated mod's declared enabled flag "
-                "to the selected state."
+                else (
+                    "Automatic client packages have no opt-in toggle."
+                    if is_client_package
+                    else "Set the source-integrated mod's declared enabled flag "
+                    "to the selected state."
+                )
             )
         )
         self.toggle.toggled.connect(self._on_toggled)
@@ -419,6 +478,10 @@ class ModRow(QFrame):
 
     def _on_remove_clicked(self) -> None:
         if self._lifecycle_busy:
+            return
+        if self.mod.activation_kind is ActivationKind.CLIENT_PACKAGE:
+            if self._can_remove and self.mod.id == "evejs-dlss5":
+                self.remove_requested.emit(self.mod)
             return
         if self._management is None:
             if self._can_show_repair:
@@ -928,6 +991,12 @@ class ModsPage(QWidget):
         """Return whether this backend may mutate ``mod`` and why not."""
         if not mod.valid:
             return False, mod.error or "This mod manifest is invalid.", "INVALID"
+        if mod.activation_kind is ActivationKind.CLIENT_PACKAGE:
+            return (
+                False,
+                "Detected and enabled automatically; verified before each client launch.",
+                "ENABLED · AUTO",
+            )
         if self._activation_state_error:
             return (
                 False,
@@ -1045,6 +1114,8 @@ class ModsPage(QWidget):
         return snapshot
 
     def _resolve_projection(self, mod: Mod) -> ModActivationProjection:
+        if mod.activation_kind is ActivationKind.CLIENT_PACKAGE:
+            return _client_package_projection(mod)
         state = read_mod_activation_state(mod.evejs_root or self._evejs_root)
         return project_mod_activation(
             mod,
@@ -1057,6 +1128,19 @@ class ModsPage(QWidget):
         evejs_root = self._evejs_root
         self._refresh_mod_folder_controls()
         mods: list[Mod] = scan_mods(evejs_root) if evejs_root else []
+        client_package = (
+            discover_dlss5_client_mod(evejs_root) if evejs_root else None
+        )
+        if client_package is not None:
+            mods.append(client_package)
+            mods.sort(
+                key=lambda mod: (
+                    mod.name.casefold(),
+                    mod.id.casefold(),
+                    mod.activation_kind.value,
+                    str(mod.path).casefold(),
+                )
+            )
         activation_state = None
         self._activation_state_error = ""
         if evejs_root:
@@ -1090,7 +1174,7 @@ class ModsPage(QWidget):
             empty_mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
             empty_layout.addWidget(empty_mark)
             empty_message = QLabel(
-                "No supported loader mods or source integrations were found."
+                "No supported loader mods, source integrations, or client packages were found."
                 if evejs_root
                 else "Set the EveJS root folder in Settings first."
             )
@@ -1102,7 +1186,9 @@ class ModsPage(QWidget):
             self._list_layout.insertWidget(0, empty)
         else:
             for index, mod in enumerate(mods):
-                if activation_state is None:
+                if mod.activation_kind is ActivationKind.CLIENT_PACKAGE:
+                    projection = _client_package_projection(mod)
+                elif activation_state is None:
                     projection = project_mod_activation(mod, runtime_snapshot)
                 else:
                     projection = project_mod_activation(
@@ -1119,6 +1205,10 @@ class ModsPage(QWidget):
                     # Legacy loader IDs come from folder names and are not
                     # necessarily registry-safe. They are simply external,
                     # not broken launcher enrollments.
+                    if mod.activation_kind is ActivationKind.CLIENT_PACKAGE:
+                        raise ModManagementError(
+                            "Automatic client packages use their own rollback manager."
+                        )
                     managed_mod_registry_path(mod.id)
                 except ModManagementError:
                     eligible_for_management = False
@@ -1135,7 +1225,12 @@ class ModsPage(QWidget):
                             + (str(exc) or "unknown registration error")
                         )
                 can_remove = (
-                    management is not None
+                    (management is not None or (
+                        mod.activation_kind is ActivationKind.CLIENT_PACKAGE
+                        and mod.id == "evejs-dlss5"
+                        and mod.manager_path is not None
+                        and bool(mod.manager_sha256)
+                    ))
                     and mod.valid
                     and self._runtime_backend is RuntimeBackend.NATIVE
                 )

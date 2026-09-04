@@ -85,6 +85,7 @@ class ActivationKind(str, Enum):
 
     LOADER_RENAME = "loader_rename"
     JSON_BOOLEAN = "json_boolean"
+    CLIENT_PACKAGE = "client_package"
 
 
 @dataclass
@@ -110,6 +111,11 @@ class Mod:
     allowed_config_schema_versions: tuple[int, ...] = ()
     status_protocol: str = ""
     status_transport: str = ""
+    manager_path: Path | None = None
+    manager_protocol: str = ""
+    manager_sha256: str = ""
+    client_build: int | None = None
+    evejs_version: str = ""
     valid: bool = True
     error: str | None = None
     evejs_root: Path | None = field(default=None, repr=False)
@@ -122,6 +128,8 @@ class Mod:
             self.manifest_path = Path(self.manifest_path)
         if self.config_path is not None:
             self.config_path = Path(self.config_path)
+        if self.manager_path is not None:
+            self.manager_path = Path(self.manager_path)
         if self.evejs_root is not None:
             self.evejs_root = Path(self.evejs_root)
 

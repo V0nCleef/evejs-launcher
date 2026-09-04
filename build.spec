@@ -118,7 +118,7 @@ a = Analysis(
         'src.i18n', 'src.translations_ru',
         'src.audio', 'src.audio.assets', 'src.audio.backends',
         'src.audio.controller', 'src.audio.events', 'src.audio.settings',
-        'src.core.db', 'src.core.discovery', 'src.core.launcher',
+        'src.core.db', 'src.core.discovery', 'src.core.dlss5', 'src.core.launcher',
         'src.core.server_launcher', 'src.core.process_tracker',
         'src.core.profiles', 'src.core.mod_manager', 'src.core.mod_manifest',
         'src.core.mod_activation_service', 'src.core.mod_activation_state',

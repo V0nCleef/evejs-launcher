@@ -7,6 +7,7 @@ from string import Formatter
 
 import pytest
 
+from src.core.mod_manager import ActivationKind, Mod
 from src.core.mod_management import ModNotManagedError
 from src.core.service_status import DockerControlPolicy, RuntimeBackend
 from src.i18n import LANGUAGES, current_language, set_language, translate_ui_phrase
@@ -88,6 +89,47 @@ def _placeholder_names(template: str) -> set[str]:
         )
         if field_name is not None
     }
+
+
+def test_automatic_client_package_is_enabled_without_server_apply(
+    qapp,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "EveJS"
+    package = root / "mods" / "DLSS5"
+    package.mkdir(parents=True)
+    manifest = package / "evejs-launcher.client-mod.json"
+    manifest.write_text("{}", encoding="utf-8")
+    client_mod = Mod(
+        name="EveJS DLSS5",
+        path=package,
+        active=True,
+        id="evejs-dlss5",
+        version="0.4.0-test",
+        activation_kind=ActivationKind.CLIENT_PACKAGE,
+        supported_backends=("client",),
+        restart_scope="client_launch",
+        manifest_path=manifest,
+        valid=True,
+        evejs_root=root,
+    )
+    monkeypatch.setattr(
+        mods_page_module,
+        "discover_dlss5_client_mod",
+        lambda _root: client_mod,
+    )
+
+    page = ModsPage()
+    page.set_evejs_root(str(root))
+
+    assert len(page._rows) == 1
+    row = page._rows[0]
+    assert row.kind_badge.text() == "GPU"
+    assert row.state_label.text() == "ENABLED · AUTO"
+    assert row.toggle.isChecked()
+    assert not row.toggle.isEnabled()
+    assert not page.apply_btn.isEnabled()
 
 
 def test_refresh_and_constructor_never_create_a_missing_mod_folder(

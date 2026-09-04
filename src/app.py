@@ -69,6 +69,7 @@ from .core.client_launch_queue import (
 )
 from .core.dashboard import visible_account_count, visible_character_rows
 from .core.discovery import resolve_client_tq_path
+from .core.dlss5_uninstall import DLSS5UninstallRequest, DLSS5UninstallResult
 from .core.db import (
     Account,
     Character,
@@ -165,7 +166,6 @@ from .core.profiles import (
     configure_profile_game_endpoint,
     create_profile,
     prefill_username,
-    profile_exists,
 )
 from .core.server_launcher import (
     get_native_mod_status_log,
@@ -259,6 +259,7 @@ from .workers.docker_monitor import DockerMonitor, DockerObservation
 from .workers.docker_preflight_worker import DockerPreflightWorker
 from .workers.docker_tool_worker import DockerToolWorker
 from .workers.mod_management_worker import ManagedModRemovalWorker
+from .workers.dlss5_uninstall_worker import DLSS5UninstallWorker
 from .workers.db_worker import (
     AccountLoadResult,
     AccountLoader,
@@ -349,10 +350,12 @@ def _perform_client_launch(request: ClientLaunchRequest) -> LaunchedProcess:
     wait_for_client_endpoints(request.launch_context)
     log.info("Client launch stage=endpoints_ready account=%s", request.username)
 
-    if not profile_exists(request.username):
-        create_profile(request.username, request.client_path)
-
-    profile_path = request.profiles_root / request.username / "tq"
+    profile_dir = create_profile(
+        request.username,
+        request.client_path,
+        request.profiles_root,
+    )
+    profile_path = profile_dir / "tq"
     if not profile_path.exists():
         raise FileNotFoundError("Profile junction not found.")
     log.info("Client launch stage=profile_ready account=%s", request.username)
@@ -2519,7 +2522,8 @@ class MainWindow(QMainWindow):
         worker.completed.connect(completed_handler)  # type: ignore[attr-defined]
         if isinstance(
             worker,
-            (DockerLifecycleWorker, DockerToolWorker, DockerCharacterCreationWorker),
+            (DockerLifecycleWorker, DockerToolWorker, DockerCharacterCreationWorker,
+             DLSS5UninstallWorker),
         ):
             # QObject deletion must be delivered in its owning worker thread.
             # Deletion then tears down the dedicated event loop; connecting
@@ -2573,7 +2577,7 @@ class MainWindow(QMainWindow):
         self._finish_lifecycle_if_complete()
         worker = getattr(self, "_lifecycle_worker", None)
         if (
-            isinstance(worker, ManagedModRemovalWorker)
+            isinstance(worker, (ManagedModRemovalWorker, DLSS5UninstallWorker))
             and not getattr(self, "_lifecycle_result_received", False)
         ):
             # Let an already-queued completed signal win first. If the worker
@@ -2588,13 +2592,20 @@ class MainWindow(QMainWindow):
 
     def _recover_missing_mod_removal_result(
         self,
-        expected_worker: ManagedModRemovalWorker,
+        expected_worker: ManagedModRemovalWorker | DLSS5UninstallWorker,
     ) -> None:
         if (
             getattr(self, "_lifecycle_worker", None) is not expected_worker
             or not getattr(self, "_lifecycle_thread_finished", False)
             or getattr(self, "_lifecycle_result_received", False)
         ):
+            return
+        if isinstance(expected_worker, DLSS5UninstallWorker):
+            self._on_dlss5_uninstall_completed(DLSS5UninstallResult(
+                request=expected_worker.request, success=False,
+                message="The DLSS5 worker exited without a terminal result. "
+                        "Uninstall state is unverified; inspect retained rollback state before retrying.",
+            ))
             return
         self._on_managed_mod_removal_completed(
             ManagedModRemovalResult(
@@ -2610,6 +2621,8 @@ class MainWindow(QMainWindow):
 
     def _finish_lifecycle_if_complete(self) -> None:
         """Run the continuation only after result handling and thread teardown."""
+        if getattr(self, "_dlss5_uninstall_result_presenting", False):
+            return
         if not getattr(self, "_lifecycle_result_received", False):
             return
         if not getattr(self, "_lifecycle_thread_finished", False):
@@ -3247,6 +3260,9 @@ class MainWindow(QMainWindow):
         if not isinstance(candidate, Mod):
             log.error("Ignored invalid mod removal request: %r", candidate)
             return
+        if candidate.activation_kind is ActivationKind.CLIENT_PACKAGE:
+            self._on_dlss5_uninstall_requested(candidate)
+            return
         if self._docker_mode():
             QMessageBox.information(
                 self,
@@ -3335,6 +3351,88 @@ class MainWindow(QMainWindow):
                 "Mod Removal Not Started",
                 "The launcher could not reserve the server lifecycle. Nothing was removed.",
             )
+
+    def _on_dlss5_uninstall_requested(self, candidate: Mod) -> None:
+        """Confirm a client-only rollback; Game and Market are not stopped."""
+        if self._docker_mode():
+            QMessageBox.information(self, "DLSS5 Uninstall Unavailable",
+                                    "Switch to the Native backend before uninstalling DLSS5.")
+            return
+        if self._lifecycle_active() or self._mod_removal_conflict_active():
+            QMessageBox.information(self, "DLSS5 Uninstall Busy",
+                                    "Another launch, maintenance, or update operation is running.")
+            return
+        try:
+            root = Path(str(self._cfg.get("evejs_root", "")))
+            client = Path(str(self._cfg.get("client_path", "")))
+            if (not root.is_absolute() or not client.is_absolute()
+                    or candidate.evejs_root is None
+                    or root.resolve(strict=True) != candidate.evejs_root.resolve(strict=True)
+                    or not candidate.valid or candidate.id != "evejs-dlss5"
+                    or candidate.manager_path is None or not candidate.manager_sha256):
+                raise ValueError("The selected root or DLSS5 package changed. Refresh Mods first.")
+            request = DLSS5UninstallRequest(
+                evejs_root=root, client_root=client,
+                package_path=candidate.path, manager_sha256=candidate.manager_sha256,
+            )
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "DLSS5 Uninstall Unavailable", str(exc))
+            return
+        choice = QMessageBox.question(
+            self, "Uninstall EveJS DLSS5?",
+            "Close every client using this installation before continuing.\n\n"
+            f"EveJS: {root}\nClient: {client}\n\n"
+            "This restores the original client files and archives the mod folder outside "
+            "automatic detection. Backups, characters, profiles, and server data are kept.\n\n"
+            "Other EveJS folders sharing this client are affected too. Game and Market "
+            "servers will not be stopped.\n\nUninstall now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if choice != QMessageBox.StandardButton.Yes:
+            return
+        # The modal dialog pumps events: recheck reservations after confirmation.
+        if (Path(str(self._cfg.get("evejs_root", ""))) != root
+                or Path(str(self._cfg.get("client_path", ""))) != client):
+            QMessageBox.warning(self, "DLSS5 Uninstall Unavailable",
+                                "The selected EveJS root or client changed. Refresh Mods and try again.")
+            return
+        if self._lifecycle_active() or self._mod_removal_conflict_active():
+            QMessageBox.warning(self, "DLSS5 Uninstall Busy",
+                                "Another operation started before uninstall could begin. Nothing was changed.")
+            return
+        try:
+            factory = getattr(self, "_dlss5_uninstall_worker_factory", None)
+            worker = factory(request) if callable(factory) else DLSS5UninstallWorker(request)
+            self._begin_lifecycle_worker(worker, self._on_dlss5_uninstall_completed)
+        except Exception as exc:
+            QMessageBox.critical(self, "DLSS5 Uninstall Failed",
+                                 "The background uninstaller could not start.\n\n" + str(exc))
+
+    @pyqtSlot(object)
+    def _on_dlss5_uninstall_completed(self, result: object) -> None:
+        """Release the lifecycle only after a terminal rollback result and thread exit."""
+        # QMessageBox runs a nested event loop: QThread.finished and an already
+        # queued missing-result fallback can run before the dialog is dismissed.
+        # Acknowledge delivery first, but keep the reservation while presenting.
+        self._lifecycle_result_received = True
+        self._dlss5_uninstall_result_presenting = True
+        try:
+            self._mods_page.refresh_mods()
+            if not isinstance(result, DLSS5UninstallResult):
+                QMessageBox.critical(self, "DLSS5 Uninstall Failed",
+                                     "The uninstaller returned an invalid result. State is unverified.")
+            else:
+                details = result.message
+                if result.archive_path is not None:
+                    details += f"\n\nRetained package: {result.archive_path}"
+                if result.success:
+                    QMessageBox.information(self, "DLSS5 Uninstalled", details)
+                else:
+                    QMessageBox.critical(self, "DLSS5 Uninstall Failed", details)
+        finally:
+            self._dlss5_uninstall_result_presenting = False
+            self._finish_lifecycle_if_complete()
 
     def _mod_removal_conflict_active(self) -> bool:
         """Return whether another operation could race removal or restore services."""

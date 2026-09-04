@@ -1,0 +1,18 @@
+# Recorded Windows x64 CPython 3.11.15 launcher build environment.
+# Exact versions, not a claim that rebuilt PE timestamps/hashes are identical.
+altgraph==0.17.5
+click==8.4.2
+colorama==0.4.6
+packaging==26.0
+pefile==2024.8.26
+pyinstaller==6.21.0
+pyinstaller-hooks-contrib==2026.6
+PyQt6==6.11.0
+PyQt6-Qt6==6.11.1
+PyQt6-sip==13.11.1
+pywin32-ctypes==0.2.3
+setuptools==83.0.0
+six==1.17.0
+spark-parser==1.9.0
+uncompyle6==3.9.3
+xdis==6.1.8
