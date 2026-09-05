@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,11 +15,14 @@ def _digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest().upper()
 
 
-REVIEWED_VERSIONS = ("0.5.0-dev", "0.5.1-dev", "0.5.2-dev", "0.5.3-dev", "0.5.4-dev", "0.5.5-dev", "0.5.5")
+REVIEWED_VERSIONS = (
+    "0.5.0-dev", "0.5.1-dev", "0.5.2-dev", "0.5.3-dev",
+    "0.5.4-dev", "0.5.5-dev", "0.5.5", "0.5.6",
+)
 
 
 def _fixture_payload(name: str, version: str) -> bytes:
-    if version in ("0.5.5-dev", "0.5.5"):
+    if version in ("0.5.5-dev", "0.5.5", "0.5.6"):
         version = "0.5.4-dev"  # Packaging-only release; exact same runtime.
     if name == "code.ccp":
         # Native F6 isolation changes ReShade, not the accepted V11 client guard.
@@ -37,7 +41,10 @@ def installed(tmp_path, monkeypatch, request):
     client = tmp_path / "Shared Client" / "tq"
     root.mkdir()
     (client / "bin64").mkdir(parents=True)
-    (root / "package.json").write_text('{"name":"eve.js","version":"0.12.7"}')
+    evejs_version = "7.3.1-next.4" if version == "0.5.6" else "0.12.7.1"
+    (root / "package.json").write_text(
+        json.dumps({"name": "eve.js", "version": evejs_version})
+    )
     (client / "start.ini").write_text("[main]\nbuild=3396210\nserver=127.0.0.1\n")
     for name in ("blue.dll", "_trinity_dx12.dll"):
         (client / "bin64" / name).write_bytes(b"fixture")
@@ -68,14 +75,24 @@ def installed(tmp_path, monkeypatch, request):
     (client / "bin64/ReShade.ini").write_text(
         "[ADDON]\nLoadFromDllMain=renodx-dlss5.addon64\n"
         "[RenoDX.DLSS5]\nEnableHooks=2\nNeuralUplift=1\n")
-    state = root / "_local/dlss5/install"
+    state = (
+        client.parent / "_evejs/dlss5/install"
+        if version == "0.5.6"
+        else root / "_local/dlss5/install"
+    )
     state.mkdir(parents=True)
-    receipt = {"schemaVersion": 4, "integrationVersion": version, "status": "installed",
+    receipt = {"schemaVersion": 5 if version == "0.5.6" else 4,
+               "integrationVersion": version, "status": "installed",
                "profile": "DLSS5", "evejsRoot": str(root), "clientRoot": str(client),
                "stateRoot": str(state), "operations": operations,
                "executable": {"path": "bin64\\exefile.exe", "sha256": _digest(exe), "modified": False},
                "config": {"path": str(config), "installedSha256": _digest(config.read_bytes()), "applied": True},
                "reshadeConfig": {"schemaVersion": 2, "path": "bin64\\ReShade.ini"}}
+    if version == "0.5.6":
+        receipt.update(
+            stateScope="client",
+            workspaceRoot=str(root.parent),
+        )
     receipt_path = state / "active-install.json"
     receipt_path.write_text(json.dumps(receipt))
 
@@ -85,6 +102,15 @@ def installed(tmp_path, monkeypatch, request):
     monkeypatch.setattr(dlss5, "_run_dlss5_manager", forbidden)
     monkeypatch.setattr(dlss5.subprocess, "Popen", forbidden)
     return root, client, receipt_path, receipt
+
+
+@pytest.fixture
+def installed_v056(tmp_path, monkeypatch):
+    return installed.__wrapped__(
+        tmp_path,
+        monkeypatch,
+        SimpleNamespace(param="0.5.6"),
+    )
 
 
 def _snapshot(root):
@@ -117,6 +143,41 @@ def test_bad_receipt_is_rejected(installed, field, value):
     path.write_text(json.dumps(receipt))
     with pytest.raises(dlss5.DLSS5ClientModError):
         dlss5.ensure_dlss5_client_mod(root, client)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("stateScope", "evejs"),
+    ("stateScope", None),
+    ("workspaceRoot", "C:/wrong"),
+    ("stateDirectory", "state"),
+])
+def test_bad_client_scoped_receipt_is_rejected(installed_v056, field, value):
+    root, client, path, receipt = installed_v056
+    receipt[field] = value
+    path.write_text(json.dumps(receipt))
+
+    with pytest.raises(dlss5.DLSS5ClientModError):
+        dlss5.ensure_dlss5_client_mod(root, client)
+
+
+def test_client_receipt_for_another_root_does_not_authorize_launch(installed_v056):
+    old_root, client, _path, _receipt = installed_v056
+    new_root = old_root.parent / "EveJS - New Version"
+    new_root.mkdir()
+    (new_root / "package.json").write_text(
+        '{"name":"eve.js","version":"99.0.0"}', encoding="utf-8"
+    )
+    config = new_root / "tools/ClientSETUP/scripts/EvEJSConfig.bat"
+    config.parent.mkdir(parents=True)
+    config.write_text(
+        f'set "EVEJS_CLIENT_PATH={client}"\n'
+        'set "TRINITYPLATFORM=dx12"\n'
+        'set "EVEJS_DLSS5=on"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(dlss5.DLSS5ClientModError, match="different installation"):
+        dlss5.ensure_dlss5_client_mod(new_root, client)
 
 
 @pytest.mark.parametrize("mutation", ["missing", "duplicate", "traversal", "hash", "size", "flag", "kind"])
@@ -238,12 +299,22 @@ def test_duplicate_batch_assignments_are_rejected_even_if_receipt_hash_matches(i
         dlss5.ensure_dlss5_client_mod(root, client)
 
 
-@pytest.mark.parametrize("parent", ["_local", "_local/dlss5", "_local/dlss5/install",
-                                   "tools", "tools/ClientSETUP", "tools/ClientSETUP/scripts"])
+@pytest.mark.parametrize("parent", ["state-top", "state-middle", "state", "tools",
+                                   "tools/ClientSETUP", "tools/ClientSETUP/scripts"])
 def test_linked_receipt_and_config_ancestors_are_rejected(installed, monkeypatch, parent):
-    root, client, _, _ = installed
+    root, client, receipt_path, _ = installed
+    state = receipt_path.parent
+    state_boundary = client.parent if state.is_relative_to(client.parent) else root
+    target = {
+        "state-top": state_boundary / ("_evejs" if state_boundary == client.parent else "_local"),
+        "state-middle": state.parent,
+        "state": state,
+        "tools": root / "tools",
+        "tools/ClientSETUP": root / "tools/ClientSETUP",
+        "tools/ClientSETUP/scripts": root / "tools/ClientSETUP/scripts",
+    }[parent]
     original = dlss5._is_reparse_point
-    monkeypatch.setattr(dlss5, "_is_reparse_point", lambda p: p == root / parent or original(p))
+    monkeypatch.setattr(dlss5, "_is_reparse_point", lambda p: p == target or original(p))
     with pytest.raises(dlss5.DLSS5ClientModError, match="unlinked directory"):
         dlss5.ensure_dlss5_client_mod(root, client)
 
@@ -265,7 +336,10 @@ def test_receipt_cannot_relabel_a_different_runtime(installed):
             continue
         receipt["integrationVersion"] = other
         path.write_text(json.dumps(receipt))
-        if dlss5._STANDALONE_PAYLOADS_BY_VERSION[other] == dlss5._STANDALONE_PAYLOADS_BY_VERSION[original_version]:
+        same_state_contract = (other == "0.5.6") == (original_version == "0.5.6")
+        if (same_state_contract and
+                dlss5._STANDALONE_PAYLOADS_BY_VERSION[other] ==
+                dlss5._STANDALONE_PAYLOADS_BY_VERSION[original_version]):
             assert dlss5.ensure_dlss5_client_mod(root, client) == {"TRINITYPLATFORM": "dx12", "EVEJS_DLSS5": "on"}
             continue
         with pytest.raises(dlss5.DLSS5ClientModError):
@@ -284,7 +358,10 @@ def test_receipt_cannot_claim_other_version_bytes_without_replacing_file(install
             size, digest = dlss5._STANDALONE_PAYLOADS_BY_VERSION[other][name]
             operation.update(installedBytes=size, installedSha256=digest)
         path.write_text(json.dumps(receipt))
-        if dlss5._STANDALONE_PAYLOADS_BY_VERSION[other] == dlss5._STANDALONE_PAYLOADS_BY_VERSION[original_version]:
+        same_state_contract = (other == "0.5.6") == (original_version == "0.5.6")
+        if (same_state_contract and
+                dlss5._STANDALONE_PAYLOADS_BY_VERSION[other] ==
+                dlss5._STANDALONE_PAYLOADS_BY_VERSION[original_version]):
             assert dlss5.ensure_dlss5_client_mod(root, client) == {"TRINITYPLATFORM": "dx12", "EVEJS_DLSS5": "on"}
             continue
         with pytest.raises(dlss5.DLSS5ClientModError):
@@ -316,6 +393,7 @@ def test_reviewed_guard_versions_have_distinct_exact_pins():
     assert len({value["code.ccp"] for value in versions.values()}) == 4
     assert versions["0.5.5-dev"] == versions["0.5.4-dev"]
     assert versions["0.5.5"] == versions["0.5.5-dev"]
+    assert versions["0.5.6"] == versions["0.5.5"]
     native = {k: v for k, v in versions["0.5.0-dev"].items() if k != "code.ccp"}
     for version in REVIEWED_VERSIONS[:3]:
         value = versions[version]

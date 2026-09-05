@@ -2,9 +2,35 @@
 
 ## Changelog
 
+## v1.0.51 — release candidate
+
+### DLSS5 survives EveJS upgrades
+
+- DLSS5 schema-3 packages now declare `evejsVersionPolicy: any`. The launcher
+  still validates a real `eve.js` root, the exact local client build 3396210,
+  the reviewed renderer payload, and a trusted manager; an unrelated EveJS
+  server version is no longer treated as a renderer compatibility boundary.
+- DLSS5 0.5.6 state, backups, cache, and the active receipt now live beside the
+  physical copied client under `_evejs/dlss5/install`. Copying the current
+  `mods/DLSS5` package into a new EveJS root is therefore enough for its trusted
+  manager to verify and safely move that same client between roots.
+- Client-scoped schema-5 receipts bind the active EveJS root, physical `tq`
+  directory, config, backups, and exact payload. A selected root with known
+  DLSS5 bytes but neither its package nor a matching valid receipt now stops
+  before client launch instead of guessing ownership.
+- Historical schema-1/schema-2 packages and schema-4 root-local receipts retain
+  their exact 0.12.6/0.12.7/0.12.7.1 contracts for verified launch, rollback,
+  and uninstall. They are not silently relabelled as client-scoped state.
+- Launcher uninstall now understands both the new schema-5 client state and
+  the retained schema-4 rollback state, while keeping package archival
+  recoverable and refusing changed client/config/backup bytes.
+
 ## v1.0.50 — release candidate
 
 ### DLSS5 0.5.5 package support
+
+- Local EveJS 0.12.7.1 compatibility recognizes the matching DLSS5 package and
+  retains the reviewed 0.5.5 rollback and standalone-receipt contracts.
 
 - Recognizes the optional DLSS5 mod automatically when its folder is placed in
   the selected EveJS root's `mods` directory. First client launch prepares its

@@ -56,6 +56,7 @@ def _package(
     manager.write_bytes(manager_bytes)
     digest = hashlib.sha256(manager_bytes).hexdigest().upper()
     monkeypatch.setattr(dlss5, "_TRUSTED_MANAGER_SHA256", frozenset({digest}))
+    monkeypatch.setattr(dlss5, "_CLIENT_SCOPED_MANAGER_SHA256", frozenset({digest}))
     manifest: dict[str, object] = {
         "schemaVersion": 1,
         "id": "evejs-dlss5",
@@ -81,6 +82,16 @@ def _package(
     return package, manager, manifest
 
 
+def _make_schema3(manifest: dict[str, object]) -> None:
+    manifest["schemaVersion"] = 3
+    manifest["version"] = "0.5.6"
+    manifest["compatibility"] = {
+        "evejsVersionPolicy": "any",
+        "clientBuild": 3396210,
+        "profile": "DLSS5",
+    }
+
+
 def test_absent_package_preserves_historical_launch_environment(
     tmp_path: Path,
 ) -> None:
@@ -100,11 +111,11 @@ def test_marked_install_without_package_fails_closed(tmp_path: Path) -> None:
     tq = _client(root)
     _config(root, tq, marked=True)
 
-    with pytest.raises(dlss5.DLSS5ClientModError, match="no standalone installation receipt"):
+    with pytest.raises(dlss5.DLSS5ClientModError, match="no matching DLSS5 package"):
         dlss5.ensure_dlss5_client_mod(root, tq)
 
 
-@pytest.mark.parametrize("evejs_version", ("0.12.6", "0.12.7"))
+@pytest.mark.parametrize("evejs_version", ("0.12.6", "0.12.7", "0.12.7.1"))
 def test_supported_package_is_detected_enabled_and_automatic(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -144,7 +155,7 @@ def test_unsupported_evejs_package_is_visible_as_invalid(
     assert mod is not None
     assert not mod.valid
     assert not mod.active
-    assert "0.12.6, 0.12.7" in (mod.error or "")
+    assert "0.12.6, 0.12.7, 0.12.7.1" in (mod.error or "")
     assert "0.12.8" in (mod.error or "")
 
 
@@ -157,13 +168,13 @@ def test_multi_version_package_matches_the_selected_evejs_root(
     package, _manager, manifest = _package(
         root,
         monkeypatch,
-        evejs_version="0.12.7",
+        evejs_version="0.12.7.1",
     )
     manifest["schemaVersion"] = 2
     compatibility = manifest["compatibility"]
     assert isinstance(compatibility, dict)
     compatibility.pop("evejsVersion")
-    compatibility["evejsVersions"] = ["0.12.6", "0.12.7"]
+    compatibility["evejsVersions"] = ["0.12.6", "0.12.7", "0.12.7.1"]
     (package / "evejs-launcher.client-mod.json").write_text(
         json.dumps(manifest),
         encoding="utf-8",
@@ -173,7 +184,101 @@ def test_multi_version_package_matches_the_selected_evejs_root(
 
     assert mod is not None
     assert mod.valid
-    assert mod.evejs_version == "0.12.7"
+    assert mod.evejs_version == "0.12.7.1"
+
+
+@pytest.mark.parametrize("evejs_version", ("0.12.8", "0.13.0-rc.1", "1.0.0"))
+def test_schema3_package_accepts_any_real_evejs_version(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    evejs_version: str,
+) -> None:
+    root = tmp_path / "EveJS"
+    root.mkdir()
+    package, _manager, manifest = _package(
+        root,
+        monkeypatch,
+        evejs_version=evejs_version,
+    )
+    _make_schema3(manifest)
+    (package / dlss5._CLIENT_MANIFEST_NAME).write_text(json.dumps(manifest))
+
+    mod = dlss5.discover_dlss5_client_mod(root)
+
+    assert mod is not None and mod.valid
+    assert mod.evejs_version == evejs_version
+
+
+@pytest.mark.parametrize("policy", ("all", "0.12.*", True, None))
+def test_schema3_version_policy_is_exact_and_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    policy: object,
+) -> None:
+    root = tmp_path / "EveJS"
+    root.mkdir()
+    package, _manager, manifest = _package(root, monkeypatch, evejs_version="9.4.2")
+    _make_schema3(manifest)
+    compatibility = manifest["compatibility"]
+    assert isinstance(compatibility, dict)
+    compatibility["evejsVersionPolicy"] = policy
+    (package / dlss5._CLIENT_MANIFEST_NAME).write_text(json.dumps(manifest))
+
+    mod = dlss5.discover_dlss5_client_mod(root)
+
+    assert mod is not None and not mod.valid
+    assert "evejsVersionPolicy must be 'any'" in (mod.error or "")
+
+
+def test_schema3_refuses_a_manager_trusted_only_for_historical_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "EveJS"
+    root.mkdir()
+    package, _manager, manifest = _package(root, monkeypatch, evejs_version="0.12.7")
+    _make_schema3(manifest)
+    monkeypatch.setattr(dlss5, "_CLIENT_SCOPED_MANAGER_SHA256", frozenset())
+    (package / dlss5._CLIENT_MANIFEST_NAME).write_text(json.dumps(manifest))
+
+    mod = dlss5.discover_dlss5_client_mod(root)
+
+    assert mod is not None and not mod.valid
+    assert "historical state contract" in (mod.error or "")
+
+
+def test_historical_schema_refuses_a_client_scoped_only_manager(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "EveJS"
+    root.mkdir()
+    _package(root, monkeypatch, evejs_version="0.12.7")
+    client_scoped = dlss5._CLIENT_SCOPED_MANAGER_SHA256
+    monkeypatch.setattr(dlss5, "_TRUSTED_MANAGER_SHA256", frozenset())
+
+    mod = dlss5.discover_dlss5_client_mod(root)
+
+    assert client_scoped
+    assert mod is not None and not mod.valid
+    assert "cannot be relabelled as a historical package" in (mod.error or "")
+
+
+def test_schema3_package_version_is_bound_to_its_receipt_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "EveJS"
+    root.mkdir()
+    package, _manager, manifest = _package(root, monkeypatch, evejs_version="4.0.0")
+    _make_schema3(manifest)
+    manifest["version"] = "0.5.5"
+    (package / dlss5._CLIENT_MANIFEST_NAME).write_text(json.dumps(manifest))
+
+    mod = dlss5.discover_dlss5_client_mod(root)
+
+    assert mod is not None and not mod.valid
+    assert "must use version 0.5.6" in (mod.error or "")
 
 
 def test_manifest_version_must_match_the_selected_evejs_root(
@@ -250,6 +355,7 @@ def test_untrusted_manager_is_visible_as_invalid(
     root.mkdir()
     _package(root, monkeypatch)
     monkeypatch.setattr(dlss5, "_TRUSTED_MANAGER_SHA256", frozenset())
+    monkeypatch.setattr(dlss5, "_CLIENT_SCOPED_MANAGER_SHA256", frozenset())
 
     mod = dlss5.discover_dlss5_client_mod(root)
 
@@ -318,7 +424,60 @@ def test_ensure_calls_shared_manager_with_durable_state_root(
     assert captured["workspace_root"] == root.resolve().parent
     assert captured["evejs_root"] == root.resolve()
     assert captured["client_root"] == tq.resolve()
-    assert captured["state_root"] == root.resolve() / "_local" / "dlss5" / "install"
+    assert captured["state_root"] == tq.resolve().parent / "_evejs" / "dlss5" / "install"
+
+
+def test_client_state_resolver_is_owned_by_resolved_tq_parent(tmp_path: Path) -> None:
+    tq = _client(tmp_path)
+
+    assert dlss5._resolve_dlss5_state_root(tq) == (
+        tq.resolve().parent / "_evejs" / "dlss5" / "install"
+    )
+    with pytest.raises(dlss5.DLSS5ClientModError, match="physical tq directory"):
+        dlss5._resolve_dlss5_state_root(tq.parent)
+
+
+def test_known_payload_without_package_or_client_receipt_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "EveJS"
+    root.mkdir()
+    tq = _client(root)
+    _config(root, tq, marked=False)
+    payload = b"reviewed-dlss-payload"
+    identity = (len(payload), hashlib.sha256(payload).hexdigest().upper())
+    monkeypatch.setattr(
+        dlss5,
+        "_STANDALONE_PAYLOADS_BY_VERSION",
+        {"0.5.6": {"bin64/renodx-dlss5.addon64": identity}},
+    )
+    (tq / "bin64/renodx-dlss5.addon64").write_bytes(payload)
+
+    with pytest.raises(dlss5.DLSS5ClientModError, match="no matching DLSS5 package"):
+        dlss5.ensure_dlss5_client_mod(root, tq)
+
+
+@pytest.mark.parametrize(
+    "name",
+    (
+        "bin64/nvngx_dlssnr.dll",
+        "bin64/sl.dlss_nr.dll",
+        "bin64/renodx-dlss5.addon64",
+    ),
+)
+def test_changed_unique_dlss5_file_without_package_or_receipt_fails_closed(
+    tmp_path: Path,
+    name: str,
+) -> None:
+    root = tmp_path / "EveJS"
+    root.mkdir()
+    tq = _client(root)
+    _config(root, tq, marked=False)
+    (tq / name).write_bytes(b"changed and deliberately not a reviewed hash")
+
+    with pytest.raises(dlss5.DLSS5ClientModError, match="no matching DLSS5 package"):
+        dlss5.ensure_dlss5_client_mod(root, tq)
 
 
 def test_manager_invocation_is_fixed_and_hidden(
@@ -349,7 +508,7 @@ def test_manager_invocation_is_fixed_and_hidden(
         return Completed()
 
     monkeypatch.setattr(dlss5, "_run_dlss5_preparation_process", fake_preparation_process)
-    state_root = root / "_local" / "dlss5" / "install"
+    state_root = tq.resolve().parent / "_evejs" / "dlss5" / "install"
 
     dlss5._run_dlss5_manager(
         package,
@@ -397,9 +556,18 @@ def test_manager_invocation_is_fixed_and_hidden(
     "8C3310AFACC7BB0AED36BE8923BFD10CBB13A706B3549A2498A425281A434D30",
     "6723D31BF55C2E221453038412E0DF19EF781F20A9020D5DF9B91CA36F0784DA",
     "2321744C25719313C520774659E63F02C0080DE97A90031E7F05E36A899ED3D4",
+    "26A81A5834A7154615002C427277CDBCE541C676D84C45FC5565DF7236BB2D0F",
+    "D75FB3C09836B9E22207FC7F2AA17FC3CE2573870497C13BEDD0CE79A479CE31",
 ])
 def test_public_bootstrap_manager_is_an_explicit_trust_anchor(digest: str) -> None:
     assert digest in dlss5._TRUSTED_MANAGER_SHA256
+
+
+def test_v056_manager_is_the_only_client_scoped_trust_anchor() -> None:
+    expected = "F841291D2939931D02B5C5E8AC009DD55AEA3C1315DDE08DC92D222B2666B5DC"
+
+    assert dlss5._CLIENT_SCOPED_MANAGER_SHA256 == frozenset({expected})
+    assert expected not in dlss5._TRUSTED_MANAGER_SHA256
 
 
 def test_manager_timeout_diagnostic_matches_preparation_budget(
@@ -425,5 +593,5 @@ def test_manager_timeout_diagnostic_matches_preparation_budget(
             workspace_root=tmp_path,
             evejs_root=root,
             client_root=tmp_path / "client",
-            state_root=root / "_local" / "dlss5" / "install",
+            state_root=(tmp_path / "client").parent / "_evejs" / "dlss5" / "install",
         )

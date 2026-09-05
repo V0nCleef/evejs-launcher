@@ -45,10 +45,12 @@ def uninstall_dlss5_client_mod(request: DLSS5UninstallRequest) -> DLSS5Uninstall
     shared client using a stale terminal journal from another installation.
     """
     archive_path = None
+    state_path = None
     try:
         with platform_api.serialize_evejs_client_trust_and_spawn():
             root, client, package = _validate_request(request)
-            state = root / "_local/dlss5/install"
+            state = _select_receipt_state(root, client)
+            state_path = state
             receipt = _read_receipt(root, client, state)
             terminal = receipt["status"] in {"restored", "rolledBack"}
             _validate_receipt(root, client, state, receipt, clean=terminal)
@@ -95,7 +97,8 @@ def uninstall_dlss5_client_mod(request: DLSS5UninstallRequest) -> DLSS5Uninstall
             detail = (
                 "DLSS5 uninstall is not complete. The package remains outside automatic mod discovery "
                 f"at {archive_path}. No automatic reinstall will be attempted. "
-                f"Keep this recovery kit and {request.evejs_root}/_local/dlss5/install (receipt/backups/cache). "
+                f"Keep this recovery kit and {state_path or 'the copied-client DLSS5 state'} "
+                "(receipt/backups/cache). "
                 "Use the archived matching manager with the original EveJS/client/state roots for recovery; "
                 "do not copy the kit back into mods before recovery.\n\n" + detail
             )
@@ -143,7 +146,8 @@ def _validate_request(request: DLSS5UninstallRequest) -> tuple[Path, Path, Mod]:
     package = dlss5.discover_dlss5_client_mod(root)
     digest = dlss5._require_sha256(request.manager_sha256, "selected manager hash")
     if (package is None or not package.valid or package.path != expected
-            or package.manager_sha256 != digest or digest not in dlss5._TRUSTED_MANAGER_SHA256):
+            or package.manager_sha256 != digest
+            or digest not in (dlss5._TRUSTED_MANAGER_SHA256 | dlss5._CLIENT_SCOPED_MANAGER_SHA256)):
         raise dlss5.DLSS5ClientModError("The DLSS5 package or trusted manager changed. Refresh Mods before uninstalling.")
     return root, client, package
 
@@ -155,18 +159,47 @@ def _read_receipt(root: Path, client: Path, state: Path) -> dict:
     path = state / "active-install.json"
     _plain_file(path, state)
     receipt = dlss5._read_json_object(path, maximum_bytes=dlss5._STANDALONE_RECEIPT_MAX_BYTES, label="DLSS5 uninstall receipt")
-    if type(receipt.get("schemaVersion")) is not int or receipt["schemaVersion"] != 4:
-        raise dlss5.DLSS5ClientModError("Only explicit schema-4 install receipts support launcher uninstall.")
+    schema = receipt.get("schemaVersion")
+    expected_schema = 5 if state == dlss5._resolve_dlss5_state_root(client) else 4
+    if type(schema) is not int or schema != expected_schema:
+        raise dlss5.DLSS5ClientModError(
+            f"Only an explicit schema-{expected_schema} receipt is valid at this state location."
+        )
+    if expected_schema == 5:
+        if receipt.get("stateScope") != "client":
+            raise dlss5.DLSS5ClientModError("Client-scoped uninstall state requires stateScope 'client'.")
+    elif "stateScope" in receipt:
+        raise dlss5.DLSS5ClientModError("Legacy schema-4 uninstall state cannot declare stateScope.")
     for key, expected in (("workspaceRoot", root.parent), ("evejsRoot", root), ("clientRoot", client), ("stateRoot", state)):
         dlss5._require_receipt_path(receipt.get(key), expected, key)
     if receipt.get("status") not in {"installed", "restored", "rolledBack"}:
         raise dlss5.DLSS5ClientModError("Partial or unknown install receipt: use the matching installer for manual recovery.")
-    if receipt.get("stateDirectory") != "state" or receipt.get("profile") != "DLSS5":
+    if receipt.get("profile") != "DLSS5":
         raise dlss5.DLSS5ClientModError("Unsupported DLSS5 receipt state/profile.")
+    state_directory = receipt.get("stateDirectory")
+    if ((expected_schema == 4 and state_directory != "state")
+            or (expected_schema == 5 and state_directory not in (None, ""))):
+        raise dlss5.DLSS5ClientModError("Unsupported DLSS5 receipt state directory.")
     version = receipt.get("integrationVersion")
     if type(version) is not str or version not in dlss5._STANDALONE_PAYLOADS_BY_VERSION:
         raise dlss5.DLSS5ClientModError("This installation version is not a reviewed uninstall contract.")
+    if ((expected_schema == 5 and version not in dlss5._CLIENT_SCOPED_RECEIPT_VERSIONS)
+            or (expected_schema == 4 and version in dlss5._CLIENT_SCOPED_RECEIPT_VERSIONS)):
+        raise dlss5.DLSS5ClientModError("The receipt schema does not match its reviewed state-scope version.")
     return receipt
+
+
+def _select_receipt_state(root: Path, client: Path) -> Path:
+    """Prefer client-owned schema-5 state, with schema-4 rollback compatibility."""
+    client_state = dlss5._resolve_dlss5_state_root(client)
+    legacy_state = root / "_local/dlss5/install"
+    if dlss5._path_entry_exists(client_state / "active-install.json"):
+        return client_state
+    if dlss5._path_entry_exists(legacy_state / "active-install.json"):
+        return legacy_state
+    # New installs belong here; returning it also makes the recovery diagnostic
+    # point at the correct durable location when the receipt is missing.
+    return client_state
 
 
 def _relative(value: object) -> Path:

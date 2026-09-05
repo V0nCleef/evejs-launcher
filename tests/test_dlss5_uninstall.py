@@ -17,11 +17,13 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest().upper()
 
 
-REVIEWED_VERSIONS = ("0.5.2-dev", "0.5.3-dev", "0.5.4-dev", "0.5.5-dev", "0.5.5")
+REVIEWED_VERSIONS = (
+    "0.5.2-dev", "0.5.3-dev", "0.5.4-dev", "0.5.5-dev", "0.5.5", "0.5.6",
+)
 
 
 def _fixture_payload(name: str, version: str) -> bytes:
-    if version in ("0.5.5-dev", "0.5.5"):
+    if version in ("0.5.5-dev", "0.5.5", "0.5.6"):
         version = "0.5.4-dev"
     if name == "bin64/dxgi.dll":
         return (name + ":" + version).encode()
@@ -43,8 +45,19 @@ def case(tmp_path, monkeypatch, request):
     package, manager, descriptor = _package(
         root, monkeypatch, manager_bytes=("# fixture manager " + version).encode())
     descriptor["version"] = version
+    if version == "0.5.6":
+        descriptor["schemaVersion"] = 3
+        descriptor["compatibility"] = {
+            "evejsVersionPolicy": "any",
+            "clientBuild": 3396210,
+            "profile": "DLSS5",
+        }
     (package / dlss5._CLIENT_MANIFEST_NAME).write_text(json.dumps(descriptor))
-    state = root / "_local/dlss5/install"
+    state = (
+        client.parent / "_evejs/dlss5/install"
+        if version == "0.5.6"
+        else root / "_local/dlss5/install"
+    )
     backup = state / "backups/fixture"
     (backup / "client").mkdir(parents=True)
     (backup / "config").mkdir()
@@ -67,7 +80,8 @@ def case(tmp_path, monkeypatch, request):
                            "originalSha256": digest(original) if original else None,
                            "installedSha256": installed_hash, "installedBytes": size})
     (client / "bin64/ReShade.ini").write_text("[RenoDX.DLSS5]\nEnableHooks=2\n")
-    receipt = {"schemaVersion": 4, "integrationVersion": version, "status": "installed",
+    receipt = {"schemaVersion": 5 if version == "0.5.6" else 4,
+               "integrationVersion": version, "status": "installed",
                "profile": "DLSS5", "workspaceRoot": str(root.parent), "evejsRoot": str(root),
                "clientRoot": str(client), "stateRoot": str(state), "stateDirectory": "state",
                "backupDirectory": "backups/fixture", "operations": operations,
@@ -75,6 +89,9 @@ def case(tmp_path, monkeypatch, request):
                "config": {"path": str(config), "backup": "config/EvEJSConfig.bat",
                           "originalSha256": digest(original_config), "installedSha256": digest(config.read_bytes())},
                "reshadeConfig": {"originalExists": False, "backup": None, "managedKeys": []}}
+    if version == "0.5.6":
+        receipt["stateScope"] = "client"
+        receipt.pop("stateDirectory")
     journal = state / "active-install.json"
     journal.write_text(json.dumps(receipt))
     events = []
@@ -141,7 +158,7 @@ def test_other_native_version_refused_before_archival(case):
 @pytest.mark.parametrize("rewrite_receipt", [False, True])
 def test_other_guard_version_refused_before_archival_even_with_matching_claim(case, rewrite_receipt):
     # 0.5.2 and 0.5.3 share V11 code; 0.5.4 must never be accepted as either.
-    other = "0.5.3-dev" if case["version"] in ("0.5.4-dev", "0.5.5-dev", "0.5.5") else "0.5.4-dev"
+    other = "0.5.3-dev" if case["version"] in ("0.5.4-dev", "0.5.5-dev", "0.5.5", "0.5.6") else "0.5.4-dev"
     data = _fixture_payload("code.ccp", other)
     (case["client"] / "code.ccp").write_bytes(data)
     if rewrite_receipt:
@@ -280,7 +297,7 @@ def test_success_exit_without_restored_receipt_is_failure(case, monkeypatch):
 @pytest.mark.parametrize("linked", ["package", "state", "client", "config_parent", "archive_parent"])
 def test_reparse_boundary_refused(case, monkeypatch, linked):
     archive_parent = case["root"] / "_local/dlss5/uninstalled-packages"
-    archive_parent.mkdir()
+    archive_parent.mkdir(parents=True)
     target = {"package": case["package"], "state": case["state"], "client": case["client"],
               "config_parent": case["config"].parent, "archive_parent": archive_parent}[linked]
     original = dlss5._is_reparse_point
@@ -300,6 +317,7 @@ def test_client_appearing_after_archival_blocks_restore(case, monkeypatch):
 
 def test_archive_preserves_unrelated_root_data(case):
     sentinel = case["root"] / "_local/gameStore.sqlite"
+    sentinel.parent.mkdir(exist_ok=True)
     sentinel.write_bytes(b"player data")
     other = case["root"] / "mods/OtherMod"
     other.mkdir()
@@ -311,7 +329,8 @@ def test_archive_preserves_unrelated_root_data(case):
 
 
 def test_duplicate_json_keys_are_rejected(case):
-    case["journal"].write_text('{"schemaVersion":4,"schemaVersion":4}')
+    schema = case["receipt"]["schemaVersion"]
+    case["journal"].write_text(f'{{"schemaVersion":{schema},"schemaVersion":{schema}}}')
     result = uninstall.uninstall_dlss5_client_mod(case["request"])
     assert not result.success and "duplicate" in result.message.lower()
     assert case["package"].exists()
@@ -346,7 +365,8 @@ def test_manager_action_restore_is_fixed_and_ensure_remains_default(tmp_path, mo
     monkeypatch.setattr(dlss5, "_windows_powershell_environment", lambda _: {})
     commands = []
     monkeypatch.setattr(dlss5, "_run_dlss5_preparation_process", lambda command, **kwargs: commands.append(command) or subprocess.CompletedProcess(command, 0, "", ""))
-    args = dict(workspace_root=root.parent, evejs_root=root, client_root=root / "client", state_root=root / "_local/dlss5/install")
+    args = dict(workspace_root=root.parent, evejs_root=root, client_root=root / "client/tq",
+                state_root=root / "client/_evejs/dlss5/install")
     dlss5._run_dlss5_manager(package, **args)
     dlss5._run_dlss5_manager(package, **args, action="Restore")
     assert [c[c.index("-Action") + 1] for c in commands] == ["Ensure", "Restore"]

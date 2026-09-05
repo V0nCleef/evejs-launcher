@@ -478,12 +478,17 @@ the selected EveJS root's `mods` directory and refresh Mods. The enabled package
 is detected automatically. Dependencies are prepared on the first client launch,
 not on server startup; that first launch can take longer while downloads and
 verification complete. Use its Mods-page Uninstall action with all clients
-sharing that physical client folder closed. Keep the retained rollback state.
+sharing that physical client folder closed. DLSS5 0.5.6 keeps its receipt,
+downloads, backups, and audit state beside that physical copied client under
+`_evejs/dlss5/install`, so the same package can be copied into a later EveJS
+root without abandoning its rollback history. Keep that retained state.
 
 The standalone installer remains available for users who use `Play.bat`, and a
 verified standalone installation can also be launched here without creating a
 Mods entry. Do not stack separate installations on the same physical client.
 An incomplete or unknown DLSS5 installation is reported rather than guessed safe.
+New schema-3 packages are independent of the EveJS server version while still
+pinning the exact supported copied-client build and reviewed renderer bytes.
 
 ## Matching source and build
 

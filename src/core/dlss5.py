@@ -24,7 +24,7 @@ _REQUIRED_CLIENT_FILES = (
 
 _CLIENT_PACKAGE_FOLDER = "DLSS5"
 _CLIENT_MANIFEST_NAME = "evejs-launcher.client-mod.json"
-_CLIENT_MANIFEST_SCHEMA_VERSIONS = frozenset({1, 2})
+_CLIENT_MANIFEST_SCHEMA_VERSIONS = frozenset({1, 2, 3})
 _CLIENT_MANAGER_PROTOCOL = "evejs_dlss5_manager_v1"
 _CLIENT_MANAGER_RELATIVE_PATH = Path("EveJS-Integration") / "Manage-EveJSDLSS5.ps1"
 _CLIENT_MANAGER_MAX_BYTES = 512 * 1024
@@ -40,7 +40,12 @@ _CLIENT_MANAGER_REAP_SECONDS = 5
 _CLIENT_MOD_ID = "evejs-dlss5"
 _CLIENT_MOD_NAME = "EveJS DLSS5"
 _CLIENT_PROFILE = "DLSS5"
-_SUPPORTED_EVEJS_VERSIONS = frozenset({"0.12.6", "0.12.7"})
+# Schemas 1 and 2 are historical exact-version contracts. Schema 3 deliberately
+# removes this launcher allow-list from new packages: DLSS5 modifies one pinned
+# copied-client build, not EveJS server code. Keeping the legacy list separate
+# lets existing packages and receipts remain fail-closed without making every
+# future EveJS release require another launcher patch.
+_SUPPORTED_EVEJS_VERSIONS = frozenset({"0.12.6", "0.12.7", "0.12.7.1"})
 _SUPPORTED_CLIENT_BUILD = 3396210
 _SHA256_PATTERN = re.compile(r"[0-9a-fA-F]{64}\Z")
 _VERSION_PATTERN = re.compile(r"[0-9A-Za-z][0-9A-Za-z._+-]{0,63}\Z")
@@ -60,6 +65,16 @@ _TRUSTED_MANAGER_SHA256 = frozenset(
         "64275F97BDA248FC5C35BED90E6E3EBB1B330F6F49AA13AF8D4F28B52BC4DECF",
         "38D111E80035D5BB201744C1D3586BB90D992900D6B8A510A6CAAC092758FDEF",
         "26A81A5834A7154615002C427277CDBCE541C676D84C45FC5565DF7236BB2D0F",
+        "D75FB3C09836B9E22207FC7F2AA17FC3CE2573870497C13BEDD0CE79A479CE31",
+    }
+)
+# Schema 3 changes state ownership and root-handoff semantics, so it must never
+# execute a merely historical manager whose bytes implement the schema-4
+# root-local contract. This is the final reviewed 0.5.6 manager and is
+# deliberately absent from the historical trust set above.
+_CLIENT_SCOPED_MANAGER_SHA256: frozenset[str] = frozenset(
+    {
+        "F841291D2939931D02B5C5E8AC009DD55AEA3C1315DDE08DC92D222B2666B5DC",
     }
 )
 
@@ -111,9 +126,24 @@ _STANDALONE_PAYLOADS_BY_VERSION = {
         "bin64/dxgi.dll": (5594112, "26EBDD0C2AE67EED8D305BC8B7A3A67B606F74D19979EFDFE6E584ACB27B78BF"),
         "code.ccp": (30763542, "BC8DD57471B376D3CC37A1908CEE64174E98EDB6D3D94B9F04437BDCE33686CC"),
     },
+    "0.5.6": {
+        **_STANDALONE_NATIVE_FILES,
+        # State ownership moved beside the physical copied client. Renderer
+        # bytes remain the exact reviewed 0.5.5 payload.
+        "bin64/dxgi.dll": (5594112, "26EBDD0C2AE67EED8D305BC8B7A3A67B606F74D19979EFDFE6E584ACB27B78BF"),
+        "code.ccp": (30763542, "BC8DD57471B376D3CC37A1908CEE64174E98EDB6D3D94B9F04437BDCE33686CC"),
+    },
 }
 _STANDALONE_EXE = (1003152, "2AAF7A9A8DFCDE85E4ADB50C1ECCD3756A4D29AEB854DFE69629846BA56EE979")
 _STANDALONE_RECEIPT_MAX_BYTES = 256 * 1024
+_CLIENT_SCOPED_RECEIPT_VERSIONS = frozenset({"0.5.6"})
+_DLSS5_UNIQUE_PAYLOAD_PATHS = frozenset(
+    {
+        "bin64/nvngx_dlssnr.dll",
+        "bin64/sl.dlss_nr.dll",
+        "bin64/renodx-dlss5.addon64",
+    }
+)
 
 
 class DLSS5ClientModError(RuntimeError):
@@ -188,7 +218,7 @@ def ensure_dlss5_client_mod(
 
     root = Path(evejs_root).resolve(strict=True)
     client = Path(client_path).resolve(strict=True)
-    state_root = root / "_local" / "dlss5" / "install"
+    state_root = _resolve_dlss5_state_root(client)
     _run_dlss5_manager(
         package,
         workspace_root=root.parent,
@@ -206,6 +236,61 @@ def ensure_dlss5_client_mod(
     return environment
 
 
+def _resolve_dlss5_state_root(client_path: str | Path) -> Path:
+    """Return state owned by the physical copied client, never an EveJS root.
+
+    ``client_path`` is the selected ``tq`` directory. Resolving it first keeps
+    launcher profile junctions from creating a second, profile-owned receipt.
+    The manager performs its own boundary/reparse checks before writing here.
+    """
+    selected = Path(client_path)
+    if not selected.is_absolute():
+        raise DLSS5ClientModError("The DLSS5 copied-client path must be absolute.")
+    try:
+        client = selected.resolve(strict=True)
+    except OSError as error:
+        raise DLSS5ClientModError(
+            f"The DLSS5 copied-client path is unavailable: {selected}"
+        ) from error
+    if not client.is_dir() or client.name.casefold() != "tq":
+        raise DLSS5ClientModError(
+            "The DLSS5 copied-client path must resolve to its physical tq directory."
+        )
+    return client.parent / "_evejs" / "dlss5" / "install"
+
+
+def _known_dlss5_payload_files(client: Path) -> tuple[str, ...]:
+    """Identify DLSS5-owned paths plus exact pins for shared/generic names."""
+    expected_by_name: dict[str, set[tuple[int, str]]] = {}
+    for payload in _STANDALONE_PAYLOADS_BY_VERSION.values():
+        for name, identity in payload.items():
+            expected_by_name.setdefault(name, set()).add(identity)
+
+    matches = []
+    for name, identities in expected_by_name.items():
+        path = client / name
+        try:
+            if name in _DLSS5_UNIQUE_PAYLOAD_PATHS and _path_entry_exists(path):
+                # These names are owned by this integration. Drift, a link, or
+                # even a directory at one of them is evidence of an incomplete
+                # installation, not a reason to silently call the client stock.
+                matches.append(name)
+                continue
+            if not path.is_file() or _is_reparse_point(path):
+                continue
+            size = path.stat().st_size
+            hashes = {digest for expected_size, digest in identities if expected_size == size}
+            if hashes and _sha256_file(path) in hashes:
+                matches.append(name)
+        except OSError:
+            # Failure to inspect a uniquely owned path is itself unsafe. A
+            # generic code.ccp/dxgi candidate still needs exact bytes before we
+            # attribute it to this integration.
+            if name in _DLSS5_UNIQUE_PAYLOAD_PATHS:
+                matches.append(name)
+    return tuple(sorted(matches))
+
+
 def _standalone_dlss5_launch_environment(
     evejs_root: str | Path, client_path: str | Path,
 ) -> dict[str, str]:
@@ -219,40 +304,91 @@ def _standalone_dlss5_launch_environment(
     try:
         environment = find_dlss5_launch_environment(str(evejs_root), client_path)
         selected_root = Path(evejs_root)
-        receipt_path = selected_root / "_local" / "dlss5" / "install" / "active-install.json"
-        if not _path_entry_exists(receipt_path):
-            if not environment:
-                return {}
-            raise DLSS5ClientModError(
-                "The DLSS5 marker has no standalone installation receipt. "
-                "Use the matching installer to verify or uninstall it."
-            )
+        selected_client = Path(client_path)
+        _require_plain_directory(selected_client, selected_client, "Standalone client root")
+        client = selected_client.resolve(strict=True)
+        client_state = _resolve_dlss5_state_root(client)
+        legacy_state = selected_root / "_local" / "dlss5" / "install"
+        client_receipt = client_state / "active-install.json"
+        legacy_receipt = legacy_state / "active-install.json"
+        if _path_entry_exists(client_receipt):
+            state = client_state
+            expected_schema = 5
+        elif _path_entry_exists(legacy_receipt):
+            state = legacy_state
+            expected_schema = 4
+        else:
+            known_payload = _known_dlss5_payload_files(client)
+            if environment or known_payload:
+                detail = (
+                    " DLSS5-owned or reviewed payload paths: " +
+                    ", ".join(known_payload) + "."
+                    if known_payload else ""
+                )
+                raise DLSS5ClientModError(
+                    "The selected EveJS root has no matching DLSS5 package or "
+                    "valid installation receipt for this copied client." + detail +
+                    " Copy the current DLSS5 package into this root's mods folder "
+                    "and let the launcher prepare it before launching."
+                )
+            return {}
 
         _require_plain_directory(selected_root, selected_root, "Standalone EveJS root")
         root = selected_root.resolve(strict=True)
-        state = root / "_local" / "dlss5" / "install"
-        for directory in (root / "_local", root / "_local/dlss5", state):
-            _require_plain_directory(directory, root, "DLSS5 receipt directory")
+        if expected_schema == 4:
+            state = root / "_local" / "dlss5" / "install"
+        if expected_schema == 5:
+            state_boundary = client.parent
+            for directory in (
+                state_boundary,
+                state_boundary / "_evejs",
+                state_boundary / "_evejs" / "dlss5",
+                state,
+            ):
+                _require_plain_directory(directory, state_boundary, "DLSS5 receipt directory")
+        else:
+            state_boundary = root
+            for directory in (root / "_local", root / "_local/dlss5", state):
+                _require_plain_directory(directory, root, "DLSS5 receipt directory")
         receipt_path = state / "active-install.json"
         _require_plain_file(receipt_path, state, "DLSS5 installation receipt")
         receipt = _read_json_object(receipt_path, maximum_bytes=_STANDALONE_RECEIPT_MAX_BYTES,
                                     label="DLSS5 installation receipt")
         if not environment:
             if receipt.get("status") in ("restored", "rolledBack"):
+                known_payload = _known_dlss5_payload_files(client)
+                if known_payload:
+                    raise DLSS5ClientModError(
+                        "A completed DLSS5 receipt still has reviewed payload files in the "
+                        "copied client: " + ", ".join(known_payload)
+                    )
                 return {}
             raise DLSS5ClientModError("DLSS5 installation is incomplete or its launch marker is missing.")
 
         version = receipt.get("integrationVersion")
-        if (type(receipt.get("schemaVersion")) is not int or receipt["schemaVersion"] != 4
+        if (type(receipt.get("schemaVersion")) is not int
+                or receipt["schemaVersion"] != expected_schema
                 or type(version) is not str or version not in _STANDALONE_PAYLOADS_BY_VERSION
                 or receipt.get("status") != "installed" or receipt.get("profile") != "DLSS5"):
             raise DLSS5ClientModError("Unsupported or incomplete standalone DLSS5 receipt.")
+        if expected_schema == 5:
+            if (version not in _CLIENT_SCOPED_RECEIPT_VERSIONS
+                    or receipt.get("stateScope") != "client"):
+                raise DLSS5ClientModError("Unsupported client-scoped DLSS5 receipt contract.")
+            if receipt.get("stateDirectory") not in (None, ""):
+                raise DLSS5ClientModError(
+                    "Client-scoped DLSS5 receipts cannot declare a legacy stateDirectory."
+                )
+        elif version in _CLIENT_SCOPED_RECEIPT_VERSIONS or "stateScope" in receipt:
+            raise DLSS5ClientModError("A legacy DLSS5 receipt cannot claim client-scoped state.")
         payload_files = _STANDALONE_PAYLOADS_BY_VERSION[version]
-        if _read_evejs_version(root) not in _SUPPORTED_EVEJS_VERSIONS:
-            raise DLSS5ClientModError("Standalone DLSS5 requires EveJS 0.12.6 or 0.12.7.")
-        selected_client = Path(client_path)
-        _require_plain_directory(selected_client, selected_client, "Standalone client root")
-        client = selected_client.resolve(strict=True)
+        actual_evejs_version = _read_evejs_version(root)
+        if expected_schema == 4 and actual_evejs_version not in _SUPPORTED_EVEJS_VERSIONS:
+            raise DLSS5ClientModError(
+                "Standalone DLSS5 requires EveJS 0.12.6, 0.12.7 or 0.12.7.1."
+            )
+        if expected_schema == 5:
+            _require_receipt_path(receipt.get("workspaceRoot"), root.parent, "workspaceRoot")
         for key, expected in (("evejsRoot", root), ("clientRoot", client), ("stateRoot", state)):
             _require_receipt_path(receipt.get(key), expected, key)
         _require_plain_directory(client / "bin64", client, "DLSS5 client bin64")
@@ -420,7 +556,7 @@ def _read_dlss5_client_mod(
     if manager["protocol"] != _CLIENT_MANAGER_PROTOCOL:
         raise DLSS5ClientModError("Unsupported DLSS5 manager protocol.")
     declared_hash = _require_sha256(manager["sha256"], "DLSS5 manager sha256")
-    if declared_hash not in _TRUSTED_MANAGER_SHA256:
+    if declared_hash not in (_TRUSTED_MANAGER_SHA256 | _CLIENT_SCOPED_MANAGER_SHA256):
         raise DLSS5ClientModError(
             "This DLSS5 manager implementation is not trusted by this launcher version."
         )
@@ -436,9 +572,23 @@ def _read_dlss5_client_mod(
             f"DLSS5 manager hash mismatch (expected {declared_hash}, got {actual_hash})."
         )
 
+    if schema_version == 3:
+        if version != "0.5.6":
+            raise DLSS5ClientModError("DLSS5 schema-3 packages must use version 0.5.6.")
+        if declared_hash not in _CLIENT_SCOPED_MANAGER_SHA256:
+            raise DLSS5ClientModError(
+                "This DLSS5 manager is trusted only for a historical state contract, "
+                "not schema-3 client-scoped state."
+            )
+    elif declared_hash not in _TRUSTED_MANAGER_SHA256:
+        raise DLSS5ClientModError(
+            "A client-scoped DLSS5 manager cannot be relabelled as a historical package."
+        )
+
     compatibility = payload["compatibility"]
     if type(compatibility) is not dict:
         raise DLSS5ClientModError("DLSS5 compatibility must be an object.")
+    actual_evejs_version = _read_evejs_version(root)
     if schema_version == 1:
         _require_exact_keys(
             compatibility,
@@ -449,7 +599,7 @@ def _read_dlss5_client_mod(
         if type(declared_version) is not str:
             raise DLSS5ClientModError("DLSS5 evejsVersion must be a string.")
         declared_evejs_versions = (declared_version,)
-    else:
+    elif schema_version == 2:
         _require_exact_keys(
             compatibility,
             {"evejsVersions", "clientBuild", "profile"},
@@ -469,31 +619,42 @@ def _read_dlss5_client_mod(
         declared_evejs_versions = tuple(declared_versions)
         if len(set(declared_evejs_versions)) != len(declared_evejs_versions):
             raise DLSS5ClientModError("DLSS5 evejsVersions contains duplicates.")
+    else:
+        _require_exact_keys(
+            compatibility,
+            {"evejsVersionPolicy", "clientBuild", "profile"},
+            "DLSS5 compatibility",
+        )
+        if compatibility["evejsVersionPolicy"] != "any":
+            raise DLSS5ClientModError(
+                "DLSS5 schema-3 evejsVersionPolicy must be 'any'."
+            )
+        declared_evejs_versions = None
 
-    unsupported_versions = tuple(
-        version
-        for version in declared_evejs_versions
-        if version not in _SUPPORTED_EVEJS_VERSIONS
-    )
-    if unsupported_versions:
-        supported_versions = ", ".join(sorted(_SUPPORTED_EVEJS_VERSIONS))
-        raise DLSS5ClientModError(
-            "This launcher supports DLSS5 packages for EveJS "
-            f"{supported_versions}; the package also declares unsupported "
-            f"versions: {', '.join(unsupported_versions)}."
+    if declared_evejs_versions is not None:
+        unsupported_versions = tuple(
+            version
+            for version in declared_evejs_versions
+            if version not in _SUPPORTED_EVEJS_VERSIONS
         )
-    actual_evejs_version = _read_evejs_version(root)
-    if actual_evejs_version not in _SUPPORTED_EVEJS_VERSIONS:
-        supported_versions = ", ".join(sorted(_SUPPORTED_EVEJS_VERSIONS))
-        raise DLSS5ClientModError(
-            f"This launcher supports DLSS5 on EveJS {supported_versions}; "
-            f"the selected root is EveJS {actual_evejs_version}."
-        )
-    if actual_evejs_version not in declared_evejs_versions:
-        raise DLSS5ClientModError(
-            f"This DLSS5 package does not declare support for the selected "
-            f"EveJS {actual_evejs_version} root."
-        )
+        if unsupported_versions:
+            supported_versions = ", ".join(sorted(_SUPPORTED_EVEJS_VERSIONS))
+            raise DLSS5ClientModError(
+                "This launcher supports historical DLSS5 packages for EveJS "
+                f"{supported_versions}; the package also declares unsupported "
+                f"versions: {', '.join(unsupported_versions)}."
+            )
+        if actual_evejs_version not in _SUPPORTED_EVEJS_VERSIONS:
+            supported_versions = ", ".join(sorted(_SUPPORTED_EVEJS_VERSIONS))
+            raise DLSS5ClientModError(
+                f"This historical package supports DLSS5 on EveJS {supported_versions}; "
+                f"the selected root is EveJS {actual_evejs_version}."
+            )
+        if actual_evejs_version not in declared_evejs_versions:
+            raise DLSS5ClientModError(
+                f"This DLSS5 package does not declare support for the selected "
+                f"EveJS {actual_evejs_version} root."
+            )
     if (
         type(compatibility["clientBuild"]) is not int
         or compatibility["clientBuild"] != _SUPPORTED_CLIENT_BUILD
@@ -536,11 +697,14 @@ def _read_evejs_version(root: Path) -> str:
         raise DLSS5ClientModError(
             "The selected root package.json is not an EveJS installation."
         )
-    return _require_text(
+    version = _require_text(
         package.get("version"),
         "EveJS package version",
         maximum=64,
     )
+    if not _VERSION_PATTERN.fullmatch(version):
+        raise DLSS5ClientModError("EveJS package version contains unsupported characters.")
+    return version
 
 
 def _run_dlss5_manager(
