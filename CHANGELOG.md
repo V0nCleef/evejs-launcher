@@ -2,7 +2,7 @@
 
 ## Changelog
 
-## v1.0.52 — release candidate
+## v1.0.52 — 2026-09-05
 
 ### DLSS5 persisted-toggle hotfix
 
