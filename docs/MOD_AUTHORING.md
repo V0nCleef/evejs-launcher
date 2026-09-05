@@ -1,6 +1,6 @@
 # EveJS Launcher mod authoring and integration guide
 
-This document describes the mod contract implemented by EveJS Launcher 1.0.51.
+This document describes the mod contract implemented by EveJS Launcher 1.0.52.
 It is a contract reference, not a promise that arbitrary EveJS source patches can
 be disabled safely.
 
@@ -85,13 +85,13 @@ For a portable client-side or external mod:
 - never move or relabel EveJS player, character, inventory, GameStore, or Market
   data as part of a client-mod handoff.
 
-DLSS5 0.5.6 is the first reviewed use of this model: its durable mod state follows
+DLSS5 0.5.6 and later are the first reviewed use of this model: durable mod state follows
 the physical `tq` client while its separately downloaded package remains under
 `<evejs>/mods/DLSS5`. The launcher itself does not contain or install DLSS5.
 
 ### Current third-party limit
 
-The DLSS5 client-package manifest in Launcher 1.0.51 is a narrow, hard-coded
+The DLSS5 client-package manifest in Launcher 1.0.52 is a narrow, hard-coded
 security contract, not a generic third-party client-mod API. Copying
 `evejs-launcher.client-mod.json`, changing its ID, or declaring
 `evejsVersionPolicy: "any"` will be rejected. Other authors can use the dependency

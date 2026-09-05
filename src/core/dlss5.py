@@ -70,12 +70,14 @@ _TRUSTED_MANAGER_SHA256 = frozenset(
 )
 # Schema 3 changes state ownership and root-handoff semantics, so it must never
 # execute a merely historical manager whose bytes implement the schema-4
-# root-local contract. This is the final reviewed 0.5.6 manager and is
-# deliberately absent from the historical trust set above.
+# root-local contract. Bind each reviewed package version to its exact manager;
+# a trusted older manager cannot be relabelled as a newer hotfix.
+_CLIENT_SCOPED_MANAGER_PACKAGE_VERSIONS = {
+    "F841291D2939931D02B5C5E8AC009DD55AEA3C1315DDE08DC92D222B2666B5DC": frozenset({"0.5.6"}),
+    "799B17BDBAD0B5808A47096F484B9072E829469AEA3A153BDDC1FA67B24F0FB3": frozenset({"0.5.7"}),
+}
 _CLIENT_SCOPED_MANAGER_SHA256: frozenset[str] = frozenset(
-    {
-        "F841291D2939931D02B5C5E8AC009DD55AEA3C1315DDE08DC92D222B2666B5DC",
-    }
+    _CLIENT_SCOPED_MANAGER_PACKAGE_VERSIONS
 )
 
 # Offline launch-only contracts for the reviewed standalone development packages.
@@ -573,12 +575,17 @@ def _read_dlss5_client_mod(
         )
 
     if schema_version == 3:
-        if version != "0.5.6":
-            raise DLSS5ClientModError("DLSS5 schema-3 packages must use version 0.5.6.")
         if declared_hash not in _CLIENT_SCOPED_MANAGER_SHA256:
             raise DLSS5ClientModError(
                 "This DLSS5 manager is trusted only for a historical state contract, "
                 "not schema-3 client-scoped state."
+            )
+        allowed_versions = _CLIENT_SCOPED_MANAGER_PACKAGE_VERSIONS.get(
+            declared_hash, frozenset()
+        )
+        if version not in allowed_versions:
+            raise DLSS5ClientModError(
+                "The DLSS5 schema-3 package version does not match its trusted manager."
             )
     elif declared_hash not in _TRUSTED_MANAGER_SHA256:
         raise DLSS5ClientModError(

@@ -57,6 +57,11 @@ def _package(
     digest = hashlib.sha256(manager_bytes).hexdigest().upper()
     monkeypatch.setattr(dlss5, "_TRUSTED_MANAGER_SHA256", frozenset({digest}))
     monkeypatch.setattr(dlss5, "_CLIENT_SCOPED_MANAGER_SHA256", frozenset({digest}))
+    monkeypatch.setattr(
+        dlss5,
+        "_CLIENT_SCOPED_MANAGER_PACKAGE_VERSIONS",
+        {digest: frozenset({"0.5.6"})},
+    )
     manifest: dict[str, object] = {
         "schemaVersion": 1,
         "id": "evejs-dlss5",
@@ -278,7 +283,7 @@ def test_schema3_package_version_is_bound_to_its_receipt_contract(
     mod = dlss5.discover_dlss5_client_mod(root)
 
     assert mod is not None and not mod.valid
-    assert "must use version 0.5.6" in (mod.error or "")
+    assert "package version does not match its trusted manager" in (mod.error or "")
 
 
 def test_manifest_version_must_match_the_selected_evejs_root(
@@ -563,11 +568,16 @@ def test_public_bootstrap_manager_is_an_explicit_trust_anchor(digest: str) -> No
     assert digest in dlss5._TRUSTED_MANAGER_SHA256
 
 
-def test_v056_manager_is_the_only_client_scoped_trust_anchor() -> None:
-    expected = "F841291D2939931D02B5C5E8AC009DD55AEA3C1315DDE08DC92D222B2666B5DC"
+def test_client_scoped_managers_are_bound_to_exact_package_versions() -> None:
+    v056 = "F841291D2939931D02B5C5E8AC009DD55AEA3C1315DDE08DC92D222B2666B5DC"
+    v057 = "799B17BDBAD0B5808A47096F484B9072E829469AEA3A153BDDC1FA67B24F0FB3"
 
-    assert dlss5._CLIENT_SCOPED_MANAGER_SHA256 == frozenset({expected})
-    assert expected not in dlss5._TRUSTED_MANAGER_SHA256
+    assert dlss5._CLIENT_SCOPED_MANAGER_SHA256 == frozenset({v056, v057})
+    assert dlss5._CLIENT_SCOPED_MANAGER_PACKAGE_VERSIONS == {
+        v056: frozenset({"0.5.6"}),
+        v057: frozenset({"0.5.7"}),
+    }
+    assert not ({v056, v057} & dlss5._TRUSTED_MANAGER_SHA256)
 
 
 def test_manager_timeout_diagnostic_matches_preparation_budget(

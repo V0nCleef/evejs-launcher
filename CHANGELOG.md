@@ -2,7 +2,21 @@
 
 ## Changelog
 
-## v1.0.51 — release candidate
+## v1.0.52 — release candidate
+
+### DLSS5 persisted-toggle hotfix
+
+- Trust the matched DLSS5 0.5.7 package manager while retaining the exact 0.5.6
+  manager and receipt contracts for recovery and uninstall.
+- Bind each client-scoped package version to its reviewed manager hash, so an
+  older trusted manager cannot be relabelled as the newer hotfix.
+- DLSS5 0.5.7 accepts the documented persisted `NeuralUplift` values `0` and
+  `1` during read-only preparation. Missing, duplicate, or invalid values and
+  changes to security-critical ReShade keys still fail closed.
+- The client renderer payload, downloads, receipt schema, state location, and
+  launcher behavior for users without the separate DLSS5 package are unchanged.
+
+## v1.0.51 — 2026-09-05
 
 ### DLSS5 survives EveJS upgrades
 

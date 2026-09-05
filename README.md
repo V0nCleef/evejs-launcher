@@ -478,7 +478,7 @@ the selected EveJS root's `mods` directory and refresh Mods. The enabled package
 is detected automatically. Dependencies are prepared on the first client launch,
 not on server startup; that first launch can take longer while downloads and
 verification complete. Use its Mods-page Uninstall action with all clients
-sharing that physical client folder closed. DLSS5 0.5.6 keeps its receipt,
+sharing that physical client folder closed. DLSS5 0.5.6 and later keep their receipt,
 downloads, backups, and audit state beside that physical copied client under
 `_evejs/dlss5/install`, so the same package can be copied into a later EveJS
 root without abandoning its rollback history. Keep that retained state.
