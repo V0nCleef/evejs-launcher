@@ -1,6 +1,6 @@
 # EveJS Launcher mod authoring and integration guide
 
-This document describes the mod contract implemented by EveJS Launcher 1.0.45.
+This document describes the mod contract implemented by EveJS Launcher 1.0.51.
 It is a contract reference, not a promise that arbitrary EveJS source patches can
 be disabled safely.
 
@@ -52,6 +52,57 @@ EveJS currently supplies the underlying loading mechanisms:
 The launcher intentionally does not execute commands, scripts, or hooks named by
 a manifest. Unknown activation strategies fail closed instead of becoming an
 arbitrary-code interface.
+
+## Mod compatibility: depend on what the mod actually changes
+
+Do not bind a mod to an EveJS version merely because its package is stored inside
+an EveJS folder. Compatibility should follow the boundary the mod actually
+modifies or calls:
+
+| What the mod depends on | Compatibility that should be declared and tested |
+| --- | --- |
+| EveJS source, services, loader behavior, configuration, database schema, or internal APIs | Exact supported EveJS versions and source/API fingerprints |
+| A physical EVE client installation, without reading or changing EveJS server code | Supported EVE client build, renderer/platform contract, and the mod's own manager protocol |
+| An external service or stable public protocol | That service/API/protocol version, plus any required platform constraints |
+
+An EveJS-version-independent claim is valid only when the complete mod remains
+independent of EveJS internals. A package is still EveJS-coupled if any loader,
+installer, helper, import, patch, launch argument, configuration path, or runtime
+assumption depends on a particular EveJS release. `any` must mean “not a real
+dependency,” not “we have not tested it yet.”
+
+For a portable client-side or external mod:
+
+- keep the copied package folder as replaceable release content, not as the sole
+  home of durable state;
+- keep only mod-owned receipts, downloads, backups, and audit history at a stable
+  location associated with the physical target, or under a per-user application
+  data directory keyed to that target;
+- record the canonical physical target, supported client/API version, package
+  version, and hashes needed for rollback;
+- verify both the old and new owner before transferring state between sibling
+  EveJS roots, and fail closed if ownership is ambiguous; and
+- never move or relabel EveJS player, character, inventory, GameStore, or Market
+  data as part of a client-mod handoff.
+
+DLSS5 0.5.6 is the first reviewed use of this model: its durable mod state follows
+the physical `tq` client while its separately downloaded package remains under
+`<evejs>/mods/DLSS5`. The launcher itself does not contain or install DLSS5.
+
+### Current third-party limit
+
+The DLSS5 client-package manifest in Launcher 1.0.51 is a narrow, hard-coded
+security contract, not a generic third-party client-mod API. Copying
+`evejs-launcher.client-mod.json`, changing its ID, or declaring
+`evejsVersionPolicy: "any"` will be rejected. Other authors can use the dependency
+and state-ownership design above today, but automatic launcher execution requires
+a reviewed generic client-package contract first.
+
+A future generic contract should keep its protocol stable and authenticate mod
+publishers or signed release manifests independently. The launcher should then
+need an update only when that protocol or trust relationship changes—not for
+every ordinary mod release. Until that contract exists, do not advertise normal
+third-party client packages as launcher-managed.
 
 ## Compatibility matrix
 
