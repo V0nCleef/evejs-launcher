@@ -17,7 +17,6 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import (
     QFrame,
     QVBoxLayout,
-    QHBoxLayout,
     QLabel,
     QPushButton,
     QButtonGroup,
@@ -29,7 +28,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.constants import COLORS, Page
-from src.i18n import translate, translate_service_action
+from src.i18n import translate, translate_service_action, translate_ui_phrase
 
 
 def logo_asset_path(module_file: str | Path | None = None) -> Path:
@@ -147,20 +146,22 @@ def _paint_telemetry_button(button: QPushButton, badge_count: int = 0) -> None:
         return
 
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    badge_radius = 8
+    gold = button.property('updateBadge') is True
+    badge_radius = 10 if gold else 8
     margin = 8
     x = button.width() - badge_radius * 2 - margin
     y = (button.height() - badge_radius * 2) // 2
-    rect = QRect(x, y, badge_radius * 2, badge_radius * 2)
-    painter.setBrush(QColor(COLORS["red"]))
+    rect = QRect(x - (8 if gold and badge_count > 99 else 0), y,
+                 badge_radius * 2 + (8 if gold and badge_count > 99 else 0), badge_radius * 2)
+    painter.setBrush(QColor(COLORS["gold"] if gold else COLORS["red"]))
     painter.setPen(Qt.PenStyle.NoPen)
     painter.drawEllipse(rect)
-    painter.setPen(QColor(COLORS["white"]))
+    painter.setPen(QColor(COLORS["void_black"] if gold else COLORS["white"]))
     font = QFont(button.font())
     font.setPixelSize(9)
     font.setBold(True)
     painter.setFont(font)
-    painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, str(badge_count))
+    painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, '99+' if gold and badge_count > 99 else str(badge_count))
     painter.end()
 
 
@@ -564,6 +565,16 @@ class NavPanel(QFrame):
         self.btn_kill_all.setText(translate("nav.kill_all"))
         self.set_service_action_text("server", self._server_source_text)
         self.set_service_action_text("market", self._market_source_text)
+        self.set_mod_update_count(self.btn_mods._badge_count)
+
+    def set_mod_update_count(self, count: int) -> None:
+        """A persistent gold marker for compatible mod updates, on every page."""
+        count = max(0, int(count))
+        self.btn_mods.setProperty('updateBadge', True)
+        self.btn_mods.set_badge_count(count)
+        detail = f"{translate_ui_phrase('Update available')}: {count}" if count else ''
+        self.btn_mods.setToolTip(detail)
+        self.btn_mods.setAccessibleDescription(detail)
 
     def set_service_action_text(self, service: str, source_text: str) -> None:
         """Display a localized service action without losing its state colour."""

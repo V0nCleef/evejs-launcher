@@ -101,6 +101,7 @@ def test_spectrum_frames_are_deterministic_and_attack_precedes_falloff(qapp) -> 
     first = _MusicSpectrum()
     second = _MusicSpectrum()
     for spectrum in (first, second):
+        spectrum.show()
         spectrum.set_active(True)
         spectrum.set_levels((1.0, 0.5) + (0.0,) * 14)
         spectrum._advance_animation()
@@ -122,6 +123,7 @@ def test_spectrum_frames_are_deterministic_and_attack_precedes_falloff(qapp) -> 
 
 def test_spectrum_timer_stops_after_stable_nonzero_frame(qapp) -> None:
     spectrum = _MusicSpectrum()
+    spectrum.show()
     target = tuple((index + 1) / 16 for index in range(16))
     spectrum.set_active(True)
     spectrum.set_levels(target)
@@ -140,6 +142,7 @@ def test_spectrum_timer_stops_after_stable_nonzero_frame(qapp) -> None:
 
 def test_spectrum_deactivation_decays_to_exact_zero_and_stops(qapp) -> None:
     spectrum = _MusicSpectrum()
+    spectrum.show()
     spectrum.set_active(True)
     spectrum.set_levels((1.0,) * 16)
     _advance_until_settled(spectrum)

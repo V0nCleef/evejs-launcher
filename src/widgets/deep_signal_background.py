@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import QWidget
 
 from src.constants import SEMANTIC_COLORS
 from src.ui.motion import MotionController
+from src.ui.scene_geometry import SceneGeometry
 
 
 def operations_scene_path(module_file: str | Path | None = None) -> Path:
@@ -110,15 +111,25 @@ class DeepSignalBackground(QWidget):
         """The Operations background is static by design."""
         return False
 
+    @property
+    def scene_geometry(self) -> SceneGeometry:
+        return SceneGeometry(max(1, self._scene_source.width()),
+                             max(1, self._scene_source.height()),
+                             self.width(), self.height())
+
     def _ensure_cache(self) -> None:
         cache_size = QSize(
             max(1, self.width() + self._STATIC_CACHE_PADDING),
             max(1, self.height() + self._STATIC_CACHE_PADDING),
         )
-        if not self._cache.isNull() and self._cache.size() == cache_size:
+        dpr = self.devicePixelRatioF()
+        physical_size = QSize(int(cache_size.width()*dpr+.5), int(cache_size.height()*dpr+.5))
+        if (not self._cache.isNull() and self._cache.size() == physical_size
+                and self._cache.devicePixelRatio() == dpr):
             return
 
-        self._cache = QPixmap(cache_size)
+        self._cache = QPixmap(physical_size)
+        self._cache.setDevicePixelRatio(dpr)
         self._cache.fill(QColor(SEMANTIC_COLORS["background"]))
         painter = QPainter(self._cache)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -132,25 +143,8 @@ class DeepSignalBackground(QWidget):
         self._paint_readability_gradient(painter, bounds)
 
     def _paint_scene(self, painter: QPainter, bounds: QRectF) -> None:
-        """Cover-crop the scene while preserving its right-side focal subject."""
-        target_size = bounds.size().toSize()
-        scaled = self._scene_source.scaled(
-            target_size,
-            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        excess_x = max(0, scaled.width() - target_size.width())
-        excess_y = max(0, scaled.height() - target_size.height())
-        # The approved composition reserves the right side for the orbital
-        # station.  A 70% horizontal focal crop preserves that subject across
-        # 16:9, ultrawide, and minimum-size windows.
-        source = QRectF(
-            float(round(excess_x * 0.70)),
-            float(round(excess_y * 0.48)),
-            float(target_size.width()),
-            float(target_size.height()),
-        )
-        painter.drawPixmap(bounds, scaled, source)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.drawPixmap(bounds, self._scene_source, self.scene_geometry.source_rect)
 
     def _paint_procedural_fallback(
         self,
@@ -253,10 +247,10 @@ class DeepSignalBackground(QWidget):
             bounds.left() + bounds.width() * 0.78,
             bounds.top(),
         )
-        left_fade.setColorAt(0.0, QColor(3, 8, 14, 247))
-        left_fade.setColorAt(0.32, QColor(3, 9, 16, 222))
-        left_fade.setColorAt(0.58, QColor(3, 10, 17, 128))
-        left_fade.setColorAt(0.82, QColor(3, 10, 17, 34))
+        left_fade.setColorAt(0.0, QColor(3, 8, 14, 112))
+        left_fade.setColorAt(0.32, QColor(3, 9, 16, 86))
+        left_fade.setColorAt(0.58, QColor(3, 10, 17, 52))
+        left_fade.setColorAt(0.82, QColor(3, 10, 17, 18))
         left_fade.setColorAt(1.0, QColor(3, 10, 17, 0))
         painter.fillRect(bounds, left_fade)
 
@@ -267,7 +261,7 @@ class DeepSignalBackground(QWidget):
             bounds.bottom(),
         )
         bottom_fade.setColorAt(0.0, QColor(2, 6, 11, 0))
-        bottom_fade.setColorAt(1.0, QColor(2, 6, 11, 112))
+        bottom_fade.setColorAt(1.0, QColor(2, 6, 11, 46))
         painter.fillRect(bounds, bottom_fade)
 
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
@@ -275,8 +269,7 @@ class DeepSignalBackground(QWidget):
         self._ensure_cache()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        source = QRectF(0.0, 0.0, float(self.width()), float(self.height()))
-        painter.drawPixmap(QRectF(self.rect()), self._cache, source)
+        painter.drawPixmap(QPointF(0., 0.), self._cache)
 
     def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
         self._cache = QPixmap()

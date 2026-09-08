@@ -117,6 +117,8 @@ def test_footer_semantic_states_keep_logical_text_and_pulse_lifecycle(
     qapp: QApplication,
 ) -> None:
     bar = StatusBar()
+    bar.show()
+    qapp.processEvents()
 
     try:
         assert bar.objectName() == "statusBar"
@@ -160,6 +162,8 @@ def test_footer_reduce_motion_settles_and_restores_requested_pulses(
     qapp: QApplication,
 ) -> None:
     bar = StatusBar()
+    bar.show()
+    qapp.processEvents()
     try:
         bar.set_server_state(ServiceState.STARTING)
         bar.set_market_state(ServiceState.STOPPING)

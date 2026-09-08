@@ -137,6 +137,7 @@ from .core.mod_runtime_state import (
     build_docker_mod_runtime_snapshot,
     build_mod_runtime_plan,
     build_native_mod_runtime_snapshot,
+    mod_state_key,
     read_server_console_bytes,
     validate_mod_runtime_plan,
     write_mod_runtime_snapshot,
@@ -171,9 +172,8 @@ from .core.server_launcher import (
     get_native_mod_status_log,
     get_server_console_log,
     get_market_console_log,
-    get_server_log_path,
     is_server_running,
-    native_market_database_status,
+    inspect_native_market_database,
     start_game_server,
     start_market_server,
 )
@@ -297,6 +297,7 @@ from .workers.server_worker import (
     ServiceStopResult,
     ServiceStopWorker,
 )
+from .ui import update_coordinator as update_coordination
 from .updater.checker import UpdateChecker
 from .updater.dialog import UpdateDialog
 from .updater.installer import UpdateInstallWorker
@@ -432,6 +433,7 @@ class MainWindow(QMainWindow):
 
         # ── State ──────────────────────────────────────────────────────
         self._cfg = config.load()
+        self.setProperty("animationsEnabled", bool(self._cfg.get("animations_enabled", True)))
         set_language(self._cfg.get("language", "en"))
         # Backends remain lazy until music or an announcement is requested.
         self._audio_controller = AudioController(self._cfg, self)
@@ -661,7 +663,9 @@ class MainWindow(QMainWindow):
         self._characters_page.hide_character.connect(self._on_hide_character)
         self._characters_page.portrait_loads_idle.connect(self._resume_close_after_data)
         self._mods_page.apply_restart_clicked.connect(self._on_mods_apply_restart)
-        self._mods_page.remove_mod_requested.connect(self._on_mod_remove_requested)
+        from .ui.mod_coordinator import ModCoordinator
+        self._mod_coordinator = ModCoordinator(self)
+        self._mod_coordinator.attach(self._mods_page)
         self._tools_page.open_settings_requested.connect(self._open_settings_page)
         self._tools_page.launch_requested.connect(self._on_tool_launch_requested)
 
@@ -714,11 +718,9 @@ class MainWindow(QMainWindow):
         # event loop.  Playback is optional and never gates launcher startup.
         QTimer.singleShot(0, self._start_launcher_ambience)
 
-        interval_hours = int(self._cfg.get("update_check_interval_hours", 6))
-        if interval_hours > 0:
-            self._update_timer = QTimer(self)
-            self._update_timer.timeout.connect(self._start_automatic_update_check)
-            self._update_timer.start(interval_hours * 3600 * 1000)
+        self._update_timer = QTimer(self)
+        self._update_timer.timeout.connect(self._start_automatic_update_check)
+        self._apply_update_settings()
 
         # ── Periodic timers ────────────────────────────────────────────
         self._status_timer = QTimer(self)
@@ -766,9 +768,11 @@ class MainWindow(QMainWindow):
         content.addWidget(self._nav)
 
         self._stack = QStackedWidget()
+        from src.ui.page_reveal import PageReveal
+        self._page_reveal = PageReveal(self)
         self._home_page = HomePage()
         self._characters_page = CharactersPage()
-        self._mods_page = ModsPage()
+        self._mods_page = ModsPage(defer_inventory=True)
         self._tools_page = ToolsPage(str(self._cfg.get("evejs_root", "")))
         self._settings_page = SettingsPage()
         self._settings_page.set_save_validator(self._settings_save_rejection)
@@ -838,15 +842,6 @@ class MainWindow(QMainWindow):
         for ring in self.findChildren(StatusRing):
             ring.retranslate_ui()
 
-    def _retranslate_runtime_ui(self) -> None:
-        """Keep high-frequency runtime labels in the selected language."""
-        language = current_language()
-        for root in (
-            getattr(self, "_home_page", None),
-            getattr(self, "_status_bar", None),
-        ):
-            if isinstance(root, QObject):
-                retranslate_widget_tree(root, language)
 
     def _switch_page(self, index: int) -> None:
         """Switch the center stack to a different page."""
@@ -884,8 +879,14 @@ class MainWindow(QMainWindow):
             self._nav.set_active_page(index)
             return
 
+        self._page_reveal.finish()
         self._stack.setCurrentIndex(index)
         self._on_page_changed(index)
+        page = self._stack.currentWidget()
+        # Fade only controls on Home. Other pages reveal their header, avoiding
+        # nested opacity effects around portraits and loading placeholders.
+        target = page._foreground if page is self._home_page else getattr(page, "page_header", None)
+        self._page_reveal.start(target)
 
     def _ask_unsaved_settings(self) -> QMessageBox.StandardButton:
         """Ask how to resolve the visible Settings draft."""
@@ -933,24 +934,11 @@ class MainWindow(QMainWindow):
 
     def _apply_runtime_settings(self) -> None:
         """Apply persisted Home animation preferences without restarting the app."""
-        try:
-            interval_sec = int(self._cfg.get("hero_rotation_interval_sec", 6))
-        except (TypeError, ValueError):
-            interval_sec = 6
-        hero = self._home_page.hero
-        hero.set_rotation_interval(interval_sec)
         animations_enabled = bool(self._cfg.get("animations_enabled", True))
-        apply_page_motion = getattr(
-            self._home_page,
-            "set_animations_enabled",
-            None,
-        )
-        if callable(apply_page_motion):
-            apply_page_motion(animations_enabled)
-        else:
-            # Lightweight controller test doubles may expose only the legacy
-            # hero seam; production HomePage owns the full motion policy.
-            hero.set_animations_enabled(animations_enabled)
+        self.setProperty("animationsEnabled", animations_enabled)
+        if not animations_enabled and hasattr(self, "_page_reveal"):
+            self._page_reveal.finish()
+        self._home_page.set_animations_enabled(animations_enabled)
 
         # Keep the preference application tolerant of lightweight controller
         # fixtures while making the production setting truly launcher-wide.
@@ -1131,6 +1119,8 @@ class MainWindow(QMainWindow):
         action: ToolAction,
     ) -> None:
         """Preserve the reviewed Native wrapper launch boundary unchanged."""
+        if not self._update_allows_mutation():
+            return
         entrypoint = tool.absolute_entrypoint
         if entrypoint is None:
             message = tool.unavailable_reason or "Tool wrapper is unavailable"
@@ -2085,7 +2075,29 @@ class MainWindow(QMainWindow):
 
     def _lifecycle_active(self) -> bool:
         """Return whether a lifecycle operation still owns the continuation slot."""
-        return getattr(self, "_lifecycle_thread", None) is not None
+        from .core.application_operations import update_active
+        return (
+            getattr(self, "_lifecycle_thread", None) is not None
+            or update_active(self)
+            or getattr(self, "_mod_operation_request", None) is not None
+        )
+
+    def _update_allows_mutation(self) -> bool:
+        """Recheck after modal confirmations before reserving a mutation."""
+        from .core.application_operations import update_active
+        if not update_active(self):
+            return True
+        QMessageBox.information(
+            self, "Operation In Progress",
+            "Wait for the launcher update to finish before changing the runtime.",
+        )
+        return False
+
+    def _set_operation_controls_busy(self, busy: bool) -> None:
+        for name in ("_mods_page", "_settings_page"):
+            setter = getattr(getattr(self, name, None), "set_lifecycle_busy", None)
+            if callable(setter):
+                setter(busy)
 
     def _acquire_game_mod_lifecycle_lease(
         self,
@@ -2183,19 +2195,26 @@ class MainWindow(QMainWindow):
         *,
         backend: str,
     ) -> tuple[Mod, ...]:
-        """Return one complete valid backend-specific discovery or fail closed."""
+        """Freeze applicable server mods without blocking on unrelated packages."""
 
-        discovered = tuple(scan_mods(evejs_root))
-        invalid = tuple(mod for mod in discovered if not mod.valid)
+        from .core.local_mod_packages import LocalModPackages
+        discovered = tuple(LocalModPackages(evejs_root).sort_mods(scan_mods(evejs_root)))
+        support_name = "docker" if backend == DOCKER_BACKEND else "native"
+        from .core.mod_relationships import plan_mod_order
+        order_plan = plan_mod_order(discovered, backend=support_name)
+        discovered = order_plan.mods
+        server_kinds = {ActivationKind.LOADER_RENAME, ActivationKind.JSON_BOOLEAN}
+        invalid = tuple(mod for mod in discovered if not mod.valid and mod.active
+                        and mod.activation_kind in server_kinds and support_name in mod.supported_backends)
         if invalid:
             names = ", ".join(sorted({mod.name for mod in invalid}))
             raise ModRuntimeStateError(
                 "Installed mod metadata is invalid"
                 + (f": {names}." if names else ".")
             )
-        support_name = "docker" if backend == DOCKER_BACKEND else "native"
         applicable = tuple(
             mod for mod in discovered if mod.supports_backend(support_name)
+            and mod.activation_kind in server_kinds
         )
         if backend == DOCKER_BACKEND:
             applicable = tuple(
@@ -2203,6 +2222,10 @@ class MainWindow(QMainWindow):
                 for mod in applicable
                 if mod.activation_kind is ActivationKind.LOADER_RENAME
             )
+        try:
+            order_plan.require_valid(applicable)
+        except ValueError as exc:
+            raise ModRuntimeStateError(str(exc)) from exc
         return applicable
 
     def _publish_mod_runtime_snapshot(
@@ -2241,7 +2264,7 @@ class MainWindow(QMainWindow):
             log.exception("Could not read the mod activation journal after failure")
             return
         for mod in mods:
-            intent = state.for_mod(mod.id)
+            intent = state.for_mod(mod_state_key(mod))
             if (
                 intent is None
                 or intent.phase
@@ -2327,16 +2350,15 @@ class MainWindow(QMainWindow):
                         if integrated
                         else b""
                     )
-                    snapshot = build_native_mod_runtime_snapshot(
-                        plan,
-                        current_mods,
-                        stdout,
-                        pid=pid,
-                    )
                 except ModStatusProtocolError as exc:
+                    # An unreadable optional status log is missing evidence,
+                    # not a reason to stop an otherwise healthy Game process.
                     last_protocol_error = exc
-                    if time.monotonic() >= deadline:
-                        raise
+                    stdout = b""
+                snapshot = build_native_mod_runtime_snapshot(
+                    plan, current_mods, stdout, pid=pid, strict_status=False,
+                )
+                if any(entry.diagnostic == "status-marker-missing" for entry in snapshot.mods) and time.monotonic() < deadline:
                     time.sleep(_NATIVE_MOD_ATTESTATION_POLL_SEC)
                     continue
                 if getattr(process, "poll")() is not None:
@@ -2442,6 +2464,11 @@ class MainWindow(QMainWindow):
         """Own one read-only setup worker until result delivery and teardown."""
         if not isinstance(request, DockerPreflightRequest):
             return
+        if not self._update_allows_mutation():
+            self._settings_page.reject_docker_preflight_request(
+                request, "Wait for the launcher update to finish before changing the runtime.",
+            )
+            return
         if self._docker_preflight_thread is not None:
             self._settings_page.reject_docker_preflight_request(
                 request,
@@ -2516,6 +2543,9 @@ class MainWindow(QMainWindow):
         completed_handler: Callable[[object], None],
     ) -> None:
         """Move a fresh one-shot worker to its own thread and retain it safely."""
+        from .core.application_operations import update_active
+        if update_active(self):
+            raise RuntimeError("Wait for the launcher update to finish before changing the runtime.")
         thread = QThread(self)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)  # type: ignore[attr-defined]
@@ -2621,7 +2651,7 @@ class MainWindow(QMainWindow):
 
     def _finish_lifecycle_if_complete(self) -> None:
         """Run the continuation only after result handling and thread teardown."""
-        if getattr(self, "_dlss5_uninstall_result_presenting", False):
+        if getattr(self, "_mod_result_presenting", False):
             return
         if not getattr(self, "_lifecycle_result_received", False):
             return
@@ -2798,6 +2828,7 @@ class MainWindow(QMainWindow):
                 game_port=self._native_game_port(),
                 continue_game_after_market_failure=start_market and start_game,
                 start_market_fn=start_market_server,
+                market_preflight_fn=inspect_native_market_database,
                 start_game_fn=start_planned_game,
                 game_runtime_validator=validate_planned_game,
                 market_readiness_timeout_sec=MARKET_READINESS_TIMEOUT_SEC,
@@ -2894,7 +2925,12 @@ class MainWindow(QMainWindow):
         if start_market:
             if result.market_process is not None:
                 self._market_proc = result.market_process
-            if result.market_ready:
+            if result.market_preflight is not None and not result.market_preflight.available:
+                market_reachable = False
+                self._market_intent = None
+                self._market_error = None
+                log.warning("Optional Market was not started: %s", result.market_preflight.reason)
+            elif result.market_ready:
                 market_reachable = True
                 self._market_intent = None
                 self._market_error = None
@@ -3013,6 +3049,14 @@ class MainWindow(QMainWindow):
             )
         self._publish_cached_runtime()
         self._lifecycle_result_received = True
+        if (
+            result.market_preflight is not None
+            and not result.market_preflight.available
+            and launching_event is not None
+        ):
+            QMessageBox.information(
+                self, "Optional Market Not Ready", result.market_preflight.reason,
+            )
         self._finish_lifecycle_if_complete()
 
     def _run_stop_sequence(
@@ -3415,8 +3459,10 @@ class MainWindow(QMainWindow):
         # QMessageBox runs a nested event loop: QThread.finished and an already
         # queued missing-result fallback can run before the dialog is dismissed.
         # Acknowledge delivery first, but keep the reservation while presenting.
+        if getattr(self, "_lifecycle_result_received", False):
+            return
         self._lifecycle_result_received = True
-        self._dlss5_uninstall_result_presenting = True
+        self._mod_result_presenting = True
         try:
             self._mods_page.refresh_mods()
             if not isinstance(result, DLSS5UninstallResult):
@@ -3431,28 +3477,13 @@ class MainWindow(QMainWindow):
                 else:
                     QMessageBox.critical(self, "DLSS5 Uninstall Failed", details)
         finally:
-            self._dlss5_uninstall_result_presenting = False
+            self._mod_result_presenting = False
             self._finish_lifecycle_if_complete()
 
     def _mod_removal_conflict_active(self) -> bool:
         """Return whether another operation could race removal or restore services."""
-
-        return any(
-            (
-                getattr(self, "_character_creation_thread", None) is not None,
-                getattr(self, "_character_creation_request", None) is not None,
-                getattr(self, "_character_deletion_thread", None) is not None,
-                getattr(self, "_character_deletion_request", None) is not None,
-                getattr(self, "_docker_character_request", None) is not None,
-                getattr(self, "_overview_patch_thread", None) is not None,
-                getattr(self, "_client_launch_thread", None) is not None,
-                getattr(self, "_client_launch_request", None) is not None,
-                getattr(self, "_launch_queue", None) is not None,
-                getattr(self, "_docker_preflight_thread", None) is not None,
-                getattr(self, "_docker_tool_request", None) is not None,
-                getattr(self, "_update_install_worker", None) is not None,
-            )
-        )
+        from .core.application_operations import active_mutations
+        return bool(active_mutations(self, exclude=("services",)))
 
     def _ask_mod_removal_policy(
         self,
@@ -3543,34 +3574,47 @@ class MainWindow(QMainWindow):
     @pyqtSlot(object)
     def _on_managed_mod_removal_completed(self, result: object) -> None:
         """Publish only the verified terminal result from the removal worker."""
-
-        if not isinstance(result, ManagedModRemovalResult):
-            log.error("Mod removal worker returned an invalid result: %r", result)
-            QMessageBox.critical(
-                self,
-                "Mod Removal Failed",
-                "The removal worker returned an invalid result. Refresh Mods before retrying.",
-            )
-        elif result.success:
-            self._publish_mod_runtime_snapshot(None)
-            self._mods_page.refresh_mods()
-            details = result.message
-            if result.warning:
-                details += "\n\n" + result.warning
-            if result.log_path is not None:
-                details += f"\n\nLog: {result.log_path}"
-            if result.warning:
-                QMessageBox.warning(self, "Mod Removed with Warning", details)
-            else:
-                QMessageBox.information(self, "Mod Removed", details)
-        else:
-            self._mods_page.refresh_mods()
-            details = result.message or "The registered mod uninstaller failed."
-            if result.log_path is not None:
-                details += f"\n\nLog: {result.log_path}"
-            QMessageBox.critical(self, "Mod Removal Failed", details)
+        if getattr(self, "_lifecycle_result_received", False):
+            return
         self._lifecycle_result_received = True
-        self._finish_lifecycle_if_complete()
+        self._mod_result_presenting = True
+        try:
+            if not isinstance(result, ManagedModRemovalResult):
+                log.error("Mod removal worker returned an invalid result: %r", result)
+                QMessageBox.critical(
+                    self,
+                    "Mod Removal Failed",
+                    "The removal worker returned an invalid result. Refresh Mods before retrying.",
+                )
+            elif result.success:
+                self._publish_mod_runtime_snapshot(None)
+                self._mods_page.refresh_mods()
+                details = result.message
+                if result.warning:
+                    details += "\n\n" + result.warning
+                if result.log_path is not None:
+                    details += f"\n\nLog: {result.log_path}"
+                if result.warning:
+                    QMessageBox.warning(self, "Mod Removed with Warning", details)
+                else:
+                    QMessageBox.information(self, "Mod Removed", details)
+            else:
+                self._mods_page.refresh_mods()
+                if result.review:
+                    from .widgets.legacy_mod_removal_dialog import LegacyModRemovalDialog
+                    dialog = LegacyModRemovalDialog(result.review, self)
+                    try:
+                        dialog.exec()
+                    finally:
+                        dialog.deleteLater()
+                    return
+                details = result.message or "The registered mod uninstaller failed."
+                if result.log_path is not None:
+                    details += f"\n\nLog: {result.log_path}"
+                QMessageBox.critical(self, "Mod Removal Failed", details)
+        finally:
+            self._mod_result_presenting = False
+            self._finish_lifecycle_if_complete()
 
     def _on_mods_apply_restart(self) -> None:
         """Apply the selected backend's truthful mod activation contract."""
@@ -4048,41 +4092,6 @@ class MainWindow(QMainWindow):
             return
         start_after_stop()
 
-    def _native_market_start_available(
-        self,
-        *,
-        unavailable_continuation: str,
-        notify: bool,
-    ) -> bool:
-        """Preflight optional Native Market and clear stale failure state on skip."""
-        available, reason = native_market_database_status(
-            str(self._cfg.get("evejs_root", ""))
-        )
-        if available:
-            return True
-
-        self._market_intent = None
-        self._market_error = None
-        game_reachable, _market_reachable = getattr(
-            self,
-            "_service_reachability",
-            (False, False),
-        )
-        self._service_reachability = (game_reachable, False)
-
-        message = f"{reason}\n\n{unavailable_continuation}"
-        if "Tools > Market Seed Builder" not in message:
-            message += " To set it up, use Tools > Market Seed Builder."
-        if notify:
-            QMessageBox.information(
-                self,
-                "Optional Market Not Ready",
-                message,
-            )
-        else:
-            log.warning(message.replace("\n\n", " "))
-        return False
-
     def _start_market(self) -> None:
         if self._docker_mode():
             if self._docker_managed():
@@ -4096,12 +4105,6 @@ class MainWindow(QMainWindow):
             return
         if self._is_market_running():
             log.info("Ignored duplicate Market start while already active")
-            self._update_status_bar()
-            return
-        if not self._native_market_start_available(
-            unavailable_continuation="Market was not started.",
-            notify=True,
-        ):
             self._update_status_bar()
             return
         self._start_service_sequence(
@@ -4173,31 +4176,9 @@ class MainWindow(QMainWindow):
 
         start_market = not self._is_market_running()
         start_game = not game_active
-        market_skipped = False
-        if start_market:
-            continuation = (
-                "Game will start without it."
-                if start_game
-                else "Game is already online; optional Market was not started."
-            )
-            if not self._native_market_start_available(
-                unavailable_continuation=continuation,
-                notify=True,
-            ):
-                start_market = False
-                market_skipped = True
         if not start_market and not start_game:
-            if market_skipped:
-                self._update_status_bar()
-                return
             QMessageBox.information(self, "Already Running", "Both servers are already online.")
             return
-
-        voice_event = (
-            VoiceEvent.GAME_SERVER_LAUNCHING
-            if market_skipped
-            else VoiceEvent.SERVER_STACK_LAUNCHING
-        )
 
         if self._start_service_sequence(
             start_market=start_market,
@@ -4205,7 +4186,7 @@ class MainWindow(QMainWindow):
             mode=resolved[0] if resolved is not None else None,
             on_ready=None,
             error_title="Service Startup Failed",
-            voice_event=voice_event,
+            voice_event=VoiceEvent.SERVER_STACK_LAUNCHING,
         ):
             return
 
@@ -4356,22 +4337,7 @@ class MainWindow(QMainWindow):
         start_market = bool(self._cfg.get("auto_start_market", False)) and not (
             self._is_market_running()
         )
-        market_skipped = False
-        if start_market:
-            continuation = (
-                "Game and the client launch will continue without optional Market."
-                if start_game
-                else "Client launch will continue without optional Market."
-            )
-            if not self._native_market_start_available(
-                unavailable_continuation=continuation,
-                notify=False,
-            ):
-                start_market = False
-                market_skipped = True
         if not start_market and not start_game:
-            if market_skipped:
-                self._update_status_bar()
             on_ready()
             return True
 
@@ -4522,6 +4488,8 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
+        if not self._update_allows_mutation():
+            return
         worker_factory = getattr(self, "_overview_patch_worker_factory", None)
         worker = (
             worker_factory(action, client_path)
@@ -4675,6 +4643,8 @@ class MainWindow(QMainWindow):
             if reply != QMessageBox.StandardButton.Yes:
                 return
 
+        if not self._update_allows_mutation():
+            return
         request = CharacterCreationRequest(
             evejs_root=str(self._cfg.get("evejs_root", "")),
             username=draft.username,
@@ -5484,6 +5454,8 @@ class MainWindow(QMainWindow):
             )
             return
 
+        if not self._update_allows_mutation():
+            return
         request = CharacterDeletionRequest(
             evejs_root=str(self._cfg.get("evejs_root", "")),
             username=username,
@@ -5875,34 +5847,6 @@ class MainWindow(QMainWindow):
             daemon=True,
         ).start()
 
-    def _launch_account(
-        self,
-        username: str,
-        character_name: str,
-        character_id: int | None = None,
-        *,
-        show_errors: bool = False,
-        launch_context: ClientLaunchContext | None = None,
-    ) -> bool:
-        """Synchronous compatibility seam; production UI uses the worker path."""
-        request = self._make_client_launch_request(
-            username,
-            character_name,
-            character_id,
-            show_errors=show_errors,
-            launch_context=launch_context,
-        )
-        if request is None:
-            return False
-        try:
-            process = _perform_client_launch(request)
-        except Exception as exc:  # noqa: BLE001 - subprocess errors vary by OS
-            log.exception("Launch failed for %s", username)
-            if show_errors:
-                QMessageBox.critical(self, "Launch Error", str(exc))
-            return False
-        self._finalize_client_launch(ClientLaunchResult(request, process))
-        return True
 
     def _set_client_launch_pending(
         self,
@@ -7968,7 +7912,6 @@ class MainWindow(QMainWindow):
             self._nav.btn_mods.setToolTip("")
             self._nav.btn_tools.setEnabled(True)
             self._nav.btn_tools.setToolTip("")
-        self._retranslate_runtime_ui()
 
     def _on_service_probe(
         self, probe: ServiceProbe, generation: int | None = None
@@ -8459,152 +8402,46 @@ class MainWindow(QMainWindow):
     def _on_update_available(
         self, version: str, changelog: str, download_url: str, published_at: str
     ) -> None:
-        """Handler for when an update is found."""
-        self._latest_version = version
-        self._latest_changelog = changelog
-        self._latest_download_url = download_url
-        self._latest_published = published_at
-        self._title_bar.show_update_available(version)
+        return update_coordination._on_update_available(self, version, changelog, download_url, published_at)
 
     def _on_update_clicked(self) -> None:
-        """Show the update dialog and handle download/install or skip."""
-        from .constants import APP_VERSION
-
-        dlg = UpdateDialog(
-            current_version=APP_VERSION,
-            new_version=self._latest_version,
-            changelog=self._latest_changelog,
-            download_url=self._latest_download_url,
-            published_at=self._latest_published,
-            parent=self,
-        )
-        dlg.exec()
-
-        if dlg.result() == QDialog.DialogCode.Accepted:
-            self._begin_update_install()
-
-        elif dlg.skip_requested:
-            # User clicked Skip This Version
-            self._update_checker.skip_version(self._latest_version)
-            self._title_bar.set_update_up_to_date()
+        return update_coordination._on_update_clicked(self)
 
     def _begin_update_install(self) -> None:
-        """Show progress before downloading, then retain the worker through teardown."""
-        if self._update_install_worker is not None:
-            return
-        if not self._latest_download_url:
-            QMessageBox.warning(
-                self,
-                "Update Unavailable",
-                "This release does not include a downloadable launcher package.",
-            )
-            return
-
-        dialog = UpdateProgressDialog(self._latest_version, parent=self)
-        worker = UpdateInstallWorker(
-            self._latest_download_url,
-            sys.executable,
-            parent=self,
-        )
-        self._update_progress_dialog = dialog
-        self._update_install_worker = worker
-        self._update_install_result = None
-        self._update_install_thread_finished = False
-
-        worker.stage_changed.connect(dialog.set_stage)
-        worker.download_progress.connect(dialog.set_download_progress)
-        worker.completed.connect(self._on_update_install_completed)
-        worker.finished.connect(
-            self._on_update_install_thread_finished,
-            Qt.ConnectionType.QueuedConnection,
-        )
-
-        dialog.show()
-        QApplication.processEvents()
-        worker.start()
+        return update_coordination._begin_update_install(self)
 
     @pyqtSlot(bool, str)
     def _on_update_install_completed(self, success: bool, error: str) -> None:
-        """Record the worker result without racing its QThread teardown."""
-        self._update_install_result = (success, error)
-        self._finish_update_install_if_ready()
+        return update_coordination._on_update_install_completed(self, success, error)
 
     @pyqtSlot()
     def _on_update_install_thread_finished(self) -> None:
-        """Wait for both the result and finished signal before releasing the worker."""
-        self._update_install_thread_finished = True
-        self._finish_update_install_if_ready()
+        return update_coordination._on_update_install_thread_finished(self)
 
     def _finish_update_install_if_ready(self) -> None:
-        """Surface preparation failures or exit only after the agent has started."""
-        if self._update_install_result is None or not self._update_install_thread_finished:
-            return
-
-        success, error = self._update_install_result
-        worker = self._update_install_worker
-        self._update_install_worker = None
-        self._update_install_result = None
-        self._update_install_thread_finished = False
-        if worker is not None:
-            worker.deleteLater()
-
-        dialog = self._update_progress_dialog
-        if not success:
-            if dialog is not None:
-                dialog.show_error(error)
-            return
-
-        if dialog is not None:
-            dialog.set_stage("install", "Switching to the standalone updater…")
-        QTimer.singleShot(750, hard_exit)
+        return update_coordination._finish_update_install_if_ready(self)
 
     def _create_update_checker(self) -> UpdateChecker:
-        """Create an update worker whose lifetime is safe during window close."""
-        checker = UpdateChecker(self)
-        checker.update_available.connect(self._on_update_available)
-        checker.up_to_date.connect(self._on_update_up_to_date)
-        checker.check_failed.connect(
-            lambda msg: log.warning("Update check failed: %s", msg)
-        )
-        checker.finished.connect(
-            self._on_update_checker_finished,
-            Qt.ConnectionType.QueuedConnection,
-        )
-        return checker
+        return update_coordination._create_update_checker(self)
 
     def _start_update_checker(self, checker: UpdateChecker) -> None:
-        """Start one checker unless shutdown has begun or it already runs."""
-        if self._close_in_progress or checker.isRunning():
-            return
-        if checker not in self._active_update_checkers:
-            self._active_update_checkers.append(checker)
-        checker.check()
+        return update_coordination._start_update_checker(self, checker)
 
     def _start_automatic_update_check(self) -> None:
-        """Run the reusable startup/periodic checker only while the window is open."""
-        self._start_update_checker(self._update_checker)
+        return update_coordination._start_automatic_update_check(self)
+
+    def _apply_update_settings(self) -> None:
+        return update_coordination._apply_update_settings(self)
 
     def _has_running_update_checker(self) -> bool:
-        """Return whether a retained update worker still owns a native thread."""
-        return any(checker.isRunning() for checker in self._active_update_checkers)
+        return update_coordination._has_running_update_checker(self)
 
     @pyqtSlot()
     def _on_update_checker_finished(self) -> None:
-        """Release completed checker tracking and resume a deferred window close."""
-        self._active_update_checkers = [
-            checker
-            for checker in self._active_update_checkers
-            if checker.isRunning()
-        ]
-        if self._close_in_progress:
-            QTimer.singleShot(0, self.close)
+        return update_coordination._on_update_checker_finished(self)
 
     def _on_update_up_to_date(self, version: str = "") -> None:
-        """Handler for when the app is already up to date."""
-        self._title_bar.set_update_up_to_date()
-        self._cfg["update_last_checked"] = datetime.now(timezone.utc).isoformat()
-        config.save(self._cfg)
-        self._settings_page.set_update_check_done(True)
+        return update_coordination._on_update_up_to_date(self, version)
 
     def _announce_shipboard(self, event: VoiceEvent, **context: object) -> bool:
         """Publish one non-blocking local announcement without gating its action."""
@@ -8779,6 +8616,9 @@ class MainWindow(QMainWindow):
 
     def _settings_save_rejection(self, draft: dict) -> str | None:
         """Reject unsafe Native endpoint changes before Settings writes disk."""
+        from .core.application_operations import update_active
+        if update_active(self):
+            return "Wait for the launcher update to finish before saving settings."
         proposed = dict(self._cfg)
         proposed.update(draft)
 
@@ -8952,28 +8792,15 @@ class MainWindow(QMainWindow):
         if self._docker_mode() and current_monitor == previous_monitor:
             self._publish_cached_runtime()
         self._apply_runtime_settings()
+        self._apply_update_settings()
         self._home_page.set_server_mode(self._effective_server_mode_label())
         self._refresh_characters()
 
     def _on_manual_update_check(self) -> None:
-        """Triggered by the Settings page's 'Check for Updates' button."""
-        if self._close_in_progress:
-            return
-        # Visual feedback — title bar spinner + settings button shows checking
-        self._title_bar.set_update_checking()
-        self._settings_page.set_update_checking()
-
-        # Create a fresh checker (QThread can only start once)
-        checker = self._create_update_checker()
-        checker.up_to_date.connect(lambda v="": self._settings_page.set_update_check_done(True))
-        checker.check_failed.connect(lambda msg: self._on_check_failed_from_settings(msg))
-        self._start_update_checker(checker)
+        return update_coordination._on_manual_update_check(self)
 
     def _on_check_failed_from_settings(self, error: str) -> None:
-        """Handle a failed check triggered from Settings."""
-        log.warning("Manual update check failed: %s", error)
-        self._title_bar.set_update_up_to_date()
-        self._settings_page.set_update_check_done(False)
+        return update_coordination._on_check_failed_from_settings(self, error)
 
     # ── Resize / close lifecycle ──────────────────────────────────────
 
@@ -8994,7 +8821,39 @@ class MainWindow(QMainWindow):
         if getattr(self, "_close_after_lifecycle", False):
             QTimer.singleShot(0, self.close)
 
+    def _wait_for_client_exit(self, event) -> bool:
+        """Keep ownership during close until requested client exits are observed."""
+        deadline = getattr(self, "_close_clients_deadline", None)
+        if deadline is None:
+            return False
+        self._tracker.prune_dead()
+        if self._tracker.running_count == 0:
+            self._close_clients_deadline = None
+            return False
+        event.ignore()
+        if time.monotonic() < deadline:
+            QTimer.singleShot(250, self.close)
+        else:
+            self._close_clients_deadline = None
+            self._close_in_progress = False
+            QMessageBox.warning(
+                self, "Clients Still Running",
+                "Some EVE clients did not exit. They remain tracked. Close them and try again.",
+            )
+        return True
+
     def closeEvent(self, event) -> None:  # noqa: N802
+        if self._wait_for_client_exit(event):
+            return
+        if getattr(self, "_mod_operation_request", None) is not None:
+            self._close_in_progress = True
+            event.ignore()
+            return
+        mod_coordinator = getattr(self, "_mod_coordinator", None)
+        if mod_coordinator is not None and not mod_coordinator.close_settings():
+            self._close_in_progress = False
+            event.ignore()
+            return
         settings_page = getattr(self, "_settings_page", None)
         stack = getattr(self, "_stack", None)
         if (
@@ -9045,7 +8904,8 @@ class MainWindow(QMainWindow):
             self._shutdown_audio_for_close()
             event.ignore()
             return
-        if self._update_install_worker is not None:
+        from .core.application_operations import update_active
+        if update_active(self):
             event.ignore()
             return
         if getattr(self, "_docker_log_thread", None) is not None:
@@ -9065,6 +8925,10 @@ class MainWindow(QMainWindow):
             )
             if reply == QMessageBox.StandardButton.Yes:
                 self._tracker.kill_all()
+                self._close_in_progress = True
+                self._close_clients_deadline = time.monotonic() + 10.0
+                if self._wait_for_client_exit(event):
+                    return
             else:
                 self._close_in_progress = False
                 event.ignore()

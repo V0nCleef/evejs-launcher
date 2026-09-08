@@ -29,10 +29,13 @@ from .mod_runtime_state import (
     ModRuntimeSnapshot,
     ModRuntimeStateError,
     mod_contract_sha256,
+    mod_state_key,
+    _require_public_identity,
 )
 
 
 ACTIVATION_STATE_SCHEMA_VERSION = 1
+PUBLIC_ACTIVATION_STATE_SCHEMA_VERSION = 2
 ACTIVATION_STATE_DIRECTORY = "mod_activation_state"
 MAX_ACTIVATION_STATE_BYTES = 256 * 1024
 MAX_ACTIVATION_RECORDS = 512
@@ -190,7 +193,7 @@ def prepare_mod_activation(
     root, fingerprint = _current_mod_contract(mod)
     state = _read_state(root)
     intent = ModActivationIntent(
-        id=mod.id,
+        id=mod_state_key(mod),
         contract_sha256=fingerprint,
         desired=desired,
         phase=ActivationPhase.PREPARED,
@@ -301,9 +304,10 @@ def clear_confirmed_mod_activations(
             raise ModActivationStateError(
                 f"Mod {mod.id!r} belongs to a different EveJS root."
             )
-        if mod.id in current_mods:
+        key = mod_state_key(mod)
+        if key in current_mods:
             raise ModActivationStateError("Current mod ids must be unique.")
-        current_mods[mod.id] = mod
+        current_mods[key] = mod
 
     remaining: list[ModActivationIntent] = []
     cleared: list[str] = []
@@ -317,7 +321,7 @@ def clear_confirmed_mod_activations(
         except (ModRuntimeStateError, OSError, TypeError, ValueError):
             remaining.append(intent)
             continue
-        evidence = tuple(item for item in snapshot.mods if item.id == mod.id)
+        evidence = tuple(item for item in snapshot.mods if item.id == mod_state_key(mod))
         effective = snapshot.effective_for(mod)
         if (
             fingerprint == intent.contract_sha256
@@ -333,7 +337,7 @@ def clear_confirmed_mod_activations(
     if cleared:
         _write_state(
             ModActivationState(
-                schema_version=ACTIVATION_STATE_SCHEMA_VERSION,
+                schema_version=state.schema_version,
                 root=root,
                 intents=tuple(remaining),
             )
@@ -372,7 +376,7 @@ def retire_removed_mod_activation(
         raise ModActivationStateWriteError(
             "The removed mod contract fingerprint is invalid."
         )
-    if any(mod.id == mod_id for mod in scan_mods(root)):
+    if any(mod_state_key(mod) == mod_id for mod in scan_mods(root)):
         raise ModActivationStateWriteError(
             "The mod is still installed or was reinstalled before activation cleanup."
         )
@@ -387,7 +391,7 @@ def retire_removed_mod_activation(
         )
     _write_state(
         ModActivationState(
-            schema_version=ACTIVATION_STATE_SCHEMA_VERSION,
+            schema_version=state.schema_version,
             root=root,
             intents=tuple(item for item in state.intents if item.id != mod_id),
         )
@@ -440,7 +444,7 @@ def project_mod_activation(
                 intent,
                 "intent-record-invalid",
             )
-        if intent.id != mod.id or intent.contract_sha256 != fingerprint:
+        if intent.id != mod_state_key(mod) or intent.contract_sha256 != fingerprint:
             return _projection(
                 ModActivationStatus.STALE_CONTRACT,
                 configured,
@@ -472,7 +476,7 @@ def project_mod_activation(
                 intent,
                 "runtime-root-mismatch",
             )
-        evidence = tuple(item for item in snapshot.mods if item.id == mod.id)
+        evidence = tuple(item for item in snapshot.mods if item.id == mod_state_key(mod))
         if evidence and (
             len(evidence) != 1
             or evidence[0].contract_sha256 != fingerprint
@@ -486,7 +490,9 @@ def project_mod_activation(
                 "runtime-contract-mismatch",
             )
         effective = snapshot.effective_for(mod)
-        if evidence and effective is None:
+        if evidence and effective is None and (
+            evidence[0].effective is not None or evidence[0].activation_kind is not mod.activation_kind
+        ):
             return _projection(
                 ModActivationStatus.STALE_CONTRACT,
                 configured,
@@ -504,7 +510,8 @@ def project_mod_activation(
                 None,
                 configured,
                 None,
-                "runtime-evidence-missing",
+                (snapshot.diagnostic_for(mod) if snapshot is not None else None)
+                or "runtime-evidence-missing",
             )
         if effective is configured:
             return _projection(
@@ -564,6 +571,12 @@ def project_mod_activation(
             intent.error_code or "activation-failed",
         )
 
+    if snapshot is not None and effective is None and snapshot.diagnostic_for(mod):
+        return _projection(
+            ModActivationStatus.RUNTIME_UNVERIFIED, configured, None, desired, intent,
+            snapshot.diagnostic_for(mod),
+        )
+
     # Both a normally pending record and a crash-recovered prepared record with
     # the desired config in place require a restart/verification. A missing
     # snapshot never becomes success merely because configuration matches.
@@ -619,7 +632,7 @@ def reconcile_mod_activation(
             None,
             "activation-state-root-mismatch",
         )
-    return project_mod_activation(mod, snapshot, current_state.for_mod(mod.id))
+    return project_mod_activation(mod, snapshot, current_state.for_mod(mod_state_key(mod)))
 
 
 def _read_state(root: Path) -> ModActivationState:
@@ -651,9 +664,7 @@ def _read_state(root: Path) -> ModActivationState:
         )
     payload = _parse_json_object(content)
     _require_exact_keys(payload, _DOCUMENT_KEYS, "Activation state")
-    if payload["schemaVersion"] != ACTIVATION_STATE_SCHEMA_VERSION or type(
-        payload["schemaVersion"]
-    ) is not int:
+    if type(payload["schemaVersion"]) is not int or payload["schemaVersion"] not in {1, 2}:
         raise ModActivationStateReadError(
             "Unsupported activation state schemaVersion."
         )
@@ -684,14 +695,14 @@ def _read_state(root: Path) -> ModActivationState:
     intents = tuple(
         sorted(
             (
-                _intent_from_payload(mod_id, raw_record)
+                _intent_from_payload(mod_id, raw_record, allow_public=payload["schemaVersion"] == 2)
                 for mod_id, raw_record in raw_records.items()
             ),
             key=lambda item: item.id,
         )
     )
     return ModActivationState(
-        schema_version=ACTIVATION_STATE_SCHEMA_VERSION,
+        schema_version=payload["schemaVersion"],
         root=root,
         intents=intents,
     )
@@ -700,8 +711,10 @@ def _read_state(root: Path) -> ModActivationState:
 def _intent_from_payload(
     mod_id: object,
     payload: object,
+    *,
+    allow_public: bool = False,
 ) -> ModActivationIntent:
-    _require_mod_id(mod_id, error_type=ModActivationStateReadError)
+    _require_mod_id(mod_id, error_type=ModActivationStateReadError, allow_public=allow_public)
     if type(payload) is not dict:
         raise ModActivationStateReadError(
             f"Activation record {mod_id!r} must be an object."
@@ -771,7 +784,8 @@ def _replace_intent(
         )
     _write_state(
         ModActivationState(
-            schema_version=ACTIVATION_STATE_SCHEMA_VERSION,
+            schema_version=(PUBLIC_ACTIVATION_STATE_SCHEMA_VERSION
+                if replacement.id.startswith("path:") else state.schema_version),
             root=state.root,
             intents=tuple(records[key] for key in sorted(records)),
         )
@@ -780,13 +794,15 @@ def _replace_intent(
 
 def _write_state(state: ModActivationState) -> Path:
     root = _canonical_root(state.root, error_type=ModActivationStateWriteError)
-    if state.schema_version != ACTIVATION_STATE_SCHEMA_VERSION:
+    if type(state.schema_version) is not int or state.schema_version not in {1, 2}:
         raise ModActivationStateWriteError(
             "Unsupported activation state schemaVersion."
         )
     validated: list[ModActivationIntent] = []
     seen: set[str] = set()
     for intent in state.intents:
+        _require_mod_id(intent.id, error_type=ModActivationStateWriteError,
+            allow_public=state.schema_version == 2)
         _validate_intent(intent, error_type=ModActivationStateWriteError)
         if intent.id in seen:
             raise ModActivationStateWriteError(
@@ -816,7 +832,7 @@ def _write_state(state: ModActivationState) -> Path:
         for intent in sorted(validated, key=lambda item: item.id)
     }
     payload = {
-        "schemaVersion": ACTIVATION_STATE_SCHEMA_VERSION,
+        "schemaVersion": state.schema_version,
         "root": str(root),
         "records": records,
     }
@@ -872,7 +888,7 @@ def _require_matching_operation(
     fingerprint: str,
     desired: bool,
 ) -> ModActivationIntent:
-    current = state.for_mod(mod.id)
+    current = state.for_mod(mod_state_key(mod))
     if current is None:
         raise ModActivationTransitionError(
             "No prepared activation operation exists for this mod."
@@ -1080,7 +1096,11 @@ def _require_mod_id(
     mod_id: object,
     *,
     error_type: type[ModActivationStateError] = ModActivationStateError,
+    allow_public: bool = True,
 ) -> None:
+    if allow_public and type(mod_id) is str and mod_id.startswith("path:"):
+        _require_public_identity(mod_id, error_type=error_type)
+        return
     if type(mod_id) is not str:
         raise error_type("Activation record mod id is invalid.")
     try:

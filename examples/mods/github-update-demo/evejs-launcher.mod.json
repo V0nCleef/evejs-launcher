@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 3,
+  "id": "github-update-demo",
+  "displayName": "GitHub Update Demo",
+  "version": "1.0.0",
+  "description": "Authoring template: replace the placeholder GitHub source before use.",
+  "kind": "loader",
+  "supportedBackends": ["native", "docker"],
+  "activation": {"strategy": "loader_rename"},
+  "restart": "game_server",
+  "compatibility": {"evejsVersions": ["0.12.7.1"]},
+  "updates": {
+    "provider": "github",
+    "repository": "YOUR-GITHUB-OWNER/YOUR-MOD-REPOSITORY",
+    "asset": "YourMod-{version}.zip",
+    "channel": "stable",
+    "tagPrefix": "v",
+    "preserveFiles": []
+  }
+}

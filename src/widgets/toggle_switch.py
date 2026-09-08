@@ -19,6 +19,7 @@ from PyQt6.QtGui import QPainter, QColor, QPaintEvent
 from PyQt6.QtWidgets import QCheckBox
 
 from src.constants import COLORS
+from src.ui.visible_motion import VisibleMotion
 
 
 class ToggleSwitch(QCheckBox):
@@ -43,6 +44,7 @@ class ToggleSwitch(QCheckBox):
         self._anim = QPropertyAnimation(self, b"_thumb_pos", self)
         self._anim.setDuration(150)
         self._anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._motion_gate = VisibleMotion(self, self._motion_changed)
 
         self.toggled.connect(self._on_toggled)
 
@@ -59,9 +61,17 @@ class ToggleSwitch(QCheckBox):
     # ── Slots ────────────────────────────────────────────────────────────
     def _on_toggled(self, checked: bool) -> None:
         self._anim.stop()
+        if not self._motion_gate.allowed:
+            self._set_thumb_pos(float(checked))
+            return
         self._anim.setStartValue(self._get_thumb_pos())
         self._anim.setEndValue(1.0 if checked else 0.0)
         self._anim.start()
+
+    def _motion_changed(self, allowed):
+        if not allowed:
+            self._anim.stop()
+            self._set_thumb_pos(float(self.isChecked()))
 
     def hitButton(self, pos: QPoint) -> bool:  # noqa: N802
         """Accept clicks anywhere within the visible 40×20 pill."""

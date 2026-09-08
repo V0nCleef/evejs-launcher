@@ -4,8 +4,10 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import time
 from PyQt6.QtCore import QCoreApplication, QEvent
 from PyQt6.QtWidgets import QApplication, QMainWindow
 
@@ -414,7 +416,7 @@ def test_docker_online_actions_never_render_external_or_mutation_labels() -> Non
     for state in ServiceState:
         label = MainWindow._service_action_text("Server", state, False, RuntimeBackend.DOCKER_COMPOSE)
         assert "External" not in label
-        assert "▶ Start" not in label and "■ Stop" not in label and "↻ Retry" not in label
+        assert "ÃƒÂ¢Ã¢â‚¬â€œÃ‚Â¶ Start" not in label and "ÃƒÂ¢Ã¢â‚¬â€œÃ‚Â  Stop" not in label and "ÃƒÂ¢Ã¢â‚¬Â Ã‚Â» Retry" not in label
     assert MainWindow._service_action_text("Server", ServiceState.ONLINE, False, RuntimeBackend.DOCKER_COMPOSE) == "Server: Online"
 
 
@@ -661,10 +663,13 @@ def test_docker_tools_page_remains_navigable_and_refreshes_backend_view(
         current = int(Page.HOME)
         def currentIndex(self) -> int: return self.current
         def setCurrentIndex(self, index: int) -> None: self.current = index
+        def currentWidget(self): return None
     refreshed: list[str] = []
     docker_window._cfg["docker_control_policy"] = policy
     docker_window._docker_unavailable = lambda _message: None
     docker_window._stack = Stack()
+    docker_window._home_page = object()
+    docker_window._page_reveal = SimpleNamespace(finish=lambda: None, start=lambda _target: None)
     docker_window._tools_page = type(
         "Tools",
         (),
@@ -691,9 +696,12 @@ def test_docker_mods_page_remains_navigable(
         current = int(Page.HOME)
         def currentIndex(self) -> int: return self.current
         def setCurrentIndex(self, index: int) -> None: self.current = index
+        def currentWidget(self): return None
     docker_window._cfg["docker_control_policy"] = policy
     docker_window._docker_unavailable = lambda _message: None
     docker_window._stack = Stack()
+    docker_window._home_page = object()
+    docker_window._page_reveal = SimpleNamespace(finish=lambda: None, start=lambda _target: None)
     docker_window._nav = type(
         "Nav",
         (),
@@ -835,7 +843,7 @@ def test_docker_identity_change_publishes_clean_unknown_and_rejects_old_observat
         "create_profile",
         lambda *_args: pytest.fail("stale context reached profile work"),
     )
-    assert not docker_window._launch_account(
+    assert not docker_window._start_client_launch(
         "fixture-account",
         "Fixture Character",
         show_errors=True,
@@ -923,7 +931,7 @@ def test_docker_missing_endpoints_fail_before_profile_and_client_work(
     monkeypatch.setattr("src.app.create_profile", lambda *_args: pytest.fail("profile work"))
     monkeypatch.setattr("src.app.launch_client", lambda **_kwargs: pytest.fail("client work"))
 
-    assert docker_window._launch_account("account", "character", show_errors=True) is False
+    assert docker_window._start_client_launch("account", "character", show_errors=True) is False
     assert len(messages) == 1
     assert "endpoint" in messages[0].casefold()
 
@@ -1015,9 +1023,20 @@ def test_complete_connect_only_endpoints_use_one_context_for_profile_and_client(
         return Process()
 
     monkeypatch.setattr(app_module, "launch_client", launch_client)
-    monkeypatch.setattr(app_module.threading, "Thread", Thread)
+    monkeypatch.setattr(app_module, "threading", SimpleNamespace(Thread=Thread))
 
-    assert docker_window._launch_account("fixture-account", "Fixture Character") is True
+    docker_window._refresh_character_views = lambda: None
+    docker_window._update_status_bar = lambda: None
+    docker_window._announce_shipboard = lambda *args, **kwargs: None
+    assert docker_window._start_client_launch("fixture-account", "Fixture Character") is True
+    deadline = time.monotonic() + 5
+    while docker_window._client_launch_thread is not None and time.monotonic() < deadline:
+        QApplication.processEvents()
+        if docker_window._client_launch_thread is not None:
+            docker_window._client_launch_thread.wait(5)
+    QApplication.processEvents()
+    assert docker_window._client_launch_thread is None
+    assert sum(event[0] == "track" for event in events) == 1
 
     context = next(event[1] for event in events if event[0] == "launch")
     assert isinstance(context, ClientLaunchContext)
@@ -1073,7 +1092,7 @@ def test_captured_docker_context_is_rejected_after_generation_changes(
         lambda *_args: pytest.fail("stale queue context reached profile work"),
     )
 
-    assert not docker_window._launch_account(
+    assert not docker_window._start_client_launch(
         "fixture-account",
         "Fixture Character",
         show_errors=True,

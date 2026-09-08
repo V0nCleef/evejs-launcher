@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "pages": [
+    {"title": "Start here", "path": "docs/MOD_AUTHORING.md"},
+    {"title": "Manifest", "path": "docs/mod-authoring/manifest.md"},
+    {"title": "Helper API", "path": "docs/mod-authoring/helpers.md"},
+    {"title": "Settings and languages", "path": "docs/mod-authoring/settings.md"},
+    {"title": "Mod updates", "path": "docs/mod-authoring/updates.md"},
+    {"title": "Ownership and recovery", "path": "docs/mod-authoring/ownership.md"},
+    {"title": "Recipes", "path": "docs/mod-authoring/recipes.md"},
+    {"title": "Working examples", "path": "docs/mod-authoring/examples.md"},
+    {"title": "Legacy loaders / schema 2", "path": "docs/mod-authoring/legacy.md"},
+    {"title": "Legacy installer removal", "path": "docs/mod-authoring/legacy-removal.md"}
+  ],
+  "examples": [
+    "examples/tools/build_mod_update_metadata.py",
+    "examples/mods/github-update-demo/README.md",
+    "examples/mods/github-update-demo/evejs-launcher.mod.json",
+    "examples/mods/github-update-demo/loader.js.disabled",
+    "examples/mods/cleanup-demo/README.md",
+    "examples/mods/cleanup-demo/evejs-launcher.mod.json",
+    "examples/mods/cleanup-demo/helper.js",
+    "examples/mods/hello-loader/README.md",
+    "examples/mods/hello-loader/evejs-launcher.mod.json",
+    "examples/mods/hello-loader/loader.js.disabled",
+    "examples/mods/profile-options/README.md",
+    "examples/mods/profile-options/evejs-launcher.mod.json",
+    "examples/mods/profile-options/helper.js",
+    "examples/mods/client-receipt-demo/README.md",
+    "examples/mods/client-receipt-demo/evejs-launcher.mod.json",
+    "examples/mods/client-receipt-demo/helper.ps1",
+    "examples/mods/shared-profile-companion/README.md",
+    "examples/mods/shared-profile-companion/evejs-launcher.mod.json",
+    "examples/mods/source-overlay-demo/README.md",
+    "examples/mods/source-overlay-demo/evejs-launcher.mod.json",
+    "examples/mods/source-overlay-demo/helper.js",
+    "examples/mods/source-overlay-demo/example-source.js"
+  ]
+}

@@ -1,0 +1,5 @@
+"use strict";
+
+// No gameplay hooks, timers, file writes or database access.
+// Disabled until explicitly enabled in the launcher.
+process.stdout.write("[github-update-demo] Selected example preload is running.\n");

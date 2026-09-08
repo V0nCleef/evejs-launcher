@@ -2,6 +2,8 @@
 """PyInstaller build spec for EveJS Launcher V2 — onedir mode."""
 
 import os
+import json
+from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules
 
@@ -19,6 +21,18 @@ if _removed_build_paths:
     )
 
 block_cipher = None
+
+# One reviewed catalog drives both offline navigation and release data. No
+# directory wildcard can pull investigation notes into the public guide.
+_guide_catalog_path = Path('docs/mod-authoring/navigation.json')
+_guide_catalog = json.loads(_guide_catalog_path.read_text(encoding='utf-8'))
+_guide_paths = [_guide_catalog_path]
+_guide_paths += [Path(row['path']) for row in _guide_catalog['pages']]
+_guide_paths += [Path(path) for path in _guide_catalog['examples']]
+for _guide_path in _guide_paths:
+    if _guide_path.is_absolute() or '..' in _guide_path.parts or _guide_path.parts[0] not in {'docs', 'examples'} or not _guide_path.is_file():
+        raise ValueError(f'Unsafe or missing bundled guide file: {_guide_path}')
+_guide_data = [(str(path), str(path.parent)) for path in _guide_paths]
 
 # Modules to exclude — aggressive pruning
 EXCLUDES = [
@@ -45,7 +59,7 @@ EXCLUDES = [
     'cryptography', 'numpy', 'pandas', 'scipy', 'matplotlib',
     'tkinter', 'turtle', 'turtledemo', 'idlelib', 'lib2to3', 'distutils',
     'setuptools', 'pip', 'wheel', 'venv', 'ensurepip', 'pydoc', 'doctest',
-    'unittest', 'test', 'xmlrpc', 'asyncio', 'multiprocessing', 'concurrent',
+    'unittest', 'test', 'xmlrpc', 'asyncio', 'multiprocessing',
     'curses', 'readline', 'dbm', 'shelve', 'zoneinfo',
     # PyQt6 plugins we don't use (via excludes in Analysis)
     'PyQt6.Qt6.plugins.sqldrivers', 'PyQt6.Qt6.plugins.sceneparsers',
@@ -86,8 +100,9 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        ('assets/hero/*.png', 'assets/hero'),
-        ('assets/deep_signal/*.png', 'assets/deep_signal'),
+        ("assets/hero/hero_nebula.png", "assets/hero"),  # updater artwork fallback
+        ('assets/deep_signal/operations_orbital.png', 'assets/deep_signal'),
+        ('assets/deep_signal/operations_scene.json', 'assets/deep_signal'),
         # Explicit release allowlist: review renders and future drafts must not
         # become bundled merely because somebody placed a WAV beside this file.
         # Personal playlist paths remain local config references.
@@ -100,7 +115,7 @@ a = Analysis(
         ('README.md', '.'),
         # Package only reviewed public documentation. A wildcard here can
         # silently scoop local investigation notes into a public release.
-        ('docs/MOD_AUTHORING.md', 'docs'),
+        *_guide_data,
         ('LICENSE', '.'),
         ('THIRD_PARTY_NOTICES.md', '.'),
         ('VERSION', '.'),
@@ -135,10 +150,11 @@ a = Analysis(
         'src.widgets.title_bar', 'src.widgets.nav_panel', 'src.widgets.status_bar',
         'src.widgets.deep_signal_background', 'src.widgets.docking_traffic_overlay',
         'src.widgets.glass_panel',
+        'src.widgets.mod_authoring_guide',
         'src.widgets.page_header', 'src.widgets.status_ring', 'src.ui.motion',
         'src.widgets.shipboard_caption',
         'src.widgets.character_card', 'src.widgets.detail_panel', 'src.widgets.console_panel',
-        'src.widgets.hero_banner', 'src.widgets.skeleton_card', 'src.widgets.toggle_switch',
+        'src.widgets.skeleton_card', 'src.widgets.toggle_switch',
         'src.widgets.update_button',
         'src.widgets.new_character_card', 'src.widgets.new_character_dialog',
         'src.pages.home_page', 'src.pages.characters_page', 'src.pages.mods_page',

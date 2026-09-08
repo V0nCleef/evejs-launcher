@@ -85,7 +85,6 @@ MOTION_DURATIONS_MS: dict[str, int] = {
     "state": 260,
     "ambient": 1_800,
 }
-MOTION_TIMER_INTERVAL_MS: int = 50
 
 # ── Application metadata ─────────────────────────────────────────────────────
 APP_NAME: str = "EveJS-Launcher"

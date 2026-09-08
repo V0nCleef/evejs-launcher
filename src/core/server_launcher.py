@@ -4,8 +4,10 @@ Both processes write stdout/stderr directly to launcher console-log files so
 the built-in console panel can tail a 1:1 mirror without making service output
 dependent on a Python pipe-reader thread.
 """
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 import hashlib
 import json
 import os
@@ -97,42 +99,65 @@ def get_market_console_log() -> Path:
     return MARKET_CONSOLE_LOG
 
 
-def native_market_database_status(
+class NativeMarketDatabaseState(str, Enum):
+    READY = "ready"
+    MISSING = "missing"
+    INVALID = "invalid"
+    BUSY = "busy"
+
+
+@dataclass(frozen=True)
+class NativeMarketDatabaseResult:
+    """Optional Market readiness without conflating a lock with damaged data."""
+
+    state: NativeMarketDatabaseState
+    reason: str = ""
+
+    @property
+    def available(self) -> bool:
+        return self.state is NativeMarketDatabaseState.READY
+
+
+def inspect_native_market_database(
     evejs_root: str | Path,
-) -> tuple[bool, str]:
-    """Return whether the configured optional Native Market seed is usable."""
+) -> NativeMarketDatabaseResult:
+    """Inspect the optional Native Market seed; call outside the GUI thread.
+
+    Reads and SQLite schema access may block on storage. Database lock conflicts
+    return Busy immediately so the user can retry without a rebuild suggestion.
+    """
     market_dir = Path(evejs_root) / "externalservices" / "market-server"
     config_path = market_dir / "config" / "market-server.local.toml"
     if not config_path.is_file():
-        return False, (
+        return NativeMarketDatabaseResult(NativeMarketDatabaseState.MISSING, (
             f"Optional Market config is missing: {config_path}. "
             "Repair the EveJS installation before starting Market."
-        )
+        ))
 
     try:
         with config_path.open("rb") as stream:
             config = tomllib.load(stream)
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
-        return False, (
+        return NativeMarketDatabaseResult(NativeMarketDatabaseState.INVALID, (
             f"Optional Market config is invalid: {config_path} ({exc}). "
             "Fix or restore it before starting Market."
-        )
+        ))
 
     storage = config.get("storage", {})
     if not isinstance(storage, dict):
-        return False, (
+        return NativeMarketDatabaseResult(NativeMarketDatabaseState.INVALID, (
             f"Optional Market config has an invalid [storage] section: "
             f"{config_path}. Fix or restore it before starting Market."
-        )
+        ))
     database_value = storage.get(
         "database_path",
         DEFAULT_NATIVE_MARKET_DATABASE,
     )
     if not isinstance(database_value, str):
-        return False, (
+        return NativeMarketDatabaseResult(NativeMarketDatabaseState.INVALID, (
             f"Optional Market config has an invalid [storage].database_path: "
             f"{config_path}. Fix or restore it before starting Market."
-        )
+        ))
 
     try:
         # Preserve the configured path exactly. Leading/trailing whitespace is
@@ -141,36 +166,51 @@ def native_market_database_status(
         if not database_path.is_absolute():
             database_path = market_dir / database_path
         if not database_path.is_file():
-            return False, (
+            return NativeMarketDatabaseResult(NativeMarketDatabaseState.MISSING, (
                 f"Optional Market database is missing: {database_path}. "
                 "Build it with Tools > Market Seed Builder."
-            )
+            ))
 
         database_uri = f"{database_path.resolve(strict=True).as_uri()}?mode=ro"
-        with sqlite3.connect(database_uri, uri=True) as connection:
+        # Connection's own context manager controls transactions, not its
+        # lifetime. Explicit closing releases Windows file handles on every path.
+        with closing(sqlite3.connect(database_uri, uri=True, timeout=0.0)) as connection:
             manifest_row = connection.execute(
                 "SELECT 1 FROM manifest WHERE key = ? LIMIT 1",
                 ("manifest_json",),
             ).fetchone()
     except (OSError, ValueError) as exc:
-        return False, (
+        return NativeMarketDatabaseResult(NativeMarketDatabaseState.INVALID, (
             f"Optional Market database path is invalid: {database_value} ({exc}). "
             "Fix [storage].database_path before starting Market."
-        )
+        ))
     except sqlite3.Error as exc:
-        return False, (
+        primary_code = getattr(exc, "sqlite_errorcode", 0) & 0xFF
+        if primary_code in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}:
+            return NativeMarketDatabaseResult(NativeMarketDatabaseState.BUSY, (
+                f"Optional Market database is busy: {database_path}. "
+                "Another operation holds a database lock. Wait for it to finish, "
+                "then try starting Market again."
+            ))
+        return NativeMarketDatabaseResult(NativeMarketDatabaseState.INVALID, (
             f"Optional Market database is not a readable seeded SQLite database: "
             f"{database_path} ({exc}). Rebuild it with Tools > Market Seed Builder."
-        )
+        ))
 
     if manifest_row is None:
-        return False, (
+        return NativeMarketDatabaseResult(NativeMarketDatabaseState.INVALID, (
             f"Optional Market database is incomplete: {database_path} does not "
             "contain the required manifest_json manifest row. Rebuild it with "
             "Tools > Market Seed Builder."
-        )
+        ))
 
-    return True, ""
+    return NativeMarketDatabaseResult(NativeMarketDatabaseState.READY)
+
+
+def native_market_database_status(evejs_root: str | Path) -> tuple[bool, str]:
+    """Compatibility wrapper for existing callers of the two-value status API."""
+    result = inspect_native_market_database(evejs_root)
+    return result.available, result.reason
 
 
 # ── Child-owned console output ────────────────────────────────────────

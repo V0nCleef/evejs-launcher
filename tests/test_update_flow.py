@@ -606,8 +606,9 @@ def test_main_window_shows_update_progress_before_starting_install_worker(
         def start(self) -> None:
             events.append("start")
 
-    monkeypatch.setattr(app_module, "UpdateProgressDialog", FakeProgressDialog)
-    monkeypatch.setattr(app_module, "UpdateInstallWorker", FakeWorker)
+    from src.ui import update_coordinator as updates
+    monkeypatch.setattr(updates, "UpdateProgressDialog", FakeProgressDialog)
+    monkeypatch.setattr(updates, "UpdateInstallWorker", FakeWorker)
 
     window = MainWindow()
     window._status_timer.stop()

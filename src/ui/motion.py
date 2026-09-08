@@ -16,6 +16,14 @@ from PyQt6.QtCore import (
 )
 
 from src.constants import MOTION_DURATIONS_MS
+from PyQt6.QtWidgets import QWidget
+
+
+def window_motion_enabled(owner: QObject | None) -> bool:
+    """Read the owning window's preference; unbound widgets default to on."""
+    while owner is not None and not isinstance(owner, QWidget):
+        owner = owner.parent()
+    return owner is None or owner.window().property("animationsEnabled") is not False
 
 
 class MotionController(QObject):
@@ -33,11 +41,11 @@ class MotionController(QObject):
 
     @property
     def reduced_motion(self) -> bool:
-        return self._reduced_motion
+        return self._reduced_motion or not window_motion_enabled(self.parent())
 
     @property
     def animations_enabled(self) -> bool:
-        return not self._reduced_motion
+        return not self.reduced_motion
 
     def set_reduced_motion(self, reduced: bool) -> None:
         """Update the policy, emitting only when the effective value changes."""
@@ -45,11 +53,11 @@ class MotionController(QObject):
         if reduced == self._reduced_motion:
             return
         self._reduced_motion = reduced
-        self.reduced_motion_changed.emit(reduced)
+        self.reduced_motion_changed.emit(self.reduced_motion)
 
     def duration(self, token_or_ms: str | int) -> int:
         """Resolve a duration token, returning zero for reduced motion."""
-        if self._reduced_motion:
+        if self.reduced_motion:
             return 0
         if isinstance(token_or_ms, str):
             try:
@@ -79,7 +87,7 @@ class MotionController(QObject):
 
     def start(self, animation: QAbstractAnimation) -> bool:
         """Start an animation, or settle its target when motion is reduced."""
-        if not self._reduced_motion:
+        if not self.reduced_motion:
             animation.start()
             return True
 

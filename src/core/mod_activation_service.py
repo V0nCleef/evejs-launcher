@@ -9,6 +9,7 @@ accidentally releasing the installer-compatible lock between those writes.
 """
 from __future__ import annotations
 
+from typing import Callable
 from .mod_activation_state import (
     fail_mod_activation,
     mark_mod_activation_pending,
@@ -16,20 +17,32 @@ from .mod_activation_state import (
 )
 from .mod_lifecycle_lock import ModLifecycleBusyError, acquire_mod_lifecycle_lock
 from .mod_manifest import Mod, ModActivationError, set_mod_active_locked
+from .mod_relationships import validate_mod_change
 
 
-def request_mod_activation(mod: Mod, desired: bool) -> bool:
+def request_mod_activation(
+    mod: Mod,
+    desired: bool,
+    *,
+    mutation: Callable[[Mod, bool], bool] | None = None,
+) -> bool:
     """Durably request ``desired`` and return the verified configured state.
 
     This confirms only the on-disk configuration transaction.  The journal is
     intentionally left at ``pending_restart`` until a later Game lifecycle
     publishes matching runtime evidence.
+
+    A public provider can supply its configuration transaction as ``mutation``.
+    It runs while this service owns the lifecycle lock, so it must use locked
+    registry/configuration APIs and must not acquire the same lock again.
     """
 
     if not isinstance(mod, Mod):
         raise TypeError("mod must be a Mod instance.")
     if type(desired) is not bool:
         raise TypeError("The requested mod state must be a boolean.")
+    if mutation is not None and not callable(mutation):
+        raise TypeError("mutation must be callable or None.")
     if mod.evejs_root is None:
         raise ModActivationError(
             f"Cannot change '{mod.name}': the mod is not bound to an EveJS root."
@@ -37,9 +50,10 @@ def request_mod_activation(mod: Mod, desired: bool) -> bool:
 
     try:
         with acquire_mod_lifecycle_lock(mod.evejs_root):
+            validate_mod_change(mod, desired)
             prepare_mod_activation(mod, desired)
             try:
-                configured = set_mod_active_locked(mod, desired)
+                configured = (mutation or set_mod_active_locked)(mod, desired)
             except Exception as exc:
                 try:
                     fail_mod_activation(

@@ -14,6 +14,7 @@ from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QGraphicsOpacityEffect, QPushButton
 
 from src.constants import COLORS
+from src.ui.visible_motion import VisibleMotion
 from src.widgets.ui_translation import (
     set_translatable_text,
     set_translatable_text_template,
@@ -39,7 +40,15 @@ class UpdateButton(QPushButton):
         self._fx.setOpacity(1.0)
         self.setGraphicsEffect(self._fx)
 
-        self._pulse: QPropertyAnimation | None = None
+        self._pulse = QPropertyAnimation(self._fx, b"opacity", self)
+        self._pulse.setDuration(2000)
+        self._pulse.setStartValue(1.)
+        self._pulse.setKeyValueAt(.5, .78)
+        self._pulse.setEndValue(1.)
+        self._pulse.setLoopCount(-1)
+        self._pulse.setEasingCurve(QEasingCurve.Type.InOutSine)
+        self._available = False
+        self._motion_gate = VisibleMotion(self, self._sync_motion)
 
         # Default: hidden
         self.set_up_to_date()
@@ -138,19 +147,17 @@ class UpdateButton(QPushButton):
     # ------------------------------------------------------------------
 
     def _start_pulse(self) -> None:
-        """Begin looping opacity pulse (0.85 → 1.0, 1.5 s, InOutSine)."""
-        self._fx.setOpacity(1.0)
+        self._available = True
+        self._motion_gate.sync()
 
-        self._pulse = QPropertyAnimation(self._fx, b"opacity", self)
-        self._pulse.setDuration(1500)
-        self._pulse.setStartValue(0.85)
-        self._pulse.setEndValue(1.0)
-        self._pulse.setLoopCount(-1)  # infinite
-        self._pulse.setEasingCurve(QEasingCurve.Type.InOutSine)
-        self._pulse.start()
+    def _sync_motion(self, allowed):
+        if allowed and self._available:
+            if self._pulse.state() != QPropertyAnimation.State.Running:
+                self._pulse.start()
+        else:
+            self._pulse.stop()
+            self._fx.setOpacity(1.0)
 
     def _cancel_pulse(self) -> None:
-        """Stop and discard any running pulse animation."""
-        if self._pulse is not None:
-            self._pulse.stop()
-            self._pulse = None
+        self._available = False
+        self._sync_motion(False)

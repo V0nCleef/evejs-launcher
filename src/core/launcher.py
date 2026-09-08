@@ -13,6 +13,9 @@ from urllib.parse import urlsplit
 
 from .client_autologin import AutoLoginLaunch, require_auto_login_arguments
 from .dlss5 import ensure_dlss5_client_mod, prepare_dlss5_profile_environment
+from .mod_api_runtime import prepare_public_client_mods, public_package_owns_legacy_folder
+from .mod_client_notifications import start_client_notifications
+from .mod_manifest import scan_mods
 from .overview_state import OverviewBridgeLaunch
 from .platform import (
     get_client_exe_path,
@@ -428,14 +431,12 @@ def launch_client(
     selected_client_path = client_path or str(profile_tq_path.resolve())
 
     with serialize_evejs_client_trust_and_spawn():
+        mods = scan_mods(evejs_root)
         # The cross-process client-launch mutex also serializes the DLSS5
         # manager. Initial install/update may mutate the copied client; the
         # exact-package path is read-only and remains safe when client one is
         # already running while client two is prepared.
-        dlss5_environment = ensure_dlss5_client_mod(
-            evejs_root,
-            selected_client_path,
-        )
+        dlss5_environment = {} if public_package_owns_legacy_folder(evejs_root, "mods/DLSS5", mods=mods) else ensure_dlss5_client_mod(evejs_root, selected_client_path)
         certificate_client_path = (
             Path(client_path) if client_path else profile_tq_path.resolve()
         )
@@ -447,13 +448,8 @@ def launch_client(
 
         env = build_env(evejs_root, effective_proxy)
         if dlss5_environment:
+            dlss5_environment = {**dlss5_environment, **prepare_dlss5_profile_environment(profile_tq_path, selected_client_path)}
             env.update(dlss5_environment)
-            env.update(
-                prepare_dlss5_profile_environment(
-                    profile_tq_path,
-                    selected_client_path,
-                )
-            )
             log.info(
                 "Verified DLSS5 integration for selected client; "
                 "launching Trinity in DX12 mode with isolated profile state."
@@ -475,6 +471,14 @@ def launch_client(
                 game_host=effective_context.game_host,
             )
 
+        public_mods = prepare_public_client_mods(
+            evejs_root, selected_client_path, profile_tq_path,
+            backend="docker" if effective_context.target_identity is not None else "native",
+            protected_environment=dlss5_environment, protected_arguments=arguments, mods=mods,
+        )
+        env.update(public_mods.environment)
+        arguments += public_mods.arguments
+
         if auto_login is not None:
             # Never log the rendered /login value: even though the supported
             # Native path uses a fixed dummy password, keeping the diagnostic
@@ -486,6 +490,13 @@ def launch_client(
                 auto_login.username,
                 auto_login.character_id,
             )
-        if pre_spawn_check is not None:
-            pre_spawn_check()
-        return launch_eve_client(exe, env, exe.parent, arguments=arguments)
+        backend = "docker" if effective_context.target_identity is not None else "native"
+        try:
+            if pre_spawn_check is not None:
+                pre_spawn_check()
+            process = launch_eve_client(exe, env, exe.parent, arguments=arguments)
+        except Exception as exc:
+            start_client_notifications(public_mods, backend=backend, error_type=type(exc).__name__)
+            raise
+        start_client_notifications(public_mods, backend=backend, process=process)
+        return process

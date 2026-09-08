@@ -51,7 +51,7 @@ def test_deep_signal_overall_status_uses_the_shared_snapshot(
 
     assert page.overall_status_label.text() == "ALL SYSTEMS NOMINAL"
     assert page.overall_status_label.property("state") == "online"
-    assert page.running_card.value_label.text() == "2"
+    assert page.running_card.count == 2
     assert page.running_card._ring.value == "2"
     assert page.running_card._ring.state == "online"
 

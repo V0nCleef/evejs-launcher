@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import sqlite3
+from types import SimpleNamespace
 from copy import deepcopy
 from pathlib import Path
 
 import pytest
+import time
 from PyQt6.QtWidgets import QApplication, QMainWindow
 
 from src import app as app_module
@@ -63,8 +65,9 @@ def bare_window(qapp: QApplication) -> MainWindow:
             return None
 
     class FakeHomePage:
-        def __init__(self) -> None:
-            self.hero = FakeHero()
+        @staticmethod
+        def set_animations_enabled(_enabled: bool) -> None:
+            return None
 
         @staticmethod
         def set_server_mode(_mode: str) -> None:
@@ -110,6 +113,31 @@ def test_main_window_constructs_without_legacy_settings_prompt(
         assert callable(window._settings_page._save_validator)
     finally:
         window.deleteLater()
+
+
+def _defer_native_start_worker(window):
+    """Run the actual captured worker later, without creating OS processes."""
+    pending = []
+    window._publish_cached_runtime = lambda: None
+    window._announce_shipboard = lambda *args, **kwargs: None
+
+    def begin(worker, handler):
+        window._lifecycle_thread = SimpleNamespace(deleteLater=lambda: None)
+        window._lifecycle_worker = worker
+        window._lifecycle_result_received = False
+        window._lifecycle_thread_finished = False
+        worker.completed.connect(handler)
+        pending.append(worker)
+
+    window._begin_lifecycle_worker = begin
+
+    def complete():
+        assert len(pending) == 1
+        pending.pop().run()
+        window._lifecycle_thread_finished = True
+        window._finish_lifecycle_if_complete()
+
+    return complete
 
 
 def test_launcher_created_character_is_exempt_from_automatic_hiding(
@@ -369,7 +397,7 @@ def test_native_game_worker_is_bound_to_the_lock_owned_runtime_plan(
     bare_window._lifecycle_thread = None
 
 
-def test_invalid_mod_manifest_blocks_native_process_start(
+def test_unselected_invalid_mod_manifest_does_not_block_native_process_start(
     bare_window: MainWindow,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -380,16 +408,20 @@ def test_invalid_mod_manifest_blocks_native_process_start(
     bare_window._cfg["evejs_root"] = str(tmp_path)
     bare_window._lifecycle_thread = None
     failures: list[str] = []
-    bare_window._begin_lifecycle_worker = lambda *_args: pytest.fail(
-        "a Game worker was created from invalid mod metadata"
-    )
+    workers = []
+    def begin(*args):
+        workers.append(args)
+        bare_window._lifecycle_thread = object()
+    bare_window._begin_lifecycle_worker = begin
+    bare_window._publish_cached_runtime = lambda: None
+    bare_window._announce_shipboard = lambda *args, **kwargs: None
     monkeypatch.setattr(
         app_module.QMessageBox,
         "critical",
         lambda _parent, _title, message: failures.append(message),
     )
 
-    assert not bare_window._start_service_sequence(
+    assert bare_window._start_service_sequence(
         start_market=False,
         start_game=True,
         mode="modded",
@@ -397,9 +429,11 @@ def test_invalid_mod_manifest_blocks_native_process_start(
         error_title="Game Server Error",
     )
 
-    assert bare_window._mod_lifecycle_lease is None
-    assert bare_window._native_mod_runtime_plan is None
-    assert failures and "No Game process was started" in failures[0]
+    assert len(workers) == 1
+    assert bare_window._native_mod_runtime_plan.mods == ()
+    assert bare_window._native_mod_runtime_plan.selected_loader_ids == ()
+    assert not failures
+    bare_window._lifecycle_thread = None
 
 
 def test_mod_restart_keeps_one_lease_across_stop_then_start(
@@ -903,19 +937,15 @@ def test_manual_market_start_skips_unavailable_seed_and_clears_stale_error(
         "src.app.QMessageBox.information",
         lambda _parent, title, message: messages.append((title, message)),
     )
-    monkeypatch.setattr(
-        bare_window,
-        "_start_service_sequence",
-        lambda **_kwargs: pytest.fail("unavailable Market reached startup worker"),
-        raising=False,
-    )
+    complete = _defer_native_start_worker(bare_window)
 
     bare_window._start_market()
 
-    assert events == ["status"]
+    assert messages == []  # preflight and its UI result are deferred
+    complete()
     assert len(messages) == 1
     assert messages[0][0] == "Optional Market Not Ready"
-    assert "Tools > Market Seed Builder" in messages[0][1]
+    assert "Repair the EveJS installation" in messages[0][1]
     assert bare_window._market_intent is None
     assert bare_window._market_error is None
     assert bare_window._service_reachability == (True, False)
@@ -1039,22 +1069,16 @@ def test_start_all_starts_game_without_unseeded_optional_market(
         (
             "sequence",
             {
-                "start_market": False,
+                "start_market": True,
                 "start_game": True,
                 "mode": "vanilla",
                 "on_ready": None,
                 "error_title": "Service Startup Failed",
-                "voice_event": VoiceEvent.GAME_SERVER_LAUNCHING,
+                "voice_event": VoiceEvent.SERVER_STACK_LAUNCHING,
             },
         ),
     ]
-    assert len(messages) == 1
-    assert "optional market" in messages[0][1].casefold()
-    assert "game will start without it" in messages[0][1].casefold()
-    assert "Tools > Market Seed Builder" in messages[0][1]
-    assert bare_window._market_intent is None
-    assert bare_window._market_error is None
-    assert bare_window._service_reachability == (False, False)
+    assert messages == []  # the worker inspects the seed after this GUI call
 
 
 def test_start_all_skips_unavailable_market_when_game_is_already_active(
@@ -1078,19 +1102,15 @@ def test_start_all_skips_unavailable_market_when_game_is_already_active(
         "src.app.QMessageBox.information",
         lambda _parent, title, message: messages.append((title, message)),
     )
-    monkeypatch.setattr(
-        bare_window,
-        "_start_service_sequence",
-        lambda **_kwargs: pytest.fail("empty startup request reached worker"),
-        raising=False,
-    )
+    complete = _defer_native_start_worker(bare_window)
 
     bare_window._start_all_servers()
 
-    assert events == ["status"]
+    assert messages == []
+    complete()
     assert len(messages) == 1
     assert messages[0][0] == "Optional Market Not Ready"
-    assert "game is already online" in messages[0][1].casefold()
+    assert "optional market" in messages[0][1].casefold()
     assert "already running" not in messages[0][0].casefold()
     assert bare_window._market_intent is None
     assert bare_window._market_error is None
@@ -1718,7 +1738,7 @@ def test_auto_start_continues_game_without_unavailable_optional_market(
 
     assert events == ["resolve"]
     assert len(sequence_calls) == 1
-    assert sequence_calls[0]["start_market"] is False
+    assert sequence_calls[0]["start_market"] is True
     assert sequence_calls[0]["start_game"] is True
     assert sequence_calls[0]["mode"] == "vanilla"
     assert sequence_calls[0]["error_title"] == "Auto-start Services Failed"
@@ -1726,9 +1746,8 @@ def test_auto_start_continues_game_without_unavailable_optional_market(
     assert callable(callback)
     callback()
     assert events == ["resolve", "ready"]
-    assert bare_window._market_intent is None
-    assert bare_window._market_error is None
-    assert bare_window._service_reachability == (False, False)
+    # The GUI only captures the request; preflight/state publication is owned by
+    # the service worker and covered separately with real missing/busy fixtures.
 
 
 def test_auto_start_continues_client_when_only_unavailable_market_was_requested(
@@ -1754,16 +1773,13 @@ def test_auto_start_continues_client_when_only_unavailable_market_was_requested(
         "src.app.QMessageBox.information",
         lambda *_args: pytest.fail("client continuation must not wait on optional Market"),
     )
-    monkeypatch.setattr(
-        bare_window,
-        "_start_service_sequence",
-        lambda **_kwargs: pytest.fail("empty startup request reached worker"),
-        raising=False,
-    )
+    complete = _defer_native_start_worker(bare_window)
 
     assert bare_window._ensure_server_if_needed(lambda: events.append("ready")) is True
 
-    assert events == ["status", "ready"]
+    assert events == []
+    complete()
+    assert events == ["ready"]
     assert bare_window._market_intent is None
     assert bare_window._market_error is None
     assert bare_window._service_reachability == (True, False)
@@ -1910,9 +1926,20 @@ def test_native_client_launch_preserves_configured_endpoint_context(
         return Process()
 
     monkeypatch.setattr(app_module, "launch_client", launch_client)
-    monkeypatch.setattr(app_module.threading, "Thread", Thread)
+    monkeypatch.setattr(app_module, "threading", SimpleNamespace(Thread=Thread))
 
-    assert bare_window._launch_account("fixture-account", "Fixture Character") is True
+    bare_window._refresh_character_views = lambda: None
+    bare_window._update_status_bar = lambda: None
+    bare_window._announce_shipboard = lambda *args, **kwargs: None
+    assert bare_window._start_client_launch("fixture-account", "Fixture Character") is True
+    deadline = time.monotonic() + 5
+    while bare_window._client_launch_thread is not None and time.monotonic() < deadline:
+        QApplication.processEvents()
+        if bare_window._client_launch_thread is not None:
+            bare_window._client_launch_thread.wait(5)
+    QApplication.processEvents()
+    assert bare_window._client_launch_thread is None
+    assert sum(event[0] == "track" for event in events) == 1
 
     context = next(event[1] for event in events if event[0] == "launch")
     assert (context.game_host, context.game_port) == ("127.0.0.1", 27555)

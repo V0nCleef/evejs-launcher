@@ -18,12 +18,13 @@ import re
 import stat
 import subprocess
 import time
+import uuid
 from typing import Mapping
 import winreg
 
 from .mod_activation_state import retire_removed_mod_activation
 from .mod_lifecycle_lock import acquire_mod_lifecycle_lock
-from .mod_manifest import Mod, scan_mods
+from .mod_manifest import ActivationKind, Mod, ModManifestError, _read_integrated_mod, scan_mods
 from .mod_runtime_state import mod_contract_sha256
 
 
@@ -33,6 +34,9 @@ INNO_USER_PROVIDER = "inno-user-v2"
 SELF_DELETE_WAIT_SECONDS = 10.0
 REMOVAL_INVENTORY_SCHEMA_VERSION = 1
 MAX_REMOVAL_INVENTORY_BYTES = 1024 * 1024
+MAX_MANAGED_STATE_FILES = 10000
+MAX_MANAGED_STATE_FILE_BYTES = 64 * 1024 * 1024
+MAX_MANAGED_STATE_BYTES = 512 * 1024 * 1024
 
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 _APP_ID_PATTERN = re.compile(
@@ -139,6 +143,59 @@ class ManagedModRemovalResult:
     message: str
     log_path: Path | None = None
     warning: str = ""
+    data_backup_path: Path | None = None
+    review: tuple[LegacyRemovalConflict, ...] = ()
+
+
+@dataclass(frozen=True)
+class LegacyRemovalConflict:
+    """Bounded, observational snapshot; never authority to force an uninstall."""
+    relative_path: str
+    reason: str
+    expected_state: str
+    expected_sha256: str | None
+    current: bytes | None = None
+    unavailable: str = ""
+
+
+class LegacyRemovalReviewRequired(ModManagementError):
+    def __init__(self, review: tuple[LegacyRemovalConflict, ...]):
+        self.review = review
+        super().__init__("Legacy removal needs a shared-file review before execution. "
+                         + "; ".join(f"{item.relative_path}: {item.reason}" for item in review))
+
+
+@dataclass(frozen=True)
+class ManagedRemovalPreflight:
+    """Read-only legacy-provider overlap and known private-data inventory."""
+    conflicts: tuple[tuple[str, str], ...]
+    state_files: tuple[str, ...]
+
+    @property
+    def ready(self) -> bool:
+        return not self.conflicts
+
+
+@dataclass(frozen=True)
+class _SavedModData:
+    directory: Path
+    files: tuple[tuple[str, str], ...]
+
+
+def _removal_contract_mod(mod: Mod) -> Mod:
+    """Validate installed metadata independently from editable configuration."""
+    if mod.valid:
+        return mod
+    if mod.evejs_root is None:
+        raise ModManagementError("The current mod contract is unbound.")
+    root = _canonical_directory(mod.evejs_root, "selected EveJS root")
+    expected = root / "server" / "mods" / mod.id
+    if mod.path != expected or mod.manifest_path != expected / "evejs-launcher.mod.json":
+        raise ModManagementError("The damaged mod has no recoverable installed manifest.")
+    try:
+        return _read_integrated_mod(root, expected, mod.manifest_path, active_override=False)
+    except (OSError, ModManifestError) as exc:
+        raise ModManagementError("The installed manifest is invalid; installer ownership cannot be established.") from exc
 
 
 def read_managed_mod_registration(mod: Mod) -> ManagedModRegistration:
@@ -146,15 +203,21 @@ def read_managed_mod_registration(mod: Mod) -> ManagedModRegistration:
 
     if not isinstance(mod, Mod):
         raise TypeError("mod must be a Mod instance.")
-    if not mod.valid:
-        raise ModManagementError(
-            f"Cannot manage removal for '{mod.name}': its runtime manifest is invalid."
-        )
+    mod = _removal_contract_mod(mod)
     if mod.evejs_root is None:
         raise ModManagementError(
             f"Cannot manage removal for '{mod.name}': it is not bound to an EveJS root."
         )
-    registry_path = managed_mod_registry_path(mod.id)
+    # Undeclared loaders use their folder name as identity. Windows registry
+    # keys are case-insensitive, whereas declared installer IDs are lowercase.
+    # A legacy folder name outside the installer grammar cannot be enrolled.
+    legacy_loader = mod.manifest_path is None and mod.activation_kind is ActivationKind.LOADER_RENAME
+    try:
+        registry_path = managed_mod_registry_path(mod.id.lower() if legacy_loader else mod.id)
+    except ModManagementError:
+        if legacy_loader:
+            raise ModNotManagedError("This legacy loader has no installer-compatible identity.") from None
+        raise
     registrations = []
     for registry_view in dict.fromkeys(_REGISTRY_VIEWS):
         values = _read_registry_values(
@@ -233,7 +296,8 @@ def validate_managed_mod_registration(
 
     if not isinstance(mod, Mod):
         raise TypeError("mod must be a Mod instance.")
-    if not mod.valid or mod.evejs_root is None:
+    mod = _removal_contract_mod(mod)
+    if mod.evejs_root is None:
         raise ModManagementError("The current mod contract is invalid or unbound.")
     if set(values) != set(_EXPECTED_REGISTRY_TYPES):
         raise ModManagementError("The launcher removal registration fields are not exact.")
@@ -257,10 +321,6 @@ def validate_managed_mod_registration(
     mod_id = _require_registry_text(values, "ModId")
     display_name = _require_registry_text(values, "DisplayName")
     package_version = _require_registry_text(values, "PackageVersion")
-    if mod_id != mod.id or display_name != mod.name or package_version != mod.version:
-        raise ModManagementError(
-            "The launcher removal registration does not match this installed mod."
-        )
 
     root = _canonical_directory(mod.evejs_root, "selected EveJS root")
     registered_root = _canonical_directory(
@@ -268,8 +328,12 @@ def validate_managed_mod_registration(
         "registered EveJS root",
     )
     if _path_identity(root) != _path_identity(registered_root):
-        raise ModManagementError(
+        raise ModNotManagedError(
             "The launcher removal registration belongs to a different EveJS root."
+        )
+    if mod_id != mod.id or display_name != mod.name or package_version != mod.version:
+        raise ModManagementError(
+            "The launcher removal registration does not match this installed mod."
         )
 
     try:
@@ -437,6 +501,249 @@ def remove_managed_mod(
         )
 
 
+def _safe_root_file(root: Path, relative: str) -> Path:
+    relative = _require_inventory_relative_path(relative)
+    target = root.joinpath(*relative.split("/"))
+    current = root
+    for part in relative.split("/")[:-1]:
+        current = current / part
+        if not _path_present(current):
+            break
+        _canonical_directory(current, "mod-owned data directory")
+    if _path_present(target):
+        _require_safe_regular_file(target, "mod-owned file")
+    return target
+
+
+def _known_state_files(registration: ManagedModRegistration) -> tuple[str, ...]:
+    root, mod_id = registration.evejs_root, registration.mod_id
+    if mod_id.casefold() in {"gamestore", "launcher-mods"}:
+        raise ModManagementError("This ID overlaps shared EveJS or launcher state.")
+    found = []
+    config_relative = f"config/mods/{mod_id}.json"
+    config_path = _safe_root_file(root, config_relative)
+    if _path_present(config_path):
+        found.append(config_relative)
+    state_root = root / "_local" / mod_id
+    if _path_present(state_root):
+        _require_safe_directory_chain(root, state_root)
+        pending = [state_root]
+        while pending:
+            folder = pending.pop()
+            for child in sorted(folder.iterdir(), key=lambda path: path.name.casefold()):
+                if folder == state_root and child.name.casefold() == "install":
+                    continue
+                info = child.lstat()
+                if stat.S_ISDIR(info.st_mode):
+                    _canonical_directory(child, "mod-owned state directory")
+                    pending.append(child)
+                else:
+                    _require_safe_regular_file(child, "mod-owned state file")
+                    found.append(child.relative_to(root).as_posix())
+                if len(found) > MAX_MANAGED_STATE_FILES:
+                    raise ModManagementError("The mod's private state exceeds the supported file count.")
+    total = 0
+    for relative in found:
+        size = _safe_root_file(root, relative).stat().st_size
+        if size > MAX_MANAGED_STATE_FILE_BYTES:
+            raise ModManagementError(f"A mod state file exceeds the supported size: {relative}")
+        total += size
+    if total > MAX_MANAGED_STATE_BYTES:
+        raise ModManagementError("The mod's private state exceeds the supported backup size.")
+    return tuple(sorted(found, key=str.casefold))
+
+
+def _installed_payload_hashes(registration: ManagedModRegistration) -> dict[str, str]:
+    """Read the existing installer journal's explicit installed-file evidence.
+
+    Original-only inventory entries cannot establish present ownership. This
+    recognizes the shipped pointer/payload journal shape without running code.
+    Unknown journal formats provide no automatic restoration authority.
+    """
+    from .mod_manifest import _parse_json_object
+    root = registration.evejs_root
+    install_relative = f"_local/{registration.mod_id}/install"
+    try:
+        pointer_content = _read_stable_file_bytes(
+            _safe_root_file(root, install_relative + "/current.json"),
+            maximum=MAX_REMOVAL_INVENTORY_BYTES, label="install pointer")
+        if hashlib.sha256(pointer_content).hexdigest() != registration.current_pointer_sha256:
+            raise ModManagementError("The active install pointer changed during removal preflight.")
+        pointer = _parse_json_object(pointer_content, "Install pointer")
+        relative = pointer.get("journalRelativePath")
+        if relative is None:
+            return {}
+        relative = _require_inventory_relative_path(relative)
+        journal = _parse_json_object(_read_stable_file_bytes(
+            _safe_root_file(root, install_relative + "/" + relative),
+            maximum=MAX_REMOVAL_INVENTORY_BYTES, label="install journal"), "Install journal")
+        if (journal.get("modSlug") != registration.mod_id or not isinstance(journal.get("evejsPath"), str)
+                or _path_identity(Path(journal["evejsPath"])) != _path_identity(root)
+                or not isinstance(journal.get("payload"), list)):
+            raise ModManagementError("The active install journal does not prove this mod's file ownership.")
+        result = {}
+        for entry in journal["payload"]:
+            if not isinstance(entry, dict) or entry.get("installed") is not True:
+                continue
+            path = _require_inventory_relative_path(entry.get("relativePath"))
+            digest = entry.get("installedSha256")
+            if type(digest) is not str or not _SHA256_PATTERN.fullmatch(digest):
+                raise ModManagementError("An installed payload hash is invalid.")
+            if path.casefold() in result:
+                raise ModManagementError("The install journal repeats a file owner.")
+            result[path.casefold()] = digest
+        return result
+    except ModManifestError as exc:
+        raise ModManagementError("The installed ownership journal is malformed.") from exc
+
+
+def _file_has_other_contributors(store, owner, target: Path) -> bool:
+    from .mod_contributions import ContributionError
+    try:
+        return any(candidate.record["evejs_root"] != owner.record["evejs_root"]
+            or candidate.record["mod_relative_path"] != owner.record["mod_relative_path"]
+            for candidate in store.owners_for_path(target))
+    except ContributionError as exc:
+        raise ModManagementError("Contribution ownership cannot be verified for legacy removal.") from exc
+
+
+def preview_managed_mod_removal(request: ManagedModRemovalRequest) -> ManagedRemovalPreflight:
+    """Inspect legacy whole-file authority and data without writing or executing."""
+    from .mod_contributions import ContributionOwner, ContributionStore
+    if not isinstance(request, ManagedModRemovalRequest) or not isinstance(request.policy, ModDataPolicy):
+        raise TypeError("A typed managed removal request is required.")
+    registration = request.registration
+    if not isinstance(registration, ManagedModRegistration):
+        raise TypeError("A typed managed removal registration is required.")
+    root = _canonical_directory(registration.evejs_root, "selected EveJS root")
+    from .mod_relationships import validate_mod_change
+    for installed_mod in scan_mods(root):
+        if installed_mod.path == root / "server" / "mods" / registration.mod_id:
+            validate_mod_change(installed_mod, False)
+    owner = ContributionOwner(root, f"server/mods/{registration.mod_id}")
+    store = ContributionStore(root)
+    state_files = _known_state_files(registration)
+    protected = {path.casefold() for path in state_files}
+    installed = None
+    conflicts = []
+    private_prefix = f"server/mods/{registration.mod_id}/".casefold()
+    for entry in registration.removal_inventory:
+        if tuple(part.casefold() for part in entry.relative_path.split("/")[:2]) == ("_local", "gamestore"):
+            conflicts.append((entry.relative_path, "Shared EveJS GameStore data is outside generic mod removal."))
+            continue
+        target = _safe_root_file(root, entry.relative_path)
+        if _file_has_other_contributors(store, owner, target):
+            conflicts.append((entry.relative_path, "Other mods have recorded contributions; this provider cannot compose their remaining edits."))
+            continue
+        if request.policy is ModDataPolicy.KEEP and entry.relative_path.casefold() in protected:
+            conflicts.append((entry.relative_path, "The legacy removal inventory conflicts with Keep Data."))
+            continue
+        if entry.relative_path.casefold().startswith(private_prefix):
+            continue
+        present = _path_present(target)
+        current_hash = _sha256_stable_file(target) if present else None
+        if (entry.expected_state == "absent" and not present
+                or entry.expected_state == "sha256" and current_hash == entry.expected_sha256):
+            continue
+        if installed is None:
+            installed = _installed_payload_hashes(registration)
+        if current_hash is not None and installed.get(entry.relative_path.casefold()) == current_hash:
+            continue
+        conflicts.append((entry.relative_path,
+            "Present bytes are not proven by installed-file history; preserve this file and review its later changes."))
+    return ManagedRemovalPreflight(tuple(conflicts), state_files)
+
+
+def legacy_removal_review(request: ManagedModRemovalRequest,
+                          preflight: ManagedRemovalPreflight) -> tuple[LegacyRemovalConflict, ...]:
+    """Capture small text candidates off-thread without traversing unsafe paths.
+
+    Terminal hashes do not supply original bytes or an installer composition API.
+    No inferred replacement is offered, even when contribution records exist.
+    """
+    entries = {entry.relative_path: entry for entry in request.registration.removal_inventory}
+    result = []
+    remaining = 2 * 1024 * 1024
+    for relative, reason in preflight.conflicts:
+        entry = entries[relative]
+        content = None
+        unavailable = ""
+        try:
+            target = _safe_root_file(request.registration.evejs_root, relative)
+            if _path_present(target):
+                content = _read_stable_file_bytes(target, maximum=min(128000, remaining), label="conflict preview")
+                remaining -= len(content)
+        except (OSError, ModManagementError) as exc:
+            unavailable = str(exc)
+        result.append(LegacyRemovalConflict(relative, reason, entry.expected_state,
+                                            entry.expected_sha256, content, unavailable))
+    return tuple(result)
+
+
+def _preserve_mod_data(request: ManagedModRemovalRequest, paths: tuple[str, ...]) -> _SavedModData | None:
+    if not paths:
+        return None
+    root = request.registration.evejs_root
+    relative = f"_local/launcher-mods/managed-removals/{uuid.uuid4().hex}"
+    directory = root.joinpath(*relative.split("/"))
+    _safe_root_file(root, relative + "/preservation.json")
+    directory.mkdir(parents=True, exist_ok=False)
+    _require_safe_directory_chain(root, directory)
+    copied = []
+    total = 0
+    for path in paths:
+        source = _safe_root_file(root, path)
+        content = _read_stable_file_bytes(source, maximum=MAX_MANAGED_STATE_FILE_BYTES, label="mod data")
+        total += len(content)
+        if total > MAX_MANAGED_STATE_BYTES:
+            raise ModManagementError("Mod data grew beyond the supported backup size.")
+        destination = directory / "data" / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        _require_safe_directory_chain(root, destination.parent)
+        with destination.open("xb") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        digest = hashlib.sha256(content).hexdigest()
+        if _sha256_stable_file(destination) != digest or _sha256_stable_file(source) != digest:
+            raise ModManagementError("Mod data changed while its recovery copy was prepared.")
+        copied.append((path, digest))
+    (directory / "preservation.json").write_text(json.dumps({
+        "schemaVersion": 1, "root": str(root), "modId": request.registration.mod_id,
+        "policy": request.policy.value, "files": dict(copied),
+    }, indent=2) + "\n", encoding="utf-8")
+    return _SavedModData(directory, tuple(copied))
+
+
+def _verify_preserved_mod_data(request: ManagedModRemovalRequest, saved: _SavedModData | None) -> None:
+    if saved is None:
+        return
+    root = request.registration.evejs_root
+    mismatches = []
+    for relative, digest in saved.files:
+        backup = saved.directory / "data" / relative
+        if _sha256_stable_file(backup) != digest:
+            raise ModManagementError("The mod data recovery copy changed; removal cannot be confirmed.")
+        target = _safe_root_file(root, relative)
+        present = _path_present(target)
+        if request.policy is ModDataPolicy.QUARANTINE:
+            if present:
+                mismatches.append(relative)
+        elif not present or _sha256_stable_file(target) != digest:
+            mismatches.append(relative)
+            # Recreate only missing data. A later existing edit is preserved for
+            # review alongside its exact pre-operation backup, never overwritten.
+            if not present:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                _require_safe_directory_chain(root, target.parent)
+                with target.open("xb") as stream:
+                    stream.write(_read_stable_file_bytes(backup, maximum=MAX_MANAGED_STATE_FILE_BYTES,
+                        label="saved mod data"))
+    if mismatches:
+        action = "Keep Data was not honored" if request.policy is ModDataPolicy.KEEP else "State was not fully quarantined"
+        raise ModManagementError(f"{action}: {', '.join(mismatches)}. Recovery data: {saved.directory}")
+
+
 def _remove_managed_mod_under_operation_lock(
     request: ManagedModRemovalRequest,
     *,
@@ -453,6 +760,12 @@ def _remove_managed_mod_under_operation_lock(
         raise ModManagementError(
             "The mod or its removal registration changed before removal started."
         )
+
+    preflight = preview_managed_mod_removal(request)
+    if not preflight.ready:
+        raise LegacyRemovalReviewRequired(legacy_removal_review(request, preflight))
+    saved_data = _preserve_mod_data(request, preflight.state_files)
+    recovery_hint = f" Recovery data: {saved_data.directory}" if saved_data else ""
 
     log_path = _new_launcher_uninstall_log(registration.mod_id)
     state_switch = (
@@ -488,16 +801,16 @@ def _remove_managed_mod_under_operation_lock(
         raise ModManagementError(
             "The mod uninstaller was terminated after the configured test/safety "
             "timeout. Removal state is indeterminate; inspect the EveJS root and "
-            f"uninstall log before retrying. Log: {log_path}"
+            f"uninstall log before retrying. Log: {log_path}{recovery_hint}"
         ) from exc
     except OSError as exc:
-        raise ModManagementError("The registered mod uninstaller could not start.") from exc
+        raise ModManagementError("The registered mod uninstaller could not start." + recovery_hint) from exc
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "").strip().splitlines()
         suffix = f" Last output: {detail[-1]}" if detail else ""
         raise ModManagementError(
             f"The mod uninstaller failed with exit code {completed.returncode}.{suffix} "
-            f"Log: {log_path}"
+            f"Log: {log_path}{recovery_hint}"
         )
 
     kit_root = registration.uninstaller_path.parent
@@ -527,10 +840,12 @@ def _remove_managed_mod_under_operation_lock(
 
     warning = ""
     with acquire_mod_lifecycle_lock(registration.evejs_root):
+        _verify_preserved_mod_data(request, saved_data)
         remaining = tuple(
             mod
             for mod in scan_mods(registration.evejs_root)
             if mod.id == registration.mod_id
+            and mod.path == registration.evejs_root / "server" / "mods" / registration.mod_id
         )
         pointer = (
             registration.evejs_root
@@ -589,6 +904,7 @@ def _remove_managed_mod_under_operation_lock(
         message=f"{registration.display_name} was removed from EveJS.",
         log_path=log_path,
         warning=warning,
+        data_backup_path=saved_data.directory if saved_data else None,
     )
 
 
@@ -671,12 +987,13 @@ def _matching_current_mod(registration: ManagedModRegistration) -> Mod:
         mod
         for mod in scan_mods(registration.evejs_root)
         if mod.id == registration.mod_id
+        and mod.path == registration.evejs_root / "server" / "mods" / registration.mod_id
     )
-    if len(matches) != 1 or not matches[0].valid:
+    if len(matches) != 1:
         raise ModManagementError(
             "The installed mod contract disappeared or became invalid before removal."
         )
-    current = matches[0]
+    current = _removal_contract_mod(matches[0])
     try:
         fingerprint = mod_contract_sha256(current)
     except Exception as exc:
@@ -965,7 +1282,11 @@ def _require_inventory_relative_path(value: object) -> str:
     ):
         raise ModManagementError("A removal inventory path is unsafe.")
     parts = value.split("/")
-    if any(not part or part in {".", ".."} for part in parts):
+    reserved = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)),
+                *(f"lpt{i}" for i in range(1, 10))}
+    if any(not part or part in {".", ".."} or part.endswith((".", " "))
+            or any(character in '<>"|?*' for character in part)
+            or part.split(".", 1)[0].casefold() in reserved for part in parts):
         raise ModManagementError("A removal inventory path is unsafe.")
     return value
 
@@ -1053,8 +1374,16 @@ def _verify_removal_inventory(registration: ManagedModRegistration) -> None:
     """Prove every enrolled executable integration path reached its end state."""
 
     root = registration.evejs_root
+    from .mod_contributions import ContributionOwner, ContributionStore
+    owner = ContributionOwner(root, f"server/mods/{registration.mod_id}")
+    store = ContributionStore(root)
     for entry in registration.removal_inventory:
         target = root.joinpath(*entry.relative_path.split("/"))
+        if _file_has_other_contributors(store, owner, target):
+            raise ModManagementError(
+                "The legacy whole-file result cannot verify another mod's retained contributions: "
+                + entry.relative_path
+            )
         parent_missing = False
         current = root
         for part in entry.relative_path.split("/")[:-1]:
@@ -1130,6 +1459,7 @@ __all__ = [
     "ManagedModRegistration",
     "ManagedModRemovalRequest",
     "ManagedModRemovalResult",
+    "ManagedRemovalPreflight",
     "ModDataPolicy",
     "ModManagementError",
     "ModNotManagedError",
@@ -1137,6 +1467,7 @@ __all__ = [
     "managed_mod_registry_path",
     "managed_mod_operation_mutex_name",
     "read_managed_mod_registration",
+    "preview_managed_mod_removal",
     "remove_managed_mod",
     "validate_managed_mod_registration",
 ]

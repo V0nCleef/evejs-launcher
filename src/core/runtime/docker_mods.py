@@ -20,6 +20,7 @@ from typing import Iterable
 
 from src.core.runtime.docker_compose import ComposeTarget
 from src.core.service_status import DockerControlPolicy
+from src.core.mod_loader_state import LoaderStateError, resolve_loader_state
 
 
 _OVERRIDE_DIRECTORY = ".evejs-launcher"
@@ -28,12 +29,6 @@ _TRANSACTION_FILENAME = "compose.mods.transaction.json"
 _OWNED_HEADER = "# Managed by EveJS Launcher. Manual edits will be replaced."
 _CONTAINER_MODS_ROOT = "/app/mods"
 _NODE_OPTIONS_PREFIX = "      NODE_OPTIONS: "
-_LOADER_FILENAMES = (
-    "loader.js",
-    "loader.js.disabled",
-    "loader.js.off",
-    "loader.js.bak",
-)
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
 MAX_DOCKER_MOD_OVERRIDE_BYTES = 512 * 1024
 MAX_DOCKER_LOADER_PAYLOAD_BYTES = 2 * 1024 * 1024
@@ -439,19 +434,11 @@ def _loader_candidates(root: Path, name: str) -> tuple[Path, ...]:
         raise DockerModBridgeError(
             f"The Docker loader directory for {name!r} is unavailable or unsafe."
         ) from exc
-    candidates: list[Path] = []
-    for filename in _LOADER_FILENAMES:
-        candidate = folder / filename
-        try:
-            candidate.lstat()
-        except FileNotFoundError:
-            continue
-        except OSError as exc:
-            raise DockerModBridgeError(
-                "A Docker loader payload could not be inspected."
-            ) from exc
-        candidates.append(candidate)
-    return tuple(candidates)
+    try:
+        selected = resolve_loader_state(folder, root=root).selected_path
+    except LoaderStateError as exc:
+        raise DockerModBridgeError(f"A Docker loader payload could not be selected: {exc}") from exc
+    return (selected,) if selected is not None else ()
 
 
 def _yaml_scalar(value: str) -> str:

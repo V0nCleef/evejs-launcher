@@ -57,6 +57,20 @@ def test_worker_emits_the_executor_terminal_result(qapp, tmp_path: Path) -> None
     assert results == [expected]
 
 
+def test_worker_preserves_structured_legacy_review(qapp, tmp_path):
+    from src.core.mod_management import LegacyRemovalConflict, LegacyRemovalReviewRequired
+    request = _request(tmp_path)
+    review = (LegacyRemovalConflict("shared.json", "overlap", "sha256", "a" * 64, b'{"a":1}'),)
+    def fail(_request):
+        raise LegacyRemovalReviewRequired(review)
+    results = []
+    worker = ManagedModRemovalWorker(request, executor=fail)
+    worker.completed.connect(results.append)
+    worker.run()
+    assert len(results) == 1
+    assert not results[0].success and results[0].review == review
+
+
 def test_worker_converts_executor_failure_to_one_failure_result(
     qapp,
     tmp_path: Path,

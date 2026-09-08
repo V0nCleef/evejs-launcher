@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import QSizePolicy, QWidget
 from src.constants import MOTION_DURATIONS_MS, SEMANTIC_COLORS, STATUS_COLORS
 from src.i18n import format_ui_phrase, translate_ui_phrase
 from src.ui.motion import MotionController
+from src.ui.visible_motion import VisibleMotion
 
 
 # ``idle`` remains deliberately neutral, but an explicitly observed offline
@@ -91,6 +92,7 @@ class StatusRing(QWidget):
         self._activity_animation.valueChanged.connect(self._set_phase)
         self._motion.reduced_motion_changed.connect(self._on_motion_policy_changed)
 
+        self._motion_gate = VisibleMotion(self, lambda _allowed: self._sync_animation())
         self._update_accessibility()
 
     @property
@@ -191,7 +193,7 @@ class StatusRing(QWidget):
     def _sync_animation(self) -> None:
         should_run = (
             self._state in self._ACTIVE_STATES
-            and self.isVisible()
+            and self._motion_gate.allowed
             and self._motion.animations_enabled
         )
         if should_run:

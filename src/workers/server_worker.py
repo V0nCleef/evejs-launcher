@@ -56,6 +56,7 @@ class ServiceStartResult:
     game_error: str | None = None
     mod_runtime_snapshot: object | None = None
     mod_runtime_error: str | None = None
+    market_preflight: server_launcher.NativeMarketDatabaseResult | None = None
 
     @property
     def succeeded(self) -> bool:
@@ -100,6 +101,7 @@ class ServiceStartWorker(QObject):
         poll_interval_sec: float = 0.25,
         probe: Callable[[int], bool] | None = None,
         start_market_fn: Callable[[str], ManagedProcess] | None = None,
+        market_preflight_fn: Callable[[str], server_launcher.NativeMarketDatabaseResult] | None = None,
         start_game_fn: Callable[[str], ManagedProcess] | None = None,
         game_runtime_validator: Callable[[ManagedProcess], object] | None = None,
         sleep_fn: Callable[[float], None] = time.sleep,
@@ -124,6 +126,8 @@ class ServiceStartWorker(QObject):
         self._poll_interval_sec = max(0.0, float(poll_interval_sec))
         self._probe = probe or self._default_probe
         self._start_market_fn = start_market_fn or server_launcher.start_market_server
+        self._market_preflight_fn = market_preflight_fn
+        self._market_preflight_result: server_launcher.NativeMarketDatabaseResult | None = None
         self._start_game_fn = start_game_fn or server_launcher.start_game_server
         self._game_runtime_validator = game_runtime_validator
         self._sleep = sleep_fn
@@ -175,7 +179,24 @@ class ServiceStartWorker(QObject):
         mod_runtime_snapshot: object | None = None
         mod_runtime_error: str | None = None
 
-        if self._start_market:
+        if self._start_market and self._market_preflight_fn is not None:
+            self.phase_changed.emit("market", "checking")
+            try:
+                checked = self._market_preflight_fn(self._evejs_root)
+                if not isinstance(checked, server_launcher.NativeMarketDatabaseResult):
+                    raise TypeError("Market preflight returned an invalid result.")
+                self._market_preflight_result = checked
+            except Exception as exc:
+                self._market_preflight_result = server_launcher.NativeMarketDatabaseResult(
+                    server_launcher.NativeMarketDatabaseState.INVALID,
+                    str(exc) or "The Market database could not be inspected.",
+                )
+            if not self._market_preflight_result.available:
+                self.phase_changed.emit("market", "skipped")
+
+        if self._start_market and (
+            self._market_preflight_result is None or self._market_preflight_result.available
+        ):
             self.phase_changed.emit("market", "starting")
             try:
                 market_process = self._start_market_fn(self._evejs_root)
@@ -186,7 +207,7 @@ class ServiceStartWorker(QObject):
                     and self._continue_game_after_market_failure
                 ):
                     self.completed.emit(
-                        ServiceStartResult(
+                        self._result(
                             market_error=market_error,
                             game_error=(
                                 "Game start skipped because Market did not start."
@@ -209,7 +230,7 @@ class ServiceStartWorker(QObject):
                     and self._continue_game_after_market_failure
                 ):
                     self.completed.emit(
-                        ServiceStartResult(
+                        self._result(
                             market_process=market_process,
                             market_error=market_error,
                             game_error=(
@@ -226,7 +247,7 @@ class ServiceStartWorker(QObject):
         if self._start_game:
             if self._mode is None:
                 self.completed.emit(
-                    ServiceStartResult(
+                    self._result(
                         market_process=market_process,
                         market_ready=market_ready,
                         market_error=market_error,
@@ -239,7 +260,7 @@ class ServiceStartWorker(QObject):
                 game_process = self._start_game_fn(self._evejs_root, mode=self._mode)
             except Exception as exc:  # noqa: BLE001 - propagated as UI state
                 self.completed.emit(
-                    ServiceStartResult(
+                    self._result(
                         market_process=market_process,
                         market_ready=market_ready,
                         market_error=market_error,
@@ -256,7 +277,7 @@ class ServiceStartWorker(QObject):
             )
             if not game_ready:
                 self.completed.emit(
-                    ServiceStartResult(
+                    self._result(
                         market_process=market_process,
                         game_process=game_process,
                         market_ready=market_ready,
@@ -280,7 +301,7 @@ class ServiceStartWorker(QObject):
                 self.phase_changed.emit("game", "ready")
 
         self.completed.emit(
-            ServiceStartResult(
+            self._result(
                 market_process=market_process,
                 game_process=game_process,
                 market_ready=market_ready,
@@ -290,6 +311,9 @@ class ServiceStartWorker(QObject):
                 mod_runtime_error=mod_runtime_error,
             )
         )
+
+    def _result(self, **values: object) -> ServiceStartResult:
+        return ServiceStartResult(market_preflight=self._market_preflight_result, **values)
 
 
 class ServiceStopWorker(QObject):

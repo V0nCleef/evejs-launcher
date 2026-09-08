@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 3,
+  "id": "hello-loader",
+  "displayName": "Hello Loader Example",
+  "version": "1.0.0",
+  "description": "Logs one line when this example preload is selected.",
+  "kind": "loader",
+  "supportedBackends": ["native", "docker"],
+  "activation": {"strategy": "loader_rename"},
+  "restart": "game_server"
+}

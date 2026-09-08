@@ -1,391 +1,177 @@
-"""Sparse, deterministic docking traffic for the Deep Signal scene.
-
-The approved orbital artwork remains a cached, permanently static raster.  This
-widget is a separate transparent layer that paints only a few tiny navigation
-lights, short warp-arrival streaks, and one rare dark capital silhouette.
-
-Animation is intentionally modest: one coarse timer samples a monotonic elapsed
-clock at 12.5 FPS, and the timer is stopped while the page is hidden, covered by
-another page, minimized, reduced-motion, or too narrow to expose the station.
-"""
+"""Station traffic and local lighting above a permanently fixed orbital scene."""
 from __future__ import annotations
-
-from dataclasses import dataclass
 import math
-import random
-
-from PyQt6.QtCore import (
-    QElapsedTimer,
-    QEvent,
-    QPointF,
-    QRectF,
-    QTimer,
-    Qt,
-)
-from PyQt6.QtGui import (
-    QColor,
-    QHideEvent,
-    QLinearGradient,
-    QPaintEvent,
-    QPainter,
-    QPainterPath,
-    QPen,
-    QRadialGradient,
-    QResizeEvent,
-    QShowEvent,
-)
+from PyQt6.QtCore import QElapsedTimer, QEvent, QPointF, QRectF, QTimer, Qt
+from PyQt6.QtGui import (QColor, QLinearGradient, QPaintEvent, QPainter,
+                        QPainterPath, QPen, QRadialGradient, QRegion)
 from PyQt6.QtWidgets import QWidget
-
 from src.ui.motion import MotionController
-
-
-@dataclass(frozen=True, slots=True)
-class _TrafficRoute:
-    """One normalized, cyclic approach route."""
-
-    kind: str
-    starts_at_s: float
-    duration_s: float
-    start: tuple[float, float]
-    control_a: tuple[float, float]
-    control_b: tuple[float, float]
-    dock: tuple[float, float]
-    scale: float
-    tone: str
-
-
-@dataclass(frozen=True, slots=True)
-class TrafficSample:
-    """A deterministic normalized traffic sample exposed for focused tests."""
-
-    kind: str
-    x: float
-    y: float
-    dx: float
-    dy: float
-    progress: float
-    opacity: float
-    warp_alpha: float
-    scale: float
-    tone: str
-
-
-def _cubic(
-    start: tuple[float, float],
-    control_a: tuple[float, float],
-    control_b: tuple[float, float],
-    end: tuple[float, float],
-    progress: float,
-) -> tuple[float, float, float, float]:
-    """Return cubic position and derivative without allocating a painter path."""
-    t = min(1.0, max(0.0, float(progress)))
-    inverse = 1.0 - t
-    x = (
-        inverse**3 * start[0]
-        + 3.0 * inverse * inverse * t * control_a[0]
-        + 3.0 * inverse * t * t * control_b[0]
-        + t**3 * end[0]
-    )
-    y = (
-        inverse**3 * start[1]
-        + 3.0 * inverse * inverse * t * control_a[1]
-        + 3.0 * inverse * t * t * control_b[1]
-        + t**3 * end[1]
-    )
-    dx = 3.0 * (
-        inverse * inverse * (control_a[0] - start[0])
-        + 2.0 * inverse * t * (control_b[0] - control_a[0])
-        + t * t * (end[0] - control_b[0])
-    )
-    dy = 3.0 * (
-        inverse * inverse * (control_a[1] - start[1])
-        + 2.0 * inverse * t * (control_b[1] - control_a[1])
-        + t * t * (end[1] - control_b[1])
-    )
-    return x, y, dx, dy
+from src.ui.scene_geometry import SceneGeometry
+from src.ui.scene_timeline import SceneTimeline, TrafficSample
+from src.widgets.deep_signal_background import operations_scene_path
+from src.widgets.station_lights import StationLights
 
 
 class DockingTrafficOverlay(QWidget):
-    """Low-cost station traffic painted above a static scene and below controls."""
+    """One elapsed-time scene clock; controls never receive its mouse events."""
 
-    TICK_INTERVAL_MS = 80
-    TRAFFIC_CYCLE_SECONDS = 96.0
-    MIN_EXPOSED_WIDTH = 150
-    _EDGE_INSET = 14
-    _LIGHT_STARTS = (1.2, 12.0, 23.5, 35.0, 47.5, 60.0, 72.0, 84.5)
+    TICK_INTERVAL_MS = 40
+    TRAFFIC_CYCLE_SECONDS = SceneTimeline.CYCLE_SECONDS
 
-    def __init__(
-        self,
-        parent: QWidget | None = None,
-        *,
-        motion_controller: MotionController | None = None,
-        motion_enabled: bool = True,
-        seed: int = 31_407,
-    ) -> None:
+    def __init__(self, parent=None, *, motion_controller: MotionController | None = None,
+                 motion_enabled: bool = True, seed: int = 31407):
         super().__init__(parent)
         self.setObjectName("deepSignalDockingTraffic")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-
         self._motion_controller = motion_controller
         self._motion_enabled = bool(motion_enabled)
         if motion_controller is not None:
-            self._motion_enabled = (
-                self._motion_enabled and motion_controller.animations_enabled
-            )
-            motion_controller.reduced_motion_changed.connect(
-                self._on_reduced_motion_changed
-            )
-
-        self._seed = int(seed)
-        self._routes = self._build_routes(self._seed)
+            self._motion_enabled &= motion_controller.animations_enabled
+            motion_controller.reduced_motion_changed.connect(self._on_reduced_motion_changed)
+        self._timeline = SceneTimeline(seed)
+        self._lights = StationLights(operations_scene_path())
+        self._background = None
         self._reserved_left_px = 0
         self._scene_time_ms = 0
         self._clock = QElapsedTimer()
-        self._watched_window: QWidget | None = None
-
+        self._watched_window = None
+        self._last_damage = QRegion()
         self._tick_timer = QTimer(self)
         self._tick_timer.setTimerType(Qt.TimerType.CoarseTimer)
         self._tick_timer.setInterval(self.TICK_INTERVAL_MS)
         self._tick_timer.timeout.connect(self._on_tick)
 
-    @staticmethod
-    def _build_routes(seed: int) -> tuple[_TrafficRoute, ...]:
-        rng = random.Random(seed)
-        routes: list[_TrafficRoute] = []
-        tones = ("cyan", "warm", "cyan", "cool")
-        for index, starts_at in enumerate(DockingTrafficOverlay._LIGHT_STARTS):
-            # All ships converge on the station's right-hand approach beacon.
-            # Sources alternate between the upper-right and deep right edge so
-            # the scene feels inhabited without becoming a screensaver.
-            if index % 3 == 0:
-                start = (rng.uniform(0.80, 0.91), rng.uniform(0.04, 0.18))
-            elif index % 3 == 1:
-                start = (rng.uniform(1.01, 1.08), rng.uniform(0.22, 0.46))
-            else:
-                start = (rng.uniform(0.85, 0.99), rng.uniform(0.13, 0.34))
-            dock = (rng.uniform(0.902, 0.928), rng.uniform(0.565, 0.615))
-            control_a = (
-                start[0] + (dock[0] - start[0]) * rng.uniform(0.24, 0.34),
-                start[1] + (dock[1] - start[1]) * rng.uniform(0.12, 0.26),
-            )
-            control_b = (
-                start[0] + (dock[0] - start[0]) * rng.uniform(0.62, 0.76),
-                start[1] + (dock[1] - start[1]) * rng.uniform(0.68, 0.84),
-            )
-            routes.append(
-                _TrafficRoute(
-                    kind="light",
-                    starts_at_s=starts_at,
-                    duration_s=rng.uniform(7.0, 8.6),
-                    start=start,
-                    control_a=control_a,
-                    control_b=control_b,
-                    dock=dock,
-                    scale=rng.uniform(0.82, 1.14),
-                    tone=tones[index % len(tones)],
-                )
-            )
-
-        # A single large, nearly black hull crosses the approach once per
-        # 96-second cycle.  It appears early on the first visit, then remains
-        # genuinely rare instead of looping conspicuously.
-        routes.append(
-            _TrafficRoute(
-                kind="silhouette",
-                starts_at_s=8.6,
-                duration_s=14.2,
-                start=(1.055, 0.285),
-                control_a=(1.018, 0.325),
-                control_b=(0.962, 0.492),
-                dock=(0.923, 0.594),
-                scale=1.0,
-                tone="dark",
-            )
-        )
-        return tuple(routes)
+    def set_background(self, background):
+        self._background = background
 
     @property
-    def motion_enabled(self) -> bool:
+    def scene_geometry(self):
+        if self._background is not None:
+            return self._background.scene_geometry
+        width, height = self._timeline.definition["reference_size"]
+        return SceneGeometry(width, height, self.width(), self.height())
+
+    @property
+    def motion_enabled(self):
         return self._motion_enabled
 
     @property
-    def reserved_left_px(self) -> int:
+    def reserved_left_px(self):
         return self._reserved_left_px
 
     @property
-    def scene_time_ms(self) -> int:
+    def scene_time_ms(self):
         return self._current_scene_time_ms()
 
     @property
-    def timer_interval_ms(self) -> int:
+    def timer_interval_ms(self):
         return self._tick_timer.interval()
 
-    def is_animating(self) -> bool:
-        """Return whether the single paint timer is currently consuming work."""
+    def is_animating(self):
         return self._tick_timer.isActive()
 
-    def set_reserved_left_px(self, pixels: int) -> None:
-        """Reserve the command column; traffic never paints left of this edge."""
-        pixels = max(0, int(pixels))
-        if pixels == self._reserved_left_px:
-            return
-        self._reserved_left_px = pixels
+    def set_reserved_left_px(self, pixels):
+        # Retain the command boundary for diagnostics; translucent controls
+        # compose naturally over the scene instead of clipping ships away.
+        self._reserved_left_px = max(0, int(pixels))
+
+    def set_motion_enabled(self, enabled):
+        self._motion_enabled = bool(enabled)
         self._sync_timer()
         self.update()
 
-    def set_motion_enabled(self, enabled: bool) -> None:
-        enabled = bool(enabled)
-        if enabled == self._motion_enabled:
-            return
-        self._motion_enabled = enabled
-        self._sync_timer()
-        if not enabled:
-            self.update()
+    def sample_frame(self, elapsed_ms=None):
+        return self._timeline.sample(self._current_scene_time_ms() if elapsed_ms is None else elapsed_ms)
 
-    def sample_frame(self, elapsed_ms: int | None = None) -> tuple[TrafficSample, ...]:
-        """Sample the cyclic traffic model at an exact elapsed time.
+    def traffic_rect(self):
+        return QRectF(self.rect()).adjusted(8., 8., -8., -8.)
 
-        Passing a time makes visual behavior deterministic in tests without
-        altering the live elapsed clock or relying on timer delivery timing.
-        """
-        if elapsed_ms is None:
-            elapsed_ms = self._current_scene_time_ms()
-        elapsed_s = max(0.0, float(elapsed_ms) / 1000.0)
-        samples: list[TrafficSample] = []
-        for route in self._routes:
-            age_s = (elapsed_s - route.starts_at_s) % self.TRAFFIC_CYCLE_SECONDS
-            if age_s > route.duration_s:
-                continue
-            progress = age_s / route.duration_s
-            # Smoothstep keeps tiny ships from visibly snapping as they arrive.
-            travel = progress * progress * (3.0 - 2.0 * progress)
-            x, y, dx, dy = _cubic(
-                route.start,
-                route.control_a,
-                route.control_b,
-                route.dock,
-                travel,
-            )
-            fade_in = min(1.0, age_s / 0.32)
-            fade_out = min(1.0, max(0.0, (route.duration_s - age_s) / 1.15))
-            opacity = fade_in * fade_out
-            warp_alpha = 0.0
-            if route.kind == "light" and age_s <= 0.48:
-                warp_alpha = max(0.0, 1.0 - age_s / 0.48)
-            samples.append(
-                TrafficSample(
-                    kind=route.kind,
-                    x=x,
-                    y=y,
-                    dx=dx,
-                    dy=dy,
-                    progress=progress,
-                    opacity=opacity,
-                    warp_alpha=warp_alpha,
-                    scale=route.scale,
-                    tone=route.tone,
-                )
-            )
-        return tuple(samples)
+    def _has_drawable_area(self):
+        if self._background is not None:
+            size = self._background.scene_source_size
+            if not self._background.scene_available or [size.width(), size.height()] != self._timeline.definition["reference_size"]:
+                return False
+        return bool(self._timeline.definition["routes"]) and self.width() >= 320 and self.height() >= 180
 
-    def traffic_rect(self) -> QRectF:
-        """Return the station-side clip rectangle used for all live painting."""
-        left = max(float(self._reserved_left_px), self.width() * 0.58)
-        top = float(self._EDGE_INSET)
-        right = max(left, float(self.width() - self._EDGE_INSET))
-        bottom = max(top, float(self.height() - self._EDGE_INSET))
-        return QRectF(left, top, right - left, bottom - top)
+    def _current_scene_time_ms(self):
+        return self._scene_time_ms + (max(0, self._clock.elapsed()) if self._clock.isValid() else 0)
 
-    def _has_drawable_area(self) -> bool:
-        area = self.traffic_rect()
-        return area.width() >= self.MIN_EXPOSED_WIDTH and area.height() >= 180.0
-
-    def _current_scene_time_ms(self) -> int:
-        if self._clock.isValid():
-            return self._scene_time_ms + max(0, self._clock.elapsed())
-        return self._scene_time_ms
-
-    def _pause_clock(self) -> None:
+    def _pause_clock(self):
         if self._clock.isValid():
             self._scene_time_ms += max(0, self._clock.elapsed())
             self._clock.invalidate()
         self._tick_timer.stop()
 
-    def _resume_clock(self) -> None:
+    def _resume_clock(self):
         if not self._clock.isValid():
             self._clock.start()
         if not self._tick_timer.isActive():
             self._tick_timer.start()
 
-    def _window_can_animate(self) -> bool:
-        window = self.window()
-        if window is None or not window.isVisible():
-            return False
-        return not bool(window.windowState() & Qt.WindowState.WindowMinimized)
+    def _should_animate(self):
+        return (self._motion_enabled and self.isVisible() and self.window().isVisible()
+                and not self.window().isMinimized() and self._has_drawable_area())
 
-    def _should_animate(self) -> bool:
-        return (
-            self._motion_enabled
-            and self.isVisible()
-            and self._window_can_animate()
-            and self._has_drawable_area()
-        )
-
-    def _sync_timer(self) -> None:
+    def _sync_timer(self):
         if self._should_animate():
             self._resume_clock()
         else:
             self._pause_clock()
 
-    def _on_tick(self) -> None:
-        # Visibility can change between queued events; fail closed so a covered
-        # or minimized launcher never retains a paint loop.
+    def _on_tick(self):
         if not self._should_animate():
             self._pause_clock()
             return
-        self.update(self.traffic_rect().toAlignedRect())
+        geometry = self.scene_geometry
+        damage = QRegion()
+        for sample in self.sample_frame():
+            point = geometry.point(sample.x, sample.y)
+            radius = 120 if sample.warp_alpha else (55 if sample.kind == "freighter" else 22)
+            damage |= QRegion(QRectF(point.x()-radius, point.y()-radius,
+                                    radius*2, radius*2).toAlignedRect())
+        for rect, _ in self._lights.patches:
+            damage |= QRegion(geometry.transform.mapRect(rect).adjusted(-2, -2, 2, 2).toAlignedRect())
+        for x, y in self._lights.beacons:
+            point = geometry.point(x, y)
+            damage |= QRegion(QRectF(point.x()-10, point.y()-10, 20, 20).toAlignedRect())
+        self.update(damage | self._last_damage)
+        self._last_damage = damage
 
-    def _on_reduced_motion_changed(self, reduced: bool) -> None:
-        self.set_motion_enabled(not bool(reduced))
+    def _on_reduced_motion_changed(self, reduced):
+        self.set_motion_enabled(not reduced)
 
-    def _bind_window_events(self) -> None:
+    def _bind_window_events(self):
         window = self.window()
         if window is self._watched_window:
             return
         if self._watched_window is not None:
-            try:
-                self._watched_window.removeEventFilter(self)
-            except RuntimeError:
-                pass
+            self._watched_window.removeEventFilter(self)
         self._watched_window = window
-        if window is not None and window is not self:
+        if window is not self:
             window.installEventFilter(self)
 
-    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+    def eventFilter(self, watched, event):
         if watched is self._watched_window and event.type() in {
-            QEvent.Type.Show,
-            QEvent.Type.Hide,
-            QEvent.Type.Close,
-            QEvent.Type.WindowStateChange,
+            QEvent.Type.Show, QEvent.Type.Hide, QEvent.Type.Close, QEvent.Type.WindowStateChange
         }:
-            # Window-state flags are authoritative by the time the filter runs.
             self._sync_timer()
         return super().eventFilter(watched, event)
 
-    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
+    def showEvent(self, event):
         super().showEvent(event)
         self._bind_window_events()
         self._sync_timer()
 
-    def hideEvent(self, event: QHideEvent) -> None:  # noqa: N802
+    def hideEvent(self, event):
         self._pause_clock()
         super().hideEvent(event)
 
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+    def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._last_damage = QRegion()
         self._sync_timer()
 
     @staticmethod
@@ -408,9 +194,10 @@ class DockingTrafficOverlay(QWidget):
         return QColor(red, green, blue, max(0, min(255, int(alpha))))
 
     def _paint_light(self, painter: QPainter, sample: TrafficSample) -> None:
-        width = float(self.width())
-        height = float(self.height())
-        position = QPointF(sample.x * width, sample.y * height)
+        geometry = self.scene_geometry
+        width = float(geometry.source_width)
+        height = float(geometry.source_height)
+        position = geometry.point(sample.x, sample.y)
         direction_x, direction_y = self._unit_direction(sample, width, height)
         perpendicular_x, perpendicular_y = -direction_y, direction_x
         alpha = max(0, min(255, int(255 * sample.opacity)))
@@ -446,6 +233,17 @@ class DockingTrafficOverlay(QWidget):
         painter.setPen(trail_pen)
         painter.drawLine(tail, position)
 
+        # A tiny lit hull gives nearby vessels a direction even between flares.
+        hull = QPainterPath(position + QPointF(direction_x*5, direction_y*5))
+        hull.lineTo(position + QPointF(-direction_x*2+perpendicular_x*2,
+                                      -direction_y*2+perpendicular_y*2))
+        hull.lineTo(position + QPointF(-direction_x*2-perpendicular_x*2,
+                                      -direction_y*2-perpendicular_y*2))
+        hull.closeSubpath()
+        painter.setPen(QPen(QColor(151, 183, 207, int(alpha*.65)), .6))
+        painter.setBrush(QColor(18, 34, 46, int(alpha*.9)))
+        painter.drawPath(hull)
+
         glow_radius = 3.4 + 2.8 * sample.scale
         glow = QRadialGradient(position, glow_radius)
         glow.setColorAt(0.0, self._tone_color(sample.tone, int(alpha * 0.82)))
@@ -469,9 +267,10 @@ class DockingTrafficOverlay(QWidget):
         painter.drawEllipse(nav, 0.55, 0.55)
 
     def _paint_silhouette(self, painter: QPainter, sample: TrafficSample) -> None:
-        width = float(self.width())
-        height = float(self.height())
-        position = QPointF(sample.x * width, sample.y * height)
+        geometry = self.scene_geometry
+        width = float(geometry.source_width)
+        height = float(geometry.source_height)
+        position = geometry.point(sample.x, sample.y)
         direction_x, direction_y = self._unit_direction(sample, width, height)
         perpendicular_x, perpendicular_y = -direction_y, direction_x
         growth = 0.45 + sample.progress * 0.85
@@ -524,18 +323,32 @@ class DockingTrafficOverlay(QWidget):
         painter.setBrush(QColor(40, 195, 224, int(alpha * 0.58)))
         painter.drawEllipse(engine, 0.75, 0.75)
 
-    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
-        del event
+    def paintEvent(self, event: QPaintEvent):
         if not self._motion_enabled or not self._has_drawable_area():
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         painter.setClipRect(self.traffic_rect())
+        geometry = self.scene_geometry
+        # Far traffic is occluded by the fixed hull, including its docking rim.
+        scene = QPainterPath()
+        scene.addRect(self.traffic_rect())
+        hull = QPainterPath()
+        vertices = self._timeline.definition["hull"]
+        hull.moveTo(geometry.point(*vertices[0]))
+        for point in vertices[1:]:
+            hull.lineTo(geometry.point(*point))
+        hull.closeSubpath()
+        painter.save()
+        painter.setClipPath(scene.subtracted(hull))
         for sample in self.sample_frame():
-            if sample.kind == "silhouette":
+            if sample.kind == "freighter":
                 self._paint_silhouette(painter, sample)
             else:
                 self._paint_light(painter, sample)
+        painter.restore()
+        self._lights.paint(painter, geometry, self._current_scene_time_ms())
 
 
 __all__ = ["DockingTrafficOverlay", "TrafficSample"]

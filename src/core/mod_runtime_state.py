@@ -20,6 +20,7 @@ import tempfile
 from typing import Iterable
 
 from .mod_manifest import ActivationKind, Mod
+from .mod_loader_state import LoaderStateError, resolve_loader_state
 from .runtime.docker_mods import (
     DockerModOverride,
     build_docker_mod_override,
@@ -28,6 +29,7 @@ from .runtime.docker_mods import (
 
 
 RUNTIME_SNAPSHOT_SCHEMA_VERSION = 1
+PUBLIC_RUNTIME_SNAPSHOT_SCHEMA_VERSION = 2
 STATUS_PROTOCOL = "evejs_mod_status_v1"
 STATUS_TRANSPORT = "server_stdout"
 STATUS_MARKER_PREFIX = "EVEJS_MOD_STATUS "
@@ -46,6 +48,7 @@ DOCKER_BACKEND = "docker_compose"
 NATIVE_STATUS_EVIDENCE = "server_stdout"
 NATIVE_LOADER_EVIDENCE = "native_mode"
 DOCKER_OVERRIDE_EVIDENCE = "docker_override"
+UNVERIFIED_EVIDENCE = "unverified"
 
 _VALID_MODES = frozenset({"vanilla", "modded"})
 _VALID_STATES = frozenset({"running", "disabled"})
@@ -68,6 +71,7 @@ _SNAPSHOT_KEYS = frozenset(
 _SNAPSHOT_MOD_KEYS = frozenset(
     {"id", "activationKind", "contractSha256", "effective", "evidence"}
 )
+_PUBLIC_SNAPSHOT_MOD_KEYS = _SNAPSHOT_MOD_KEYS | {"loaderName", "diagnostic"}
 _DOCKER_OVERRIDE_KEYS = frozenset({"path", "sha256"})
 _MARKER_KEYS = frozenset({"id", "pid", "state"})
 _INTEGRATED_MOD_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}\Z")
@@ -76,15 +80,6 @@ _UTC_TIME_PATTERN = re.compile(
     r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z\Z"
 )
 _UTF8_BOM = b"\xef\xbb\xbf"
-# Keep this closed set identical to mod_manifest._LOADER_FILENAMES. The
-# filename is mutable activation state; the bytes behind exactly one of these
-# names are the immutable loader contract.
-_LOADER_PAYLOAD_FILENAMES = (
-    "loader.js",
-    "loader.js.disabled",
-    "loader.js.off",
-    "loader.js.bak",
-)
 
 
 class ModRuntimeStateError(ValueError):
@@ -93,6 +88,10 @@ class ModRuntimeStateError(ValueError):
 
 class ModStatusProtocolError(ModRuntimeStateError):
     """Native server stdout violates the declared status protocol."""
+
+
+class ModRuntimeIdentityError(ModStatusProtocolError):
+    """An observation names a different process and must not be accepted."""
 
 
 class ModRuntimeSnapshotError(ModRuntimeStateError):
@@ -114,12 +113,13 @@ class ModStatusMarker:
 
 @dataclass(frozen=True)
 class ModRuntimePlanEntry:
-    """One prelaunch mod contract and its configured activation state."""
+    """One prelaunch contract keyed by shipped ID or a public root-relative path."""
 
     id: str
     activation_kind: ActivationKind
     configured_active: bool
     contract_sha256: str
+    loader_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -136,6 +136,7 @@ class ModRuntimePlan:
     docker_override_sha256: str | None
     docker_node_options: str | None
     plan_sha256: str
+    schema_version: int = RUNTIME_SNAPSHOT_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "root", Path(self.root))
@@ -160,13 +161,15 @@ class RuntimeModEvidence:
     id: str
     activation_kind: ActivationKind
     contract_sha256: str
-    effective: bool
+    effective: bool | None
     evidence: str
+    loader_name: str | None = None
+    diagnostic: str | None = None
 
 
 @dataclass(frozen=True)
 class ModRuntimeSnapshot:
-    """A complete, verified mod-state observation for one EveJS runtime."""
+    """Root/process-bound evidence, including explicit unknown per-mod states."""
 
     schema_version: int
     root: Path
@@ -217,13 +220,27 @@ class ModRuntimeSnapshot:
             return None
 
         for evidence in self.mods:
-            if evidence.id != mod.id:
+            if evidence.id != mod_state_key(mod):
                 continue
             if evidence.activation_kind is not mod.activation_kind:
                 return None
             if evidence.contract_sha256 != fingerprint:
                 return None
             return evidence.effective
+        return None
+
+    def diagnostic_for(self, mod: Mod) -> str | None:
+        """Return a diagnostic only for this root and current mod contract."""
+        try:
+            if _canonical_mod_root(mod) != self.root.resolve(strict=True):
+                return None
+            key, fingerprint = mod_state_key(mod), mod_contract_sha256(mod)
+        except (OSError, ModRuntimeStateError, TypeError, ValueError):
+            return None
+        for evidence in self.mods:
+            if (evidence.id == key and evidence.activation_kind is mod.activation_kind
+                    and evidence.contract_sha256 == fingerprint):
+                return evidence.diagnostic
         return None
 
 
@@ -285,49 +302,12 @@ def parse_native_status_markers(
 
     markers: dict[str, ModStatusMarker] = {}
     marker_token = b"EVEJS_MOD_STATUS"
-    marker_prefix = STATUS_MARKER_PREFIX.encode("ascii")
     for raw_line in stdout.split(b"\n"):
         line = raw_line[:-1] if raw_line.endswith(b"\r") else raw_line
         if not line.startswith(marker_token):
             continue
-        if len(line) > MAX_STATUS_LINE_BYTES:
-            raise ModStatusProtocolError(
-                "An EVEJS_MOD_STATUS line exceeds the "
-                f"{MAX_STATUS_LINE_BYTES}-byte limit."
-            )
-        if not line.startswith(marker_prefix):
-            raise ModStatusProtocolError("Malformed EVEJS_MOD_STATUS marker prefix.")
-        payload_text = line[len(STATUS_MARKER_PREFIX) :]
-        if payload_text != payload_text.strip() or not payload_text:
-            raise ModStatusProtocolError(
-                "EVEJS_MOD_STATUS payload must consume the complete stdout line."
-            )
-        payload = _parse_json_object(
-            payload_text,
-            "EVEJS_MOD_STATUS payload",
-            error_type=ModStatusProtocolError,
-        )
-        _require_exact_keys(
-            payload,
-            _MARKER_KEYS,
-            "EVEJS_MOD_STATUS payload",
-            error_type=ModStatusProtocolError,
-        )
-        mod_id = payload["id"]
-        marker_pid = payload["pid"]
-        state = payload["state"]
-        if type(mod_id) is not str or not _INTEGRATED_MOD_ID_PATTERN.fullmatch(mod_id):
-            raise ModStatusProtocolError("Marker id is invalid.")
-        if type(marker_pid) is not int or marker_pid < 1:
-            raise ModStatusProtocolError("Marker pid must be a positive integer.")
-        if marker_pid != pid:
-            raise ModStatusProtocolError(
-                f"Marker for {mod_id!r} does not belong to current PID {pid}."
-            )
-        if type(state) is not str or state not in _VALID_STATES:
-            raise ModStatusProtocolError(
-                "Marker state must be exactly 'running' or 'disabled'."
-            )
+        marker = _decode_status_marker(line, pid)
+        mod_id = marker.id
         if mod_id not in expected_ids:
             raise ModStatusProtocolError(
                 f"Unexpected integrated mod marker id {mod_id!r}."
@@ -336,7 +316,7 @@ def parse_native_status_markers(
             raise ModStatusProtocolError(
                 f"Integrated mod {mod_id!r} emitted more than one marker."
             )
-        markers[mod_id] = ModStatusMarker(mod_id, marker_pid, state)
+        markers[mod_id] = marker
 
     missing = sorted(set(expected_ids) - set(markers))
     if missing:
@@ -344,6 +324,94 @@ def parse_native_status_markers(
             "Missing integrated mod status marker(s): " + ", ".join(missing) + "."
         )
     return markers
+
+
+def _decode_status_marker(line: bytes, pid: int) -> ModStatusMarker:
+    if len(line) > MAX_STATUS_LINE_BYTES:
+        raise ModStatusProtocolError(
+            f"An EVEJS_MOD_STATUS line exceeds the {MAX_STATUS_LINE_BYTES}-byte limit."
+        )
+    if not line.startswith(STATUS_MARKER_PREFIX.encode("ascii")):
+        raise ModStatusProtocolError("Malformed EVEJS_MOD_STATUS marker prefix.")
+    content = line[len(STATUS_MARKER_PREFIX):]
+    if not content or content != content.strip():
+        raise ModStatusProtocolError(
+            "EVEJS_MOD_STATUS payload must consume the complete stdout line."
+        )
+    payload = _parse_json_object(content, "EVEJS_MOD_STATUS payload", error_type=ModStatusProtocolError)
+    _require_exact_keys(payload, _MARKER_KEYS, "EVEJS_MOD_STATUS payload", error_type=ModStatusProtocolError)
+    mod_id, marker_pid, state = payload["id"], payload["pid"], payload["state"]
+    if type(mod_id) is not str or not _INTEGRATED_MOD_ID_PATTERN.fullmatch(mod_id):
+        raise ModStatusProtocolError("Marker id is invalid.")
+    if type(marker_pid) is not int or marker_pid < 1:
+        raise ModStatusProtocolError("Marker pid must be a positive integer.")
+    if marker_pid != pid:
+        raise ModRuntimeIdentityError(f"Marker for {mod_id!r} does not belong to current PID {pid}.")
+    if type(state) is not str or state not in _VALID_STATES:
+        raise ModStatusProtocolError("Marker state must be exactly 'running' or 'disabled'.")
+    return ModStatusMarker(mod_id, marker_pid, state)
+
+
+@dataclass(frozen=True)
+class NativeModObservations:
+    markers: dict[str, ModStatusMarker]
+    diagnostics: dict[str, str]
+    unattributed: tuple[str, ...] = ()
+
+
+def collect_native_status_markers(stdout: bytes, mods: Iterable[Mod], *, pid: int) -> NativeModObservations:
+    """Collect optional per-mod observations without discarding valid neighbors.
+
+    The v1 marker contains an author ID, so duplicate author IDs cannot be
+    attributed to separate public packages. A current-PID mismatch remains a
+    hard error. Unattributed malformed lines never grant effective state.
+    """
+    if type(stdout) is not bytes:
+        raise TypeError("Native server stdout must be bytes.")
+    if type(pid) is not int or pid < 1:
+        raise ModStatusProtocolError("The current game-server PID must be positive.")
+    if len(stdout) > MAX_SERVER_CONSOLE_BYTES:
+        raise ModStatusProtocolError(f"Server stdout exceeds the {MAX_SERVER_CONSOLE_BYTES}-byte limit.")
+    expected: dict[str, list[Mod]] = {}
+    for mod in mods:
+        if mod.activation_kind is ActivationKind.JSON_BOOLEAN:
+            expected.setdefault(mod.id, []).append(mod)
+    markers: dict[str, ModStatusMarker] = {}
+    diagnostics: dict[str, str] = {}
+    unattributed: set[str] = set()
+    for mod_id, candidates in expected.items():
+        if len(candidates) > 1:
+            for mod in candidates:
+                diagnostics[mod_state_key(mod)] = "status-id-ambiguous"
+    for raw_line in stdout.split(b"\n"):
+        line = raw_line[:-1] if raw_line.endswith(b"\r") else raw_line
+        if not line.startswith(b"EVEJS_MOD_STATUS"):
+            continue
+        try:
+            marker = _decode_status_marker(line, pid)
+        except ModRuntimeIdentityError:
+            raise
+        except ModStatusProtocolError:
+            unattributed.add("status-line-malformed")
+            continue
+        candidates = expected.get(marker.id, ())
+        if not candidates:
+            unattributed.add("status-id-unexpected")
+            continue
+        if len(candidates) != 1:
+            continue
+        key = mod_state_key(candidates[0])
+        if key in markers or diagnostics.get(key) == "status-marker-duplicate":
+            markers.pop(key, None)
+            diagnostics[key] = "status-marker-duplicate"
+        else:
+            markers[key] = marker
+    for candidates in expected.values():
+        for mod in candidates:
+            key = mod_state_key(mod)
+            if key not in markers and key not in diagnostics:
+                diagnostics[key] = "status-marker-missing"
+    return NativeModObservations(markers, diagnostics, tuple(sorted(unattributed)))
 
 
 def build_mod_runtime_plan(
@@ -398,10 +466,12 @@ def build_mod_runtime_plan(
         sorted(
             (
                 ModRuntimePlanEntry(
-                    id=mod.id,
+                    id=mod_state_key(mod),
                     activation_kind=mod.activation_kind,
                     configured_active=_require_configured_state(mod),
                     contract_sha256=mod_contract_sha256(mod),
+                    loader_name=(mod.path.name if mod.api_descriptor is not None
+                        and mod.activation_kind is ActivationKind.LOADER_RENAME else None),
                 )
                 for mod in normalized_mods
             ),
@@ -419,6 +489,9 @@ def build_mod_runtime_plan(
         docker_override_sha256=override_sha256,
         docker_node_options=docker_node_options,
         plan_sha256="0" * 64,
+        schema_version=(PUBLIC_RUNTIME_SNAPSHOT_SCHEMA_VERSION
+            if any(mod.api_descriptor is not None for mod in normalized_mods)
+            else RUNTIME_SNAPSHOT_SCHEMA_VERSION),
     )
     plan = ModRuntimePlan(
         root=root,
@@ -431,6 +504,7 @@ def build_mod_runtime_plan(
         docker_override_sha256=override_sha256,
         docker_node_options=docker_node_options,
         plan_sha256=_compute_plan_sha256(plan_without_hash),
+        schema_version=plan_without_hash.schema_version,
     )
     _validate_plan(plan)
     return plan
@@ -478,38 +552,47 @@ def build_native_mod_runtime_snapshot(
     *,
     pid: int,
     observed_at: datetime | None = None,
+    strict_status: bool = True,
 ) -> ModRuntimeSnapshot:
-    """Attest a Native start against its immutable plan and a fresh rescan."""
+    """Attest a Native start against its immutable plan and a fresh rescan.
+
+    ``strict_status=False`` treats markers as optional per-mod diagnostics.
+    The strict schema-1 path is retained for callers using the shipped protocol.
+    """
 
     _validate_plan(plan, expected_backend=NATIVE_BACKEND)
     rescanned = _validate_post_start_mods(plan, mods)
-    markers = parse_native_status_markers(
-        stdout,
-        (item[0] for item in rescanned.values()),
-        pid=pid,
-    )
+    current_mods = tuple(item[0] for item in rescanned.values())
+    if strict_status and plan.schema_version == RUNTIME_SNAPSHOT_SCHEMA_VERSION:
+        observations = NativeModObservations(parse_native_status_markers(stdout, current_mods, pid=pid), {})
+    else:
+        observations = collect_native_status_markers(stdout, current_mods, pid=pid)
     selected = frozenset(plan.selected_loader_ids)
 
     entries: list[RuntimeModEvidence] = []
     for planned in plan.mods:
         mod, _ = rescanned[planned.id]
+        diagnostic = None
         if planned.activation_kind is ActivationKind.JSON_BOOLEAN:
-            marker = markers[mod.id]
-            if marker.effective is not planned.configured_active:
+            marker = observations.markers.get(planned.id)
+            if marker is None:
+                effective, evidence = None, UNVERIFIED_EVIDENCE
+                diagnostic = observations.diagnostics.get(planned.id, "status-marker-missing")
+            elif marker.effective is not planned.configured_active and strict_status:
                 raise ModRuntimeStateError(
                     f"Runtime marker for {mod.id!r} does not match planned state."
                 )
-            effective = marker.effective
-            evidence = NATIVE_STATUS_EVIDENCE
+            else:
+                effective, evidence = marker.effective, NATIVE_STATUS_EVIDENCE
+                if marker.effective is not planned.configured_active:
+                    diagnostic = "configured-runtime-mismatch"
         elif planned.activation_kind is ActivationKind.LOADER_RENAME:
-            effective = mod.id in selected
+            effective = _entry_loader_name(planned) in selected
             evidence = NATIVE_LOADER_EVIDENCE
-        else:  # Defensive against future enum additions.
-            raise ModRuntimeStateError(
-                f"Unsupported activation kind for {mod.id!r}."
-            )
+        else:
+            effective, evidence, diagnostic = None, UNVERIFIED_EVIDENCE, "provider-evidence-missing"
         entries.append(
-            _runtime_evidence_from_plan(planned, effective, evidence)
+            _runtime_evidence_from_plan(planned, effective, evidence, diagnostic)
         )
 
     return _build_snapshot(
@@ -525,6 +608,9 @@ def build_native_mod_runtime_snapshot(
         pid=pid,
         observed_at=observed_at,
         entries=entries,
+        schema_version=(PUBLIC_RUNTIME_SNAPSHOT_SCHEMA_VERSION
+            if any(entry.diagnostic or entry.effective is None for entry in entries)
+            else plan.schema_version),
     )
 
 
@@ -564,7 +650,7 @@ def build_docker_mod_runtime_snapshot(
     entries = [
         _runtime_evidence_from_plan(
             planned,
-            planned.id in selected,
+            _entry_loader_name(planned) in selected,
             DOCKER_OVERRIDE_EVIDENCE,
         )
         for planned in plan.mods
@@ -582,7 +668,88 @@ def build_docker_mod_runtime_snapshot(
         pid=pid,
         observed_at=observed_at,
         entries=entries,
+        schema_version=plan.schema_version,
     )
+
+
+def mod_state_key(mod: Mod) -> str:
+    """Preserve shipped IDs; public packages use a root-bound physical path."""
+    if mod.api_descriptor is None:
+        _require_mod_identity(mod.id, mod.activation_kind)
+        return mod.id
+    root = _canonical_mod_root(mod)
+    relative = _relative_contract_path(mod.path, root, "mod path").casefold()
+    key = "path:" + relative
+    _require_public_identity(key)
+    return key
+
+
+def _require_public_identity(value: object, *, error_type=ModRuntimeStateError) -> None:
+    if type(value) is not str or not value.startswith("path:") or value != value.casefold():
+        raise error_type("Public mod identity is invalid.")
+    parts = value[5:].split("/")
+    if not (len(parts) == 2 and parts[0] == "mods"
+            or len(parts) == 3 and parts[:2] == ["server", "mods"]):
+        raise error_type("Public mod identity must name a discovered package folder.")
+    _require_loader_mod_id(parts[-1], error_type=error_type)
+
+
+def _entry_loader_name(entry: ModRuntimePlanEntry | RuntimeModEvidence) -> str:
+    return entry.loader_name if entry.loader_name is not None else entry.id
+
+
+def _validate_loader_binding(entry, schema_version: int, *, error_type=ModRuntimeStateError) -> None:
+    public = entry.id.startswith("path:")
+    if not public or entry.activation_kind is not ActivationKind.LOADER_RENAME:
+        if entry.loader_name is not None:
+            raise error_type("Only public loader entries may have a loaderName binding.")
+        return
+    if schema_version != 2:
+        raise error_type("Public loader identities require runtime schemaVersion 2.")
+    _require_loader_mod_id(entry.loader_name, error_type=error_type)
+    if entry.id != "path:mods/" + entry.loader_name.casefold():
+        raise error_type("Public loader identity does not match its selected folder.")
+
+
+def _public_mod_contract_sha256(mod: Mod) -> str:
+    from .mod_api_manifest import MAX_API_MANIFEST_BYTES
+    root = _canonical_mod_root(mod)
+    descriptor = mod.api_descriptor
+    if (descriptor.root != root or descriptor.folder.resolve(strict=True) != mod.path.resolve(strict=True)
+            or descriptor.id != mod.id or descriptor.activation_strategy != mod.activation_kind.value):
+        raise ModRuntimeStateError("The public mod descriptor does not match its discovered owner.")
+    if mod.manifest_path is None:
+        raise ModRuntimeStateError("The public mod descriptor is unavailable.")
+    relative_manifest = _relative_contract_path(mod.manifest_path, root, "manifest path")
+    if mod.manifest_path != descriptor.manifest_path:
+        raise ModRuntimeStateError("The public mod manifest path does not match its descriptor.")
+    content = _read_stable_bounded_file(mod.manifest_path, MAX_API_MANIFEST_BYTES,
+        label="Public mod descriptor", error_type=ModRuntimeStateError)
+    metadata = {
+        "schemaVersion": 3, "identity": mod_state_key(mod), "id": mod.id,
+        "name": mod.name, "version": mod.version, "description": mod.description,
+        "activationKind": mod.activation_kind.value, "supportedBackends": mod.supported_backends,
+        "restartScope": mod.restart_scope,
+        "manifestPath": relative_manifest,
+        "manifestSha256": hashlib.sha256(content).hexdigest(),
+    }
+    if mod.activation_kind is ActivationKind.JSON_BOOLEAN:
+        if mod.config_path is None or not mod.config_key:
+            raise ModRuntimeStateError("The public mod activation configuration is unavailable.")
+        metadata["activation"] = {
+            "configPath": _relative_contract_path(mod.config_path, root, "configuration path"),
+            "property": mod.config_key, "allowedConfigSchemaVersions": mod.allowed_config_schema_versions,
+        }
+    elif mod.activation_kind is ActivationKind.LOADER_RENAME:
+        metadata["loaderPayloadSha256"] = _loader_payload_sha256(mod, root)
+    elif mod.activation_kind not in {ActivationKind.CLIENT_PACKAGE, ActivationKind.PACKAGE}:
+        raise ModRuntimeStateError("Unsupported public activation kind.")
+    try:
+        encoded = json.dumps(metadata, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":"), allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ModRuntimeStateError("The public mod contract is not serializable.") from exc
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def mod_contract_sha256(mod: Mod) -> str:
@@ -592,6 +759,8 @@ def mod_contract_sha256(mod: Mod) -> str:
         raise ModRuntimeStateError(f"Cannot fingerprint invalid mod {mod.id!r}.")
     if not isinstance(mod.activation_kind, ActivationKind):
         raise ModRuntimeStateError(f"Mod {mod.id!r} has an invalid activation kind.")
+    if mod.api_descriptor is not None:
+        return _public_mod_contract_sha256(mod)
     _require_mod_identity(mod.id, mod.activation_kind)
     root = _canonical_mod_root(mod)
     common: dict[str, object] = {
@@ -796,9 +965,10 @@ def _build_snapshot(
     pid: int | None,
     observed_at: datetime | None,
     entries: Iterable[RuntimeModEvidence],
+    schema_version: int = RUNTIME_SNAPSHOT_SCHEMA_VERSION,
 ) -> ModRuntimeSnapshot:
     snapshot = ModRuntimeSnapshot(
-        schema_version=RUNTIME_SNAPSHOT_SCHEMA_VERSION,
+        schema_version=schema_version,
         root=root,
         backend=backend,
         mode=mode,
@@ -818,17 +988,20 @@ def _build_snapshot(
 
 def _runtime_evidence_from_plan(
     planned: ModRuntimePlanEntry,
-    effective: bool,
+    effective: bool | None,
     evidence: str,
+    diagnostic: str | None = None,
 ) -> RuntimeModEvidence:
-    if type(effective) is not bool:
-        raise ModRuntimeStateError("Effective mod state must be a boolean.")
+    if type(effective) is not bool and effective is not None:
+        raise ModRuntimeStateError("Effective mod state must be a boolean or unknown.")
     return RuntimeModEvidence(
         id=planned.id,
         activation_kind=planned.activation_kind,
         contract_sha256=planned.contract_sha256,
         effective=effective,
         evidence=evidence,
+        loader_name=planned.loader_name,
+        diagnostic=diagnostic,
     )
 
 
@@ -839,7 +1012,7 @@ def _validate_post_start_mods(
     """Require a fresh discovery to match the complete prelaunch plan."""
 
     normalized = _validate_mods_for_root(mods, plan.root, backend=plan.backend)
-    current = {mod.id: mod for mod in normalized}
+    current = {mod_state_key(mod): mod for mod in normalized}
     planned = {item.id: item for item in plan.mods}
     if set(current) != set(planned):
         raise ModRuntimeStateError(
@@ -873,6 +1046,7 @@ def _validate_mods_for_root(
 ) -> tuple[Mod, ...]:
     normalized = tuple(mods)
     seen: set[str] = set()
+    seen_paths: set[str] = set()
     for mod in normalized:
         if not isinstance(mod, Mod):
             raise ModRuntimeStateError("Runtime snapshots accept only discovered mods.")
@@ -880,9 +1054,9 @@ def _validate_mods_for_root(
             raise ModRuntimeStateError(
                 f"Cannot build runtime snapshot while mod {mod.id!r} is invalid."
             )
-        _require_mod_identity(mod.id, mod.activation_kind)
+        key = mod_state_key(mod)
         _require_configured_state(mod)
-        folded = mod.id.casefold()
+        folded = key.casefold()
         if folded in seen:
             raise ModRuntimeStateError("Discovered mod ids must be unique.")
         seen.add(folded)
@@ -890,12 +1064,18 @@ def _validate_mods_for_root(
             raise ModRuntimeStateError(
                 f"Mod {mod.id!r} belongs to a different EveJS root."
             )
+        physical = os.path.normcase(str(mod.path.resolve(strict=True)))
+        if physical in seen_paths:
+            raise ModRuntimeStateError("The same physical mod folder was discovered more than once.")
+        seen_paths.add(physical)
         if mod.activation_kind is ActivationKind.LOADER_RENAME:
             if backend == DOCKER_BACKEND and mod.id != mod.id.strip():
                 raise ModRuntimeStateError(
                     f"Docker loader id {mod.id!r} must be trimmed exactly."
                 )
-            expected_path = root / "mods" / mod.id
+            loader_name = mod.path.name if mod.api_descriptor is not None else mod.id
+            _require_loader_mod_id(loader_name)
+            expected_path = root / "mods" / loader_name
             try:
                 actual_path = mod.path.resolve(strict=True)
                 expected_path = expected_path.resolve(strict=True)
@@ -903,7 +1083,7 @@ def _validate_mods_for_root(
                 raise ModRuntimeStateError(
                     f"Loader mod {mod.id!r} has an unsafe folder path."
                 ) from exc
-            if actual_path != expected_path or mod.path.name != mod.id:
+            if actual_path != expected_path or mod.path.name != loader_name:
                 raise ModRuntimeStateError(
                     f"Loader mod {mod.id!r} does not match its root folder."
                 )
@@ -912,7 +1092,7 @@ def _validate_mods_for_root(
             raise ModRuntimeStateError(
                 f"Mod {mod.id!r} does not support the {backend} backend."
             )
-        if mod.activation_kind is ActivationKind.JSON_BOOLEAN:
+        if mod.activation_kind is ActivationKind.JSON_BOOLEAN and mod.api_descriptor is None:
             _require_status_declaration(mod)
     return normalized
 
@@ -927,7 +1107,7 @@ def _validate_selected_loaders(
     """Validate the exact loader IDs consumed by the launched runtime."""
 
     loaders = {
-        mod.id: mod
+        mod.path.name: mod
         for mod in mods
         if mod.activation_kind is ActivationKind.LOADER_RENAME
     }
@@ -952,7 +1132,7 @@ def _validate_selected_loaders(
     if mode == "vanilla" and selected:
         raise ModRuntimeStateError("A vanilla launch plan cannot preload mods.")
     expected = {
-        mod.id
+        mod.path.name
         for mod in loaders.values()
         if mode == "modded" and _require_configured_state(mod)
     }
@@ -970,6 +1150,8 @@ def _validate_plan(
 ) -> None:
     if not isinstance(plan, ModRuntimePlan):
         raise ModRuntimeStateError("A ModRuntimePlan is required.")
+    if type(plan.schema_version) is not int or plan.schema_version not in {1, 2}:
+        raise ModRuntimeStateError("Unsupported runtime plan schemaVersion.")
     root = _canonical_root(plan.root)
     if plan.root != root:
         raise ModRuntimeStateError("Runtime plan root is not canonical.")
@@ -993,7 +1175,8 @@ def _validate_plan(
     seen: set[str] = set()
     loaders: dict[str, ModRuntimePlanEntry] = {}
     for entry in plan.mods:
-        _require_mod_identity(entry.id, entry.activation_kind)
+        _require_mod_identity(entry.id, entry.activation_kind, allow_public=plan.schema_version == 2)
+        _validate_loader_binding(entry, plan.schema_version)
         folded = entry.id.casefold()
         if folded in seen:
             raise ModRuntimeStateError("Runtime plan mod ids must be unique.")
@@ -1005,7 +1188,7 @@ def _validate_plan(
         ):
             raise ModRuntimeStateError("Runtime plan contract SHA-256 is invalid.")
         if entry.activation_kind is ActivationKind.LOADER_RENAME:
-            loaders[entry.id] = entry
+            loaders[_entry_loader_name(entry)] = entry
         elif backend == DOCKER_BACKEND:
             raise ModRuntimeStateError("Docker runtime plans may contain only loaders.")
 
@@ -1021,7 +1204,7 @@ def _validate_plan(
         selected.add(mod_id)
         selected_folded.add(folded)
     expected_selected = {
-        entry.id
+        _entry_loader_name(entry)
         for entry in loaders.values()
         if mode == "modded" and entry.configured_active
     }
@@ -1070,6 +1253,10 @@ def _compute_plan_sha256(plan: ModRuntimePlan) -> str:
         ),
         "dockerNodeOptions": plan.docker_node_options,
     }
+    if plan.schema_version == PUBLIC_RUNTIME_SNAPSHOT_SCHEMA_VERSION:
+        payload["schemaVersion"] = plan.schema_version
+        for raw, entry in zip(payload["mods"], plan.mods):
+            raw["loaderName"] = entry.loader_name
     try:
         content = json.dumps(
             payload,
@@ -1256,7 +1443,7 @@ def _require_status_declaration(mod: Mod) -> None:
 
 
 def _snapshot_payload(snapshot: ModRuntimeSnapshot) -> dict[str, object]:
-    return {
+    payload = {
         "schemaVersion": snapshot.schema_version,
         "root": str(snapshot.root),
         "backend": snapshot.backend,
@@ -1286,6 +1473,11 @@ def _snapshot_payload(snapshot: ModRuntimeSnapshot) -> dict[str, object]:
             for item in snapshot.mods
         ],
     }
+    if snapshot.schema_version == PUBLIC_RUNTIME_SNAPSHOT_SCHEMA_VERSION:
+        for raw, entry in zip(payload["mods"], snapshot.mods):
+            raw["loaderName"] = entry.loader_name
+            raw["diagnostic"] = entry.diagnostic
+    return payload
 
 
 def _snapshot_from_payload(
@@ -1312,7 +1504,7 @@ def _snapshot_from_payload(
     pid = payload["pid"]
     observed_value = payload["observedAt"]
     raw_mods = payload["mods"]
-    if type(schema_version) is not int or schema_version != RUNTIME_SNAPSHOT_SCHEMA_VERSION:
+    if type(schema_version) is not int or schema_version not in {1, 2}:
         raise ModRuntimeSnapshotError("Unsupported runtime snapshot schemaVersion.")
     if type(root_value) is not str or not root_value:
         raise ModRuntimeSnapshotError("Runtime snapshot root is invalid.")
@@ -1381,7 +1573,7 @@ def _snapshot_from_payload(
             raise ModRuntimeSnapshotError("Runtime snapshot mod entry must be an object.")
         _require_exact_keys(
             raw_entry,
-            _SNAPSHOT_MOD_KEYS,
+            _PUBLIC_SNAPSHOT_MOD_KEYS if schema_version == 2 else _SNAPSHOT_MOD_KEYS,
             "Runtime snapshot mod entry",
             error_type=ModRuntimeSnapshotError,
         )
@@ -1402,14 +1594,14 @@ def _snapshot_from_payload(
             mod_id,
             activation_kind,
             error_type=ModRuntimeSnapshotError,
+            allow_public=schema_version == 2,
         )
         if type(fingerprint) is not str or not _SHA256_PATTERN.fullmatch(fingerprint):
             raise ModRuntimeSnapshotError("Runtime contract fingerprint is invalid.")
-        if type(effective) is not bool:
+        if type(effective) is not bool and not (schema_version == 2 and effective is None):
             raise ModRuntimeSnapshotError("Runtime effective state must be a boolean.")
         if type(evidence) is not str:
             raise ModRuntimeSnapshotError("Runtime evidence is invalid.")
-        _validate_evidence(backend, activation_kind, evidence)
         entries.append(
             RuntimeModEvidence(
                 id=mod_id,
@@ -1417,6 +1609,8 @@ def _snapshot_from_payload(
                 contract_sha256=fingerprint,
                 effective=effective,
                 evidence=evidence,
+                loader_name=raw_entry.get("loaderName"),
+                diagnostic=raw_entry.get("diagnostic"),
             )
         )
 
@@ -1451,7 +1645,7 @@ def _validate_snapshot(
 ) -> None:
     if (
         type(snapshot.schema_version) is not int
-        or snapshot.schema_version != RUNTIME_SNAPSHOT_SCHEMA_VERSION
+        or snapshot.schema_version not in {1, 2}
     ):
         raise ModRuntimeSnapshotError("Unsupported runtime snapshot schemaVersion.")
     try:
@@ -1491,18 +1685,30 @@ def _validate_snapshot(
             item.id,
             item.activation_kind,
             error_type=ModRuntimeSnapshotError,
+            allow_public=snapshot.schema_version == 2,
         )
+        _validate_loader_binding(item, snapshot.schema_version, error_type=ModRuntimeSnapshotError)
         folded = item.id.casefold()
         if folded in ids:
             raise ModRuntimeSnapshotError("Runtime snapshot mod ids must be unique.")
         ids.add(folded)
         if not isinstance(item.activation_kind, ActivationKind):
             raise ModRuntimeSnapshotError("Runtime activation kind is invalid.")
+        if backend == DOCKER_BACKEND and item.activation_kind is not ActivationKind.LOADER_RENAME:
+            raise ModRuntimeSnapshotError("Docker snapshots may contain only loaders.")
         if not _SHA256_PATTERN.fullmatch(item.contract_sha256):
             raise ModRuntimeSnapshotError("Runtime contract fingerprint is invalid.")
-        if type(item.effective) is not bool:
-            raise ModRuntimeSnapshotError("Runtime effective state must be a boolean.")
-        _validate_evidence(backend, item.activation_kind, item.evidence)
+        if item.effective is None and snapshot.schema_version == 2:
+            if item.evidence != UNVERIFIED_EVIDENCE or item.diagnostic is None:
+                raise ModRuntimeSnapshotError("Unknown runtime state requires an unverified diagnostic.")
+        else:
+            if type(item.effective) is not bool:
+                raise ModRuntimeSnapshotError("Runtime effective state must be a boolean.")
+            _validate_evidence(backend, item.activation_kind, item.evidence)
+        if item.diagnostic is not None:
+            if (snapshot.schema_version != 2 or type(item.diagnostic) is not str
+                    or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,95}", item.diagnostic)):
+                raise ModRuntimeSnapshotError("Runtime mod diagnostic is invalid.")
         if (
             snapshot.mode == "vanilla"
             and item.activation_kind is ActivationKind.LOADER_RENAME
@@ -1512,7 +1718,7 @@ def _validate_snapshot(
                 "A vanilla runtime snapshot cannot contain an effective loader."
             )
     effective_loader_ids = {
-        item.id
+        _entry_loader_name(item)
         for item in snapshot.mods
         if item.activation_kind is ActivationKind.LOADER_RENAME and item.effective
     }
@@ -1603,34 +1809,15 @@ def _relative_contract_path(path: Path, root: Path, label: str) -> str:
 def _loader_payload_sha256(mod: Mod, root: Path) -> str:
     """Hash exactly one recognized loader payload without hashing its state name."""
 
-    candidates: list[tuple[Path, os.stat_result]] = []
-    for filename in _LOADER_PAYLOAD_FILENAMES:
-        candidate = mod.path / filename
-        try:
-            metadata = candidate.lstat()
-        except FileNotFoundError:
-            continue
-        except OSError as exc:
-            raise ModRuntimeStateError(
-                f"Loader payload for {mod.id!r} could not be inspected."
-            ) from exc
-        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
-            raise ModRuntimeStateError(
-                f"Loader payload for {mod.id!r} is unsafe or not a regular file."
-            )
-        try:
-            candidate.resolve(strict=True).relative_to(root)
-        except (OSError, ValueError) as exc:
-            raise ModRuntimeStateError(
-                f"Loader payload for {mod.id!r} escapes its EveJS root."
-            ) from exc
-        candidates.append((candidate, metadata))
-
-    if len(candidates) != 1:
+    try:
+        candidate = resolve_loader_state(mod.path, root=root).selected_path
+    except LoaderStateError as exc:
+        raise ModRuntimeStateError(f"Loader mod {mod.id!r} must contain exactly one safe recognized payload; unsafe or unavailable: {exc}") from exc
+    if candidate is None:
         raise ModRuntimeStateError(
             f"Loader mod {mod.id!r} must contain exactly one recognized loader payload."
         )
-    candidate, before = candidates[0]
+    before = candidate.lstat()
     if before.st_size > MAX_LOADER_PAYLOAD_BYTES:
         raise ModRuntimeStateError(
             f"Loader payload for {mod.id!r} exceeds the "
@@ -1706,7 +1893,13 @@ def _require_mod_identity(
     activation_kind: ActivationKind,
     *,
     error_type: type[ModRuntimeStateError] = ModRuntimeStateError,
+    allow_public: bool = False,
 ) -> None:
+    if allow_public and type(mod_id) is str and mod_id.startswith("path:"):
+        _require_public_identity(mod_id, error_type=error_type)
+        if not isinstance(activation_kind, ActivationKind):
+            raise error_type("Mod activation kind is invalid.")
+        return
     if activation_kind is ActivationKind.JSON_BOOLEAN:
         _require_integrated_mod_id(mod_id, error_type=error_type)
         return
@@ -1941,15 +2134,19 @@ __all__ = [
     "MAX_SERVER_CONSOLE_BYTES",
     "MAX_STATUS_LINE_BYTES",
     "ModRuntimePlan",
+    "ModRuntimeIdentityError",
     "ModRuntimePlanEntry",
     "ModRuntimeSnapshot",
     "ModRuntimeSnapshotError",
     "ModRuntimeStateError",
     "ModStatusMarker",
     "ModStatusProtocolError",
+    "NativeModObservations",
     "NATIVE_BACKEND",
     "NATIVE_LOADER_EVIDENCE",
     "NATIVE_STATUS_EVIDENCE",
+    "PUBLIC_RUNTIME_SNAPSHOT_SCHEMA_VERSION",
+    "UNVERIFIED_EVIDENCE",
     "RUNTIME_SNAPSHOT_FILENAME",
     "RUNTIME_SNAPSHOT_SCHEMA_VERSION",
     "RuntimeModEvidence",
@@ -1959,8 +2156,10 @@ __all__ = [
     "build_docker_mod_runtime_snapshot",
     "build_mod_runtime_plan",
     "build_native_mod_runtime_snapshot",
+    "collect_native_status_markers",
     "mod_contract_sha256",
     "mod_runtime_snapshot_path",
+    "mod_state_key",
     "native_mod_preload_paths",
     "parse_native_status_markers",
     "read_mod_runtime_snapshot",

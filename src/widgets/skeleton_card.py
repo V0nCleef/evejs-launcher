@@ -2,15 +2,16 @@
 
 A 220×280 frame with grey placeholder rectangles laid out like a
 character card (128×128 centered portrait, name bar, info bar, button
-bar). The whole card pulses by toggling its opacity between 0.4 and 0.7
-on an 800ms QTimer.
+bar). Visible cards gently breathe between two opacity levels. Hidden and
+reduced-motion placeholders retain a static frame.
 """
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve
 from PyQt6.QtWidgets import QFrame, QVBoxLayout, QGraphicsOpacityEffect
 
 from src.constants import COLORS
+from src.ui.visible_motion import VisibleMotion
 
 
 class SkeletonCard(QFrame):
@@ -21,7 +22,6 @@ class SkeletonCard(QFrame):
 
     _OPACITY_LOW = 0.4
     _OPACITY_HIGH = 0.7
-    _PULSE_INTERVAL_MS = 800
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -77,24 +77,28 @@ class SkeletonCard(QFrame):
         self._opacity_effect.setOpacity(self._OPACITY_HIGH)
         self.setGraphicsEffect(self._opacity_effect)
 
-        self._pulse_high = False  # next tick drives toward LOW
-        self._pulse_timer = QTimer(self)
-        self._pulse_timer.setInterval(self._PULSE_INTERVAL_MS)
-        self._pulse_timer.timeout.connect(self._pulse)
-        self._pulse_timer.start()
+        self._pulsing_enabled = True
+        self._pulse = QPropertyAnimation(self._opacity_effect, b"opacity", self)
+        self._pulse.setDuration(1600)
+        self._pulse.setStartValue(self._OPACITY_HIGH)
+        self._pulse.setKeyValueAt(.5, self._OPACITY_LOW)
+        self._pulse.setEndValue(self._OPACITY_HIGH)
+        self._pulse.setLoopCount(-1)
+        self._pulse.setEasingCurve(QEasingCurve.Type.InOutSine)
+        self._motion_gate = VisibleMotion(self, self._sync_motion)
 
-    def _pulse(self) -> None:
-        self._pulse_high = not self._pulse_high
-        self._opacity_effect.setOpacity(
-            self._OPACITY_HIGH if self._pulse_high else self._OPACITY_LOW
-        )
+    def _sync_motion(self, allowed):
+        if allowed and self._pulsing_enabled:
+            if self._pulse.state() != QPropertyAnimation.State.Running:
+                self._pulse.start()
+        else:
+            self._pulse.stop()
+            self._opacity_effect.setOpacity(self._OPACITY_HIGH)
 
-    # ── Lifecycle helpers ────────────────────────────────────────────────
     def stop_pulsing(self) -> None:
-        """Stop the pulse timer (e.g. when the card is being removed)."""
-        self._pulse_timer.stop()
+        self._pulsing_enabled = False
+        self._sync_motion(False)
 
     def start_pulsing(self) -> None:
-        """Resume the pulse timer if it was stopped."""
-        if not self._pulse_timer.isActive():
-            self._pulse_timer.start()
+        self._pulsing_enabled = True
+        self._motion_gate.sync()

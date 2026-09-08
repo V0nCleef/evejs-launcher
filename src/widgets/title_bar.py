@@ -136,6 +136,9 @@ class _AudioTransportButton(QPushButton):
         )
 
 
+from src.ui.visible_motion import VisibleMotion
+
+
 class _MusicSpectrum(QWidget):
     """Render the controller's real deterministic 16-band music spectrum."""
 
@@ -158,6 +161,7 @@ class _MusicSpectrum(QWidget):
         self._animation_timer.setInterval(self.FRAME_INTERVAL_MS)
         self._animation_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._animation_timer.timeout.connect(self._advance_animation)
+        self._motion_gate = VisibleMotion(self, self._sync_motion)
 
         self.setObjectName("musicSpectrum")
         self.setMinimumWidth(30)
@@ -199,8 +203,7 @@ class _MusicSpectrum(QWidget):
         self._target_levels = (
             normalized if self._active else (0.0,) * self.BAND_COUNT
         )
-        if self._needs_animation() and not self._animation_timer.isActive():
-            self._animation_timer.start()
+        self._sync_motion(self._motion_gate.allowed)
 
     def set_active(self, active: bool) -> None:
         active = bool(active)
@@ -210,8 +213,7 @@ class _MusicSpectrum(QWidget):
         if not active:
             self._target_levels = (0.0,) * self.BAND_COUNT
         self._sync_accessibility()
-        if self._needs_animation() and not self._animation_timer.isActive():
-            self._animation_timer.start()
+        self._sync_motion(self._motion_gate.allowed)
         self.update()
 
     def is_active(self) -> bool:
@@ -263,6 +265,18 @@ class _MusicSpectrum(QWidget):
                 strict=True,
             )
         )
+
+    def _sync_motion(self, allowed):
+        if allowed and self._needs_animation():
+            if not self._animation_timer.isActive():
+                self._animation_timer.start()
+        elif not allowed:
+            self._animation_timer.stop()
+            # Inactive or reduced motion shows a quiet baseline. Audio continues.
+            self._display_levels = [0.0] * self.BAND_COUNT
+            self._peak_levels = [0.0] * self.BAND_COUNT
+            self._peak_holds = [0] * self.BAND_COUNT
+            self.update()
 
     def _advance_animation(self) -> None:
         """Advance one deterministic attack/falloff and peak-decay frame."""

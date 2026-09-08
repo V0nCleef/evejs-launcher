@@ -9,12 +9,13 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 from pathlib import Path
-from PyQt6.QtCore import QUrl, Qt, pyqtSignal
+from PyQt6.QtCore import QUrl, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QDesktopServices, QShowEvent
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -49,10 +50,13 @@ from src.core.mod_management import (
     read_managed_mod_registration,
 )
 from src.core.mod_runtime_state import ModRuntimeSnapshot
+from src.core.mod_runtime_state import mod_state_key
+from src.core.mod_inventory import ModInventory, folder_key, load_mod_inventory
 from src.core.service_status import DockerControlPolicy, RuntimeBackend
 from src.widgets.page_header import PageHeader
 from src.widgets.localized_dialogs import LocalizedMessageBox as QMessageBox
 from src.widgets.toggle_switch import ToggleSwitch
+from src.widgets.update_button import UpdateButton
 from src.widgets.ui_translation import (
     mark_translatable,
     register_translatable_widget_tree,
@@ -65,10 +69,7 @@ from src.widgets.ui_translation import (
 )
 
 
-MOD_AUTHORING_GUIDE_URL = (
-    "https://github.com/V0nCleef/evejs-launcher/blob/v1.0.45/"
-    "docs/MOD_AUTHORING.md"
-)
+MOD_AUTHORING_GUIDE_URL = "docs/MOD_AUTHORING.md"
 
 
 class ModFolderError(RuntimeError):
@@ -171,6 +172,11 @@ class ModRow(QFrame):
 
     state_changed = pyqtSignal()
     remove_requested = pyqtSignal(object)
+    configure_requested = pyqtSignal(object)
+    activation_requested = pyqtSignal(object, bool)
+    move_requested = pyqtSignal(object, int)
+    helper_requested = pyqtSignal(object, str)
+    update_requested = pyqtSignal(object)
 
     def __init__(
         self,
@@ -184,6 +190,9 @@ class ModRow(QFrame):
         management: ManagedModRegistration | None = None,
         management_error: str = "",
         can_remove: bool = False,
+        local_removable: bool = False,
+        delegated_activation: bool = False,
+        cleanup: dict | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -196,6 +205,9 @@ class ModRow(QFrame):
         self._management = management
         self._management_error = management_error
         self._can_remove = can_remove
+        self._local_removable = local_removable
+        self._delegated_activation = delegated_activation
+        self._cleanup = cleanup
         self._can_show_repair = management is None and bool(management_error)
         self._operation_error = ""
         self._lifecycle_busy = False
@@ -271,16 +283,21 @@ class ModRow(QFrame):
             folder_name = mod.path.name or mod.name
             display_path = f"mods / {folder_name} / loader.js"
             troubleshooting_path = mod.path
-        elif is_client_package:
-            folder_name = mod.path.name or "DLSS5"
+        elif is_client_package or mod.activation_kind is ActivationKind.PACKAGE:
+            folder_name = mod.path.name or mod.name
             manifest_path = mod.manifest_path
             manifest_name = (
                 manifest_path.name
                 if manifest_path is not None
                 else "evejs-launcher.client-mod.json"
             )
-            display_path = f"mods / {folder_name} / {manifest_name}"
             troubleshooting_path = manifest_path or mod.path
+            try:
+                relative_path = troubleshooting_path.relative_to(mod.evejs_root)
+            except (TypeError, ValueError):
+                display_path = f"{folder_name} / {manifest_name}"
+            else:
+                display_path = " / ".join(relative_path.parts)
         else:
             config_path = mod.config_path
             config_name = config_path.name if config_path else "configuration.json"
@@ -339,6 +356,10 @@ class ModRow(QFrame):
                 if can_remove
                 else management_error
             )
+        elif local_removable:
+            self.remove_btn.setProperty("managementRole", "remove")
+            self.remove_btn.setText("REMOVE")
+            set_translatable_tooltip(self.remove_btn, "Move this mod to recovery storage. You can undo removal.")
         elif management_error:
             self.remove_btn.setProperty("managementRole", "repair")
             self.remove_btn.setText("REPAIR")
@@ -369,6 +390,44 @@ class ModRow(QFrame):
         self._sync_remove_cursor()
         self.remove_btn.clicked.connect(self._on_remove_clicked)
         layout.addWidget(self.remove_btn)
+
+        self.configure_btn = QPushButton("Configure")
+        self.configure_btn.setProperty("class", "signalSecondary")
+        self.configure_btn.setVisible(bool(getattr(mod, "settings_schema", None)))
+        self.configure_btn.clicked.connect(lambda: self.configure_requested.emit(self.mod))
+        mark_translatable(self.configure_btn)
+        layout.addWidget(self.configure_btn)
+
+        self.update_btn = UpdateButton()
+        self.update_btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.update_btn.clicked.connect(lambda: self.update_requested.emit(self.mod))
+        mark_translatable(self.update_btn)
+        layout.addWidget(self.update_btn)
+
+        self.helper_btn = QPushButton("Actions")
+        self.helper_btn.setProperty("class", "signalSecondary")
+        api = mod.api_descriptor.launcher_api if mod.api_descriptor else None
+        capabilities = api.capabilities if api else ()
+        menu = QMenu(self.helper_btn)
+        for action, label in (("install", "Install / Update"), ("verify", "Verify"), ("recover", "Recover")):
+            if action in capabilities:
+                entry = menu.addAction(translate_ui_phrase(label))
+                entry.triggered.connect(lambda _checked=False, action=action: self.helper_requested.emit(self.mod, action))
+        self.helper_btn.setMenu(menu)
+        self.helper_btn.setVisible(not menu.isEmpty())
+        mark_translatable(self.helper_btn)
+        layout.addWidget(self.helper_btn)
+
+        self.move_up_btn = QPushButton("↑")
+        self.move_down_btn = QPushButton("↓")
+        for button, amount, label in ((self.move_up_btn, -1, "Move mod earlier"), (self.move_down_btn, 1, "Move mod later")):
+            button.setProperty("class", "signalSecondary")
+            button.setFixedWidth(28)
+            set_translatable_tooltip(button, label)
+            set_translatable_accessible_name(button, label)
+            button.setVisible(is_loader and delegated_activation)
+            button.clicked.connect(lambda _checked=False, amount=amount: self.move_requested.emit(self.mod, amount))
+            layout.addWidget(button)
 
         self.toggle = ToggleSwitch(self)
         self.toggle.setChecked(mod.active)
@@ -406,8 +465,13 @@ class ModRow(QFrame):
             text, state = "INVALID", "error"
         elif self._operation_error:
             text, state = "VERIFICATION FAILED", "error"
+        elif self._cleanup and self._cleanup.get("ready") is False:
+            text, state = "CLEANUP PENDING", "pending"
+            self.setToolTip(str(self._cleanup.get("message", "")))
         elif self._lifecycle_busy and self._can_toggle:
             text, state = "SERVER BUSY", "readonly"
+        elif self.mod.api_descriptor is not None and self.mod.activation_kind in {ActivationKind.CLIENT_PACKAGE, ActivationKind.PACKAGE}:
+            text, state = ("CONFIGURED ON", "enabled") if self.mod.active else ("CONFIGURED OFF", "disabled")
         elif not self._can_toggle:
             text, state = self._disabled_state, "readonly"
         else:
@@ -440,6 +504,12 @@ class ModRow(QFrame):
                 self.toggle.blockSignals(True)
                 self.toggle.setChecked(self.mod.active)
                 self.toggle.blockSignals(False)
+            return
+        if self._delegated_activation:
+            self.toggle.blockSignals(True)
+            self.toggle.setChecked(self.mod.active)
+            self.toggle.blockSignals(False)
+            self.activation_requested.emit(self.mod, bool(checked))
             return
         try:
             # Pass the control's explicit desired value.  Inverting the model
@@ -479,6 +549,9 @@ class ModRow(QFrame):
     def _on_remove_clicked(self) -> None:
         if self._lifecycle_busy:
             return
+        if self._local_removable and self._can_remove:
+            self.remove_requested.emit(self.mod)
+            return
         if self.mod.activation_kind is ActivationKind.CLIENT_PACKAGE:
             if self._can_remove and self.mod.id == "evejs-dlss5":
                 self.remove_requested.emit(self.mod)
@@ -503,6 +576,11 @@ class ModRow(QFrame):
     def set_lifecycle_busy(self, busy: bool) -> None:
         """Temporarily lock mutation without changing backend capability."""
         self._lifecycle_busy = bool(busy)
+        self.configure_btn.setEnabled(not self._lifecycle_busy)
+        self.helper_btn.setEnabled(not self._lifecycle_busy and self._can_toggle)
+        self.update_btn.setEnabled(not self._lifecycle_busy and self._can_toggle)
+        self.move_up_btn.setEnabled(not self._lifecycle_busy and self._can_toggle)
+        self.move_down_btn.setEnabled(not self._lifecycle_busy and self._can_toggle)
         self.toggle.setEnabled(self._can_toggle and not self._lifecycle_busy)
         self.remove_btn.setEnabled(
             (self._can_remove or self._can_show_repair)
@@ -530,8 +608,18 @@ class ModsPage(QWidget):
 
     apply_restart_clicked = pyqtSignal()
     remove_mod_requested = pyqtSignal(object)
+    configure_mod_requested = pyqtSignal(object)
+    import_requested = pyqtSignal(str)
+    update_mod_requested = pyqtSignal(object)
+    check_updates_requested = pyqtSignal()
+    recover_update_requested = pyqtSignal()
+    undo_requested = pyqtSignal()
+    recover_requested = pyqtSignal()
+    activation_requested = pyqtSignal(object, bool)
+    move_requested = pyqtSignal(object, int)
+    helper_requested = pyqtSignal(object, str)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, *, defer_inventory: bool = False) -> None:
         super().__init__(parent)
         self.setProperty("deepSignal", True)
         self.setAccessibleName("Mods")
@@ -548,6 +636,13 @@ class ModsPage(QWidget):
         self._mod_folder_path: Path | None = None
         self._mod_folder_error = ""
         self._mod_folder_can_create = False
+        self._inventory = ModInventory(self._evejs_root)
+        self._refresh_handler = None
+        self._defer_inventory = defer_inventory
+        self._restore_scroll_position = 0
+        self._restore_scroll_timer = QTimer(self)
+        self._restore_scroll_timer.setSingleShot(True)
+        self._restore_scroll_timer.timeout.connect(self._restore_scroll)
         self._build_ui()
         register_translatable_widget_tree(self)
         self.refresh_mods()
@@ -585,6 +680,17 @@ class ModsPage(QWidget):
             lambda _checked=False: self.refresh_mods()
         )
         self.page_header.add_action(self.refresh_btn)
+        self.check_updates_btn = QPushButton("Check mod updates")
+        self.check_updates_btn.setProperty("class", "signalSecondary")
+        mark_translatable(self.check_updates_btn)
+        self.check_updates_btn.clicked.connect(self.check_updates_requested.emit)
+        self.page_header.add_action(self.check_updates_btn)
+        self.recover_update_btn = QPushButton("Recover mod update")
+        self.recover_update_btn.setProperty("class", "signalSecondary")
+        mark_translatable(self.recover_update_btn)
+        self.recover_update_btn.clicked.connect(self.recover_update_requested.emit)
+        self.page_header.add_action(self.recover_update_btn)
+        self.recover_update_btn.hide()
         root.addWidget(self.page_header)
 
         self.runtime_panel = QFrame(self)
@@ -696,7 +802,7 @@ class ModsPage(QWidget):
         )
         set_translatable_accessible_description(
             self.mod_author_guide_btn,
-            "Open the EveJS Launcher mod-authoring guide on GitHub.",
+            "Open the bundled mod-authoring guide.",
         )
         self.mod_author_guide_btn.clicked.connect(self._open_mod_author_guide)
         folder_layout.addWidget(self.mod_author_guide_btn)
@@ -717,6 +823,27 @@ class ModsPage(QWidget):
         self.manifest_meta_label.setProperty("class", "modsManifestMeta")
         manifest_header.addWidget(self.manifest_meta_label)
         manifest_layout.addLayout(manifest_header)
+
+        package_actions = QHBoxLayout()
+        self.add_zip_btn = QPushButton("Add ZIP")
+        self.add_folder_btn = QPushButton("Add Folder")
+        self.undo_remove_btn = QPushButton("Undo Removal")
+        self.recover_mods_btn = QPushButton("Recover Interrupted Operation")
+        for button in (self.add_zip_btn, self.add_folder_btn, self.undo_remove_btn, self.recover_mods_btn):
+            button.setProperty("class", "signalSecondary")
+            mark_translatable(button)
+            package_actions.addWidget(button)
+        package_actions.addStretch()
+        self.add_zip_btn.clicked.connect(lambda: self.import_requested.emit("zip"))
+        self.add_folder_btn.clicked.connect(lambda: self.import_requested.emit("folder"))
+        self.undo_remove_btn.clicked.connect(self.undo_requested.emit)
+        self.recover_mods_btn.clicked.connect(self.recover_requested.emit)
+        manifest_layout.addLayout(package_actions)
+        self.operation_notice = QLabel()
+        self.operation_notice.setWordWrap(True)
+        self.operation_notice.setProperty("class", "modsRuntimeDescription")
+        self.operation_notice.setVisible(False)
+        manifest_layout.addWidget(self.operation_notice)
 
         divider = QFrame()
         divider.setProperty("modsDivider", True)
@@ -905,15 +1032,18 @@ class ModsPage(QWidget):
             self._refresh_mod_folder_controls()
 
     def _open_mod_author_guide(self, _checked: bool = False) -> None:
-        """Open the pinned launcher-compatible authoring guide."""
-
-        if QDesktopServices.openUrl(QUrl(MOD_AUTHORING_GUIDE_URL)):
-            return
-        QMessageBox.warning(
-            self,
-            "Mod Author Guide",
-            "The mod-authoring guide could not be opened in your default browser.",
-        )
+        """Show the guide bundled with this exact launcher version."""
+        from src.widgets.mod_authoring_guide import ModAuthoringGuide
+        try:
+            guide = getattr(self, "_authoring_guide", None)
+            if guide is None:
+                guide = ModAuthoringGuide(self)
+                self._authoring_guide = guide
+            guide.show()
+            guide.raise_()
+            guide.activateWindow()
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Mod Author Guide", str(exc))
 
     def set_evejs_root(self, evejs_root: str) -> None:
         """Select the root scanned by both Native and Docker mod views."""
@@ -960,6 +1090,8 @@ class ModsPage(QWidget):
         for row in self._rows:
             row.set_lifecycle_busy(busy)
         self.refresh_btn.setEnabled(not busy)
+        self.check_updates_btn.setEnabled(not busy)
+        self.recover_update_btn.setEnabled(not busy)
         self._refresh_mod_folder_controls()
         self._update_summary_and_actions()
 
@@ -991,7 +1123,7 @@ class ModsPage(QWidget):
         """Return whether this backend may mutate ``mod`` and why not."""
         if not mod.valid:
             return False, mod.error or "This mod manifest is invalid.", "INVALID"
-        if mod.activation_kind is ActivationKind.CLIENT_PACKAGE:
+        if mod.activation_kind is ActivationKind.CLIENT_PACKAGE and mod.api_descriptor is None:
             return (
                 False,
                 "Detected and enabled automatically; verified before each client launch.",
@@ -1114,40 +1246,37 @@ class ModsPage(QWidget):
         return snapshot
 
     def _resolve_projection(self, mod: Mod) -> ModActivationProjection:
-        if mod.activation_kind is ActivationKind.CLIENT_PACKAGE:
+        if not mod.valid:
+            return project_mod_activation(mod, self._current_mod_snapshot())
+        if mod.activation_kind is ActivationKind.CLIENT_PACKAGE and mod.api_descriptor is None:
             return _client_package_projection(mod)
         state = read_mod_activation_state(mod.evejs_root or self._evejs_root)
         return project_mod_activation(
             mod,
             self._current_mod_snapshot(),
-            state.for_mod(mod.id),
+            state.for_mod(mod_state_key(mod)),
         )
 
     def refresh_mods(self) -> None:
-        """Rescan supported mod locations and rebuild the list."""
-        evejs_root = self._evejs_root
+        """The application delegates disk discovery to its retained worker."""
+        if self._refresh_handler is not None:
+            self._refresh_handler()
+        elif not self._defer_inventory:
+            self.show_inventory(load_mod_inventory(self._evejs_root))
+
+    def set_refresh_handler(self, handler) -> None:
+        self._refresh_handler = handler
+        self.refresh_mods()
+
+    def show_inventory(self, inventory: ModInventory) -> None:
+        if inventory.root != self._evejs_root:
+            return
+        self._inventory = inventory
+        evejs_root, mods = inventory.root, inventory.mods
+        scroll_position = self._scroll.verticalScrollBar().value()
         self._refresh_mod_folder_controls()
-        mods: list[Mod] = scan_mods(evejs_root) if evejs_root else []
-        client_package = (
-            discover_dlss5_client_mod(evejs_root) if evejs_root else None
-        )
-        if client_package is not None:
-            mods.append(client_package)
-            mods.sort(
-                key=lambda mod: (
-                    mod.name.casefold(),
-                    mod.id.casefold(),
-                    mod.activation_kind.value,
-                    str(mod.path).casefold(),
-                )
-            )
-        activation_state = None
-        self._activation_state_error = ""
-        if evejs_root:
-            try:
-                activation_state = read_mod_activation_state(evejs_root)
-            except ModActivationStateError as exc:
-                self._activation_state_error = str(exc) or "Unknown state error."
+        activation_state = inventory.activation_state
+        self._activation_state_error = inventory.state_error
         runtime_snapshot = self._current_mod_snapshot()
 
         for row in self._rows:
@@ -1186,53 +1315,31 @@ class ModsPage(QWidget):
             self._list_layout.insertWidget(0, empty)
         else:
             for index, mod in enumerate(mods):
-                if mod.activation_kind is ActivationKind.CLIENT_PACKAGE:
+                if mod.activation_kind is ActivationKind.CLIENT_PACKAGE and mod.api_descriptor is None:
                     projection = _client_package_projection(mod)
-                elif activation_state is None:
+                elif activation_state is None or not mod.valid:
                     projection = project_mod_activation(mod, runtime_snapshot)
                 else:
                     projection = project_mod_activation(
                         mod,
                         runtime_snapshot,
-                        activation_state.for_mod(mod.id),
+                        activation_state.for_mod(mod_state_key(mod)),
                     )
                 can_toggle, disabled_reason, disabled_state = (
                     self._row_capability(mod)
                 )
-                management = None
-                management_error = ""
-                try:
-                    # Legacy loader IDs come from folder names and are not
-                    # necessarily registry-safe. They are simply external,
-                    # not broken launcher enrollments.
-                    if mod.activation_kind is ActivationKind.CLIENT_PACKAGE:
-                        raise ModManagementError(
-                            "Automatic client packages use their own rollback manager."
-                        )
-                    managed_mod_registry_path(mod.id)
-                except ModManagementError:
-                    eligible_for_management = False
-                else:
-                    eligible_for_management = True
-                if eligible_for_management:
-                    try:
-                        management = read_managed_mod_registration(mod)
-                    except ModNotManagedError:
-                        pass
-                    except ModManagementError as exc:
-                        management_error = (
-                            "Launcher removal support needs repair: "
-                            + (str(exc) or "unknown registration error")
-                        )
+                key = folder_key(mod)
+                management = inventory.management.get(key)
+                management_error = inventory.management_errors.get(key, "")
+                local_removable = key in inventory.local_removable
                 can_remove = (
-                    (management is not None or (
+                    (management is not None or local_removable or (
                         mod.activation_kind is ActivationKind.CLIENT_PACKAGE
                         and mod.id == "evejs-dlss5"
                         and mod.manager_path is not None
                         and bool(mod.manager_sha256)
                     ))
-                    and mod.valid
-                    and self._runtime_backend is RuntimeBackend.NATIVE
+                    and (self._runtime_backend is RuntimeBackend.NATIVE or (local_removable and self._can_mutate()))
                 )
                 if management is not None and not can_remove:
                     if self._runtime_backend is not RuntimeBackend.NATIVE:
@@ -1249,15 +1356,28 @@ class ModsPage(QWidget):
                     management=management,
                     management_error=management_error,
                     can_remove=can_remove,
+                    local_removable=local_removable,
+                    delegated_activation=self._refresh_handler is not None,
+                    cleanup=(inventory.local_records[key].cleanup if key in inventory.local_records else None),
                     parent=self._list_container,
                 )
                 row.state_changed.connect(self._update_summary_and_actions)
                 row.remove_requested.connect(self.remove_mod_requested.emit)
+                row.configure_requested.connect(self.configure_mod_requested.emit)
+                row.activation_requested.connect(self.activation_requested.emit)
+                row.move_requested.connect(self.move_requested.emit)
+                row.helper_requested.connect(self.helper_requested.emit)
+                row.update_requested.connect(self.update_mod_requested.emit)
                 row.set_lifecycle_busy(self._lifecycle_busy)
                 self._rows.append(row)
                 self._list_layout.insertWidget(index, row)
 
         self._update_summary_and_actions()
+        self._restore_scroll_position = scroll_position
+        self._restore_scroll_timer.start(0)
+
+    def _restore_scroll(self):
+        self._scroll.verticalScrollBar().setValue(self._restore_scroll_position)
 
     def _update_summary_and_actions(self) -> None:
         """Refresh count and Apply capability after an in-row mutation."""
@@ -1298,6 +1418,15 @@ class ModsPage(QWidget):
         if self._activation_state_error:
             can_apply = False
         self.apply_btn.setEnabled(can_apply)
+        editable = self._can_mutate() and not self._lifecycle_busy and bool(self._evejs_root)
+        for button in (self.add_zip_btn, self.add_folder_btn):
+            button.setEnabled(editable and not self._inventory.registry_error)
+        self.undo_remove_btn.setEnabled(editable and bool(self._inventory.quarantined))
+        self.recover_mods_btn.setVisible(self._inventory.recovery_pending)
+        self.recover_mods_btn.setEnabled(editable)
+        notice = self._inventory.registry_error or self._inventory.state_error
+        self.operation_notice.setText(notice)
+        self.operation_notice.setVisible(bool(notice))
 
     def mods(self) -> list[Mod]:
         """Return the currently displayed mods."""

@@ -190,51 +190,15 @@ def test_copy_after_bounded_stream_writes_visible_ring_buffer_to_clipboard(qapp:
     assert "line-2009" in QApplication.clipboard().text()
 
 
-def test_append_lines_bounds_large_burst_before_one_qt_insert(
-    qapp: QApplication,
-) -> None:
+def test_append_lines_bounds_large_bursts(qapp):
     panel = ConsolePanel()
-    inserted: list[str] = []
-    cursor_moves: list[object] = []
-    ensure_visible: list[bool] = []
-
-    class _Cursor:
-        def movePosition(self, operation) -> None:  # noqa: N802
-            cursor_moves.append(operation)
-
-        def insertText(self, text: str) -> None:  # noqa: N802
-            inserted.append(text)
-
-    class _Document:
-        @staticmethod
-        def blockCount() -> int:  # noqa: N802
-            return 1
-
-    class _Log:
-        @staticmethod
-        def textCursor() -> _Cursor:  # noqa: N802
-            return _Cursor()
-
-        @staticmethod
-        def document() -> _Document:
-            return _Document()
-
-        @staticmethod
-        def ensureCursorVisible() -> None:  # noqa: N802
-            ensure_visible.append(True)
-
-    panel._log = _Log()
+    panel.begin_stream("Test")
     burst_size = panel.MAX_LINES + 50_000
-
     panel._append_lines([f"line-{index}" for index in range(burst_size)])
-
-    assert len(cursor_moves) == 1
-    assert len(inserted) == 1
-    assert inserted[0].splitlines() == [
-        f"line-{index}"
-        for index in range(burst_size - panel.MAX_LINES, burst_size)
-    ]
-    assert ensure_visible == [True]
+    assert panel._log.document().blockCount() <= panel.MAX_LINES
+    assert f"line-{burst_size-1}" in panel._log.toPlainText()
+    assert "line-0\n" not in panel._log.toPlainText()
+    panel.close()
 
 
 def test_poll_log_caps_large_unread_burst_discards_partial_line_and_advances(

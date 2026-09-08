@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 3,
+  "id": "source-overlay-demo",
+  "displayName": "Source Overlay Demo",
+  "version": "1.0.0",
+  "kind": "source-integrated",
+  "restart": "game_server",
+  "activation": {"strategy": "package"},
+  "launcherApi": {
+    "version": 1,
+    "minLauncherVersion": "1.0.53",
+    "helper": {"runtime": "node", "path": "helper.js"},
+    "capabilities": ["install", "prepare_disable", "prepare_remove"]
+  },
+  "settings": {
+    "schemaVersion": 1,
+    "files": [{"id": "options", "base": "mod", "path": "options.json", "format": "json"}],
+    "fields": [
+      {"id": "region", "label": "Demo region", "type": "choice", "default": "first", "choices": [{"value":"first","label":"First"},{"value":"second","label":"Second"}], "file": "options", "key": ["region"]},
+      {"id": "replacement", "label": "Replacement value", "type": "string", "default": "modified", "file": "options", "key": ["replacement"]}
+    ]
+  }
+}

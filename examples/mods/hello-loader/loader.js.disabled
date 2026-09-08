@@ -1,0 +1,5 @@
+"use strict";
+
+// This example has no gameplay hooks, timers, filesystem writes or DB access.
+// Node does not load this file while it remains a disabled loader.
+process.stdout.write("[hello-loader] Selected launcher preload is running.\n");

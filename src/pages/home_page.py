@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal, QUrl
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QObject, QVariantAnimation
+from PyQt6.QtGui import QDesktopServices, QPainter, QColor
 from PyQt6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -35,7 +35,8 @@ from src.i18n import (
     translate_ui_phrase,
 )
 from src.ui.motion import MotionController
-from src.widgets.hero_banner import HeroBanner
+from src.ui.visible_motion import VisibleMotion
+from src.widgets.signal_button import SignalButton
 from src.widgets.deep_signal_background import DeepSignalBackground
 from src.widgets.docking_traffic_overlay import DockingTrafficOverlay
 from src.widgets.page_header import PageHeader
@@ -53,75 +54,11 @@ DISCORD_INVITE_URL = "https://discord.gg/HVTfKeqX3t"
 _CHANGELOG_PATH = Path(__file__).resolve().parent.parent.parent / "CHANGELOG.md"
 
 
-def extract_latest_release(text: str, *, limit: int = 3) -> tuple[str, list[str]]:
-    """Return the newest changelog heading and a capped list of its bullets."""
-    lines = text.splitlines()
-    header_index = next(
-        (index for index, line in enumerate(lines) if line.startswith("## v")),
-        None,
-    )
-    if header_index is None:
-        return "Latest release unavailable", []
+class SignalInstrument(QFrame):
+    """Shared ring and text layout for game, market and client status."""
 
-    version = lines[header_index].removeprefix("## ").strip()
-    highlights: list[str] = []
-    for line in lines[header_index + 1:]:
-        if line.startswith("## "):
-            break
-        if line.startswith("- "):
-            highlights.append(line.removeprefix("- ").strip())
-            if len(highlights) >= limit:
-                break
-    return version, highlights
-
-
-class StatCard(QFrame):
-    """Mini stat card showing a big number over a small label."""
-
-    def __init__(self, label: str, parent: QWidget | None = None) -> None:
+    def __init__(self, label, parent=None, *, motion_controller=None):
         super().__init__(parent)
-        self.setProperty("class", "signalMetric")
-        self.setProperty("deepSignal", True)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setFixedHeight(84)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(2)
-
-        self.value_label = QLabel("—")
-        self.value_label.setProperty("class", "metricValue")
-        layout.addWidget(self.value_label)
-
-        name_label = QLabel(label.upper())
-        name_label.setProperty("class", "muted")
-        layout.addWidget(name_label)
-
-    def set_value(self, value: str | int) -> None:
-        self.value_label.setText(str(value))
-
-
-class ServerStatusCard(QFrame):
-    """Compatibility name retained for imports during the Home transition."""
-
-
-class ServiceRow(QFrame):
-    """Standalone keyboard-accessible service instrument."""
-
-    activated = pyqtSignal(str)
-
-    def __init__(
-        self,
-        service_key: str,
-        label: str,
-        parent: QWidget | None = None,
-        *,
-        motion_controller: MotionController | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self._service_key = service_key
-        self._state_text = "Offline"
-        self._detail_text = ""
         self.setProperty("class", "signalInstrument")
         self.setProperty("deepSignal", True)
         self.setFixedHeight(132)
@@ -130,11 +67,9 @@ class ServiceRow(QFrame):
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Fixed,
         )
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
         set_translatable_accessible_name(
             self,
-            f"{label} service status",
+            f"{label} status",
             allow_templates=True,
         )
 
@@ -169,11 +104,10 @@ class ServiceRow(QFrame):
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Preferred,
         )
-        name_line.addWidget(self._name_label)
-        name_line.addStretch()
+        name_line.addWidget(self._name_label, 1)
         copy.addLayout(name_line)
 
-        self._state_label = QLabel(self._state_text)
+        self._state_label = QLabel("Offline")
         self._state_label.setProperty("class", "signalInstrumentState")
         self._state_label.setSizePolicy(
             QSizePolicy.Policy.Ignored,
@@ -194,6 +128,26 @@ class ServiceRow(QFrame):
         copy.addStretch()
         layout.addLayout(copy, 1)
 
+
+class ServiceRow(SignalInstrument):
+    """Standalone keyboard-accessible service instrument."""
+
+    activated = pyqtSignal(str)
+
+    def __init__(
+        self,
+        service_key: str,
+        label: str,
+        parent: QWidget | None = None,
+        *,
+        motion_controller: MotionController | None = None,
+    ) -> None:
+        super().__init__(label, parent, motion_controller=motion_controller)
+        self._service_key = service_key
+        self._state_text = "Offline"
+        self._detail_text = ""
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.set_state(ServiceState.OFFLINE)
 
     @property
@@ -295,8 +249,8 @@ class ServiceRow(QFrame):
             self.activated.emit(self._service_key)
         super().mouseReleaseEvent(event)
 
-class ServicesCard(QFrame):
-    """Compatibility controller for the two visible service instruments."""
+class ServicesCard(QObject):
+    """Presentation controller for the two visible service instruments."""
 
     console_requested = pyqtSignal(str)
 
@@ -307,10 +261,8 @@ class ServicesCard(QFrame):
         motion_controller: MotionController | None = None,
     ) -> None:
         super().__init__(parent)
-        self.mode_label = QLabel("ASK ON START")
+        self.mode_label = QLabel("ASK ON START", parent)
         self.mode_label.setProperty("class", "muted")
-        self.mode_label.setParent(self)
-        self.mode_label.hide()
 
         # These instruments are reparented into Home's three-column signal rail.
         self.game_row = ServiceRow(
@@ -348,7 +300,7 @@ class ServicesCard(QFrame):
         )
 
 
-class ClientSignalCard(QFrame):
+class ClientSignalCard(SignalInstrument):
     """Third truthful signal instrument driven by the observed client count."""
 
     def __init__(
@@ -357,78 +309,13 @@ class ClientSignalCard(QFrame):
         *,
         motion_controller: MotionController | None = None,
     ) -> None:
-        super().__init__(parent)
-        self.setProperty("class", "signalInstrument")
-        self.setProperty("deepSignal", True)
-        self.setFixedHeight(132)
-        self.setMinimumWidth(0)
-        self.setSizePolicy(
-            QSizePolicy.Policy.Ignored,
-            QSizePolicy.Policy.Fixed,
-        )
-        self.setAccessibleName("Clients status")
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(10)
-
-        self._ring = StatusRing(
-            "Clients",
-            "0",
-            state=ServiceState.OFFLINE,
-            motion_controller=motion_controller,
-        )
-        self._ring.setFixedSize(80, 80)
-        layout.addWidget(self._ring)
-
-        copy = QVBoxLayout()
-        copy.setContentsMargins(0, 8, 0, 8)
-        copy.setSpacing(4)
-
-        name_line = QHBoxLayout()
-        name_line.setContentsMargins(0, 0, 0, 0)
-        name_line.setSpacing(5)
-
-        self._dot = QLabel("●")
-        self._dot.setFixedWidth(12)
-        name_line.addWidget(self._dot)
-
-        self._name_label = QLabel("CLIENTS")
-        self._name_label.setProperty("class", "signalInstrumentName")
-        self._name_label.setSizePolicy(
-            QSizePolicy.Policy.Ignored,
-            QSizePolicy.Policy.Preferred,
-        )
-        name_line.addWidget(self._name_label)
-        name_line.addStretch()
-        copy.addLayout(name_line)
-
-        self._state_label = QLabel("NONE RUNNING")
-        self._state_label.setProperty("class", "signalInstrumentState")
-        self._state_label.setSizePolicy(
-            QSizePolicy.Policy.Ignored,
-            QSizePolicy.Policy.Preferred,
-        )
-        copy.addWidget(self._state_label)
-
-        self._detail_label = QLabel("CAPSULES IDLE")
-        self._detail_label.setProperty("class", "muted")
-        self._detail_label.setSizePolicy(
-            QSizePolicy.Policy.Ignored,
-            QSizePolicy.Policy.Preferred,
-        )
-        copy.addWidget(self._detail_label)
-        copy.addStretch()
-        layout.addLayout(copy, 1)
-
-        # Compatibility metric consumed by controller and dashboard tests.
-        self.value_label = QLabel("0", self)
-        self.value_label.hide()
+        super().__init__("Clients", parent, motion_controller=motion_controller)
+        self.count = 0
         self.set_value(0)
 
     def set_value(self, value: str | int) -> None:
         count = max(0, int(value))
-        self.value_label.setText(str(count))
+        self.count = count
         state = ServiceState.ONLINE if count > 0 else ServiceState.OFFLINE
         color = COLORS["green"] if count > 0 else COLORS["red"]
         self._ring.set_state(
@@ -546,13 +433,17 @@ class RecentActivityCard(QFrame):
         super().__init__(parent)
         self.setProperty("class", "recentActivity")
         self.setProperty("deepSignal", True)
-        self.setMinimumHeight(142)
-        self.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Expanding,
-        )
+        self.setFixedHeight(156)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._entries: list[tuple[str, str, str, str]] = []
         self._last_signature: tuple[ServiceState, ServiceState, int] | None = None
+        self._flash = 0.
+        self._arrival = QVariantAnimation(self)
+        self._arrival.setDuration(650)
+        self._arrival.setStartValue(1.)
+        self._arrival.setEndValue(0.)
+        self._arrival.valueChanged.connect(self._set_flash)
+        self._motion_gate = VisibleMotion(self, self._sync_motion)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 8, 10, 8)
@@ -570,6 +461,7 @@ class RecentActivityCard(QFrame):
         for row in self.activity_rows:
             layout.addWidget(row)
         layout.addStretch(1)
+        self._render_entries()
 
     def add_header_action(self, widget: QWidget) -> None:
         self.header_layout.addWidget(widget)
@@ -622,6 +514,24 @@ class RecentActivityCard(QFrame):
                 self._append(timestamp, message, state, label)
 
         self._last_signature = signature
+        if self._motion_gate.allowed:
+            self._arrival.stop()
+            self._arrival.start()
+
+    def _set_flash(self, value):
+        self._flash = float(value)
+        self.update()
+
+    def _sync_motion(self, allowed):
+        if not allowed:
+            self._arrival.stop()
+            self._set_flash(0.)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self._flash > 0.:
+            painter = QPainter(self)
+            painter.fillRect(self.rect().adjusted(1, 1, -1, -1), QColor(0, 210, 235, int(22*self._flash)))
 
     def _append(self, timestamp: str, message: str, state: str, label: str) -> None:
         self._entries.insert(0, (timestamp, message, state, label))
@@ -629,7 +539,10 @@ class RecentActivityCard(QFrame):
         self._render_entries()
 
     def _render_entries(self) -> None:
+        visible_count = max(1, len(self._entries))
+        self.setFixedHeight(56 + visible_count * 25)
         for index, row in enumerate(self.activity_rows):
+            row.setVisible(index < visible_count)
             if index < len(self._entries):
                 row.set_entry(*self._entries[index])
             else:
@@ -642,118 +555,6 @@ class RecentActivityCard(QFrame):
     @property
     def messages(self) -> tuple[str, ...]:
         return tuple(entry[1] for entry in self._entries)
-
-
-class LatestReleaseCard(QFrame):
-    """Compact summary of the newest release rather than the full archive."""
-
-    view_full_changelog_requested = pyqtSignal()
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setProperty("class", "card")
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setFixedHeight(164)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(6)
-
-        title = QLabel("LATEST RELEASE")
-        title.setProperty("class", "sectionTitle")
-        layout.addWidget(title)
-
-        self.version_label = QLabel()
-        self.version_label.setStyleSheet(
-            f"color: {COLORS['white']}; font-size: 15px; font-weight: 700;"
-        )
-        layout.addWidget(self.version_label)
-
-        self.highlights_label = QLabel()
-        self.highlights_label.setProperty("class", "muted")
-        self.highlights_label.setWordWrap(True)
-        layout.addWidget(self.highlights_label, stretch=1)
-
-        view_button = QPushButton("View Full Changelog")
-        view_button.setProperty("class", "ghost")
-        view_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        view_button.setFixedHeight(28)
-        view_button.clicked.connect(self.view_full_changelog_requested.emit)
-        layout.addWidget(view_button, alignment=Qt.AlignmentFlag.AlignLeft)
-
-    def set_release(self, version: str, highlights: list[str]) -> None:
-        """Render a bounded release summary suitable for the dashboard."""
-        self.version_label.setText(version)
-        if highlights:
-            # Release-note content belongs to the publisher and stays verbatim.
-            self.highlights_label.setText(
-                "\n".join(f"• {highlight}" for highlight in highlights)
-            )
-        else:
-            set_translatable_text(
-                self.highlights_label,
-                "No release highlights are available.",
-            )
-
-
-class ResourcesCard(QFrame):
-    """Compact community, release, and diagnostic shortcuts."""
-
-    console_requested = pyqtSignal(str)
-    changelog_requested = pyqtSignal()
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setProperty("class", "card")
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setFixedHeight(164)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(6)
-
-        title = QLabel("RESOURCES")
-        title.setProperty("class", "sectionTitle")
-        layout.addWidget(title)
-
-        blurb = QLabel("Community, release notes, and service diagnostics.")
-        blurb.setProperty("class", "muted")
-        blurb.setWordWrap(True)
-        layout.addWidget(blurb)
-
-        links = QHBoxLayout()
-        links.setSpacing(6)
-        self.btn_discord = self._make_button("Discord")
-        self.btn_discord.clicked.connect(
-            lambda: QDesktopServices.openUrl(QUrl(DISCORD_INVITE_URL))
-        )
-        self.btn_changelog = self._make_button("Changelog")
-        self.btn_changelog.clicked.connect(self.changelog_requested.emit)
-        links.addWidget(self.btn_discord)
-        links.addWidget(self.btn_changelog)
-        layout.addLayout(links)
-
-        consoles = QHBoxLayout()
-        consoles.setSpacing(6)
-        self.btn_game_console = self._make_button("Game Console")
-        self.btn_market_console = self._make_button("Market Console")
-        self.btn_game_console.clicked.connect(
-            lambda: self.console_requested.emit("server")
-        )
-        self.btn_market_console.clicked.connect(
-            lambda: self.console_requested.emit("market")
-        )
-        consoles.addWidget(self.btn_game_console)
-        consoles.addWidget(self.btn_market_console)
-        layout.addLayout(consoles)
-
-    @staticmethod
-    def _make_button(label: str) -> QPushButton:
-        button = QPushButton(label)
-        button.setProperty("class", "compactGhost")
-        button.setCursor(Qt.CursorShape.PointingHandCursor)
-        button.setFixedHeight(32)
-        return button
 
 
 class HomePage(QWidget):
@@ -783,7 +584,7 @@ class HomePage(QWidget):
         self._build_ui()
         register_translatable_widget_tree(self)
         self.set_group_state(TargetGroupState())
-        self._load_latest_release()
+
 
     # ── UI construction ──────────────────────────────────────────────────────
     def _build_ui(self) -> None:
@@ -810,30 +611,19 @@ class HomePage(QWidget):
         self._foreground.setProperty("deepSignal", True)
         layers.addWidget(self._foreground)
         layers.setCurrentWidget(self._foreground)
+        # StackAll only raises the current child; explicitly order the rest.
+        self.signal_background.lower()
+        self.traffic_overlay.stackUnder(self._foreground)
+        self.traffic_overlay.set_background(self.signal_background)
 
-        # Keep the pre-redesign object graph alive for controllers and plugins,
-        # but make it impossible for those widgets to consume command-surface
-        # geometry.  These remain real, functional objects rather than mocks.
-        self._compatibility_store = QWidget(self)
-        self._compatibility_store.setObjectName("homeCompatibilityStore")
-        self._compatibility_store.hide()
-        self.hero = HeroBanner(self._compatibility_store)
-        self.accounts_card = StatCard("Accounts", self._compatibility_store)
-        self.characters_card = StatCard("Characters", self._compatibility_store)
-        self.release_card = LatestReleaseCard(self._compatibility_store)
-        self.resources_card = ResourcesCard(self._compatibility_store)
-        self.services_card = ServicesCard(
-            self._compatibility_store,
-            motion_controller=self._motion,
-        )
-        self.release_card.view_full_changelog_requested.connect(self._open_full_changelog)
-        self.resources_card.changelog_requested.connect(self._open_full_changelog)
-        self.resources_card.console_requested.connect(self.console_requested.emit)
+        self.accounts_count = 0
+        self.characters_count = 0
+        self.services_card = ServicesCard(self, motion_controller=self._motion)
         self.services_card.console_requested.connect(self.console_requested.emit)
         self.server_card = self.services_card.game_row
 
         canvas = QHBoxLayout(self._foreground)
-        canvas.setContentsMargins(24, 16, 24, 16)
+        canvas.setContentsMargins(24, 12, 24, 12)
         canvas.setSpacing(0)
 
         self.command_column = QWidget(self._foreground)
@@ -854,7 +644,7 @@ class HomePage(QWidget):
         overview_layout.setSpacing(4)
         self.page_header = PageHeader(
             "OPERATIONS",
-            "Authoritative runtime telemetry and safe launcher-owned controls.",
+            "Your station. Your fleet. Ready when you are.",
             "DEEP SIGNAL // COMMAND NETWORK",
         )
         overview_layout.addWidget(self.page_header)
@@ -890,7 +680,7 @@ class HomePage(QWidget):
         actions.setContentsMargins(0, 0, 0, 0)
         actions.setSpacing(10)
 
-        self.btn_start_servers = QPushButton("Start Stack")
+        self.btn_start_servers = SignalButton("Start Stack", accent=COLORS["gold"])
         self.btn_start_servers.setProperty("class", "secondary")
         self.btn_start_servers.setProperty("deepRole", "launchStack")
         self.btn_start_servers.setFixedHeight(70)
@@ -913,7 +703,7 @@ class HomePage(QWidget):
             alignment=Qt.AlignmentFlag.AlignVCenter,
         )
 
-        self.btn_launch_all = QPushButton("Launch All")
+        self.btn_launch_all = SignalButton("Launch All")
         self.btn_launch_all.setProperty("class", "primary")
         self.btn_launch_all.setProperty("deepRole", "launchGroup")
         self.btn_launch_all.setFixedHeight(70)
@@ -937,7 +727,22 @@ class HomePage(QWidget):
         self.btn_kill_all.clicked.connect(self.kill_all_clicked.emit)
         self.recent_activity = RecentActivityCard(self.command_column)
         self.recent_activity.add_header_action(self.btn_kill_all)
-        command_layout.addWidget(self.recent_activity, 1)
+        command_layout.addWidget(self.recent_activity)
+        links = QHBoxLayout()
+        links.setSpacing(8)
+        links.addWidget(self.services_card.mode_label)
+        links.addStretch()
+        self.btn_changelog = QPushButton("Changelog")
+        self.btn_changelog.clicked.connect(self._open_full_changelog)
+        self.btn_discord = QPushButton("Discord")
+        self.btn_discord.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(DISCORD_INVITE_URL)))
+        for button in (self.btn_changelog, self.btn_discord):
+            button.setProperty("class", "compactGhost")
+            button.setFixedHeight(26)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            links.addWidget(button)
+        command_layout.addLayout(links)
+        command_layout.addStretch(1)
 
         canvas.addWidget(self.command_column)
         canvas.addStretch(1)
@@ -947,8 +752,7 @@ class HomePage(QWidget):
         """Keep commands full-width at minimum size and cinematic when wide."""
         available = max(320, int(page_width) - 48)
         self.command_column.setFixedWidth(min(760, available))
-        # Keep all live traffic on the exposed station side.  At the minimum
-        # launcher width this intentionally leaves no animation area.
+        # Retain the command edge for diagnostics; ships remain visible through glass.
         self.traffic_overlay.set_reserved_left_px(
             24 + self.command_column.width() + 12
         )
@@ -959,17 +763,6 @@ class HomePage(QWidget):
             self._sync_command_width(event.size().width())
 
     # ── Data ─────────────────────────────────────────────────────────────────
-    def _load_latest_release(self) -> None:
-        """Load only the latest release highlights into the compact summary."""
-        try:
-            if _CHANGELOG_PATH.exists():
-                text = _CHANGELOG_PATH.read_text(encoding="utf-8")
-                version, highlights = extract_latest_release(text)
-            else:
-                version, highlights = "Latest release unavailable", []
-        except OSError:
-            version, highlights = "Latest release unavailable", []
-        self.release_card.set_release(version, highlights)
 
     @staticmethod
     def _open_full_changelog() -> None:
@@ -986,15 +779,15 @@ class HomePage(QWidget):
         server_online: bool,
     ) -> None:
         """Update the four stat cards."""
-        self.accounts_card.set_value(accounts)
-        self.characters_card.set_value(characters)
+        self.accounts_count = max(0, int(accounts))
+        self.characters_count = max(0, int(characters))
         self.running_card.set_value(running_clients)
         self.server_card.set_online(server_online)
 
     def set_character_stats(self, accounts: int, characters: int) -> None:
         """Update account/character metrics without disturbing runtime state."""
-        self.accounts_card.set_value(accounts)
-        self.characters_card.set_value(characters)
+        self.accounts_count = max(0, int(accounts))
+        self.characters_count = max(0, int(characters))
 
     def set_server_online(self, online: bool) -> None:
         """Update only the server status mini card."""
@@ -1008,7 +801,6 @@ class HomePage(QWidget):
         """Apply one reduced-motion choice to every Operations decoration."""
         enabled = bool(enabled)
         self._motion.set_reduced_motion(not enabled)
-        self.hero.set_animations_enabled(enabled)
         self.signal_background.set_motion_enabled(enabled)
         self.traffic_overlay.set_motion_enabled(enabled)
 
@@ -1067,6 +859,7 @@ class HomePage(QWidget):
     ) -> None:
         """Make Launch All a cancellation control while its serial queue runs."""
         self._launch_in_progress = True
+        self.btn_launch_all.set_busy(True)
         self._launch_progress = (attempted, total, succeeded, group_name)
         self.group_combo.setEnabled(False)
         prefix = (
@@ -1097,6 +890,7 @@ class HomePage(QWidget):
         """Restore the primary action after its serial launch queue finishes."""
         self._launch_in_progress = False
         self._launch_progress = None
+        self.btn_launch_all.set_busy(False)
         self.group_combo.setEnabled(True)
         self._restore_launch_button()
         if cancelled:
@@ -1204,6 +998,10 @@ class HomePage(QWidget):
 
     def _update_stack_action(self, snapshot: RuntimeSnapshot) -> None:
         """Describe the next safe stack operation from the shared snapshot."""
+        self.btn_start_servers.set_busy(any(
+            state in {ServiceState.STARTING, ServiceState.STOPPING}
+            for state in (snapshot.game, snapshot.market)
+        ))
         if snapshot.backend is RuntimeBackend.DOCKER_COMPOSE:
             states = {snapshot.game, snapshot.market}
             if snapshot.docker_control_policy is DockerControlPolicy.CONNECT_ONLY:

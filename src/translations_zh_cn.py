@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from .translations_zh_cn_additional import ADDITIONAL_UI_PHRASES
+from .translations_mod_settings import UI_PHRASES_BY_LANGUAGE as _MOD_SETTINGS_PHRASES
+from .translations_mod_updates import UI_PHRASES_BY_LANGUAGE as _MOD_UPDATE_PHRASES
 
 
 UI_PHRASES: dict[str, str] = {
@@ -22,6 +24,9 @@ UI_PHRASES: dict[str, str] = {
     "MUTED": "已静音",
     "SOUNDSCAPE OFF": "环境音关闭",
     "STATION SOUNDSCAPE": "空间站环境音",
+    "RETURN TO LIVE": "返回实时输出",
+    "Return to latest console output": "返回最新的控制台输出",
+    "Your station. Your fleet. Ready when you are.": "你的空间站，你的舰队，随时待命。",
     "COPY": "复制",
     "OPEN LOG": "打开日志",
     "SIGNAL CONSOLE": "信号控制台",
@@ -157,3 +162,5 @@ UI_PHRASES: dict[str, str] = {
 
 
 UI_PHRASES.update(ADDITIONAL_UI_PHRASES)
+UI_PHRASES.update(_MOD_SETTINGS_PHRASES["zh_CN"])
+UI_PHRASES.update(_MOD_UPDATE_PHRASES["zh_CN"])

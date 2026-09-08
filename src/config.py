@@ -38,8 +38,8 @@ DEFAULT_CONFIG = {
     "hide_test_characters": True,  # auto-hide characters belonging to test/GM accounts
     "never_hide_characters": [],  # characters the user explicitly un-hid — auto-hide skips these
     "animations_enabled": True,  # cross-fade banner, page transitions, card effects
-    "hero_rotation_interval_sec": 6,  # seconds between hero banner cross-fades
-    "deep_signal_enabled": True,  # side-project visual shell feature flag
+    "hero_rotation_interval_sec": 6,  # legacy preference; retained for config round-trips
+    "deep_signal_enabled": True,  # legacy preference; shell is always enabled
     # ── Audio & LYRA ───────────────────────────────────────────────────────
     "audio_master_muted": False,
     # Music-only mute used by the persistent title-bar control.  Master mute
@@ -90,7 +90,7 @@ def _legacy_script_filename(value: object) -> str:
 
 
 def _migrate(stored: dict) -> dict:
-    """Normalize legacy server-selector keys into one preference value."""
+    """Migrate known settings while retaining unrelated persisted preferences."""
     migrated = dict(stored)
     preference = migrated.get("server_start_preference")
     if _is_valid_server_start_preference(preference):
@@ -121,15 +121,67 @@ def _migrate(stored: dict) -> dict:
         "server_script_prompted",
     ):
         migrated.pop(legacy_key, None)
+    _normalize_settings(migrated)
     return migrated
 
 
 def _runtime_backend(value: object) -> str:
-    return value if value in {"native", "docker_compose"} else "native"
+    return value if isinstance(value, str) and value in {"native", "docker_compose"} else "native"
 
 
 def _control_policy(value: object) -> str:
-    return value if value in {"connect_only", "managed"} else "connect_only"
+    return value if isinstance(value, str) and value in {"connect_only", "managed"} else "connect_only"
+
+
+_INTEGER_SETTING_RANGES = {
+    "game_port": (1, 65535),
+    "stagger_delay_sec": (0, 30),
+    # Zero predates the Settings control and disables the repeating timer.
+    "update_check_interval_hours": (0, 72),
+    "hero_rotation_interval_sec": (0, 2_147_483),
+}
+
+
+def _integer_setting(value: object, *, default: int, minimum: int, maximum: int) -> int:
+    """Normalize integer preferences without truncating fractions or Booleans."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return default
+    if isinstance(value, float) and (not math.isfinite(value) or not value.is_integer()):
+        return default
+    try:
+        numeric = int(value)
+    except (ValueError, OverflowError):
+        return default
+    return numeric if minimum <= numeric <= maximum else default
+
+
+def _normalize_settings(migrated: dict) -> None:
+    """Make supported field types safe for consumers without discarding a profile.
+
+    Unknown keys remain untouched. Lists in the current schema contain names,
+    versions or paths; keep valid entries rather than losing an entire list to
+    one malformed member. Audio's more specific normalization runs first.
+    """
+    for key, default in DEFAULT_CONFIG.items():
+        value = migrated.get(key, default)
+        if isinstance(default, bool):
+            migrated[key] = _bool_setting(value, default=default)
+        elif isinstance(default, str):
+            migrated[key] = value if isinstance(value, str) else default
+        elif isinstance(default, list):
+            migrated[key] = (
+                [item for item in value if isinstance(item, str)]
+                if isinstance(value, list)
+                else []
+            )
+
+    for key, (minimum, maximum) in _INTEGER_SETTING_RANGES.items():
+        migrated[key] = _integer_setting(
+            migrated.get(key), default=DEFAULT_CONFIG[key],
+            minimum=minimum, maximum=maximum,
+        )
+    if migrated["server_mode"] not in {"vanilla", "modded"}:
+        migrated["server_mode"] = DEFAULT_CONFIG["server_mode"]
 
 
 def _string_setting(value: object) -> str:
@@ -170,20 +222,18 @@ def _percent_setting(value: object, *, default: int) -> int:
     """Return a finite integer percentage clamped to 0-100."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return default
-    numeric = float(value)
-    if not math.isfinite(numeric):
+    if isinstance(value, float) and not math.isfinite(value):
         return default
-    return max(0, min(100, int(round(numeric))))
+    return int(round(max(0, min(100, value))))
 
 
 def _speech_axis_setting(value: object, *, default: float = 0.0) -> float:
     """Return a finite QTextToSpeech rate/pitch value clamped to -1..1."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return default
-    numeric = float(value)
-    if not math.isfinite(numeric):
+    if isinstance(value, float) and not math.isfinite(value):
         return default
-    return max(-1.0, min(1.0, numeric))
+    return float(max(-1.0, min(1.0, value)))
 
 
 _AUDIO_SETTING_ALIASES = {
@@ -299,6 +349,16 @@ def load() -> dict:
             return _default_config()
 
         stored = _migrate(raw)
+        repaired = [
+            key for key in DEFAULT_CONFIG
+            if key in raw and (
+                type(raw[key]) is not type(stored[key]) or raw[key] != stored[key]
+            )
+        ]
+        if repaired:
+            # Field names are useful diagnostics; paths, accounts and values
+            # are private. Leave the original file intact until an explicit save.
+            log.warning("Normalized persisted configuration fields: %s", ", ".join(repaired))
         cfg = _default_config()
         cfg.update(stored)
         return cfg

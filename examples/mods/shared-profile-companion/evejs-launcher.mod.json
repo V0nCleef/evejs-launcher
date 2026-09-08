@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 3,
+  "id": "shared-profile-companion-demo",
+  "displayName": "Shared Profile Companion Example",
+  "version": "1.0.0",
+  "description": "Shares a demonstration INI section with Profile Options without replacing its keys.",
+  "kind": "settings",
+  "supportedBackends": ["native", "docker"],
+  "activation": {"strategy": "package"},
+  "restart": "client",
+  "settings": {
+    "schemaVersion": 1,
+    "files": [{"id": "prefs", "base": "profile_settings", "path": "prefs.ini", "format": "ini"}],
+    "fields": [{
+      "id": "hint_level",
+      "label": {"en": "Example hint level", "nl": "Voorbeeldhintniveau"},
+      "description": "A demonstration key only; this example adds no gameplay behavior.",
+      "type": "integer", "default": 0, "minimum": 0, "maximum": 5,
+      "file": "prefs", "key": ["LauncherExample", "HintLevel"], "restart": "client"
+    }]
+  }
+}

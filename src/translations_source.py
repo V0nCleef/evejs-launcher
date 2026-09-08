@@ -13,6 +13,8 @@ this language-neutral module.
 from __future__ import annotations
 
 from .translations_zh_cn import UI_PHRASES as _LEGACY_REVIEWED_PHRASES
+from .translations_mod_settings import SOURCE_PHRASES as _MOD_SETTINGS_PHRASES
+from .translations_mod_updates import SOURCE_PHRASES as _MOD_UPDATE_PHRASES
 
 
 # Reviewed launcher-owned UI that was not part of the original 142-phrase
@@ -567,6 +569,9 @@ _ADDITIONAL_SOURCE_PHRASES: tuple[str, ...] = (
     "{count} character(s)",
 
     # Console, title bar, soundscape, and footer accessibility.
+    "RETURN TO LIVE",
+    "Return to latest console output",
+    "Your station. Your fleet. Ready when you are.",
     "A decorative, non-progress soundscape signal. Soundscape is {state}.",
     "Actions for {character}",
     "Ambience signal",
@@ -1060,7 +1065,7 @@ _ADDITIONAL_SOURCE_PHRASES: tuple[str, ...] = (
 # Unicode code-point ordering makes the exported tuple reproducible regardless
 # of hash randomization.  The frozenset is the fast membership view.
 SOURCE_PHRASES: tuple[str, ...] = tuple(
-    sorted(set(_LEGACY_REVIEWED_PHRASES) | set(_ADDITIONAL_SOURCE_PHRASES))
+    sorted(set(_LEGACY_REVIEWED_PHRASES) | set(_ADDITIONAL_SOURCE_PHRASES) | set(_MOD_SETTINGS_PHRASES) | set(_MOD_UPDATE_PHRASES))
 )
 SOURCE_PHRASE_SET: frozenset[str] = frozenset(SOURCE_PHRASES)
 

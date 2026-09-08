@@ -36,6 +36,7 @@ from src.i18n import (
     translate_ui_phrase,
 )
 from src.ui.motion import MotionController
+from src.ui.visible_motion import VisibleMotion
 from src.widgets.ui_translation import (
     set_translatable_accessible_name,
 )
@@ -146,7 +147,9 @@ class TelemetryLabel(QLabel):
         painter.drawText(
             self.contentsRect(),
             self.alignment() | Qt.AlignmentFlag.AlignVCenter,
-            self.display_text(),
+            self.fontMetrics().elidedText(
+                self.display_text(), Qt.TextElideMode.ElideRight, self.contentsRect().width()
+            ),
         )
 
 
@@ -178,6 +181,7 @@ class StatusSection(QFrame):
         self.setProperty("telemetryState", "offline")
         self._build_ui()
         self._apply_style()
+        self._motion_gate = VisibleMotion(self, lambda _allowed: self._sync_pulse())
 
     def _build_ui(self) -> None:
         layout = QHBoxLayout(self)
@@ -236,17 +240,8 @@ class StatusSection(QFrame):
             self._render_label_text()
 
     def _render_label_text(self) -> None:
-        """Fit the visible label deliberately instead of allowing raw clipping."""
-        available_width = self.label.contentsRect().width()
-        if available_width <= 0:
-            return
-        self.label.setText(
-            self.label.fontMetrics().elidedText(
-                self._full_text,
-                Qt.TextElideMode.ElideRight,
-                available_width,
-            )
-        )
+        """TelemetryLabel elides its visual text; logical status stays intact."""
+        self.label.update()
 
     def _apply_style(self) -> None:
         self.setStyleSheet(f"""
@@ -277,7 +272,7 @@ class StatusSection(QFrame):
         self._sync_pulse()
 
     def _sync_pulse(self) -> None:
-        should_run = self._pulse_requested and self._motion.animations_enabled
+        should_run = self._pulse_requested and self._motion.animations_enabled and self._motion_gate.allowed
         if should_run:
             if not self.is_animating():
                 self._pulse.start()

@@ -19,6 +19,7 @@ from src.core.mod_management import (
 )
 from src.core.service_status import DockerControlPolicy, RuntimeBackend
 from src.pages import mods_page as mods_page_module
+from src.core import mod_management
 from src.pages.mods_page import ModsPage
 
 
@@ -38,7 +39,7 @@ def _activation_state_directory(
 
     # Never inspect a developer machine's real HKCU enrollment from UI tests.
     monkeypatch.setattr(
-        mods_page_module,
+        mod_management,
         "read_managed_mod_registration",
         unmanaged,
     )
@@ -228,7 +229,7 @@ def test_managed_native_mod_exposes_remove_and_emits_exact_discovered_mod(
     _integrated_mod(tmp_path)
     registration = _managed_registration(tmp_path.resolve())
     monkeypatch.setattr(
-        mods_page_module,
+        mod_management,
         "read_managed_mod_registration",
         lambda _mod: registration,
     )
@@ -260,7 +261,7 @@ def test_invalid_management_enrollment_is_repair_only_and_fail_closed(
         raise ModManagementError("registered bundle hash does not match")
 
     monkeypatch.setattr(
-        mods_page_module,
+        mod_management,
         "read_managed_mod_registration",
         invalid,
     )
@@ -292,7 +293,7 @@ def test_lifecycle_busy_locks_remove_and_refresh_then_restores_capability(
     _integrated_mod(tmp_path)
     registration = _managed_registration(tmp_path.resolve())
     monkeypatch.setattr(
-        mods_page_module,
+        mod_management,
         "read_managed_mod_registration",
         lambda _mod: registration,
     )
@@ -322,7 +323,7 @@ def test_lifecycle_busy_refresh_does_not_permanently_disable_remove(
     _integrated_mod(tmp_path, enabled=False)
     registration = _managed_registration(tmp_path.resolve())
     monkeypatch.setattr(
-        mods_page_module,
+        mod_management,
         "read_managed_mod_registration",
         lambda _mod: registration,
     )
@@ -472,6 +473,25 @@ def test_invalid_integrated_manifest_is_visible_but_fails_closed(
     assert row.state_label.text() == "INVALID"
     assert row.toggle.toolTip()
     assert not page.apply_btn.isEnabled()
+
+
+def test_invalid_public_package_does_not_hide_following_mods(qapp, tmp_path):
+    _loader(tmp_path, "a-valid")
+    broken = tmp_path / "mods/m-broken/evejs-launcher.mod.json"
+    broken.parent.mkdir(parents=True)
+    broken.write_text('{"schemaVersion":3}', encoding="utf-8")
+    _loader(tmp_path, "z-valid")
+    page = ModsPage()
+    page.set_evejs_root(str(tmp_path))
+    assert len(page._rows) == 3
+    row = page._rows[1]
+    assert not row.mod.valid
+    assert row.state_label.text() == "INVALID"
+    assert not row.toggle.isEnabled()
+    assert page._rows[2].mod.name == "z-valid"
+    page._resolve_projection(row.mod)
+    page.refresh_mods()
+    assert len(page._rows) == 3
 
 
 def test_corrupt_activation_journal_disables_mutation_fail_closed(

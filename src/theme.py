@@ -406,13 +406,13 @@ QFrame[class="serviceRow"]:focus {{
    page-scoped through semantic properties so the legacy utility pages retain
    their denser layout while Operations follows the approved cinematic deck. */
 QFrame[class="signalInstrument"] {{
-    background-color: rgba(5, 14, 23, 196);
+    background-color: rgba(5, 14, 23, 102);
     border: 1px solid rgba(75, 104, 122, 176);
     border-radius: 4px;
 }}
 QFrame[class="signalInstrument"]:hover,
 QFrame[class="signalInstrument"]:focus {{
-    background-color: rgba(8, 24, 36, 218);
+    background-color: rgba(8, 24, 36, 145);
     border-color: rgba(0, 200, 224, 218);
 }}
 QLabel[class="signalInstrumentName"] {{
@@ -428,9 +428,12 @@ QLabel[class="signalInstrumentState"] {{
     font-weight: 600;
 }}
 QFrame[class="recentActivity"] {{
-    background-color: rgba(3, 10, 17, 152);
+    background-color: rgba(3, 10, 17, 64);
     border: 1px solid rgba(52, 88, 106, 112);
     border-radius: 3px;
+}}
+QFrame[class="activityRow"] {{
+    background-color: transparent;
 }}
 QLabel[class="activityTime"] {{
     color: {s['text_muted']};

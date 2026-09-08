@@ -1,7 +1,7 @@
 """Interaction regressions for the custom settings toggle."""
 from __future__ import annotations
 
-from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtCore import QPoint, Qt, QCoreApplication, QEvent
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 
@@ -42,3 +42,4 @@ def test_toggle_switch_accepts_clicks_across_its_painted_pill_and_space(
         assert toggled == [True, False, True]
     finally:
         toggle.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)

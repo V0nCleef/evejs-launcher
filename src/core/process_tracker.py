@@ -89,17 +89,24 @@ class ProcessTracker:
         return False
 
     def kill_all(self) -> int:
-        """Kill all running clients. Returns number killed."""
-        killed = 0
+        """Request termination and return the number of requests accepted.
+
+        A successful request can still leave a live process for a while. Keep
+        ownership until ``prune_dead`` observes exit, including when termination
+        is refused, so status updates and a later retry still see that client.
+        """
+        requested = 0
         for client in self._clients:
             try:
                 if client.is_running:
                     client.process.terminate()
-                    killed += 1
-            except Exception:
-                pass
-        self._clients.clear()
-        return killed
+                    requested += 1
+            except Exception as exc:
+                log.warning(
+                    "Client termination request failed pid=%s error_type=%s; retaining tracking",
+                    client.pid, type(exc).__name__,
+                )
+        return requested
 
     def prune_dead(self) -> int:
         """Remove processes that have exited or become unavailable.

@@ -367,6 +367,32 @@ def test_missing_removal_worker_result_releases_slot_with_terminal_failure(
         window.deleteLater()
 
 
+def test_legacy_review_keeps_result_reservation_through_modal(qapp, tmp_path, monkeypatch):
+    from src.core.mod_management import LegacyRemovalConflict
+    from src.widgets.legacy_mod_removal_dialog import LegacyModRemovalDialog
+    window = _window()
+    result = ManagedModRemovalResult(
+        ManagedModRemovalRequest(_registration(tmp_path), ModDataPolicy.KEEP),
+        False, "review required", review=(LegacyRemovalConflict("shared.json", "overlap", "absent", None),))
+    observed = []
+    finished = []
+    window._finish_lifecycle_if_complete = lambda: finished.append(True)
+    def show(dialog):
+        assert window._mod_result_presenting and window._lifecycle_result_received
+        assert not finished
+        observed.append(dialog.review)
+        window._on_managed_mod_removal_completed(result)  # nested duplicate cannot release or present twice
+        return 0
+    monkeypatch.setattr(LegacyModRemovalDialog, "exec", show)
+    try:
+        window._on_managed_mod_removal_completed(result)
+        assert observed == [result.review]
+        assert finished == [True] and not window._mod_result_presenting
+        assert window._mods_page.refresh_count == 1
+    finally:
+        window.deleteLater()
+
+
 def test_managed_removal_worker_start_exception_does_not_claim_lifecycle_slot(
     qapp,
     tmp_path: Path,

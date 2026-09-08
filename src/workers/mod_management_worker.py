@@ -8,6 +8,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 from src.core.mod_management import (
     ManagedModRemovalRequest,
     ManagedModRemovalResult,
+    LegacyRemovalReviewRequired,
     remove_managed_mod,
 )
 
@@ -38,6 +39,9 @@ class ManagedModRemovalWorker(QObject):
             result = self._executor(self._request)
             if not isinstance(result, ManagedModRemovalResult):
                 raise TypeError("The mod removal executor returned an invalid result.")
+        except LegacyRemovalReviewRequired as exc:
+            result = ManagedModRemovalResult(request=self._request, success=False,
+                                             message=str(exc), review=exc.review)
         except Exception as exc:
             result = ManagedModRemovalResult(
                 request=self._request,

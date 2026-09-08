@@ -104,8 +104,8 @@ def test_home_counts_only_visible_non_banned_characters(
         window._status_timer.stop()
         window._prune_timer.stop()
         _wait_for_data(qapp, window)
-        assert window._home_page.accounts_card.value_label.text() == str(expected_accounts)
-        assert window._home_page.characters_card.value_label.text() == str(expected_characters)
+        assert window._home_page.accounts_count == expected_accounts
+        assert window._home_page.characters_count == expected_characters
     finally:
         window.close()
         _wait_for_data(qapp, window)

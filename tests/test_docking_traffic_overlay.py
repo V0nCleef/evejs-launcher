@@ -14,20 +14,20 @@ def test_traffic_schedule_is_sparse_deterministic_and_contains_arrivals(qapp) ->
     second = DockingTrafficOverlay(seed=118)
     different = DockingTrafficOverlay(seed=119)
 
-    sample_times = range(0, 96_000, 100)
+    sample_times = range(0, 540_000, 100)
     first_frames = tuple(first.sample_frame(elapsed) for elapsed in sample_times)
     second_frames = tuple(second.sample_frame(elapsed) for elapsed in sample_times)
 
     assert first_frames == second_frames
     assert first.sample_frame(1_300) != different.sample_frame(1_300)
-    assert max(map(len, first_frames)) <= 2
+    assert max(map(len, first_frames)) <= 5
     assert any(
-        sample.kind == "light" and sample.warp_alpha > 0.0
+        sample.kind == "arrival" and sample.warp_alpha > 0.0
         for frame in first_frames
         for sample in frame
     )
     assert any(
-        sample.kind == "silhouette"
+        sample.kind == "freighter"
         for frame in first_frames
         for sample in frame
     )
@@ -43,14 +43,14 @@ def test_overlay_uses_one_bounded_low_cadence_timer(qapp) -> None:
 
     timers = overlay.findChildren(QTimer)
     assert timers == [overlay._tick_timer]
-    assert 60 <= overlay.timer_interval_ms <= 125
+    assert 40 <= overlay.timer_interval_ms <= 80
     assert overlay._tick_timer.timerType() == Qt.TimerType.CoarseTimer
     # Structural performance guard: no frame ever asks QPainter to render an
     # unbounded particle field, even when sampled at fine granularity.
     assert max(
         len(overlay.sample_frame(elapsed))
-        for elapsed in range(0, 96_000, 25)
-    ) <= 2
+        for elapsed in range(0, 540_000, 25)
+    ) <= 5
 
 
 def test_overlay_stops_when_covered_minimized_or_reduce_motion(qapp) -> None:
@@ -109,7 +109,7 @@ def test_overlay_stops_when_covered_minimized_or_reduce_motion(qapp) -> None:
         stack.deleteLater()
 
 
-def test_overlay_clips_every_pixel_away_from_the_command_surface(qapp) -> None:
+def test_overlay_is_click_through_and_clipped_to_the_viewport(qapp) -> None:
     host = QWidget()
     host.resize(900, 500)
     overlay = DockingTrafficOverlay(host, seed=11)
@@ -145,7 +145,7 @@ def test_overlay_clips_every_pixel_away_from_the_command_surface(qapp) -> None:
         host.deleteLater()
 
 
-def test_home_traffic_disables_itself_when_no_station_side_is_exposed(qapp) -> None:
+def test_home_traffic_remains_visible_through_compact_commands(qapp) -> None:
     from src.pages.home_page import HomePage
 
     page = HomePage()
@@ -160,7 +160,7 @@ def test_home_traffic_disables_itself_when_no_station_side_is_exposed(qapp) -> N
         assert layers.currentWidget() is page._foreground
         assert page.signal_background.is_animating() is False
         assert page.traffic_overlay.reserved_left_px >= 744
-        assert page.traffic_overlay.is_animating() is False
+        assert page.traffic_overlay.is_animating() is True
 
         page.resize(1_122, 696)
         qapp.processEvents()

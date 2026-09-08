@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 3,
+  "id": "cleanup-demo",
+  "displayName": "Cleanup Retry Demo",
+  "version": "1.0.0",
+  "kind": "source-integrated",
+  "activation": {"strategy": "package"},
+  "restart": "none",
+  "launcherApi": {
+    "version": 1,
+    "minLauncherVersion": "1.0.53",
+    "helper": {"runtime": "node", "path": "helper.js"},
+    "capabilities": ["install", "prepare_disable", "prepare_remove"]
+  }
+}

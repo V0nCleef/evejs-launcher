@@ -5,7 +5,7 @@ Sections
 * General        — EveJS root, client path, proxy URL
 * Launch         — stagger delay, auto-start toggles
 * Audio & Voice  — ambience, local shipboard voice, events, accessibility
-* UI             — motion preference and hero rotation interval
+* UI             — reduced-motion preference
 * Hidden Characters— list of hidden character names with a "Show Selected" action
 * Danger Zone    — delete all local launcher data
 
@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import QTimer, Qt, QUrl, pyqtSignal
-from PyQt6.QtGui import QDesktopServices, QWheelEvent
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -35,8 +35,6 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
-    QSlider,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -44,32 +42,6 @@ from PyQt6.QtWidgets import (
 
 log = logging.getLogger(__name__)
 
-
-class FocusWheelSpinBox(QSpinBox):
-    """A QSpinBox that only responds to the mouse wheel when it has focus.
-
-    Standard QSpinBox consumes wheel events even when the cursor merely
-    passes over it while the user is scrolling a parent QScrollArea,
-    which hijacks the scroll and changes the spinbox value instead.
-    When unfocused, this subclass ignores wheel events and lets the
-    parent scroll area handle them normally.
-    """
-
-    def wheelEvent(self, event: QWheelEvent) -> None:
-        if self.hasFocus():
-            super().wheelEvent(event)
-        else:
-            event.ignore()  # propagate to parent scroll area
-
-
-class FocusWheelSlider(QSlider):
-    """A slider that leaves page scrolling alone until it has focus."""
-
-    def wheelEvent(self, event: QWheelEvent) -> None:
-        if self.hasFocus():
-            super().wheelEvent(event)
-        else:
-            event.ignore()
 
 from src import config
 from src.constants import COLORS, APP_VERSION
@@ -88,6 +60,9 @@ from src.core.runtime.docker_setup import (
     docker_draft_fingerprint,
 )
 from src.widgets.toggle_switch import ToggleSwitch
+from src.widgets.scroll_safe_controls import (
+    ScrollSafeComboBox, ScrollSafeSlider, ScrollSafeSpinBox,
+)
 from src.widgets.localized_dialogs import (
     LocalizedFileDialog as QFileDialog,
     LocalizedMessageBox as QMessageBox,
@@ -239,7 +214,7 @@ class SettingsPage(QWidget):
         self.runtime_box = QGroupBox("Runtime")
         runtime_form = QFormLayout(self.runtime_box)
         runtime_form.setSpacing(8)
-        self.runtime_backend_combo = QComboBox()
+        self.runtime_backend_combo = ScrollSafeComboBox()
         self.runtime_backend_combo.setSizePolicy(
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Fixed,
@@ -290,7 +265,7 @@ class SettingsPage(QWidget):
         self.docker_compose_resolved_label.setObjectName("dockerComposeResolved")
         docker_form.addRow("", self.docker_compose_resolved_label)
 
-        self.docker_policy_combo = QComboBox()
+        self.docker_policy_combo = ScrollSafeComboBox()
         self.docker_policy_combo.setSizePolicy(
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Fixed,
@@ -384,7 +359,7 @@ class SettingsPage(QWidget):
         launch_form = QFormLayout(launch_box)
         launch_form.setSpacing(10)
 
-        self.stagger_delay_spin = FocusWheelSpinBox()
+        self.stagger_delay_spin = ScrollSafeSpinBox()
         self.stagger_delay_spin.setRange(0, 30)
         self.stagger_delay_spin.setSuffix(" s")
         launch_form.addRow("Stagger Delay:", self.stagger_delay_spin)
@@ -457,29 +432,12 @@ class SettingsPage(QWidget):
         self._sync_audio_panel_layout(1_100)
         root.addWidget(self.audio_panel_host)
 
-        ui_box = QGroupBox("Visual Timing")
-        ui_form = QFormLayout(ui_box)
-        ui_form.setSpacing(10)
-
-        self.hero_interval_spin = FocusWheelSpinBox()
-        self.hero_interval_spin.setRange(3, 30)
-        self.hero_interval_spin.setSuffix(" s")
-        self.hero_interval_spin.setAccessibleName("Hero rotation interval")
-        ui_form.addRow("Hero Rotation Interval:", self.hero_interval_spin)
-        self.hero_interval_help = self._make_help_label(
-            "Used by rotating hero content. Reduce Motion pauses optional UI motion."
-        )
-        ui_form.addRow("", self.hero_interval_help)
-
-        root.addWidget(ui_box)
         # Settings opens on the approved Audio & Voice composition.  Existing
         # operational settings remain below it in their original relative order.
         root.removeWidget(audio_heading)
         root.removeWidget(self.audio_panel_host)
-        root.removeWidget(ui_box)
         root.insertWidget(0, audio_heading)
         root.insertWidget(1, self.audio_panel_host)
-        root.insertWidget(2, ui_box)
 
         # ── Updates ─────────────────────────────────────────────────────────
         updates_box = QGroupBox("Updates")
@@ -500,7 +458,7 @@ class SettingsPage(QWidget):
         self.update_auto_check_toggle = ToggleSwitch()
         updates_form.addRow("Auto-Check for Updates:", self.update_auto_check_toggle)
 
-        self.update_interval_spin = FocusWheelSpinBox()
+        self.update_interval_spin = ScrollSafeSpinBox()
         self.update_interval_spin.setRange(1, 72)
         self.update_interval_spin.setSuffix(" h")
         updates_form.addRow("Check Interval:", self.update_interval_spin)
@@ -531,7 +489,7 @@ class SettingsPage(QWidget):
         scripts_layout = QFormLayout(scripts_box)
         scripts_layout.setSpacing(10)
 
-        self.server_script_combo = QComboBox()
+        self.server_script_combo = ScrollSafeComboBox()
         self.server_script_combo.setMinimumWidth(300)
         self.server_script_combo.currentIndexChanged.connect(self._update_script_info)
         scripts_layout.addRow("Default:", self.server_script_combo)
@@ -674,8 +632,8 @@ class SettingsPage(QWidget):
         accessible_name: str,
         minimum: int = 0,
         maximum: int = 100,
-    ) -> FocusWheelSlider:
-        slider = FocusWheelSlider(Qt.Orientation.Horizontal)
+    ) -> ScrollSafeSlider:
+        slider = ScrollSafeSlider(Qt.Orientation.Horizontal)
         slider.setRange(minimum, maximum)
         slider.setSingleStep(1)
         slider.setPageStep(5)
@@ -688,7 +646,7 @@ class SettingsPage(QWidget):
         self,
         title: str,
         description: str,
-        slider: FocusWheelSlider,
+        slider: ScrollSafeSlider,
         value_label: QLabel,
         toggle: ToggleSwitch | None,
     ) -> QWidget:
@@ -1072,13 +1030,6 @@ class SettingsPage(QWidget):
             self.reduce_motion_toggle.setChecked(not bool(enabled))
         finally:
             self._syncing_motion_toggles = False
-        self.hero_interval_spin.setEnabled(bool(enabled))
-        set_translatable_text(
-            self.hero_interval_help,
-            "Used by rotating hero content. Reduce Motion pauses optional UI motion."
-            if enabled
-            else "Optional interface motion and rotating hero content are paused."
-        )
 
     def _on_reduce_motion_toggled(self, reduced: bool) -> None:
         if self._syncing_motion_toggles:
@@ -1274,7 +1225,6 @@ class SettingsPage(QWidget):
         self._set_animations_enabled(
             bool(cfg.get("animations_enabled", True))
         )
-        self.hero_interval_spin.setValue(int(cfg.get("hero_rotation_interval_sec", 6)))
         self._sync_audio_control_states()
 
         self.update_auto_check_toggle.setChecked(bool(cfg.get("update_auto_check", True)))
@@ -1439,7 +1389,6 @@ class SettingsPage(QWidget):
             "audio_ducking_enabled": self.ducking_enabled_toggle.isChecked(),
             "audio_ducking_level": self.ducking_level_slider.value(),
             "animations_enabled": self.animations_toggle.isChecked(),
-            "hero_rotation_interval_sec": self.hero_interval_spin.value(),
             "update_auto_check": self.update_auto_check_toggle.isChecked(),
             "update_check_interval_hours": self.update_interval_spin.value(),
             "hidden_characters": tuple(

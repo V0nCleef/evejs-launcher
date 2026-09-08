@@ -12,6 +12,7 @@ from src.core.mod_management import ModNotManagedError
 from src.core.service_status import DockerControlPolicy, RuntimeBackend
 from src.i18n import LANGUAGES, current_language, set_language, translate_ui_phrase
 from src.pages import mods_page as mods_page_module
+from src.core import mod_inventory, mod_management
 from src.pages.mods_page import MOD_AUTHORING_GUIDE_URL, ModsPage
 from src.widgets.ui_translation import retranslate_widget_tree
 
@@ -67,7 +68,7 @@ def _isolate_mod_page(
         raise ModNotManagedError("fixture mod is externally installed")
 
     monkeypatch.setattr(
-        mods_page_module,
+        mod_management,
         "read_managed_mod_registration",
         unmanaged,
     )
@@ -115,7 +116,7 @@ def test_automatic_client_package_is_enabled_without_server_apply(
         evejs_root=root,
     )
     monkeypatch.setattr(
-        mods_page_module,
+        mod_inventory,
         "discover_dlss5_client_mod",
         lambda _root: client_mod,
     )
@@ -241,7 +242,7 @@ def test_open_folder_uses_unicode_safe_local_file_url(
     assert Path(opened[0].toLocalFile()) == mods.resolve()
 
 
-def test_author_guide_uses_pinned_exact_url(
+def test_author_guide_uses_bundled_matching_document(
     qapp,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -255,11 +256,10 @@ def test_author_guide_uses_pinned_exact_url(
 
     page.mod_author_guide_btn.click()
 
-    assert [url.toString() for url in opened] == [MOD_AUTHORING_GUIDE_URL]
-    assert MOD_AUTHORING_GUIDE_URL == (
-        "https://github.com/V0nCleef/evejs-launcher/blob/v1.0.45/"
-        "docs/MOD_AUTHORING.md"
-    )
+    assert not opened
+    assert page._authoring_guide.isVisible()
+    assert page._authoring_guide._current.name == "MOD_AUTHORING.md"
+    page._authoring_guide.close()
 
 
 def test_root_change_replaces_folder_state_without_stale_actions(
@@ -525,13 +525,11 @@ def test_open_and_guide_failures_are_visible_and_preserve_raw_details(
     page._open_mod_folder()
     page._open_mod_author_guide()
 
-    assert len(warnings) == 2
+    assert len(warnings) == 1
     assert str((root / "mods").resolve()) in warnings[0][1]
     assert "エクスプローラーがフォルダー URL を受け付けませんでした" in warnings[0][1]
-    assert warnings[1] == (
-        "Mod Author Guide",
-        "The mod-authoring guide could not be opened in your default browser.",
-    )
+    assert page._authoring_guide.isVisible()
+    page._authoring_guide.close()
     assert (root / "mods").is_dir()
 
 

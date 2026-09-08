@@ -92,7 +92,7 @@ def test_native_account_refresh_uses_existing_loader_seam_off_gui_thread(
 
         assert calls == [("C:/Synthetic/EveJS", calls[0][1])]
         assert calls[0][1] is not gui_thread
-        assert window._home_page.accounts_card.value_label.text() == "1"
+        assert window._home_page.accounts_count == 1
     finally:
         _close_window(qapp, window)
 

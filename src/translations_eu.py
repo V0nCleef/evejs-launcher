@@ -6,6 +6,9 @@ be passed through these catalogs.
 """
 from __future__ import annotations
 
+from .translations_mod_settings import UI_PHRASES_BY_LANGUAGE as _MOD_SETTINGS_PHRASES
+from .translations_mod_updates import UI_PHRASES_BY_LANGUAGE as _MOD_UPDATE_PHRASES
+
 
 FR_UI_PHRASES: dict[str, str] = {
     "Home": "Accueil",
@@ -25,6 +28,9 @@ FR_UI_PHRASES: dict[str, str] = {
     "MUTED": "SON COUPÉ",
     "SOUNDSCAPE OFF": "AMBIANCE SONORE DÉSACTIVÉE",
     "STATION SOUNDSCAPE": "AMBIANCE SONORE DE LA STATION",
+    "RETURN TO LIVE": "RETOUR AU DIRECT",
+    "Return to latest console output": "Revenir aux dernières lignes de la console",
+    "Your station. Your fleet. Ready when you are.": "Votre station. Votre flotte. Prêtes quand vous l’êtes.",
     "COPY": "COPIER",
     "OPEN LOG": "OUVRIR LE JOURNAL",
     "SIGNAL CONSOLE": "CONSOLE DE SIGNAL",
@@ -179,6 +185,9 @@ DE_UI_PHRASES: dict[str, str] = {
     "MUTED": "STUMMGESCHALTET",
     "SOUNDSCAPE OFF": "KLANGKULISSE AUS",
     "STATION SOUNDSCAPE": "STATIONSKLANGKULISSE",
+    "RETURN TO LIVE": "ZUR LIVE-ANSICHT",
+    "Return to latest console output": "Zur neuesten Konsolenausgabe zurückkehren",
+    "Your station. Your fleet. Ready when you are.": "Deine Station. Deine Flotte. Bereit, wenn du es bist.",
     "COPY": "KOPIEREN",
     "OPEN LOG": "PROTOKOLL ÖFFNEN",
     "SIGNAL CONSOLE": "SIGNALKONSOLE",
@@ -333,6 +342,9 @@ NL_UI_PHRASES: dict[str, str] = {
     "MUTED": "GEDEMPT",
     "SOUNDSCAPE OFF": "GELUIDSOMGEVING UIT",
     "STATION SOUNDSCAPE": "GELUIDSOMGEVING VAN HET STATION",
+    "RETURN TO LIVE": "TERUG NAAR LIVE",
+    "Return to latest console output": "Terug naar de nieuwste console-uitvoer",
+    "Your station. Your fleet. Ready when you are.": "Jouw station. Jouw vloot. Klaar wanneer jij dat bent.",
     "COPY": "KOPIËREN",
     "OPEN LOG": "LOGBOEK OPENEN",
     "SIGNAL CONSOLE": "SIGNAALCONSOLE",
@@ -1646,6 +1658,13 @@ for _source, (_fr, _de, _nl) in _ADDITIONAL_TRANSLATIONS.items():
     NL_UI_PHRASES[_source] = _nl
 
 del _source, _fr, _de, _nl
+
+FR_UI_PHRASES.update(_MOD_SETTINGS_PHRASES["fr"])
+FR_UI_PHRASES.update(_MOD_UPDATE_PHRASES["fr"])
+DE_UI_PHRASES.update(_MOD_SETTINGS_PHRASES["de"])
+DE_UI_PHRASES.update(_MOD_UPDATE_PHRASES["de"])
+NL_UI_PHRASES.update(_MOD_SETTINGS_PHRASES["nl"])
+NL_UI_PHRASES.update(_MOD_UPDATE_PHRASES["nl"])
 
 
 UI_PHRASES_BY_LANGUAGE: dict[str, dict[str, str]] = {

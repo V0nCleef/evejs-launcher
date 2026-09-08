@@ -21,6 +21,10 @@ from .mod_lifecycle_lock import (
     ModLifecycleBusyError,
     acquire_mod_lifecycle_lock,
 )
+from .mod_loader_state import (
+    DISABLED_LOADER_FILENAMES, LOADER_FILENAMES, LoaderStateError, resolve_loader_state,
+)
+from .mod_api_manifest import MAX_API_MANIFEST_BYTES, ModApiDescriptor, ModApiManifestError, read_api_manifest
 
 
 MANIFEST_FILENAME = "evejs-launcher.mod.json"
@@ -30,13 +34,8 @@ RUNTIME_STATUS_TRANSPORT = "server_stdout"
 MAX_MANIFEST_BYTES = 64 * 1024
 MAX_CONFIG_BYTES = 2 * 1024 * 1024
 
-_LOADER_FILENAMES = (
-    "loader.js",
-    "loader.js.disabled",
-    "loader.js.off",
-    "loader.js.bak",
-)
-_DISABLED_LOADER_FILENAMES = _LOADER_FILENAMES[1:]
+_LOADER_FILENAMES = LOADER_FILENAMES
+_DISABLED_LOADER_FILENAMES = DISABLED_LOADER_FILENAMES
 _MANIFEST_KEYS = {
     "schemaVersion",
     "id",
@@ -86,6 +85,7 @@ class ActivationKind(str, Enum):
     LOADER_RENAME = "loader_rename"
     JSON_BOOLEAN = "json_boolean"
     CLIENT_PACKAGE = "client_package"
+    PACKAGE = "package"
 
 
 @dataclass
@@ -107,7 +107,7 @@ class Mod:
     restart_scope: str = "game_server"
     manifest_path: Path | None = None
     config_path: Path | None = None
-    config_key: str | None = None
+    config_key: str | tuple[str, ...] | None = None
     allowed_config_schema_versions: tuple[int, ...] = ()
     status_protocol: str = ""
     status_transport: str = ""
@@ -119,6 +119,10 @@ class Mod:
     valid: bool = True
     error: str | None = None
     evejs_root: Path | None = field(default=None, repr=False)
+    api_descriptor: ModApiDescriptor | None = field(default=None, repr=False)
+    settings_schema: dict | None = field(default=None, repr=False)
+    descriptor_error: str | None = None
+    identity: str = ""
 
     def __post_init__(self) -> None:
         self.path = Path(self.path)
@@ -132,6 +136,8 @@ class Mod:
             self.manager_path = Path(self.manager_path)
         if self.evejs_root is not None:
             self.evejs_root = Path(self.evejs_root)
+            if not self.identity:
+                self.identity = os.path.normcase(str(self.evejs_root.resolve())) + "|" + str(self.path.resolve()).casefold()
 
     def supports_backend(self, backend: object) -> bool:
         """Return whether this mod can be controlled by ``backend``."""
@@ -228,6 +234,8 @@ def _set_mod_active_unlocked(mod: Mod, active: bool) -> bool:
         return _set_loader_active(mod, active)
     if mod.activation_kind is ActivationKind.JSON_BOOLEAN:
         return _set_json_boolean_active(mod, active)
+    if mod.api_descriptor is not None and mod.activation_kind in {ActivationKind.CLIENT_PACKAGE, ActivationKind.PACKAGE}:
+        return _set_public_package_active(mod, active)
     raise ModActivationError(
         f"Unsupported activation strategy for '{mod.name}'."
     )
@@ -291,40 +299,33 @@ def _scan_legacy_mods(root: Path) -> list[Mod]:
             if not folder.is_dir():
                 continue
             _require_within_root(folder, root, f"Legacy mod '{folder.name}'")
-            for filename in _LOADER_FILENAMES:
-                candidate = folder / filename
-                if candidate.exists() or candidate.is_symlink():
-                    _require_regular_file_within_root(
-                        candidate,
-                        root,
-                        f"Legacy mod '{folder.name}' loader",
-                    )
-            active_loader = folder / "loader.js"
-            disabled = [
-                folder / filename
-                for filename in _DISABLED_LOADER_FILENAMES
-                if (folder / filename).exists()
-            ]
-            if not active_loader.exists() and not disabled:
+            manifest = folder / MANIFEST_FILENAME
+            descriptor_error = None
+            if manifest.exists() or manifest.is_symlink():
+                try:
+                    mods.append(_read_public_mod(root, folder))
+                    continue
+                except (OSError, ModManifestError, ModApiManifestError) as exc:
+                    descriptor_error = str(exc)
+            state = resolve_loader_state(folder, root=root)
+            if state.selected_path is None:
+                if descriptor_error:
+                    mods.append(_invalid_mod(name=folder.name, path=folder, error=descriptor_error,
+                        activation_kind=ActivationKind.PACKAGE, root=root, manifest_path=manifest))
                 continue
-            if active_loader.exists() and disabled:
-                raise ModManifestError(
-                    "Both active and disabled loader files exist."
-                )
-            if len(disabled) > 1:
-                raise ModManifestError("Multiple disabled loader files exist.")
             mods.append(
                 Mod(
                     name=folder.name,
                     path=folder,
-                    active=active_loader.is_file(),
+                    active=state.active,
                     id=folder.name,
                     activation_kind=ActivationKind.LOADER_RENAME,
                     supported_backends=("native", "docker"),
                     evejs_root=root,
+                    descriptor_error=descriptor_error,
                 )
             )
-        except (OSError, ModManifestError) as exc:
+        except (OSError, ModManifestError, LoaderStateError) as exc:
             mods.append(
                 _invalid_mod(
                     name=folder.name,
@@ -374,8 +375,24 @@ def _scan_integrated_mods(root: Path) -> list[Mod]:
             if not folder.is_dir():
                 raise ModManifestError("The manifest parent is not a directory.")
             _require_within_root(folder, root, f"Integrated mod '{folder.name}'")
-            mods.append(_read_integrated_mod(root, folder, manifest_path))
-        except (OSError, ModManifestError) as exc:
+            _require_regular_file_within_root(manifest_path, root, "Mod manifest")
+            content = _read_bounded_bytes(
+                manifest_path, MAX_API_MANIFEST_BYTES, "Mod manifest"
+            )
+            try:
+                payload = _parse_json_object(content, "Mod manifest")
+            except ModManifestError:
+                # An unreadable document cannot opt into the larger public limit.
+                if len(content) > MAX_MANIFEST_BYTES:
+                    raise ModManifestError(
+                        f"Mod manifest exceeds the {MAX_MANIFEST_BYTES}-byte size limit."
+                    )
+                raise
+            if payload.get("schemaVersion") == 3:
+                mods.append(_read_public_mod(root, folder, payload))
+            else:
+                mods.append(_read_integrated_mod(root, folder, manifest_path))
+        except (OSError, ModManifestError, ModApiManifestError, LoaderStateError) as exc:
             mods.append(
                 _invalid_mod(
                     name=folder.name,
@@ -387,6 +404,38 @@ def _scan_integrated_mods(root: Path) -> list[Mod]:
                 )
             )
     return mods
+
+
+def _read_public_mod(root: Path, folder: Path, payload: dict | None = None) -> Mod:
+    descriptor = read_api_manifest(root, folder, payload)
+    strategy = ActivationKind(descriptor.activation_strategy)
+    if strategy is ActivationKind.LOADER_RENAME:
+        state = resolve_loader_state(folder, root=root)
+        if state.selected_path is None:
+            raise ModManifestError("The public loader package has no recognized loader.")
+        active = state.active
+    elif strategy is ActivationKind.JSON_BOOLEAN:
+        _require_regular_file_within_root(descriptor.config_path, root, "Mod configuration")
+        config = _read_and_validate_config(descriptor.config_path, descriptor.allowed_config_schema_versions,
+            config_key=descriptor.config_key, require_schema=bool(descriptor.allowed_config_schema_versions))
+        owner, leaf = _config_property(config, descriptor.config_key)
+        active = owner[leaf]
+    else:
+        from .local_mod_packages import LocalModPackages, LocalModPackageError
+        try:
+            record = next((record for record in LocalModPackages(root).records()
+                if record.status == "installed" and record.relative_path.casefold() == folder.relative_to(root).as_posix().casefold()
+                and record.mod_id.casefold() == descriptor.id.casefold()), None)
+        except LocalModPackageError as exc:
+            raise ModManifestError(str(exc)) from exc
+        active = record is not None and record.enabled is True
+    return Mod(name=descriptor.display_name, path=folder, active=active, id=descriptor.id,
+        version=descriptor.version, description=descriptor.description, activation_kind=strategy,
+        supported_backends=descriptor.supported_backends, restart_scope=descriptor.restart_scope,
+        manifest_path=descriptor.manifest_path, config_path=descriptor.config_path,
+        config_key=descriptor.config_key if strategy is ActivationKind.JSON_BOOLEAN else None,
+        allowed_config_schema_versions=descriptor.allowed_config_schema_versions, evejs_root=root,
+        api_descriptor=descriptor, settings_schema=descriptor.settings, identity=descriptor.identity)
 
 
 def _read_integrated_mod(
@@ -515,6 +564,8 @@ def _read_integrated_mod(
 def _invalidate_duplicate_ids(mods: list[Mod]) -> list[Mod]:
     indexes: dict[str, list[int]] = {}
     for index, mod in enumerate(mods):
+        if mod.api_descriptor is not None:
+            continue
         indexes.setdefault(mod.id.casefold(), []).append(index)
     duplicate_indexes = {
         index
@@ -565,35 +616,21 @@ def _set_loader_active(mod: Mod, desired: bool) -> bool:
     if root is not None:
         _activation_path_check(mod.path, root, "Legacy mod directory")
 
+    try:
+        state = resolve_loader_state(mod.path, root=root)
+    except LoaderStateError as exc:
+        raise ModActivationError(f"Cannot change '{mod.name}': {exc}") from exc
     active_loader = mod.path / "loader.js"
-    disabled_loaders = [
-        mod.path / filename
-        for filename in _DISABLED_LOADER_FILENAMES
-        if (mod.path / filename).exists()
-    ]
-    if root is not None:
-        for candidate in (active_loader, *disabled_loaders):
-            if candidate.exists() or candidate.is_symlink():
-                _activation_file_check(candidate, root, "Legacy mod loader")
-
-    if active_loader.exists() and disabled_loaders:
-        raise ModActivationError(
-            f"Cannot change '{mod.name}': active and disabled loaders both exist."
-        )
-    if len(disabled_loaders) > 1:
-        raise ModActivationError(
-            f"Cannot change '{mod.name}': multiple disabled loaders exist."
-        )
 
     if desired:
-        if active_loader.is_file():
+        if state.active:
             return True
-        if not disabled_loaders:
+        if state.disabled_path is None:
             raise ModActivationError(
                 f"No disabled loader was found for '{mod.name}'."
             )
         try:
-            disabled_loaders[0].rename(active_loader)
+            state.disabled_path.rename(active_loader)
         except OSError as exc:
             raise ModActivationError(
                 f"Could not enable loader mod '{mod.name}'."
@@ -604,7 +641,7 @@ def _set_loader_active(mod: Mod, desired: bool) -> bool:
             )
         return True
 
-    if not active_loader.exists():
+    if not state.active:
         return False
     disabled_loader = mod.path / "loader.js.disabled"
     if disabled_loader.exists():
@@ -625,12 +662,14 @@ def _set_loader_active(mod: Mod, desired: bool) -> bool:
 
 
 def _set_json_boolean_active(mod: Mod, desired: bool) -> bool:
+    public = mod.api_descriptor is not None
+    config_key = tuple(mod.config_key) if isinstance(mod.config_key, tuple) else (mod.config_key,)
     if (
         mod.evejs_root is None
         or mod.manifest_path is None
         or mod.config_path is None
-        or mod.config_key != "enabled"
-        or not mod.allowed_config_schema_versions
+        or (not public and (mod.config_key != "enabled" or not mod.allowed_config_schema_versions))
+        or not all(isinstance(key, str) and key for key in config_key)
     ):
         raise ModActivationError(
             f"Integrated mod '{mod.name}' has incomplete activation metadata."
@@ -642,7 +681,10 @@ def _set_json_boolean_active(mod: Mod, desired: bool) -> bool:
         raise ModActivationError(
             f"The selected EveJS root for '{mod.name}' is no longer available."
         ) from exc
-    _revalidate_integrated_activation_contract(mod, root)
+    if public:
+        _revalidate_public_activation_contract(mod, root)
+    else:
+        _revalidate_integrated_activation_contract(mod, root)
     config_path = mod.config_path
     try:
         _activation_file_check(config_path, root, "Mod configuration")
@@ -652,32 +694,33 @@ def _set_json_boolean_active(mod: Mod, desired: bool) -> bool:
             "Mod configuration",
         )
         original = _parse_json_object(original_bytes, "Mod configuration")
-        _validate_config_document(original, mod.allowed_config_schema_versions)
+        _validate_config_document(original, mod.allowed_config_schema_versions,
+            config_key=config_key, require_schema=not public or bool(mod.allowed_config_schema_versions))
     except (OSError, ModManifestError) as exc:
         raise ModActivationError(
             f"Could not validate configuration for '{mod.name}': {exc}"
         ) from exc
 
-    if original["enabled"] is desired:
+    original_owner, leaf = _config_property(original, config_key)
+    if original_owner[leaf] is desired:
         mod.active = desired
         return desired
 
     updated = deepcopy(original)
-    updated["enabled"] = desired
-    original_without_state = dict(original)
-    updated_without_state = dict(updated)
-    original_without_state.pop("enabled")
-    updated_without_state.pop("enabled")
-    if _semantic_fingerprint(original_without_state) != _semantic_fingerprint(
-        updated_without_state
-    ):
-        raise ModActivationError(
-            f"Refusing to change unrelated configuration for '{mod.name}'."
-        )
+    updated_owner, leaf = _config_property(updated, config_key)
+    updated_owner[leaf] = desired
+    original_without_state = _without_config_property(original, config_key)
 
-    updated_bytes = (
-        json.dumps(updated, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
-    ).encode("utf-8")
+    if public:
+        from .mod_config_documents import DocumentError, edit_value
+        try:
+            updated_bytes = edit_value(original_bytes, "json", config_key, desired)
+        except DocumentError as exc:
+            raise ModActivationError(f"The declared setting could not be edited: {exc}") from exc
+    else:
+        updated_bytes = (
+            json.dumps(updated, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+        ).encode("utf-8")
     replaced = False
     try:
         _activation_file_check(config_path, root, "Mod configuration")
@@ -698,10 +741,11 @@ def _set_json_boolean_active(mod: Mod, desired: bool) -> bool:
             "Mod configuration",
         )
         verified = _parse_json_object(verified_bytes, "Mod configuration")
-        _validate_config_document(verified, mod.allowed_config_schema_versions)
-        verified_without_state = dict(verified)
-        verified_without_state.pop("enabled")
-        if verified["enabled"] is not desired or _semantic_fingerprint(
+        _validate_config_document(verified, mod.allowed_config_schema_versions,
+            config_key=config_key, require_schema=not public or bool(mod.allowed_config_schema_versions))
+        verified_owner, leaf = _config_property(verified, config_key)
+        verified_without_state = _without_config_property(verified, config_key)
+        if verified_owner[leaf] is not desired or _semantic_fingerprint(
             verified_without_state
         ) != _semantic_fingerprint(original_without_state):
             raise ModActivationError(
@@ -735,6 +779,34 @@ def _set_json_boolean_active(mod: Mod, desired: bool) -> bool:
             f"Could not change integrated mod '{mod.name}'."
         ) from exc
 
+    return desired
+
+
+def _revalidate_public_activation_contract(mod: Mod, root: Path) -> None:
+    try:
+        current = read_api_manifest(root, mod.path)
+    except (OSError, ModApiManifestError) as exc:
+        raise ModActivationError("The public descriptor changed or became unavailable; refresh the mod.") from exc
+    if current != mod.api_descriptor:
+        raise ModActivationError("The public descriptor changed; refresh before changing its configuration.")
+
+
+def _set_public_package_active(mod: Mod, desired: bool) -> bool:
+    from .local_mod_packages import LocalModPackages, LocalModPackageError
+    if mod.evejs_root is None:
+        raise ModActivationError("The public package is not bound to an EveJS root.")
+    root = mod.evejs_root.resolve(strict=True)
+    _revalidate_public_activation_contract(mod, root)
+    service = LocalModPackages(root)
+    record = next((record for record in service.records() if record.status == "installed"
+        and record.relative_path.casefold() == mod.path.relative_to(root).as_posix().casefold()
+        and record.mod_id.casefold() == mod.id.casefold()), None)
+    if record is None:
+        raise ModActivationError("Register this package folder before requesting its activation.")
+    try:
+        service.set_enabled_locked(record.record_id, desired)
+    except LocalModPackageError as exc:
+        raise ModActivationError(str(exc)) from exc
     return desired
 
 
@@ -818,33 +890,55 @@ def _revalidate_integrated_activation_contract(mod: Mod, root: Path) -> None:
 def _read_and_validate_config(
     path: Path,
     allowed_schema_versions: tuple[int, ...],
+    *, config_key: tuple[str, ...] = ("enabled",), require_schema: bool = True,
 ) -> dict[str, object]:
     payload = _read_json_object(
         path,
         maximum_bytes=MAX_CONFIG_BYTES,
         label="Mod configuration",
     )
-    _validate_config_document(payload, allowed_schema_versions)
+    _validate_config_document(payload, allowed_schema_versions, config_key=config_key, require_schema=require_schema)
     return payload
 
 
 def _validate_config_document(
     payload: dict[str, object],
     allowed_schema_versions: tuple[int, ...],
+    *, config_key: tuple[str, ...] = ("enabled",), require_schema: bool = True,
 ) -> None:
     schema_version = payload.get("schemaVersion")
-    if type(schema_version) is not int:
+    if require_schema and type(schema_version) is not int:
         raise ModManifestError(
             "Mod configuration schemaVersion must be an integer."
         )
-    if schema_version not in allowed_schema_versions:
+    if require_schema and schema_version not in allowed_schema_versions:
         raise ModManifestError(
             f"Unsupported mod configuration schemaVersion {schema_version!r}."
         )
-    if "enabled" not in payload or type(payload["enabled"]) is not bool:
+    owner, leaf = _config_property(payload, config_key)
+    if type(owner[leaf]) is not bool:
         raise ModManifestError(
             "Mod configuration must contain a top-level boolean 'enabled'."
+            if config_key == ("enabled",) else "Mod configuration must contain the declared boolean property."
         )
+
+
+def _config_property(payload: dict, keys: tuple[str, ...]) -> tuple[dict, str]:
+    owner = payload
+    for key in keys[:-1]:
+        if not isinstance(owner.get(key), dict):
+            raise ModManifestError("The declared configuration property does not exist.")
+        owner = owner[key]
+    if not keys or keys[-1] not in owner:
+        raise ModManifestError("The declared configuration property does not exist.")
+    return owner, keys[-1]
+
+
+def _without_config_property(payload: dict, keys: tuple[str, ...]) -> dict:
+    result = deepcopy(payload)
+    owner, leaf = _config_property(result, keys)
+    owner.pop(leaf)
+    return result
 
 
 def _validate_config_relative_path(value: object, mod_id: str) -> PurePosixPath:

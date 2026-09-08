@@ -10,6 +10,8 @@ the legacy Japanese/Korean facade can safely re-export this complete catalog.
 from __future__ import annotations
 
 from .translations_source import SOURCE_PHRASES
+from .translations_mod_settings import UI_PHRASES_BY_LANGUAGE as _MOD_SETTINGS_PHRASES
+from .translations_mod_updates import UI_PHRASES_BY_LANGUAGE as _MOD_UPDATE_PHRASES
 
 
 # Existing reviewed Korean translations from the original static-widget pass.
@@ -31,6 +33,9 @@ _LEGACY_TRANSLATIONS: dict[str, str] = {
     "MUTED": "음소거됨",
     "SOUNDSCAPE OFF": "환경음 끄기",
     "STATION SOUNDSCAPE": "정거장 환경음",
+    "RETURN TO LIVE": "실시간 출력으로 돌아가기",
+    "Return to latest console output": "최신 콘솔 출력으로 돌아가기",
+    "Your station. Your fleet. Ready when you are.": "당신의 정거장. 당신의 함대. 언제든 준비 완료.",
     "COPY": "복사",
     "OPEN LOG": "로그 열기",
     "SIGNAL CONSOLE": "신호 콘솔",
@@ -1158,7 +1163,7 @@ _ADDITIONAL_TRANSLATIONS: dict[str, str] = {
 }
 
 
-_TRANSLATIONS = {**_LEGACY_TRANSLATIONS, **_ADDITIONAL_TRANSLATIONS}
+_TRANSLATIONS = {**_LEGACY_TRANSLATIONS, **_ADDITIONAL_TRANSLATIONS, **_MOD_SETTINGS_PHRASES["ko"], **_MOD_UPDATE_PHRASES["ko"]}
 
 # Deliberately fail at import time when the canonical source corpus grows.  A
 # silent English fallback would make the catalog look complete while leaking

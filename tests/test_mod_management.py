@@ -562,6 +562,8 @@ def test_removal_executor_constructs_only_the_fixed_inno_argv_and_verifies(
     def run(argv, **kwargs):
         captured["argv"] = argv
         captured["kwargs"] = kwargs
+        if policy is ModDataPolicy.QUARANTINE:
+            mod.config_path.unlink()
         pointer.unlink()
         _remove_mod_payload(mod)
         _remove_kit(registration)
@@ -1055,3 +1057,181 @@ def test_quarantine_policy_is_rejected_when_provider_does_not_support_it(
 def test_managed_registry_path_accepts_only_bounded_machine_ids(mod_id: str) -> None:
     with pytest.raises(ModManagementError, match="managed mod id"):
         managed_mod_registry_path(mod_id)
+
+
+def _write_real_manifest(mod: Mod) -> None:
+    mod.manifest_path.write_text(json.dumps({
+        "schemaVersion": 2, "id": mod.id, "displayName": mod.name, "version": mod.version,
+        "description": mod.description, "kind": "source-integrated", "supportedBackends": ["native"],
+        "restart": "game_server", "status": {"protocol": "evejs_mod_status_v1", "transport": "server_stdout"},
+        "activation": {"strategy": "json_boolean", "configPath": f"config/mods/{mod.id}.json",
+            "property": "enabled", "allowedConfigSchemaVersions": [1, 2, 3]},
+    }))
+
+
+@pytest.mark.parametrize("damage", ["missing", "malformed"])
+def test_removal_ownership_survives_broken_editable_config(tmp_path, monkeypatch, damage):
+    from src.core import mod_management as implementation
+    from src.core.mod_manifest import scan_mods
+    mod, local, values, standard = _registration_fixture(tmp_path)
+    _write_real_manifest(mod)
+    expected = validate_managed_mod_registration(mod, values, standard_uninstall_values=standard, local_app_data=local)
+    if damage == "missing":
+        mod.config_path.unlink()
+    else:
+        mod.config_path.write_bytes(b'{"broken":')
+    broken = scan_mods(mod.evejs_root)[0]
+    assert not broken.valid
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    monkeypatch.setattr(implementation, "_read_registry_values", lambda path, **_: values
+        if path == managed_mod_registry_path(mod.id) else standard)
+    recovered = read_managed_mod_registration(broken)
+    assert recovered == expected
+    assert implementation._matching_current_mod(recovered).version == mod.version
+    assert mod.config_path.read_bytes() == b'{"broken":' if damage == "malformed" else not mod.config_path.exists()
+
+
+def test_broken_manifest_does_not_gain_removal_authority_from_registry(tmp_path):
+    from src.core.mod_manifest import scan_mods
+    mod, local, values, standard = _registration_fixture(tmp_path)
+    mod.manifest_path.write_bytes(b'{"broken":')
+    broken = scan_mods(mod.evejs_root)[0]
+    with pytest.raises(ModManagementError, match="manifest is invalid"):
+        validate_managed_mod_registration(broken, values, standard_uninstall_values=standard, local_app_data=local)
+
+
+def test_legacy_removal_preflight_preserves_recorded_other_mod_contributions(tmp_path, monkeypatch):
+    from src.core import mod_management as implementation
+    from src.core.mod_contributions import ContributionOwner, ContributionStore, FileTarget, KeyEdit
+    mod, registration, _ = _validate_fixture(tmp_path)
+    path = mod.evejs_root / "shared.json"
+    original = b'{"a":0,"b":0,"manual":0}'
+    path.write_bytes(original)
+    store = ContributionStore(mod.evejs_root)
+    target = FileTarget.capture(path, mod.evejs_root, "json")
+    first = ContributionOwner(mod.evejs_root, "server/mods/" + mod.id)
+    second = ContributionOwner(mod.evejs_root, "mods/other")
+    store.commit(store.plan_edits(first, [KeyEdit(target, ("a",), 1)]))
+    store.commit(store.plan_edits(second, [KeyEdit(target, ("b",), 2)]))
+    registration = replace(registration, removal_inventory=registration.removal_inventory + (
+        implementation.RemovalInventoryEntry("shared.json", "sha256", hashlib.sha256(original).hexdigest()),))
+    request = ManagedModRemovalRequest(registration, ModDataPolicy.KEEP)
+    before = path.read_bytes()
+    preview = implementation.preview_managed_mod_removal(request)
+    assert not preview.ready and preview.conflicts[0][0] == "shared.json"
+    assert "Other mods" in preview.conflicts[0][1]
+    assert path.read_bytes() == before
+    monkeypatch.setattr(implementation, "_matching_current_mod", lambda _: mod)
+    monkeypatch.setattr(implementation, "read_managed_mod_registration", lambda _: registration)
+    monkeypatch.setattr(implementation.subprocess, "run", lambda *_a, **_k: pytest.fail("overlapping uninstaller must not execute"))
+    with pytest.raises(implementation.LegacyRemovalReviewRequired, match="shared-file review") as failure:
+        remove_managed_mod(request)
+    assert failure.value.review[0].relative_path == "shared.json"
+    assert failure.value.review[0].current == before
+    assert failure.value.review[0].expected_sha256 == hashlib.sha256(original).hexdigest()
+    assert path.read_bytes() == before
+    # The old whole-file original must not falsely prove that B was retained.
+    path.write_bytes(original)
+    with pytest.raises(ModManagementError, match="another mod's retained contributions"):
+        implementation._verify_removal_inventory(replace(registration, removal_inventory=registration.removal_inventory[-1:]))
+
+
+def test_installed_payload_history_allows_unchanged_bytes_but_blocks_later_edits(tmp_path):
+    from src.core import mod_management as implementation
+    mod, registration, pointer = _validate_fixture(tmp_path)
+    source = mod.evejs_root / "shared.js"
+    source.write_bytes(b"installed A\n")
+    journal = pointer.parent / "journals" / "installed.json"
+    journal.parent.mkdir()
+    journal.write_text(json.dumps({"modSlug": mod.id, "evejsPath": str(mod.evejs_root),
+        "payload": [{"relativePath": "shared.js", "installed": True, "installedSha256": _sha256(source)}]}))
+    pointer.write_text(json.dumps({"schemaVersion": 1, "journalRelativePath": "journals/installed.json"}))
+    registration = replace(registration, current_pointer_sha256=_sha256(pointer),
+        removal_inventory=registration.removal_inventory + (implementation.RemovalInventoryEntry(
+            "shared.js", "sha256", hashlib.sha256(b"original\n").hexdigest()),))
+    request = ManagedModRemovalRequest(registration, ModDataPolicy.KEEP)
+    assert implementation.preview_managed_mod_removal(request).ready
+    source.write_bytes(b"installed A\nmanual or mod B\n")
+    preview = implementation.preview_managed_mod_removal(request)
+    assert not preview.ready and preview.conflicts[0][0] == "shared.js"
+    assert source.read_bytes() == b"installed A\nmanual or mod B\n"
+
+
+def test_legacy_review_limits_preview_and_does_not_follow_reparse_targets(tmp_path, monkeypatch):
+    from src.core import mod_management as implementation
+    mod, registration, _ = _validate_fixture(tmp_path)
+    large = mod.evejs_root / "large.txt"
+    large.write_bytes(b"x" * 128001)
+    registration = replace(registration, removal_inventory=(implementation.RemovalInventoryEntry("large.txt", "absent"),))
+    request = ManagedModRemovalRequest(registration, ModDataPolicy.KEEP)
+    preflight = implementation.ManagedRemovalPreflight((("large.txt", "later changes"),), ())
+    review = implementation.legacy_removal_review(request, preflight)
+    assert review[0].current is None and review[0].unavailable
+    assert large.stat().st_size == 128001
+    monkeypatch.setattr(implementation, "_safe_root_file", lambda *_: (_ for _ in ()).throw(ModManagementError("unsafe target")))
+    review = implementation.legacy_removal_review(request, preflight)
+    assert review[0].unavailable == "unsafe target"
+
+
+def _stub_terminal_provider(monkeypatch, mod, registration, pointer, mutate):
+    from src.core import mod_management as implementation
+    monkeypatch.setenv("LOCALAPPDATA", str(registration.uninstaller_path.parents[3]))
+    monkeypatch.setattr(implementation, "_matching_current_mod", lambda _: mod)
+    monkeypatch.setattr(implementation, "read_managed_mod_registration", lambda _: registration)
+    monkeypatch.setattr(implementation, "_registry_key_exists", lambda _: False)
+    monkeypatch.setattr(implementation, "retire_removed_mod_activation", lambda *_: None)
+    def run(*_args, **_kwargs):
+        mutate()
+        pointer.unlink()
+        _remove_mod_payload(mod)
+        _remove_kit(registration)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(implementation.subprocess, "run", run)
+
+
+@pytest.mark.parametrize("change", ["delete", "modify"])
+def test_keep_data_checks_result_and_retains_exact_recovery_bytes(tmp_path, monkeypatch, change):
+    mod, registration, pointer = _validate_fixture(tmp_path)
+    before = mod.config_path.read_bytes()
+    mutate = mod.config_path.unlink if change == "delete" else lambda: mod.config_path.write_bytes(b"new foreign edit")
+    _stub_terminal_provider(monkeypatch, mod, registration, pointer, mutate)
+    with pytest.raises(ModManagementError, match="Keep Data was not honored.*Recovery data"):
+        remove_managed_mod(ManagedModRemovalRequest(registration, ModDataPolicy.KEEP))
+    backups = list((mod.evejs_root / "_local/launcher-mods/managed-removals").glob("*/data/config/mods/*.json"))
+    assert len(backups) == 1 and backups[0].read_bytes() == before
+    assert mod.config_path.read_bytes() == (before if change == "delete" else b"new foreign edit")
+
+
+@pytest.mark.parametrize("honored", [False, True])
+def test_quarantine_requires_verified_archive_and_removed_original_state(tmp_path, monkeypatch, honored):
+    mod, registration, pointer = _validate_fixture(tmp_path)
+    state = mod.evejs_root / "_local" / mod.id / "saved.bin"
+    state.write_bytes(b"private data")
+    shared = mod.evejs_root / "_local/GameStore/shared.sqlite"
+    shared.parent.mkdir()
+    shared.write_bytes(b"shared runtime database remains untouched")
+    before = mod.config_path.read_bytes()
+    def mutate():
+        mod.config_path.unlink()
+        if honored:
+            state.unlink()
+    _stub_terminal_provider(monkeypatch, mod, registration, pointer, mutate)
+    request = ManagedModRemovalRequest(registration, ModDataPolicy.QUARANTINE)
+    if not honored:
+        with pytest.raises(ModManagementError, match="not fully quarantined"):
+            remove_managed_mod(request)
+    else:
+        result = remove_managed_mod(request)
+        assert result.success and result.data_backup_path
+        assert (result.data_backup_path / "data" / "config/mods" / f"{mod.id}.json").read_bytes() == before
+        assert (result.data_backup_path / "data" / "_local" / mod.id / "saved.bin").read_bytes() == b"private data"
+    assert shared.read_bytes() == b"shared runtime database remains untouched"
+
+
+def test_managed_removal_never_accepts_shared_gamestore_as_private_payload(tmp_path):
+    from src.core import mod_management as implementation
+    mod, registration, _ = _validate_fixture(tmp_path)
+    registration = replace(registration, removal_inventory=registration.removal_inventory + (
+        implementation.RemovalInventoryEntry("_local/GameStore/main.sqlite", "absent"),))
+    preview = implementation.preview_managed_mod_removal(ManagedModRemovalRequest(registration, ModDataPolicy.KEEP))
+    assert not preview.ready and "Shared EveJS" in preview.conflicts[0][1]

@@ -9,6 +9,8 @@ from __future__ import annotations
 from .translations_ja_additional_modals import ADDITIONAL_JA_MODAL_PHRASES
 from .translations_ja_additional_ui import ADDITIONAL_JA_UI_PHRASES
 from .translations_ko_full import UI_PHRASES as COMPLETE_KO_UI_PHRASES
+from .translations_mod_settings import UI_PHRASES_BY_LANGUAGE as _MOD_SETTINGS_PHRASES
+from .translations_mod_updates import UI_PHRASES_BY_LANGUAGE as _MOD_UPDATE_PHRASES
 
 
 JA_UI_PHRASES: dict[str, str] = {
@@ -29,6 +31,9 @@ JA_UI_PHRASES: dict[str, str] = {
     "MUTED": "ミュート中",
     "SOUNDSCAPE OFF": "環境音オフ",
     "STATION SOUNDSCAPE": "ステーション環境音",
+    "RETURN TO LIVE": "最新の出力に戻る",
+    "Return to latest console output": "コンソールの最新の出力に戻る",
+    "Your station. Your fleet. Ready when you are.": "あなたのステーション。あなたの艦隊。いつでも準備万端。",
     "COPY": "コピー",
     "OPEN LOG": "ログを開く",
     "SIGNAL CONSOLE": "シグナルコンソール",
@@ -317,6 +322,8 @@ KO_UI_PHRASES: dict[str, str] = {
 
 JA_UI_PHRASES.update(ADDITIONAL_JA_UI_PHRASES)
 JA_UI_PHRASES.update(ADDITIONAL_JA_MODAL_PHRASES)
+JA_UI_PHRASES.update(_MOD_SETTINGS_PHRASES["ja"])
+JA_UI_PHRASES.update(_MOD_UPDATE_PHRASES["ja"])
 KO_UI_PHRASES = dict(COMPLETE_KO_UI_PHRASES)
 
 

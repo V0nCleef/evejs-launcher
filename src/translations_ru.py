@@ -11,6 +11,8 @@ from hashlib import sha256
 from string import Formatter
 
 from .translations_source import SOURCE_PHRASES
+from .translations_mod_settings import UI_PHRASES_BY_LANGUAGE as _MOD_SETTINGS_PHRASES
+from .translations_mod_updates import UI_PHRASES_BY_LANGUAGE as _MOD_UPDATE_PHRASES
 
 
 _RUSSIAN_VALUES: tuple[str, ...] = (
@@ -1148,6 +1150,9 @@ _RUSSIAN_VALUES: tuple[str, ...] = (
 
 
 _ADDITIONAL_RUSSIAN_UI_PHRASES: dict[str, str] = {
+    "RETURN TO LIVE": "К ТЕКУЩЕМУ ВЫВОДУ",
+    "Return to latest console output": "Вернуться к последнему выводу консоли",
+    "Your station. Your fleet. Ready when you are.": "Ваша станция. Ваш флот. Готовы по вашей команде.",
     # Mods-folder validation added after the original ordered catalog review.
     # Paths and operating-system diagnostics remain named placeholders.
     "DIR": "ПАП",
@@ -1174,6 +1179,9 @@ _ADDITIONAL_RUSSIAN_UI_PHRASES: dict[str, str] = {
     "Previous music track": "Предыдущая музыкальная композиция",
 }
 
+
+_ADDITIONAL_RUSSIAN_UI_PHRASES.update(_MOD_SETTINGS_PHRASES["ru"])
+_ADDITIONAL_RUSSIAN_UI_PHRASES.update(_MOD_UPDATE_PHRASES["ru"])
 
 # The original catalog is deliberately stored in canonical source order to
 # keep the reviewed Russian values readable.  New reviewed phrases live in the

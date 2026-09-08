@@ -99,6 +99,14 @@ class ConsolePanel(QFrame):
         header_layout.addWidget(self._title_label)
         header_layout.addStretch()
 
+        self._live_btn = QPushButton("RETURN TO LIVE", self._header)
+        self._live_btn.setProperty("class", "compactGhost")
+        self._live_btn.setFixedHeight(24)
+        self._live_btn.setAccessibleName("Return to latest console output")
+        self._live_btn.clicked.connect(self._return_to_live)
+        self._live_btn.hide()
+        header_layout.addWidget(self._live_btn)
+
         self._copy_btn = QPushButton("COPY", self._header)
         self._copy_btn.setObjectName("consoleCopyBtn")
         self._copy_btn.setFixedHeight(24)
@@ -131,6 +139,7 @@ class ConsolePanel(QFrame):
         self._log.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._log.setAccessibleName("Console output")
         self._log.document().setMaximumBlockCount(self.MAX_LINES)
+        self._log.verticalScrollBar().valueChanged.connect(self._sync_live_button)
         layout.addWidget(self._log)
 
         self._set_monospace_font(10)
@@ -427,10 +436,36 @@ class ConsolePanel(QFrame):
         if not lines:
             return
         lines = lines[-self.MAX_LINES :]
+        scrollbar = self._log.verticalScrollBar()
+        follow = self._log.document().isEmpty() or scrollbar.value() >= scrollbar.maximum() - 2
+        previous = scrollbar.value()
+        old_blocks = self._log.document().blockCount()
         cursor = self._log.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         cursor.insertText("\n".join(lines) + "\n")
+        if follow:
+            self._return_to_live()
+        else:
+            # When the bounded buffer drops old lines, preserve the same text
+            # position as far as the retained history permits.
+            added = len(lines)
+            removed = max(0, old_blocks + added - self.MAX_LINES)
+            line_height = self._log.fontMetrics().lineSpacing()
+            scrollbar.setValue(max(0, previous - removed * line_height))
+            self._sync_live_button()
+
+    def _sync_live_button(self):
+        bar = self._log.verticalScrollBar()
+        self._live_btn.setVisible(bar.value() < bar.maximum() - 2)
+
+    def _return_to_live(self):
+        cursor = self._log.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self._log.setTextCursor(cursor)
         self._log.ensureCursorVisible()
+        bar = self._log.verticalScrollBar()
+        bar.setValue(bar.maximum())
+        self._sync_live_button()
 
     # ── Header actions ───────────────────────────────────────────────────────
     def _copy_to_clipboard(self) -> None:

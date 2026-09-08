@@ -215,11 +215,9 @@ def test_audio_dependencies_and_reduce_motion_keep_runtime_setting_semantics(
     try:
         assert page.animations_toggle.isChecked() is True
         assert page.reduce_motion_toggle.isChecked() is False
-        assert page.hero_interval_spin.isEnabled() is True
 
         page.reduce_motion_toggle.setChecked(True)
         assert page.animations_toggle.isChecked() is False
-        assert page.hero_interval_spin.isEnabled() is False
         assert page._form_state()["animations_enabled"] is False
 
         page.music_enabled_toggle.setChecked(False)
@@ -235,7 +233,6 @@ def test_audio_dependencies_and_reduce_motion_keep_runtime_setting_semantics(
 
         page.animations_toggle.setChecked(True)
         assert page.reduce_motion_toggle.isChecked() is False
-        assert page.hero_interval_spin.isEnabled() is True
     finally:
         page.deleteLater()
         qapp.processEvents()

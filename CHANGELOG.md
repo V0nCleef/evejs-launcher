@@ -2,6 +2,65 @@
 
 ## Changelog
 
+## v1.0.53 — 2026-09-08
+
+### Mods and settings
+
+- Offer opt-in GitHub mod updates with the launcher's gold Update button,
+  release-note previews, retained settings and recovery of interrupted updates.
+- Keep the mod update window open with download progress, installation stages,
+  and the final success or recovery message.
+- Show a gold update-count badge on Mods in the sidebar when compatible updates
+  are available, including while another page is open.
+- Let mod authors restrict updates to declared EveJS versions. The launcher
+  selects the newest compatible release and rechecks the downloaded package.
+  Omit the restriction for EveJS-independent mods such as DLSS5.
+- Document release metadata generation and include a complete GitHub update example.
+
+- Add local mod folders or ZIPs, change loader order, and undo removal from
+  launcher recovery storage. Existing loaders retain their configured state.
+- Let authors declare settings panels with global or profile-specific controls,
+  translated labels, validation and restart notices. Saves preserve unrelated
+  configuration keys and detect conflicting edits.
+- Add a versioned public helper interface for profile preparation and mod-owned
+  installation, verification and cleanup. Existing DLSS5 packages keep their
+  compatibility bridge; future packages can use the public interface.
+- Keep optional missing mod telemetry separate from Game server readiness.
+  Preserve valid observations from other mods.
+- Reorganize the bundled Mod Authoring Guide into a quick start, focused
+  reference pages and runnable examples, with an offline guide reader.
+- Strengthen update/mutation coordination, removal result handling, saved
+  configuration validation and Native Market database preflight.
+
+### DLSS5 upgrade note
+
+- Updating the launcher does not automatically upgrade DLSS5 0.5.7. Move to
+  DLSS5 0.5.8 with a one-time manual package import after removing the old mod
+  through the launcher. Retain private profile data and recovery backups.
+  Future update-aware DLSS5 releases can use the launcher Update button.
+- DLSS5 0.5.8 owns its mod-specific behavior; launcher integration requires
+  1.0.53 or newer. Existing 0.5.7 keeps its compatibility support.
+
+### Living station
+
+- Keep the orbital artwork completely still while small ships cross the scene,
+  approach the station, depart, and make occasional localized warp arrivals.
+- Add independently changing station window lights, navigation beacons, and
+  occasional freighter traffic, aligned with the artwork through resizing.
+- Fix the layer order that hid all traffic behind the background image.
+- Make the status cards and Recent Activity more transparent. Keep activity
+  compact, with one empty-state row, and expose Changelog and Discord links.
+- Add command-button hover and focus lighting, pending-operation sweeps,
+  foreground entrances, and brief emphasis for real activity updates.
+- Pause optional animation when hidden, minimized, or Reduce Motion is enabled.
+  Reuse update-button animations and stop unused spectrum/placeholder work.
+- Let the mouse wheel scroll Settings without changing dropdowns, numbers or
+  sliders, even when a control still has focus after editing.
+- Preserve console reading position while new output arrives; add Return to Live.
+- Remove the unused Home slideshow, hidden legacy cards, retired character-panel
+  methods, duplicate instrument layout, and unused synchronous launch queue.
+  Retain the existing asynchronous launch and service ownership behavior.
+
 ## v1.0.52 — 2026-09-05
 
 ### DLSS5 persisted-toggle hotfix

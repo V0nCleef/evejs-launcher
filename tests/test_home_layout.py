@@ -4,34 +4,11 @@ from __future__ import annotations
 from PyQt6.QtWidgets import QApplication
 
 from src.core.service_status import ServiceState
-from src.pages.home_page import HomePage, extract_latest_release
+from src.pages.home_page import HomePage
 from src.theme import build_qss
 
 
-def test_latest_release_parser_uses_the_first_release_and_caps_highlights() -> None:
-    changelog = """# EveJS Launcher V1
-
-## Changelog
-
-## v9.9.9 — 2026-07-28
-
-### Added
-- First highlight
-- Second highlight
-- Third highlight
-- Fourth highlight
-
-## v9.9.8 — 2026-07-27
-- Older highlight
-"""
-
-    version, highlights = extract_latest_release(changelog, limit=3)
-
-    assert version == "v9.9.9 — 2026-07-28"
-    assert highlights == ["First highlight", "Second highlight", "Third highlight"]
-
-
-def test_home_uses_a_cinematic_command_column_and_hidden_compatibility_store(
+def test_home_keeps_activity_compact_and_has_no_hidden_dashboard(
     qapp: QApplication,
 ) -> None:
     original_style = qapp.styleSheet()
@@ -61,14 +38,11 @@ def test_home_uses_a_cinematic_command_column_and_hidden_compatibility_store(
         assert page.services_card.market_row._ring.size().width() == 80
         assert page.running_card._ring.size().width() == 80
 
-        # Removed primary-canvas widgets remain available to controller code.
-        assert page.hero.isVisible() is False
-        assert page.accounts_card.isVisible() is False
-        assert page.characters_card.isVisible() is False
-        assert page.release_card.isVisible() is False
-        assert page.resources_card.isVisible() is False
-        assert page.release_card.version_label.text()
-        assert page.release_card.highlights_label.text()
+        assert page.recent_activity.height() <= 170
+        assert page.findChild(type(page), "homeCompatibilityStore") is None
+        assert not hasattr(page, "hero")
+        assert page.btn_changelog.isVisible()
+        assert page.btn_discord.isVisible()
     finally:
         page.close()
         page.deleteLater()
@@ -133,11 +107,11 @@ def test_home_exposes_deep_signal_operations_instruments(
     qapp.processEvents()
     assert page.signal_background.is_animating() is False
     page.set_animations_enabled(False)
-    assert page.hero.animations_enabled is False
+    assert page._motion.animations_enabled is False
     assert page.signal_background.motion_enabled is False
     assert page.signal_background.is_animating() is False
     page.set_animations_enabled(True)
-    assert page.hero.animations_enabled is True
+    assert page._motion.animations_enabled is True
     assert page.signal_background.motion_enabled is True
     assert page.signal_background.is_animating() is False
 
@@ -179,14 +153,14 @@ def test_home_reduce_motion_controls_every_live_status_instrument(
         page.deleteLater()
 
 
-def test_resources_card_routes_each_console_action_through_home(
+def test_status_instruments_route_each_console_action_through_home(
     qapp: QApplication,
 ) -> None:
     page = HomePage()
     requested: list[str] = []
     page.console_requested.connect(requested.append)
 
-    page.resources_card.btn_game_console.click()
-    page.resources_card.btn_market_console.click()
+    page.services_card.game_row.activated.emit("server")
+    page.services_card.market_row.activated.emit("market")
 
     assert requested == ["server", "market"]

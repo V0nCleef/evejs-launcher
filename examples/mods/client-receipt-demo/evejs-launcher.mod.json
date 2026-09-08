@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 3,
+  "id": "client-receipt-demo",
+  "displayName": "Client Receipt Example",
+  "version": "1.0.0",
+  "description": "A receipt lifecycle example with no renderer or gameplay payload.",
+  "kind": "client-package",
+  "supportedBackends": ["native", "docker"],
+  "activation": {"strategy": "client_package"},
+  "restart": "client",
+  "launcherApi": {
+    "version": 1,
+    "minLauncherVersion": "1.0.53",
+    "helper": {"runtime": "powershell", "path": "helper.ps1"},
+    "capabilities": ["install", "verify", "prepare_profile", "prepare_disable", "prepare_remove", "recover"]
+  }
+}

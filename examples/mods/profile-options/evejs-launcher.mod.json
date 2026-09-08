@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 3,
+  "id": "profile-options-demo",
+  "displayName": "Profile Options Example",
+  "version": "1.0.0",
+  "description": "Demonstrates a localized profile form and private configuration proposals.",
+  "kind": "settings",
+  "supportedBackends": ["native", "docker"],
+  "activation": {"strategy": "package"},
+  "restart": "client",
+  "launcherApi": {
+    "version": 1,
+    "minLauncherVersion": "1.0.53",
+    "helper": {"runtime": "node", "path": "helper.js"},
+    "capabilities": ["prepare_profile"]
+  },
+  "settings": {
+    "schemaVersion": 1,
+    "files": [{"id": "prefs", "base": "profile", "path": "preferences.ini", "format": "ini"}],
+    "fields": [
+      {
+        "id": "label",
+        "label": {"en": "Profile label", "nl": "Profielnaam"},
+        "description": {"en": "Stored only in this example's private profile data.", "nl": "Alleen opgeslagen in de privegegevens van dit voorbeeldprofiel."},
+        "group": {"en": "Preferences", "nl": "Voorkeuren"},
+        "type": "string", "default": "Pilot", "maxLength": 80,
+        "file": "prefs", "key": ["Example", "Label"], "restart": "client"
+      },
+      {
+        "id": "intensity",
+        "label": {"en": "Example intensity", "nl": "Voorbeeldintensiteit"},
+        "group": {"en": "Preferences", "nl": "Voorkeuren"},
+        "type": "integer", "default": 2, "minimum": 0, "maximum": 5, "step": 1,
+        "file": "prefs", "key": ["Example", "Intensity"], "restart": "client"
+      },
+      {
+        "id": "enabled",
+        "label": {"en": "Example preference", "nl": "Voorbeeldvoorkeur"},
+        "type": "boolean", "default": true, "storage": "numeric_boolean", "advanced": true,
+        "file": "prefs", "key": ["Example", "Enabled"], "restart": "client"
+      }
+    ]
+  }
+}
