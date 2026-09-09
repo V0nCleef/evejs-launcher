@@ -153,14 +153,9 @@ Settings covers the EveJS root, EVE client path, proxy address, Native/Docker ru
 
 ## Service startup and detection
 
-EveJS installations may include more than one `StartServer*.bat` file. The launcher uses those filenames as mode indicators:
+For the native runtime, enable the loader mods you want on the **Mods** page, then start or restart **Game**. The launcher loads enabled loader mods automatically. With none enabled, Game starts in Vanilla mode.
 
-- `StartServer.bat` means vanilla mode.
-- `StartServerWithMods.bat` means modded mode.
-- With more than one supported indicator, Settings can save a default or keep **Always ask**.
-- With one supported indicator, that mode is selected automatically.
-
-The batch files are not executed. They may contain interactive prompts that do not behave correctly inside a GUI launcher. Game is always started through Node.js directly with an explicit mode.
+No `StartServerWithMods.bat` file or script selection is needed. The launcher starts Game directly through Node.js. Home shows the running mode, or the mode selected for the next start.
 
 When **Start Stack** is used, Market is started first and Game waits for the required readiness state. Controls remain responsive while startup and shutdown checks run in background workers.
 

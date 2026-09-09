@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QMenu,
     QPushButton,
     QScrollArea,
+    QStyle,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -192,6 +193,8 @@ class ModRow(QFrame):
         can_remove: bool = False,
         local_removable: bool = False,
         delegated_activation: bool = False,
+        can_move_up: bool = False,
+        can_move_down: bool = False,
         cleanup: dict | None = None,
         parent: QWidget | None = None,
     ) -> None:
@@ -418,14 +421,17 @@ class ModRow(QFrame):
         mark_translatable(self.helper_btn)
         layout.addWidget(self.helper_btn)
 
-        self.move_up_btn = QPushButton("↑")
-        self.move_down_btn = QPushButton("↓")
+        self.move_up_btn = QPushButton()
+        self.move_down_btn = QPushButton()
+        self.move_up_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowUp))
+        self.move_down_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowDown))
         for button, amount, label in ((self.move_up_btn, -1, "Move mod earlier"), (self.move_down_btn, 1, "Move mod later")):
             button.setProperty("class", "signalSecondary")
             button.setFixedWidth(28)
             set_translatable_tooltip(button, label)
             set_translatable_accessible_name(button, label)
-            button.setVisible(is_loader and delegated_activation)
+            available = can_move_up if amount < 0 else can_move_down
+            button.setVisible(mod.valid and is_loader and delegated_activation and available)
             button.clicked.connect(lambda _checked=False, amount=amount: self.move_requested.emit(self.mod, amount))
             layout.addWidget(button)
 
@@ -1278,6 +1284,8 @@ class ModsPage(QWidget):
         activation_state = inventory.activation_state
         self._activation_state_error = inventory.state_error
         runtime_snapshot = self._current_mod_snapshot()
+        loader_keys = [folder_key(mod) for mod in mods
+                       if mod.valid and mod.activation_kind is ActivationKind.LOADER_RENAME]
 
         for row in self._rows:
             row.setParent(None)
@@ -1358,6 +1366,8 @@ class ModsPage(QWidget):
                     can_remove=can_remove,
                     local_removable=local_removable,
                     delegated_activation=self._refresh_handler is not None,
+                    can_move_up=key in loader_keys and loader_keys.index(key) > 0,
+                    can_move_down=key in loader_keys and loader_keys.index(key) < len(loader_keys) - 1,
                     cleanup=(inventory.local_records[key].cleanup if key in inventory.local_records else None),
                     parent=self._list_container,
                 )

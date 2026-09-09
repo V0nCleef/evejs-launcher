@@ -47,11 +47,7 @@ from src import config
 from src.constants import COLORS, APP_VERSION
 from src.core.client_autologin import inspect_auto_login_capability
 from src.core.discovery import resolve_client_tq_path
-from src.core.server_selection import (
-    ASK_EVERY_TIME,
-    discover_server_scripts,
-    mode_for_script,
-)
+
 from src.core.runtime.docker_setup import (
     DockerPreflightRequest,
     DockerPreflightResult,
@@ -130,7 +126,6 @@ class SettingsPage(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._stale_server_preference = ""
         self._docker_preflight_token = 0
         self._pending_docker_request: DockerPreflightRequest | None = None
         self._validated_docker_fingerprint: str | None = None
@@ -475,43 +470,16 @@ class SettingsPage(QWidget):
 
         root.addWidget(updates_box)
 
-        # ── Server Start Scripts ─────────────────────────────────────────────
-        scripts_box = QGroupBox("Server Start Scripts")
-        self.scripts_box = scripts_box
-        scripts_box.setToolTip(
-            "Select which server mode to use when starting the game server.\n"
-            "The launcher detects StartServer*.bat files to determine the mode.\n"
-            "StartServerWithMods.bat → modded (mods enabled)\n"
-            "StartServer.bat → vanilla (no mods)\n"
-            "The server is always launched via Node.js directly — the .bat is\n"
-            "only used as a mode indicator, not executed."
+        self.scripts_box = QGroupBox("Game Server Startup")
+        startup_layout = QVBoxLayout(self.scripts_box)
+        startup_info = QLabel(
+            "Enabled loader mods are loaded automatically when the Game server starts. "
+            "With no enabled loader mods, it starts in Vanilla mode. "
+            "Manage mods on the Mods page, then restart the Game server to apply changes."
         )
-        scripts_layout = QFormLayout(scripts_box)
-        scripts_layout.setSpacing(10)
-
-        self.server_script_combo = ScrollSafeComboBox()
-        self.server_script_combo.setMinimumWidth(300)
-        self.server_script_combo.currentIndexChanged.connect(self._update_script_info)
-        scripts_layout.addRow("Default:", self.server_script_combo)
-
-        scripts_btn_row = QHBoxLayout()
-        scripts_btn_row.setSpacing(8)
-
-        rescan_btn = QPushButton("Rescan")
-        rescan_btn.setProperty("class", "ghost")
-        rescan_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        rescan_btn.clicked.connect(self._rescan_server_scripts)
-        scripts_btn_row.addWidget(rescan_btn)
-
-        scripts_btn_row.addStretch()
-        scripts_layout.addRow("", scripts_btn_row)
-
-        self.server_script_info = QLabel("")
-        self.server_script_info.setStyleSheet(f"color: {COLORS['grey']}; font-size: 11px;")
-        self.server_script_info.setWordWrap(True)
-        scripts_layout.addRow("", self.server_script_info)
-
-        root.addWidget(scripts_box)
+        startup_info.setWordWrap(True)
+        startup_layout.addWidget(startup_info)
+        root.addWidget(self.scripts_box)
 
         # ── Hidden Characters ────────────────────────────────────────────────
         hidden_box = QGroupBox("Hidden Characters")
@@ -1240,9 +1208,6 @@ class SettingsPage(QWidget):
         for name in cfg.get("hidden_characters", []):
             self.hidden_list.addItem(str(name))
 
-        self._populate_server_scripts(
-            str(cfg.get("server_start_preference", ASK_EVERY_TIME))
-        )
         self._set_combo_data(self.runtime_backend_combo, cfg.get("runtime_backend", "native"))
         self.docker_compose_edit.setText(str(cfg.get("docker_compose_file", "")))
         self._set_combo_data(self.docker_policy_combo, cfg.get("docker_control_policy", "connect_only"))
@@ -1395,9 +1360,6 @@ class SettingsPage(QWidget):
                 self.hidden_list.item(i).text()
                 for i in range(self.hidden_list.count())
             ),
-            "server_start_preference": (
-                self.server_script_combo.currentData() or ASK_EVERY_TIME
-            ),
             "runtime_backend": self.runtime_backend_combo.currentData() or "native",
             "docker_compose_file": self.docker_compose_edit.text().strip(),
             "docker_control_policy": (
@@ -1438,8 +1400,6 @@ class SettingsPage(QWidget):
             self.save_finished.emit(False)
             return
 
-        self._stale_server_preference = ""
-        self._update_script_info()
         self._show_save_feedback("Saved ✓", success=True)
         self._settings_baseline = self._form_state()
         self.settings_saved.emit(cfg)
@@ -1778,102 +1738,8 @@ class SettingsPage(QWidget):
             # Now persist the updated hidden_characters (triggers refresh)
             self.save_settings()
 
-    # ── Server start scripts ─────────────────────────────────────────────────
-    def _populate_server_scripts(self, preference: str | None = None) -> None:
-        """Populate the preference combo from the currently entered EveJS root."""
-        evejs_root = self.evejs_root_edit.text().strip()
-        if preference is None:
-            preference = str(
-                self.server_script_combo.currentData() or ASK_EVERY_TIME
-            )
-        scripts = discover_server_scripts(evejs_root)
-
-        self.server_script_combo.blockSignals(True)
-        self.server_script_combo.clear()
-        self.server_script_combo.addItem("Always ask (default)", ASK_EVERY_TIME)
-        register_translatable_combo_item(self.server_script_combo, 0)
-        selected_index = 0
-        matched = preference.casefold() == ASK_EVERY_TIME
-        for script in scripts:
-            self.server_script_combo.addItem(script.name, script.name)
-            if script.name.casefold() == preference.casefold():
-                selected_index = self.server_script_combo.count() - 1
-                matched = True
-        self.server_script_combo.setCurrentIndex(selected_index)
-        self.server_script_combo.blockSignals(False)
-        self._stale_server_preference = "" if matched else preference
-
-        self._update_script_info()
-
-    def _update_script_info(self, _index: int = -1) -> None:
-        """Explain the effective launch behavior for the current selection."""
-        if _index >= 0:
-            self._stale_server_preference = ""
-        scripts = discover_server_scripts(self.evejs_root_edit.text().strip())
-        one_script_note = ""
-        if len(scripts) == 1:
-            try:
-                mode_for_script(scripts[0])
-            except ValueError:
-                one_script_note = (
-                    f" {scripts[0].name} was found but is unsupported as a mode indicator."
-                )
-            else:
-                one_script_note = (
-                    f" Only {scripts[0].name} was found, so it will be used "
-                    "automatically and no prompt will appear."
-                )
-
-        if self._stale_server_preference:
-            set_translatable_text_template(
-                self.server_script_info,
-                f"Saved script {self._stale_server_preference} is unavailable in this "
-                f"EveJS root. The preference was reset to Always ask.{one_script_note}"
-            )
-            return
-
-        selected = str(self.server_script_combo.currentData() or ASK_EVERY_TIME)
-        if not scripts:
-            set_translatable_text(
-                self.server_script_info,
-                "No StartServer*.bat files detected. The legacy direct-Node mode "
-                "fallback will be used."
-            )
-            return
-        if len(scripts) == 1:
-            set_translatable_text_template(
-                self.server_script_info,
-                one_script_note.strip(),
-            )
-            return
-        if selected.casefold() == ASK_EVERY_TIME:
-            set_translatable_text(
-                self.server_script_info,
-                "A script chooser will appear whenever the game server is started."
-            )
-            return
-
-        try:
-            mode = mode_for_script(Path(selected))
-        except ValueError:
-            set_translatable_text_template(
-                self.server_script_info,
-                f"{selected} is detected but unsupported as a mode indicator."
-            )
-            return
-        detail = "mods enabled" if mode == "modded" else "no mods"
-        set_translatable_text_template(
-            self.server_script_info,
-            f"Mode: {mode} ({detail}) — {selected}",
-        )
-
     def _on_evejs_root_edited(self) -> None:
-        """Rescan immediately when the root field finishes changing."""
-        self._populate_server_scripts()
-
-    def _rescan_server_scripts(self) -> None:
-        """Re-scan the EveJS root for server start scripts."""
-        self._populate_server_scripts()
+        """Startup is derived at launch; root edits need no script scan."""
 
     # ── Danger zone ──────────────────────────────────────────────────────────
     def _delete_all_local_data(self) -> None:

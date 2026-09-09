@@ -47,3 +47,14 @@ def mode_for_script(script: Path) -> str:
     if name == "startserverwithmods.bat":
         return "modded"
     raise ValueError(f"Unsupported server start script: {script.name}")
+
+
+def native_server_mode(evejs_root: str | Path) -> str:
+    """Derive Native preload mode from the single mod activation authority."""
+    from .mod_manifest import ModManagerError, active_loader_names, scan_mods
+
+    mods = scan_mods(evejs_root)
+    invalid = [mod.name for mod in mods if not mod.valid]
+    if invalid:
+        raise ModManagerError("Invalid installed mod metadata: " + ", ".join(invalid))
+    return "modded" if active_loader_names(mods) else "vanilla"

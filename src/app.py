@@ -177,12 +177,8 @@ from .core.server_launcher import (
     start_game_server,
     start_market_server,
 )
-from .core.server_selection import (
-    ASK_EVERY_TIME,
-    choose_saved_script,
-    discover_server_scripts,
-    mode_for_script,
-)
+from .core.server_selection import native_server_mode
+from .core.mod_manifest import ModManagerError
 from .core.service_status import (
     DockerControlPolicy,
     RuntimeBackend,
@@ -1951,95 +1947,39 @@ class MainWindow(QMainWindow):
         return labels.get(mode.casefold(), "Unsupported")
 
     def _effective_server_mode_label(self) -> str:
-        """Return the private-safe mode that the next start would resolve to."""
+        """Show attested running state, otherwise the automatic next-start mode."""
         if self._docker_mode():
             policy = str(self._cfg.get("docker_control_policy", "connect_only"))
             return f"DOCKER • {policy.replace('_', ' ').upper()}"
-        evejs_root = str(self._cfg.get("evejs_root", ""))
-        scripts = discover_server_scripts(evejs_root)
-        if len(scripts) == 1:
-            try:
-                return self._server_mode_label(mode_for_script(scripts[0]))
-            except ValueError:
-                return "Unsupported"
-
-        preference = str(
-            self._cfg.get("server_start_preference", ASK_EVERY_TIME)
-        ).casefold()
-        legacy_entry = Path(evejs_root) / "server" / "index.js"
-        if not scripts and evejs_root and legacy_entry.is_file():
-            return self._server_mode_label(str(self._cfg.get("server_mode", "modded")))
-        if preference == ASK_EVERY_TIME:
-            return "Ask on start"
-        selected = choose_saved_script(scripts, preference)
-        if selected is None:
-            return "Ask on start"
+        root = str(self._cfg.get("evejs_root", ""))
+        snapshot = self.__dict__.get("_current_mod_runtime_snapshot")
+        process = self.__dict__.get("_server_proc")
+        if (snapshot is not None and snapshot.backend == NATIVE_BACKEND
+                and process is not None and process.poll() is None
+                and snapshot.pid == process.pid
+                and snapshot.root == Path(root).resolve()):
+            count = len(snapshot.selected_loader_ids)
+            return f"Running: {self._server_mode_label(snapshot.mode)} · {count} loader mod(s)"
         try:
-            return self._server_mode_label(mode_for_script(selected))
-        except ValueError:
-            return "Unsupported"
+            mode = native_server_mode(root)
+        except ModManagerError:
+            return "Invalid mod configuration"
+        return f"Next start: {self._server_mode_label(mode)}"
 
     def _resolve_server_start(self) -> tuple[str, Path | None] | None:
-        """Resolve the explicit Node launch mode and its indicator script."""
-        evejs_root = str(self._cfg.get("evejs_root", ""))
-        scripts = discover_server_scripts(evejs_root)
-        if not scripts:
-            index_js = Path(evejs_root) / "server" / "index.js"
-            fallback_mode = str(self._cfg.get("server_mode", "modded"))
-            if not index_js.is_file():
-                QMessageBox.critical(
-                    self,
-                    "Invalid EveJS Installation",
-                    "No StartServer*.bat indicator was found, and the legacy "
-                    "server/index.js entry point is missing.",
-                )
-                return None
-            if fallback_mode in {"vanilla", "modded"}:
-                log.info(
-                    "Resolved server start: no indicator script -> legacy %s mode",
-                    fallback_mode,
-                )
-                return fallback_mode, None
-            QMessageBox.critical(
-                self,
-                "Invalid Server Mode",
-                f"Unsupported legacy server mode: {fallback_mode}",
-            )
-            return None
-        preference = str(
-            self._cfg.get("server_start_preference", ASK_EVERY_TIME)
-        )
-        selected = choose_saved_script(
-            scripts,
-            preference,
-        )
-        if selected is None and len(scripts) > 1:
-            if preference and preference.casefold() != ASK_EVERY_TIME:
-                self._cfg["server_start_preference"] = ASK_EVERY_TIME
-                config.save(self._cfg)
-            chosen_name, accepted = QInputDialog.getItem(
-                self,
-                "Choose Server Start Script",
-                "Select the server mode indicator for this start:",
-                [script.name for script in scripts],
-                0,
-                False,
-            )
-            if not accepted:
-                return None
-            selected = next(
-                (script for script in scripts if script.name == chosen_name),
-                None,
-            )
-        if selected is None:
+        """Choose preloads from enabled mods, independently of batch files."""
+        root = str(self._cfg.get("evejs_root", ""))
+        if not root or not (Path(root) / "server" / "index.js").is_file():
+            QMessageBox.critical(self, "Invalid EveJS Installation",
+                                 "The server/index.js entry point is missing.")
             return None
         try:
-            mode = mode_for_script(selected)
-        except ValueError as exc:
-            QMessageBox.critical(self, "Unsupported Server Script", str(exc))
+            mode = native_server_mode(root)
+        except ModManagerError as exc:
+            QMessageBox.critical(self, "Invalid Mod Configuration", str(exc))
             return None
-        log.info("Resolved server start: %s -> %s", selected.name, mode)
-        return mode, selected
+        log.info("Resolved server start: enabled loader mods -> %s", mode)
+        return mode, None
 
     def _on_server_toggle(self) -> None:
         if self._docker_mode():
@@ -2235,6 +2175,9 @@ class MainWindow(QMainWindow):
         """Publish current evidence without letting an optional page leak a lease."""
 
         self._current_mod_runtime_snapshot = snapshot
+        home = self.__dict__.get("_home_page")
+        if home is not None:
+            home.set_server_mode(self._effective_server_mode_label())
         if snapshot is None:
             self._attested_docker_target_identity = None
             self._attested_docker_container_id = None
@@ -2291,7 +2234,8 @@ class MainWindow(QMainWindow):
             evejs_root,
             backend=NATIVE_BACKEND,
         )
-        selected = active_loader_names(mods) if mode == "modded" else ()
+        selected = active_loader_names(mods)
+        mode = "modded" if selected else "vanilla"
         plan = build_mod_runtime_plan(
             evejs_root,
             mods,
@@ -2756,6 +2700,7 @@ class MainWindow(QMainWindow):
                     evejs_root,
                     mode,
                 )
+                mode = mod_plan.mode
             except (ModRuntimeStateError, OSError, TypeError, ValueError) as exc:
                 self._native_mod_runtime_plan = None
                 self._release_mod_lifecycle_lease()
@@ -3630,10 +3575,7 @@ class MainWindow(QMainWindow):
                 allow_force_game_kill=False,
                 on_ready=None,
                 continuous_mod_lifecycle=True,
-                # A Mods Apply always uses the mod-aware launch path. The
-                # lock-owned discovery in _start_service_sequence freezes the
-                # exact active loader set, including an empty set.
-                mode_override="modded",
+                # Mode is derived again from the frozen active loader set.
             )
             return
         if not self._docker_managed():

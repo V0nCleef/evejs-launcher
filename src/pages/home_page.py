@@ -658,6 +658,8 @@ class HomePage(QWidget):
         )
         self.overall_detail_label.setProperty("class", "pageSubtitle")
         overview_layout.addWidget(self.overall_detail_label)
+        overview_layout.addWidget(self.services_card.mode_label)
+        self.services_card.mode_label.show()
         command_layout.addWidget(overview)
 
         self.instrument_rail = QFrame(self.command_column)

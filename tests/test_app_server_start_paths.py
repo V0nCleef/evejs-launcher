@@ -178,7 +178,7 @@ def test_main_window_connects_mods_apply_to_central_restart(
         assert restarted[0][1]["allow_force_game_kill"] is False
         assert restarted[0][1]["on_ready"] is None
         assert restarted[0][1]["continuous_mod_lifecycle"] is True
-        assert restarted[0][1]["mode_override"] == "modded"
+        assert "mode_override" not in restarted[0][1]
     finally:
         window.deleteLater()
 
@@ -208,7 +208,7 @@ def test_native_mod_apply_always_uses_lock_owned_modded_discovery(
     bare_window._on_mods_apply_restart()
 
     assert len(restarts) == 1
-    assert restarts[0]["mode_override"] == "modded"
+    assert "mode_override" not in restarts[0]
     assert restarts[0]["on_ready"] is None
 
 

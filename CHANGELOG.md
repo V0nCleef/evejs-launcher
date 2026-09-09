@@ -2,6 +2,13 @@
 
 ## Changelog
 
+## v1.0.55 — 2026-09-09
+
+- Enabled loader mods now load automatically when the native Game server starts. No extra `.bat` file is needed.
+- Removed the server-start script selector from Settings.
+- Home now shows the server mode: Vanilla or Modded.
+- Fixed empty mod buttons. Mod-order arrows only appear when you can move a mod.
+
 ## v1.0.54 — 2026-09-09
 
 - Fix client relaunch errors after ReShade saves profile settings.
