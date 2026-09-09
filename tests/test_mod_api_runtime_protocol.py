@@ -41,6 +41,49 @@ def make_mod(tmp_path, name="graphics", version="0.5.8", *, kind="client-package
     return descriptor, context
 
 
+def test_private_profile_relaunch_retains_runtime_paths_and_font_settings(tmp_path):
+    from src.core.mod_config_documents import edit_value
+    _descriptor, context = make_mod(tmp_path)
+    rows = [
+        {"base": "profile", "path": "ReShade.ini", "format": "ini",
+         "key": ["GENERAL", "PresetPath"], "value": str(context.mod_data_root / "ReShadePreset.ini")},
+        {"base": "profile", "path": "ReShade.ini", "format": "ini",
+         "key": ["STYLE", "FontScale"], "value": "1.000000"},
+    ]
+    edits, _files = runtime._contributions(rows, "prepare_profile", context)
+    store = ContributionStore(context.client_root, allowed_roots={edit.target.allowed_root for edit in edits})
+    store.commit(store.plan_edits(context.owner, edits))
+    path = edits[0].target.path
+    changed = edit_value(path.read_bytes(), "ini", ("GENERAL", "PresetPath"), r".\ReShadePreset.ini")
+    changed = edit_value(changed, "ini", ("STYLE", "FontScale"), "1.500000")
+    path.write_bytes(changed)
+    for row, value in zip(rows, (r".\ReShadePreset.ini", "1.500000")):
+        row["value"] = value
+    refreshed, _files = runtime._contributions(rows, "prepare_profile", context)
+    plan = store.plan_edits(context.owner, refreshed)
+    assert plan.changed_paths == ()
+    store.commit(plan)
+    assert path.read_bytes() == changed
+    assert store.plan_edits(context.owner, refreshed).is_noop
+    store.commit(store.plan_remove(context.owner))
+    assert path.read_bytes() == changed
+
+
+@pytest.mark.parametrize("base,action,format,enabled", [
+    ("profile", "prepare_profile", "ini", True),
+    ("profile_settings", "prepare_profile", "ini", False),
+    ("profile", "install", "ini", False),
+    ("client", "install", "ini", False),
+    ("profile", "prepare_profile", "text", False),
+])
+def test_runtime_value_acceptance_is_limited_to_private_configuration(tmp_path, base, action, format, enabled):
+    _descriptor, context = make_mod(tmp_path)
+    row = {"base": base, "path": "prefs.ini" if format == "ini" else "prefs.txt", "format": format,
+           "key": ["Graphics", "Quality"] if format == "ini" else ["BEGIN", "END"], "value": "2"}
+    edits, _files = runtime._contributions([row], action, context)
+    assert edits[0].accept_current is enabled
+
+
 @pytest.mark.parametrize("action,status", [("launch_result", "started"), ("client_exit", "exited")])
 def test_notifications_keep_profile_context_and_reject_launch_mutations(tmp_path, action, status):
     descriptor, context = make_mod(tmp_path)

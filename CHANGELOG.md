@@ -2,6 +2,10 @@
 
 ## Changelog
 
+## v1.0.54 — 2026-09-09
+
+- Fix client relaunch errors after ReShade saves profile settings.
+
 ## v1.0.53 — 2026-09-08
 
 ### Mods and settings

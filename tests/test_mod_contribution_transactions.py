@@ -99,6 +99,17 @@ def test_manual_same_key_edits_are_preserved_and_explicit_override_restores_them
     assert read(target)["a"] == 5
 
 
+@pytest.mark.parametrize("different_owner,desired", [(False, 2), (True, 5)])
+def test_accept_current_cannot_overwrite_or_take_another_owners_drift(setup_store, different_owner, desired):
+    store, target, a, b = setup_store
+    apply(store, a, target, ("a",), 1)
+    target.path.write_bytes(target.path.read_bytes().replace(b'"a": 1', b'"a": 5'))
+    before = target.path.read_bytes(), store.index_path.read_bytes()
+    with pytest.raises(ContributionConflict):
+        store.plan_edits(b if different_owner else a, [KeyEdit(target, ("a",), desired, accept_current=True)])
+    assert (target.path.read_bytes(), store.index_path.read_bytes()) == before
+
+
 def test_removing_an_ineffective_layer_does_not_overwrite_a_manual_edit(setup_store):
     store, target, a, b = setup_store
     apply(store, a, target, ("a",), 1)

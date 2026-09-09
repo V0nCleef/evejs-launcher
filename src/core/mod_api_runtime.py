@@ -379,7 +379,8 @@ def _contributions(values: object, action: str, context: ModSettingsContext) -> 
             raise ModApiRuntimeError("Contribution key components exceed the size limit.")
         file = SettingsFile(str(index), base, path, format)
         files.append(file)
-        edits.append(KeyEdit(context.target(file), tuple(row["key"]), value))
+        edits.append(KeyEdit(context.target(file), tuple(row["key"]), value,
+            accept_current=action == "prepare_profile" and base == "profile" and not overlay))
     if files:
         context.store_root(tuple(files))  # reject ambiguous cross-store batches
     return tuple(edits), tuple(files)

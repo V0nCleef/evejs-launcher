@@ -213,6 +213,7 @@ class KeyEdit:
     value: object = None
     allow_override: bool = False
     delete: bool = False
+    accept_current: bool = False
 
 
 @dataclass(frozen=True)
@@ -367,7 +368,7 @@ class ContributionStore:
             raise ContributionError("An explicit contribution owner is required.")
         seen = set()
         for edit in edits:
-            if not isinstance(edit, KeyEdit) or type(edit.allow_override) is not bool or type(edit.delete) is not bool:
+            if not isinstance(edit, KeyEdit) or any(type(flag) is not bool for flag in (edit.allow_override, edit.delete, edit.accept_current)):
                 raise ContributionError("Key edits require explicit Boolean override/delete flags.")
             target = self._target(edit.target)
             key = canonical_key(target.format, edit.key)
@@ -406,6 +407,15 @@ class ContributionStore:
                 # whose contribution is currently below explicit precedence.
                 continue
             if layers and not values_equal(current, _value(layers[-1]["state"])):
+                if (edit.accept_current and not edit.delete and current.present
+                        and layers[-1]["owner"] == owner.id and values_equal(current, desired)):
+                    # A private-profile helper can retain a runtime-written
+                    # value without writing the file or claiming it was the
+                    # original contribution. Keep it through later removal.
+                    layers[:] = [layer for layer in layers if layer["owner"] != owner.id]
+                    layers.append({"owner": None, "state": _state(current)})
+                    layers.append({"owner": owner.id, "state": _state(current)})
+                    continue
                 if not edit.allow_override:
                     raise ContributionConflict(f"The value of {key!r} was edited outside its recorded contributions.")
                 # Retain this observed manual value as an unowned layer; do not
