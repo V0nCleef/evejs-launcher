@@ -157,7 +157,7 @@ class DetailPanel(QFrame):
         identity_layout.addWidget(self._name_label)
         self._account_label = QLabel()
         self._account_label.setStyleSheet(
-            f"color: {S['accent']}; font-size: 11px;"
+            f"color: {S['accent']}; font-size: 13px;"
         )
         identity_layout.addWidget(self._account_label)
         identity_layout.addStretch()
@@ -182,11 +182,11 @@ class DetailPanel(QFrame):
             label = QLabel()
             set_translatable_text(label, label_text.upper())
             label.setStyleSheet(
-                f"color: {S['text_muted']}; font-size: 9px;"
+                f"color: {S['text_muted']}; font-size: 13px;"
             )
             value = QLabel("—")
             value.setStyleSheet(
-                f"color: {S['text_primary']}; font-size: 11px; "
+                f"color: {S['text_primary']}; font-size: 13px; "
                 "font-family: 'Consolas', monospace;"
             )
             value.setTextInteractionFlags(
@@ -230,7 +230,7 @@ class DetailPanel(QFrame):
         secondary_style = (
             f"QPushButton {{ background-color: rgba(7, 17, 29, 190); "
             f"color: {S['text_secondary']}; border: 1px solid {S['border_bright']}; "
-            "border-radius: 4px; font-size: 9px; font-weight: 600; }}"
+            "border-radius: 4px; font-size: 13px; font-weight: 600; }}"
             f"QPushButton:hover {{ color: {S['text_primary']}; border-color: {S['accent']}; }}"
             f"QPushButton:focus {{ border: 2px solid {S['accent']}; }}"
         )

@@ -37,7 +37,7 @@ class ShipboardCaption(QFrame):
                 background: rgba(0, 200, 224, 0.10);
                 border: 1px solid rgba(0, 200, 224, 0.38);
                 border-radius: 3px;
-                font-size: 10px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 1px;
                 padding: 3px 5px;
@@ -45,7 +45,7 @@ class ShipboardCaption(QFrame):
             QLabel#shipboardCaptionMessage {{
                 color: {COLORS['white']};
                 background: transparent;
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 500;
             }}
             """

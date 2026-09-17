@@ -315,7 +315,7 @@ class CharactersPage(QWidget):
         self.launch_group_button.setStyleSheet(
             f"QPushButton {{ background-color: rgba(105, 72, 0, 232); "
             f"color: #FFE39A; border: 1px solid {C['gold']}; border-radius: 4px; "
-            "padding: 0 14px; font-size: 12px; font-weight: 700; }}"
+            "padding: 0 14px; font-size: 13px; font-weight: 700; }}"
             f"QPushButton:hover:enabled {{ background-color: {C['gold']}; "
             f"color: {C['void_black']}; }}"
             "QPushButton:focus { border: 2px solid #FFF2C3; }"

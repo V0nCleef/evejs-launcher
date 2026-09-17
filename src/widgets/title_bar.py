@@ -498,7 +498,7 @@ class TitleBar(QWidget):
         # ── Title ────────────────────────────────────────────────────────
         self._title = QLabel(title, self)
         self._title.setStyleSheet(
-            f"color: {COLORS['grey']}; font-size: 11px; font-weight: 600;"
+            f"color: {COLORS['grey']}; font-size: 13px; font-weight: 600;"
             " letter-spacing: 2px; background: transparent;"
         )
         layout.addWidget(self._title)
@@ -559,7 +559,7 @@ class TitleBar(QWidget):
             QSizePolicy.Policy.Fixed,
         )
         self.audio_track_label.setStyleSheet(
-            f"color: {COLORS['grey']}; font-size: 9px; font-weight: 700;"
+            f"color: {COLORS['grey']}; font-size: 13px; font-weight: 700;"
             " letter-spacing: 1px;"
         )
         self.audio_track_label.setToolTip(self._audio_track_full_text)
@@ -613,7 +613,7 @@ class TitleBar(QWidget):
                 border: 1px solid {COLORS["steel"]};
                 border-radius: 4px;
                 color: {COLORS["grey"]};
-                font-size: 10px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 1px;
                 padding: 0 8px;

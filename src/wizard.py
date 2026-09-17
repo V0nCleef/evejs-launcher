@@ -163,7 +163,7 @@ def _wizard_qss() -> str:
         }}
         QLabel[class="pageEyebrow"] {{
             color: {S['accent']};
-            font-size: 10px;
+            font-size: 13px;
             font-weight: 700;
             letter-spacing: 1px;
         }}
@@ -174,7 +174,7 @@ def _wizard_qss() -> str:
         }}
         QLabel[class="pageSubtitle"] {{
             color: {S['text_secondary']};
-            font-size: 12px;
+            font-size: 13px;
         }}
         QFrame[class="wizardSection"] {{
             background-color: rgba(5, 14, 23, 178);
@@ -183,25 +183,25 @@ def _wizard_qss() -> str:
         }}
         QLabel[class="wizardSectionTitle"] {{
             color: {S['accent']};
-            font-size: 10px;
+            font-size: 13px;
             font-weight: 700;
             letter-spacing: 1px;
         }}
         QLabel[class="wizardFieldLabel"] {{
             color: {S['text_secondary']};
-            font-size: 11px;
+            font-size: 13px;
             font-weight: 600;
         }}
         QLabel[class="wizardHint"] {{
             color: {S['text_muted']};
-            font-size: 11px;
+            font-size: 13px;
         }}
         QLabel[class="wizardHint"][tone="warning"] {{
             color: {S['warning']};
         }}
         QLabel[class="wizardStatus"] {{
             color: {S['text_muted']};
-            font-size: 11px;
+            font-size: 13px;
             padding: 2px 0;
         }}
         QLabel[class="wizardStatus"][state="ready"] {{
@@ -220,7 +220,7 @@ def _wizard_qss() -> str:
             border-radius: 7px;
             color: {S['text_secondary']};
             padding: 11px 13px;
-            font-size: 12px;
+            font-size: 13px;
         }}
         QLabel[class="wizardReview"] {{
             background-color: rgba(5, 14, 23, 190);
@@ -228,7 +228,7 @@ def _wizard_qss() -> str:
             border-radius: 8px;
             color: {S['text_secondary']};
             padding: 15px;
-            font-size: 12px;
+            font-size: 13px;
         }}
         QLabel[class="wizardCheck"] {{
             background-color: rgba(79, 224, 127, 18);
@@ -236,7 +236,7 @@ def _wizard_qss() -> str:
             border-radius: 7px;
             color: {S['success']};
             padding: 10px 13px;
-            font-size: 12px;
+            font-size: 13px;
             font-weight: 600;
         }}
         QLineEdit,
@@ -325,7 +325,7 @@ def _wizard_qss() -> str:
         }}
         QLabel#wizardStepLabel {{
             color: {S['text_secondary']};
-            font-size: 10px;
+            font-size: 13px;
             font-weight: 700;
             letter-spacing: 1px;
         }}

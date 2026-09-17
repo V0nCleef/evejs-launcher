@@ -440,7 +440,7 @@ class SettingsPage(QWidget):
         updates_form.setSpacing(10)
 
         self.version_label = QLabel(f"Version {APP_VERSION}")
-        self.version_label.setStyleSheet(f"color: {COLORS['grey']}; font-size: 11px;")
+        self.version_label.setStyleSheet(f"color: {COLORS['grey']}; font-size: 13px;")
         self.version_label.setCursor(Qt.CursorShape.ArrowCursor)
         updates_form.addRow("Current Version:", self.version_label)
 
@@ -459,7 +459,7 @@ class SettingsPage(QWidget):
         updates_form.addRow("Check Interval:", self.update_interval_spin)
 
         self.last_checked_label = QLabel("Never")
-        self.last_checked_label.setStyleSheet(f"color: {COLORS['grey']}; font-size: 11px;")
+        self.last_checked_label.setStyleSheet(f"color: {COLORS['grey']}; font-size: 13px;")
         updates_form.addRow("Last Checked:", self.last_checked_label)
 
         changelog_btn = QPushButton("View Changelog")
@@ -1070,7 +1070,7 @@ class SettingsPage(QWidget):
         label = QLabel(text)
         label.setWordWrap(True)
         label.setStyleSheet(
-            f"color: {color or COLORS['grey']}; font-size: 11px;"
+            f"color: {color or COLORS['grey']}; font-size: 13px;"
         )
         label.setAccessibleDescription(text)
         return label
@@ -1572,7 +1572,7 @@ class SettingsPage(QWidget):
     ) -> None:
         color = COLORS["green"] if success else COLORS["red"]
         self.docker_preflight_result_label.setStyleSheet(
-            f"color: {color}; font-size: 12px;"
+            f"color: {color}; font-size: 13px;"
         )
         set_translatable_text(self.docker_preflight_result_label, message)
         self.docker_preflight_result_label.show()
@@ -1668,7 +1668,7 @@ class SettingsPage(QWidget):
         self._save_feedback_timer.stop()
         color = COLORS["green"] if success else COLORS["red"]
         self.save_feedback_label.setStyleSheet(
-            f"color: {color}; font-size: 12px; font-weight: 600;"
+            f"color: {color}; font-size: 13px; font-weight: 600;"
         )
         set_translatable_text(self.save_feedback_label, message)
         set_translatable_tooltip(self.save_feedback_label, message)
@@ -1706,7 +1706,7 @@ class SettingsPage(QWidget):
                 self.last_checked_label,
                 f"Failed — {now}",
             )
-            self.last_checked_label.setStyleSheet(f"color: {COLORS['red']}; font-size: 11px;")
+            self.last_checked_label.setStyleSheet(f"color: {COLORS['red']}; font-size: 13px;")
 
     def _open_changelog(self) -> None:
         """Open CHANGELOG.md in the default text editor."""

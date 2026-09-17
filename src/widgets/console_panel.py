@@ -142,7 +142,7 @@ class ConsolePanel(QFrame):
         self._log.verticalScrollBar().valueChanged.connect(self._sync_live_button)
         layout.addWidget(self._log)
 
-        self._set_monospace_font(10)
+        self._set_monospace_font(13)
 
     def _apply_style(self) -> None:
         self.setStyleSheet(f"""
@@ -158,7 +158,7 @@ class ConsolePanel(QFrame):
             QLabel#consoleActivity {{
                 color: {S['success']};
                 background: transparent;
-                font-size: 9px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 1px;
             }}
@@ -166,7 +166,7 @@ class ConsolePanel(QFrame):
                 color: {S['text_primary']};
                 background: transparent;
                 font-weight: 700;
-                font-size: 10px;
+                font-size: 13px;
                 letter-spacing: 1px;
             }}
             QPushButton#consoleCopyBtn,
@@ -176,7 +176,7 @@ class ConsolePanel(QFrame):
                 border: 1px solid {S['border_bright']};
                 border-radius: 4px;
                 padding: 0 9px;
-                font-size: 9px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 1px;
             }}
@@ -254,18 +254,18 @@ class ConsolePanel(QFrame):
     # ── Font scaling ─────────────────────────────────────────────────────────
     def _set_monospace_font(self, size_px: int) -> None:
         font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
-        font.setPixelSize(max(9, min(14, size_px)))
+        font.setPixelSize(max(13, min(20, size_px)))
         self._log.setFont(font)
 
     def _update_font_from_height(self) -> None:
         h = self.height()
         if h <= 60:
-            size = 9
+            size = 13
         elif h >= 400:
-            size = 14
+            size = 16
         else:
-            # Linear interpolation between 9px @60 and 14px @400
-            size = int(9 + (h - 60) * (14 - 9) / (400 - 60))
+            # A collapsed console must remain readable as it expands.
+            size = int(13 + (h - 60) * (16 - 13) / (400 - 60))
         self._set_monospace_font(size)
 
     # ── Geometry / positioning ───────────────────────────────────────────────
@@ -395,7 +395,7 @@ class ConsolePanel(QFrame):
             set_translatable_text(self._activity_label, "●  COMPLETE")
             self._activity_label.setStyleSheet(
                 f"color: {S['text_muted']}; background: transparent; "
-                "font-size: 9px; font-weight: 700; letter-spacing: 1px;"
+                "font-size: 13px; font-weight: 700; letter-spacing: 1px;"
             )
 
     def clear_content(self) -> None:

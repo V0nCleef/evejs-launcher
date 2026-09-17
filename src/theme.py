@@ -153,7 +153,7 @@ QPushButton[class="compactGhost"] {{
     border-radius: 4px;
     color: {c['grey']};
     padding: 3px 8px;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 500;
 }}
 QPushButton[class="compactGhost"]:hover {{
@@ -198,7 +198,7 @@ QLabel[class="secondary"] {{
 }}
 QLabel[class="muted"] {{
     color: {c['grey']};
-    font-size: 11px;
+    font-size: 13px;
 }}
 QLabel[class="metricValue"] {{
     color: {c['white']};
@@ -208,7 +208,7 @@ QLabel[class="metricValue"] {{
 }}
 QLabel[class="eyebrow"] {{
     color: {c['grey']};
-    font-size: 10px;
+    font-size: 13px;
     font-weight: 600;
 }}
 QLabel[class="sectionTitle"] {{
@@ -295,7 +295,7 @@ QLabel[class="audioControlTitle"],
 QLabel[class="audioEventName"] {{
     color: {s['text_primary']};
     font-family: '{header}';
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
 }}
 QLabel[class="audioControlHelp"],
@@ -303,12 +303,12 @@ QLabel[class="audioEventDescription"],
 QLabel[class="audioIdentityTagline"],
 QLabel[class="audioIdentityKey"] {{
     color: {s['text_muted']};
-    font-size: 10px;
+    font-size: 13px;
 }}
 QLabel[class="audioControlValue"] {{
     color: {s['text_primary']};
     font-family: '{mono}';
-    font-size: 11px;
+    font-size: 13px;
 }}
 QLabel[class="audioIdentityName"] {{
     color: {s['text_primary']};
@@ -319,12 +319,12 @@ QLabel[class="audioIdentityName"] {{
 }}
 QLabel[class="audioIdentityValue"] {{
     color: {s['text_secondary']};
-    font-size: 11px;
+    font-size: 13px;
 }}
 QLabel[class="audioAvailability"] {{
     color: {s['success']};
     font-family: '{header}';
-    font-size: 10px;
+    font-size: 13px;
     font-weight: 700;
 }}
 QLabel[class="audioAvailability"][state="unavailable"] {{
@@ -424,7 +424,7 @@ QLabel[class="signalInstrumentName"] {{
 QLabel[class="signalInstrumentState"] {{
     color: {s['success']};
     font-family: '{header}';
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 600;
 }}
 QFrame[class="recentActivity"] {{
@@ -438,15 +438,15 @@ QFrame[class="activityRow"] {{
 QLabel[class="activityTime"] {{
     color: {s['text_muted']};
     font-family: '{mono}';
-    font-size: 10px;
+    font-size: 13px;
 }}
 QLabel[class="activityMessage"] {{
     color: {s['text_secondary']};
-    font-size: 11px;
+    font-size: 13px;
 }}
 QLabel[class="activityState"] {{
     color: {s['success']};
-    font-size: 12px;
+    font-size: 13px;
 }}
 QLabel[class="activityState"][state="idle"] {{ color: {s['text_muted']}; }}
 QLabel[class="activityState"][state="online"] {{ color: {s['success']}; }}
@@ -502,7 +502,7 @@ QPushButton[deepRole="launchGroup"]:disabled {{
 QLabel[class="pageEyebrow"] {{
     color: {s['accent']};
     font-family: '{header}';
-    font-size: 10px;
+    font-size: 13px;
     font-weight: 700;
 }}
 QLabel[class="pageTitle"] {{
@@ -513,7 +513,7 @@ QLabel[class="pageTitle"] {{
 }}
 QLabel[class="pageSubtitle"] {{
     color: {s['text_secondary']};
-    font-size: 12px;
+    font-size: 13px;
 }}
 QLabel[class="panelTitle"] {{
     color: {s['text_primary']};
@@ -523,7 +523,7 @@ QLabel[class="panelTitle"] {{
 }}
 QLabel[class="panelMeta"] {{
     color: {s['text_muted']};
-    font-size: 11px;
+    font-size: 13px;
 }}
 QLabel[class="signalPill"] {{
     background-color: rgba(22, 74, 87, 150);
@@ -532,7 +532,7 @@ QLabel[class="signalPill"] {{
     color: {s['accent']};
     padding: 2px 8px;
     font-family: '{header}';
-    font-size: 10px;
+    font-size: 13px;
     font-weight: 700;
 }}
 QLabel[class="signalPill"][state="online"],
@@ -612,28 +612,28 @@ QLabel[class="modIconPlate"] {{
     border-radius: 5px;
     color: {s['accent']};
     font-family: '{header}';
-    font-size: 10px;
+    font-size: 13px;
     font-weight: 700;
 }}
 QLabel[class="modsRuntimeEyebrow"],
 QLabel[class="modsManifestMeta"] {{
     color: {s['text_muted']};
     font-family: '{header}';
-    font-size: 9px;
+    font-size: 13px;
     font-weight: 700;
 }}
 QLabel[class="modsRuntimeDescription"],
 QLabel[class="modsActionDescription"],
 QLabel[class="modsEmptyDescription"] {{
     color: {s['text_secondary']};
-    font-size: 11px;
+    font-size: 13px;
 }}
 QLabel[class="modsManifestTitle"],
 QLabel[class="modsActionTitle"],
 QLabel[class="modsEmptyTitle"] {{
     color: {s['text_primary']};
     font-family: '{header}';
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 700;
 }}
 QFrame[modsDivider="true"] {{
@@ -661,7 +661,7 @@ QLabel[class="modName"] {{
 QLabel[class="modPath"] {{
     color: {s['text_muted']};
     font-family: '{mono}';
-    font-size: 9px;
+    font-size: 13px;
 }}
 QLabel[class="modState"] {{
     background-color: rgba(143, 158, 173, 14);
@@ -670,7 +670,7 @@ QLabel[class="modState"] {{
     color: {s['text_muted']};
     padding: 2px 7px;
     font-family: '{header}';
-    font-size: 9px;
+    font-size: 13px;
     font-weight: 700;
 }}
 QLabel[class="modState"][state="enabled"] {{
@@ -690,7 +690,7 @@ QPushButton[class="modManagementAction"] {{
     color: {s['text_secondary']};
     padding: 0 12px;
     font-family: '{header}';
-    font-size: 10px;
+    font-size: 13px;
     font-weight: 700;
 }}
 QPushButton[class="modManagementAction"][managementRole="remove"] {{
@@ -767,7 +767,7 @@ QLabel[class="toolAvailableCount"] {{
     color: {s['accent']};
     padding: 2px 8px;
     font-family: '{header}';
-    font-size: 9px;
+    font-size: 13px;
     font-weight: 700;
 }}
 QLabel[class="toolRuntimePill"][state="online"],
@@ -788,7 +788,7 @@ QFrame[class="toolFilterRail"] {{
 QLabel[class="toolFilterLabel"] {{
     color: {s['text_muted']};
     font-family: '{header}';
-    font-size: 9px;
+    font-size: 13px;
     font-weight: 700;
 }}
 QFrame[class="toolFilterRail"] QLineEdit,
@@ -837,7 +837,7 @@ QLabel[class="toolName"] {{
 }}
 QLabel[class="toolDescription"] {{
     color: {s['text_secondary']};
-    font-size: 11px;
+    font-size: 13px;
 }}
 QLabel[class="toolCategoryPill"] {{
     background-color: rgba(22, 74, 87, 120);
@@ -845,13 +845,13 @@ QLabel[class="toolCategoryPill"] {{
     border-radius: 3px;
     color: {s['accent']};
     padding: 2px 6px;
-    font-size: 9px;
+    font-size: 13px;
     font-weight: 700;
 }}
 QLabel[class="toolSource"] {{
     color: {s['text_muted']};
     font-family: '{mono}';
-    font-size: 10px;
+    font-size: 13px;
 }}
 QLabel[class="toolSectionTitle"] {{
     color: {s['accent']};
@@ -863,11 +863,11 @@ QLabel[class="toolSectionCount"],
 QLabel[class="toolAvailability"],
 QLabel[class="toolAvailabilityDot"] {{
     color: {s['text_muted']};
-    font-size: 11px;
+    font-size: 13px;
 }}
 QLabel[class="toolSectionCount"] {{
     color: {s['text_muted']};
-    font-size: 11px;
+    font-size: 13px;
 }}
 QLabel[class="toolAvailabilityDot"][state="ready"],
 QLabel[class="toolAvailabilityDot"][state="launched"] {{
@@ -893,7 +893,7 @@ QLabel[class="toolRiskBadge"] {{
     border-radius: 3px;
     color: {s['text_muted']};
     padding: 2px 6px;
-    font-size: 9px;
+    font-size: 13px;
     font-weight: 600;
 }}
 QLabel[class="toolRiskBadge"][risk="system"] {{
@@ -913,7 +913,7 @@ QPushButton[class="toolPrimary"] {{
     border: 1px solid {s['warning']};
     color: {s['background']};
     padding: 6px 12px;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 700;
 }}
 QPushButton[class="toolPrimary"]:hover {{
@@ -928,7 +928,7 @@ QPushButton[class="toolSecondary"] {{
     border: 1px solid {s['accent_dim']};
     color: {s['accent']};
     padding: 6px 12px;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 600;
 }}
 QPushButton[class="toolSecondary"]:hover {{
@@ -943,7 +943,7 @@ QPushButton[class="toolDanger"] {{
     border: 1px solid {s['danger']};
     color: {s['background']};
     padding: 6px 12px;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 700;
 }}
 QPushButton[class="toolDanger"]:hover {{
@@ -1196,7 +1196,7 @@ QProgressBar {{
     border-radius: 4px;
     color: {c['white']};
     text-align: center;
-    font-size: 11px;
+    font-size: 13px;
 }}
 QProgressBar::chunk {{
     background-color: {c['teal']};

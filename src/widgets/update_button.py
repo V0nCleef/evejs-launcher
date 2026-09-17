@@ -110,7 +110,7 @@ class UpdateButton(QPushButton):
         set_translatable_tooltip(self, "Checking for updates...")
 
         font = QFont("Segoe UI")
-        font.setPixelSize(12)
+        font.setPixelSize(13)
         font.setStyleHint(QFont.StyleHint.SansSerif)
         self.setFont(font)
 
@@ -130,7 +130,7 @@ class UpdateButton(QPushButton):
                 border:      none;
                 padding-left:  10px;
                 padding-right: 10px;
-                font-size:   12px;
+                font-size:   13px;
             }}
             """
         )

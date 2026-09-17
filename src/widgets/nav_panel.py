@@ -147,7 +147,7 @@ def _paint_telemetry_button(button: QPushButton, badge_count: int = 0) -> None:
 
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     gold = button.property('updateBadge') is True
-    badge_radius = 10 if gold else 8
+    badge_radius = 12
     margin = 8
     x = button.width() - badge_radius * 2 - margin
     y = (button.height() - badge_radius * 2) // 2
@@ -158,7 +158,7 @@ def _paint_telemetry_button(button: QPushButton, badge_count: int = 0) -> None:
     painter.drawEllipse(rect)
     painter.setPen(QColor(COLORS["void_black"] if gold else COLORS["white"]))
     font = QFont(button.font())
-    font.setPixelSize(9)
+    font.setPixelSize(13)
     font.setBold(True)
     painter.setFont(font)
     painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, '99+' if gold and badge_count > 99 else str(badge_count))
@@ -191,7 +191,7 @@ class NavButton(QPushButton):
                 text-align: left;
                 padding-left: 22px;
                 padding-right: 30px;
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 600;
                 letter-spacing: 1px;
             }}
@@ -258,7 +258,7 @@ class ToggleButton(QPushButton):
                 text-align: left;
                 padding-left: 18px;
                 padding-right: 8px;
-                font-size: 9px;
+                font-size: 13px;
                 font-weight: 600;
                 letter-spacing: 1px;
             }}
@@ -414,7 +414,7 @@ class NavPanel(QFrame):
             QLabel#navBrandPrimary {{
                 color: {COLORS['white']};
                 background: transparent;
-                font-size: 10px;
+                font-size: 13px;
                 font-weight: 600;
                 letter-spacing: 2px;
             }}
@@ -423,7 +423,7 @@ class NavPanel(QFrame):
             QLabel#navSystemsLabel {{
                 color: #698091;
                 background: transparent;
-                font-size: 9px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 1px;
             }}
@@ -531,7 +531,7 @@ class NavPanel(QFrame):
                 border: 1px solid rgba(224, 79, 79, 0.42);
                 border-radius: 3px;
                 padding: 0 12px;
-                font-size: 10px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 1px;
             }}

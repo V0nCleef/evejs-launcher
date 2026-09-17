@@ -309,7 +309,7 @@ class CharacterCard(QFrame):
         self._status_label = QLabel("READY")
         self._status_label.setStyleSheet(
             f"color: {S['text_secondary']}; border: none; background: transparent; "
-            "font-size: 9px; font-weight: 700;"
+            "font-size: 13px; font-weight: 700;"
         )
         signal_row.addWidget(self._status_label)
         signal_row.addStretch()
@@ -343,7 +343,7 @@ class CharacterCard(QFrame):
 
         self._account_label = QLabel(self.username)
         self._account_label.setStyleSheet(
-            f"color: {S['accent']}; border: none; background: transparent; font-size: 9px;"
+            f"color: {S['accent']}; border: none; background: transparent; font-size: 13px;"
         )
         self._account_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._account_label)
@@ -357,7 +357,7 @@ class CharacterCard(QFrame):
         self._summary_label = QLabel()
         self._summary_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._summary_label.setStyleSheet(
-            f"color: {S['text_muted']}; border: none; background: transparent; font-size: 9px;"
+            f"color: {S['text_muted']}; border: none; background: transparent; font-size: 13px;"
         )
         layout.addWidget(self._summary_label)
         layout.addStretch(1)
@@ -477,7 +477,7 @@ class CharacterCard(QFrame):
             f"background-color: {cfg['bar_color']}; border: none; border-radius: 1px;"
         )
         self._status_dot.setStyleSheet(
-            f"color: {cfg['bar_color']}; border: none; background: transparent; font-size: 9px;"
+            f"color: {cfg['bar_color']}; border: none; background: transparent; font-size: 13px;"
         )
         set_translatable_text(self._status_label, str(cfg["label"]))
         if self._launch_available:
@@ -501,7 +501,8 @@ class CharacterCard(QFrame):
                 border: 1px solid {C['gold']};
                 border-radius: 4px;
                 font-weight: bold;
-                font-size: 10px;
+                font-size: 13px;
+                padding: 2px 6px;
             }}
             QPushButton:hover:enabled {{
                 background-color: {C['gold']};

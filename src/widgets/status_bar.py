@@ -197,7 +197,7 @@ class StatusSection(QFrame):
 
         self.label = TelemetryLabel()
         self.label.setStyleSheet(
-            f"color: {COLORS['white']}; font-size: 10px; font-weight: 600;"
+            f"color: {COLORS['white']}; font-size: 13px; font-weight: 600;"
             " letter-spacing: 0.8px; background: transparent;"
         )
         self.label.setSizePolicy(
@@ -432,7 +432,7 @@ class StatusBar(QFrame):
                 border: 1px solid rgba(0, 200, 224, 0.34);
                 border-radius: 3px;
                 padding: 0 28px 0 12px;
-                font-size: 10px;
+                font-size: 13px;
                 font-weight: 600;
             }}
             QComboBox#languageSelector:hover,
@@ -482,7 +482,7 @@ class StatusBar(QFrame):
         self.server_section.dot.installEventFilter(self)
         self.server_section.setMinimumWidth(160)
         self.server_section.setMaximumWidth(230)
-        layout.addWidget(self.server_section)
+        layout.addWidget(self.server_section, stretch=1)
 
         # Market section
         self.market_section = StatusSection(
@@ -495,7 +495,7 @@ class StatusBar(QFrame):
         self.market_section.dot.installEventFilter(self)
         self.market_section.setMinimumWidth(160)
         self.market_section.setMaximumWidth(230)
-        layout.addWidget(self.market_section)
+        layout.addWidget(self.market_section, stretch=1)
 
         # Clients section
         self.clients_section = StatusSection(
@@ -506,7 +506,7 @@ class StatusBar(QFrame):
         self.clients_section.set_count(0)
         self.clients_section.setMinimumWidth(160)
         self.clients_section.setMaximumWidth(220)
-        layout.addWidget(self.clients_section)
+        layout.addWidget(self.clients_section, stretch=1)
 
         layout.addStretch(1)
 
@@ -515,7 +515,7 @@ class StatusBar(QFrame):
         self.build_label.setObjectName("statusBuildLabel")
         self.build_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.build_label.setStyleSheet(
-            "color: #637A8A; font-family: Consolas; font-size: 9px;"
+            "color: #637A8A; font-family: Consolas; font-size: 13px;"
             " font-weight: 700; letter-spacing: 1px; padding-left: 8px;"
         )
         layout.addWidget(self.build_label)
@@ -529,7 +529,7 @@ class StatusBar(QFrame):
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
         self.version_label.setStyleSheet(
-            f"color: {COLORS['teal_dim']}; font-family: Consolas; font-size: 10px;"
+            f"color: {COLORS['teal_dim']}; font-family: Consolas; font-size: 13px;"
             " font-weight: 700; letter-spacing: 1px; padding: 0 8px 0 4px;"
         )
         layout.addWidget(self.version_label)

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 3,
+  "id": "configure-demo",
+  "displayName": "Scan Settings Demo",
+  "version": "1.0.0",
+  "description": "A form demonstration. Saves preferences; does not scan or change gameplay.",
+  "kind": "settings",
+  "supportedBackends": [
+    "native",
+    "docker"
+  ],
+  "activation": {
+    "strategy": "package"
+  },
+  "restart": "game_server",
+  "settings": {
+    "schemaVersion": 1,
+    "files": [
+      {
+        "id": "prefs",
+        "base": "mod",
+        "path": "preferences.json",
+        "format": "json"
+      }
+    ],
+    "fields": [
+      {
+        "id": "scanInterval",
+        "label": "Scan interval (seconds)",
+        "description": "How often your mod should scan.",
+        "type": "integer",
+        "default": 10,
+        "minimum": 1,
+        "maximum": 300,
+        "restart": "game_server",
+        "file": "prefs",
+        "key": [
+          "scanInterval"
+        ]
+      }
+    ]
+  }
+}

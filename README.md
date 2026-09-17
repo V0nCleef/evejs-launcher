@@ -102,7 +102,7 @@ A source-integrated mod installed by a launcher-compatible Setup also has **Remo
 
 The current v2 installer provider supports one installation of a given mod per Windows user. Launcher removal binds the verified child to the exact selected EveJS root and refuses divergent provider registry roots before touching files. To move that mod to another EveJS root, remove it from the original root first, select the other root in the launcher, and run Setup again.
 
-Mod authors should use the complete [EveJS Launcher mod authoring and integration guide](docs/MOD_AUTHORING.md). It documents supported layouts, the schema-v2 manifest, disabled-state boundary, runtime attestation, installer transactions, launcher-managed removal, testing, and the current limits of EveJS's upstream extension mechanisms.
+Start with [Build an EveJS Mod — Launcher Integration Guide](docs/MOD_AUTHORING.md). Each page covers one task, with real launcher screenshots and a working example: importing a package, enabling it, adding Configure, choosing controls, using profiles, translating labels, offering updates, and removal. Open **Mods → Make a mod** for the offline walkthrough in your language. The guide places code below the illustrated explanations and includes publishing and downloadable example files. An optional handoff button copies the current topic and its technical details for your AI.
 
 ### Tools
 
@@ -262,7 +262,7 @@ In Managed Docker mode, Apply & Restart instead regenerates the launcher-owned C
 
 Managed Docker writes a durable transaction marker before replacing its exact launcher-owned override. If the launcher or computer stops during that handoff, ordinary Docker start/restart operations fail closed instead of consuming an uncertain override. Return to **Mods**, keep the same visible toggle selection, and press **Apply & Restart Server** again to resume the exact transaction. If the override no longer matches either its enrolled prior or desired hash, leave the launcher-owned files untouched and repair the artifact; the launcher deliberately refuses to guess.
 
-See the [mod authoring and integration guide](docs/MOD_AUTHORING.md) for the complete compatibility and packaging contract.
+See [Build an EveJS Mod — Launcher Integration Guide](docs/MOD_AUTHORING.md) for the illustrated walkthrough, publishing instructions, and working example packages.
 
 ## Tool Deck catalogue
 

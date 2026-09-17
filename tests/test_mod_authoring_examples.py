@@ -15,6 +15,7 @@ from src.core.mod_api_manifest import read_api_manifest
 from src.core.mod_api_runtime import commit_helper_contributions, run_mod_helper
 from src.core.mod_settings import ModSettingsContext, ModSettingsSession, profile_identity
 from src.core.mod_settings_schema import parse_settings_schema
+from src.core.mod_guide import catalog_paths
 
 
 SOURCE = Path(__file__).resolve().parents[1]
@@ -40,6 +41,17 @@ def copy_example(tmp_path, name):
     if descriptor.settings:
         parse_settings_schema(descriptor.settings)
     return descriptor, context
+
+
+def test_configure_demo_saves_reopens_and_has_no_executable_helper(tmp_path):
+    descriptor, context = copy_example(tmp_path, "configure-demo")
+    assert descriptor.launcher_api is None
+    session = ModSettingsSession.open(context, descriptor.settings)
+    assert not (context.mod_folder / "preferences.json").exists()
+    session.save({"scanInterval": 20})
+    assert json.loads((context.mod_folder / "preferences.json").read_text()) == {"scanInterval": 20}
+    reopened = ModSettingsSession.open(context, descriptor.settings)
+    assert reopened.values["scanInterval"] == 20
 
 
 def test_source_overlay_folder_and_zip_work_together_through_real_helpers(tmp_path):
@@ -219,7 +231,7 @@ def test_shared_profile_examples_remove_one_owner_without_erasing_the_other(tmp_
 def test_guide_catalog_contains_every_local_documentation_link_and_no_external_files():
     catalog_path = SOURCE / "docs/mod-authoring/navigation.json"
     catalog = json.loads(catalog_path.read_bytes())
-    paths = [SOURCE / row["path"] for row in catalog["pages"]] + [SOURCE / value for value in catalog["examples"]]
+    paths = [SOURCE / path for path in catalog_paths(catalog)]
     allowed = {path.resolve() for path in paths}
     assert len(allowed) == len(paths)
     for path in paths:

@@ -8,6 +8,7 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
 
 from build_support import reject_contaminated_binaries, sanitize_build_path
+from src.core.mod_guide import catalog_paths
 
 
 _clean_path, _removed_build_paths = sanitize_build_path(
@@ -26,9 +27,7 @@ block_cipher = None
 # directory wildcard can pull investigation notes into the public guide.
 _guide_catalog_path = Path('docs/mod-authoring/navigation.json')
 _guide_catalog = json.loads(_guide_catalog_path.read_text(encoding='utf-8'))
-_guide_paths = [_guide_catalog_path]
-_guide_paths += [Path(row['path']) for row in _guide_catalog['pages']]
-_guide_paths += [Path(path) for path in _guide_catalog['examples']]
+_guide_paths = [Path(path) for path in catalog_paths(_guide_catalog)]
 for _guide_path in _guide_paths:
     if _guide_path.is_absolute() or '..' in _guide_path.parts or _guide_path.parts[0] not in {'docs', 'examples'} or not _guide_path.is_file():
         raise ValueError(f'Unsafe or missing bundled guide file: {_guide_path}')

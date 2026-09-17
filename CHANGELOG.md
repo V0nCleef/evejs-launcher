@@ -2,6 +2,14 @@
 
 ## Changelog
 
+## v1.0.56 — 2026-09-17
+
+- Replaced the flat mod-author guide with an illustrated, task-by-task Launcher Integration Guide, available from **Mods → Make a mod**.
+- Added a Configure demo, screenshots of real launcher controls, and explanations of what each manifest example does in the launcher.
+- Added eight-language offline walkthroughs with every topic in the sidebar, working text zoom, and a resizable guide window. Code examples stay unchanged; the GitHub guide stays English.
+- Kept code examples below a clear divider and added an optional **Hand off to your AI** button that copies the current topic and its implementation details.
+- Increased small text throughout the launcher to at least 13 px, including mod paths, character details, settings hints, status labels, dialogs and the console.
+
 ## v1.0.55 — 2026-09-09
 
 - Enabled loader mods now load automatically when the native Game server starts. No extra `.bat` file is needed.

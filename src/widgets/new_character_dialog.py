@@ -232,7 +232,7 @@ class NewCharacterDialog(QDialog):
             }}
             QLabel#dialogEyebrow {{
                 color: {S['accent']};
-                font-size: 9px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 2px;
             }}
@@ -242,7 +242,7 @@ class NewCharacterDialog(QDialog):
                 font-weight: 700;
                 letter-spacing: 2px;
             }}
-            QLabel#dialogIntro {{ color: {S['text_secondary']}; font-size: 11px; }}
+            QLabel#dialogIntro {{ color: {S['text_secondary']}; font-size: 13px; }}
             QFrame#identityCard, QFrame#overviewCard {{
                 background-color: rgba(10, 24, 36, 232);
                 border: 1px solid {S['border']};
@@ -250,13 +250,13 @@ class NewCharacterDialog(QDialog):
             }}
             QLabel#identityTitle, QLabel#overviewTitle {{
                 color: {S['accent']};
-                font-size: 10px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 1px;
             }}
             QLabel#credentialNote, QLabel#overviewHint {{
                 color: {S['text_muted']};
-                font-size: 10px;
+                font-size: 13px;
             }}
             QLineEdit, QComboBox {{
                 min-height: 32px;
@@ -313,7 +313,7 @@ class NewCharacterDialog(QDialog):
                 border: 1px solid {border};
                 border-radius: 5px;
                 padding: 0 14px;
-                font-size: 9px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 1px;
             }}

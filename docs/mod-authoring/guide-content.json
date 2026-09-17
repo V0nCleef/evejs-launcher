@@ -1,0 +1,1296 @@
+{
+  "ui": {
+    "title": {
+      "en": "Build an EveJS Mod — Launcher Integration Guide",
+      "nl": "Maak een EveJS-mod — Handleiding voor launcherintegratie",
+      "fr": "Créer un mod EveJS — Guide d’intégration au lanceur",
+      "de": "Einen EveJS-Mod erstellen — Launcher-Integration",
+      "ru": "Создание мода EveJS — Интеграция с лаунчером",
+      "zh_CN": "制作 EveJS 模组 — 启动器集成指南",
+      "ja": "EveJS MOD を作る — ランチャー連携ガイド",
+      "ko": "EveJS 모드 만들기 — 런처 연동 가이드"
+    },
+    "home": {
+      "en": "Start here",
+      "nl": "Begin hier",
+      "fr": "Commencer ici",
+      "de": "Hier starten",
+      "ru": "Начало",
+      "zh_CN": "从这里开始",
+      "ja": "はじめに",
+      "ko": "시작하기"
+    },
+    "walkthrough": {
+      "en": "Step-by-step guide",
+      "nl": "Stap voor stap",
+      "fr": "Guide pas à pas",
+      "de": "Schritt-für-Schritt-Anleitung",
+      "ru": "Пошаговое руководство",
+      "zh_CN": "分步指南",
+      "ja": "手順ガイド",
+      "ko": "단계별 안내"
+    },
+    "reference": {
+      "en": "Technical reference (English)",
+      "nl": "Technische naslag (Engels)",
+      "fr": "Référence technique (anglais)",
+      "de": "Technische Referenz (Englisch)",
+      "ru": "Технический справочник (английский)",
+      "zh_CN": "技术参考（英语）",
+      "ja": "技術リファレンス（英語）",
+      "ko": "기술 참조 (영어)"
+    },
+    "referenceNote": {
+      "en": "This is the detailed English reference. Use the step-by-step guide for translated explanations and visual examples.",
+      "nl": "Dit is de uitgebreide Engelse naslag. Kies Stap voor stap voor vertaalde uitleg en voorbeelden met afbeeldingen.",
+      "fr": "Cette référence détaillée est en anglais. Le guide pas à pas propose des explications traduites et des exemples illustrés.",
+      "de": "Dies ist die ausführliche englische Referenz. Übersetzte Erklärungen und Bilder stehen in der Schritt-für-Schritt-Anleitung.",
+      "ru": "Это подробный справочник на английском. Переведённые пояснения и изображения доступны в пошаговом руководстве.",
+      "zh_CN": "这是详细的英语参考文档。翻译后的说明和图示请查看分步指南。",
+      "ja": "詳細なリファレンスは英語です。翻訳された説明と画像は手順ガイドをご覧ください。",
+      "ko": "이 문서는 자세한 영어 참조입니다. 번역된 설명과 그림 예시는 단계별 안내에서 볼 수 있습니다."
+    },
+    "language": {
+      "en": "Guide language",
+      "nl": "Taal van de handleiding",
+      "fr": "Langue du guide",
+      "de": "Sprache der Anleitung",
+      "ru": "Язык руководства",
+      "zh_CN": "指南语言",
+      "ja": "ガイドの言語",
+      "ko": "안내 언어"
+    },
+    "back": {
+      "en": "Back",
+      "nl": "Terug",
+      "fr": "Retour",
+      "de": "Zurück",
+      "ru": "Назад",
+      "zh_CN": "返回",
+      "ja": "戻る",
+      "ko": "뒤로"
+    },
+    "find": {
+      "en": "Find in this page",
+      "nl": "Zoek op deze pagina",
+      "fr": "Rechercher dans cette page",
+      "de": "Auf dieser Seite suchen",
+      "ru": "Найти на странице",
+      "zh_CN": "在本页查找",
+      "ja": "ページ内を検索",
+      "ko": "이 페이지에서 찾기"
+    },
+    "next": {
+      "en": "Find next",
+      "nl": "Volgende zoeken",
+      "fr": "Suivant",
+      "de": "Weitersuchen",
+      "ru": "Найти далее",
+      "zh_CN": "查找下一个",
+      "ja": "次を検索",
+      "ko": "다음 찾기"
+    },
+    "close": {
+      "en": "Close",
+      "nl": "Sluiten",
+      "fr": "Fermer",
+      "de": "Schließen",
+      "ru": "Закрыть",
+      "zh_CN": "关闭",
+      "ja": "閉じる",
+      "ko": "닫기"
+    },
+    "zoomIn": {
+      "en": "Larger text",
+      "nl": "Grotere tekst",
+      "fr": "Agrandir le texte",
+      "de": "Größerer Text",
+      "ru": "Увеличить текст",
+      "zh_CN": "放大文字",
+      "ja": "文字を大きく",
+      "ko": "글자 확대"
+    },
+    "zoomOut": {
+      "en": "Smaller text",
+      "nl": "Kleinere tekst",
+      "fr": "Réduire le texte",
+      "de": "Kleinerer Text",
+      "ru": "Уменьшить текст",
+      "zh_CN": "缩小文字",
+      "ja": "文字を小さく",
+      "ko": "글자 축소"
+    },
+    "openImage": {
+      "en": "Open full-size image",
+      "nl": "Afbeelding op volledig formaat openen",
+      "fr": "Ouvrir l’image en taille réelle",
+      "de": "Bild in voller Größe öffnen",
+      "ru": "Открыть изображение в полном размере",
+      "zh_CN": "打开原尺寸图片",
+      "ja": "画像を原寸で開く",
+      "ko": "원본 크기로 이미지 열기"
+    },
+    "demoImage": {
+      "en": "Demo screenshot — open to enlarge",
+      "nl": "Voorbeeldafbeelding — open om te vergroten",
+      "fr": "Capture de démonstration — ouvrir pour agrandir",
+      "de": "Beispielbild — zum Vergrößern öffnen",
+      "ru": "Демонстрационный снимок — открыть для увеличения",
+      "zh_CN": "演示截图 — 点击放大",
+      "ja": "デモ画像 — 開いて拡大",
+      "ko": "데모 화면 — 열어서 확대"
+    },
+    "exportExamples": {
+      "en": "Save example files as ZIP…",
+      "nl": "Voorbeeldbestanden opslaan als ZIP…",
+      "fr": "Enregistrer les exemples en ZIP…",
+      "de": "Beispieldateien als ZIP speichern…",
+      "ru": "Сохранить примеры в ZIP…",
+      "zh_CN": "将示例文件保存为 ZIP…",
+      "ja": "サンプルを ZIP として保存…",
+      "ko": "예제 파일을 ZIP으로 저장…"
+    },
+    "copiedAI": {
+      "en": "Copied — paste into your AI chat",
+      "nl": "Gekopieerd — plak in je AI-chat",
+      "fr": "Copié — collez dans votre discussion IA",
+      "de": "Kopiert — in den KI-Chat einfügen",
+      "ru": "Скопировано — вставьте в чат с ИИ",
+      "zh_CN": "已复制 — 粘贴到 AI 对话中",
+      "ja": "コピーしました — AI チャットに貼り付け",
+      "ko": "복사됨 — AI 채팅에 붙여넣기"
+    },
+    "aiInstruction": {
+      "en": "Help me add the feature described below to my EveJS mod. First explain your plan in simple language. Ask for my mod files and any missing choices. Follow the included launcher contracts, preserve existing functionality and user settings, and use the supplied examples. Give me a package I can import and clear steps to check it. Do not publish or install anything without my approval.",
+      "nl": "Help me de onderstaande functie aan mijn EveJS-mod toe te voegen. Leg eerst je plan eenvoudig uit. Vraag om mijn modbestanden en ontbrekende keuzes. Volg de meegeleverde launcherregels, behoud bestaande functies en gebruikersinstellingen en gebruik de voorbeelden. Geef me een importeerbaar pakket en duidelijke controle-stappen. Publiceer of installeer niets zonder mijn toestemming.",
+      "fr": "Aide-moi à ajouter la fonction ci-dessous à mon mod EveJS. Explique d’abord ton plan simplement. Demande mes fichiers et les choix manquants. Respecte les règles du lanceur fournies, préserve les fonctions et réglages existants et utilise les exemples. Fournis un paquet importable et des étapes de vérification claires. Ne publie ni n’installe rien sans mon accord.",
+      "de": "Hilf mir, die folgende Funktion zu meinem EveJS-Mod hinzuzufügen. Erkläre zuerst deinen Plan einfach. Frage nach meinen Moddateien und fehlenden Entscheidungen. Beachte die beigefügten Launcher-Regeln, erhalte vorhandene Funktionen und Einstellungen und nutze die Beispiele. Liefere ein importierbares Paket mit klaren Prüfschritten. Veröffentliche oder installiere nichts ohne meine Zustimmung.",
+      "ru": "Помоги добавить описанную ниже функцию в мой мод EveJS. Сначала объясни план простыми словами. Запроси файлы мода и недостающие решения. Следуй приложенным правилам лаунчера, сохрани существующие функции и настройки и используй примеры. Подготовь пакет для импорта и понятные шаги проверки. Ничего не публикуй и не устанавливай без моего согласия.",
+      "zh_CN": "请帮我为 EveJS 模组添加以下功能。先用简单语言解释计划，询问我的模组文件及尚未确定的选项。遵循附带的启动器技术规则，保留现有功能和用户设置，并参考示例。提供可导入的模组包和清楚的检查步骤。未经我同意，不要发布或安装任何内容。",
+      "ja": "以下の機能を EveJS MOD に追加するのを手伝ってください。まず簡単な言葉で計画を説明し、MOD ファイルや未決定の内容を確認してください。添付の仕様と例に従い、既存機能とユーザー設定を保ってください。取り込めるパッケージと確認手順を用意してください。許可なく公開やインストールをしないでください。",
+      "ko": "아래 기능을 EveJS 모드에 추가하도록 도와주세요. 먼저 쉬운 말로 계획을 설명하고 모드 파일과 미정인 선택 사항을 물어보세요. 첨부된 런처 규칙과 예시를 따르고 기존 기능과 사용자 설정을 보존하세요. 가져올 수 있는 패키지와 명확한 확인 절차를 제공하세요. 허락 없이 게시하거나 설치하지 마세요."
+    },
+    "copyAI": {
+      "en": "Hand off to your AI",
+      "nl": "Doorgeven aan je AI",
+      "fr": "Transmettre à votre IA",
+      "de": "An deine KI übergeben",
+      "ru": "Передать вашему ИИ",
+      "zh_CN": "交给你的 AI",
+      "ja": "AI に引き継ぐ",
+      "ko": "AI에게 전달"
+    },
+    "codeHeading": {
+      "en": "Code examples",
+      "nl": "Codevoorbeelden",
+      "fr": "Exemples de code",
+      "de": "Codebeispiele",
+      "ru": "Примеры кода",
+      "zh_CN": "代码示例",
+      "ja": "コード例",
+      "ko": "코드 예시"
+    }
+  },
+  "pages": [
+    {
+      "id": "start",
+      "path": "docs/MOD_AUTHORING.md",
+      "title": {
+        "en": "Build an EveJS Mod — Launcher Integration Guide",
+        "nl": "Maak een EveJS-mod — Handleiding voor launcherintegratie",
+        "fr": "Créer un mod EveJS — Guide d’intégration au lanceur",
+        "de": "Einen EveJS-Mod erstellen — Launcher-Integration",
+        "ru": "Создание мода EveJS — Интеграция с лаунчером",
+        "zh_CN": "制作 EveJS 模组 — 启动器集成指南",
+        "ja": "EveJS MOD を作る — ランチャー連携ガイド",
+        "ko": "EveJS 모드 만들기 — 런처 연동 가이드"
+      },
+      "blocks": [
+        {
+          "en": "Add launcher support to your mod, one feature at a time. You do not need every feature. Start with a small package, then add only what your mod needs.\n\nThe examples use manifest schema **3**, settings schema **1** and helper API **1** (Launcher **1.0.53 or newer**). Your mod still provides the gameplay or graphics behaviour.",
+          "nl": "Voeg stap voor stap launcherondersteuning toe aan je mod. Je hebt niet elke functie nodig. Begin met een klein pakket en voeg alleen toe wat je mod nodig heeft.\n\nDe voorbeelden gebruiken manifestschema **3**, instellingenschema **1** en helper-API **1** (Launcher **1.0.53 of nieuwer**). Je mod zorgt zelf voor het spelgedrag of de grafische effecten.",
+          "fr": "Ajoutez les fonctions du lanceur une par une. Vous n’avez pas besoin de tout utiliser. Commencez par un petit paquet, puis ajoutez seulement ce qui est utile.\n\nLes exemples utilisent le schéma de manifeste **3**, le schéma de réglages **1** et l’API d’assistance **1** (Launcher **1.0.53 ou ultérieur**). Votre mod fournit toujours le comportement de jeu ou les effets graphiques.",
+          "de": "Ergänze die Launcher-Unterstützung Schritt für Schritt. Du brauchst nicht jede Funktion. Beginne mit einem kleinen Paket und füge nur hinzu, was dein Mod benötigt.\n\nDie Beispiele verwenden Manifest-Schema **3**, Einstellungs-Schema **1** und Helper-API **1** (Launcher **1.0.53 oder neuer**). Das Spielverhalten oder die Grafikeffekte stellt weiterhin dein Mod bereit.",
+          "ru": "Добавляйте поддержку лаунчера по одной функции. Использовать всё не обязательно. Начните с небольшого пакета и добавляйте только нужные возможности.\n\nПримеры используют схему манифеста **3**, схему настроек **1** и API помощника **1** (Launcher **1.0.53 или новее**). Игровое поведение или графические эффекты по-прежнему реализует сам мод.",
+          "zh_CN": "逐项为模组添加启动器支持。你不需要使用所有功能。先制作一个小型包，再添加模组真正需要的功能。\n\n示例使用清单架构 **3**、设置架构 **1** 和辅助程序 API **1**（Launcher **1.0.53 或更新版本**）。游戏行为或图形效果仍由模组自己实现。",
+          "ja": "ランチャー連携は、機能を一つずつ追加できます。すべてを使う必要はありません。小さなパッケージから始め、必要な機能だけ追加しましょう。\n\n例ではマニフェストスキーマ **3**、設定スキーマ **1**、ヘルパー API **1** を使用します（Launcher **1.0.53 以降**）。ゲーム内の動作や描画効果は MOD 自体が実装します。",
+          "ko": "런처 지원은 기능 하나씩 추가하면 됩니다. 모든 기능을 사용할 필요는 없습니다. 작은 패키지로 시작하고 모드에 필요한 기능만 추가하세요.\n\n예시는 매니페스트 스키마 **3**, 설정 스키마 **1**, 도우미 API **1**을 사용합니다(Launcher **1.0.53 이상**). 게임 동작이나 그래픽 효과는 여전히 모드가 구현해야 합니다.",
+          "afterImages": [
+            "mods-overview"
+          ]
+        },
+        {
+          "en": "## Choose one task\n\n1. [Make your first package](@first-mod) — give the mod a name and import it.\n2. [Enable and restart](@activation) — control when the mod runs.\n3. [Add a Configure button](@configure) — let players change a setting.\n4. [Choose form controls](@controls) — numbers, switches and lists.\n5. [Separate settings by profile](@profiles) — different preferences for different characters.\n6. [Translate your setting labels](@languages) — display text in the player’s language.\n7. [Offer mod updates](@updates-intro) — show a newer GitHub release.\n8. [Add a helper when needed](@helpers-intro) — run preparation code.\n9. [Remove and recover](@removal) — understand ownership and restoration.\n10. [Dependencies and load order](@dependencies)\n11. [Integrate server source files](@source-integration)\n12. [Support client file mods](@client-files)\n13. [React to client start and exit](@client-events)\n14. [Publish a mod update](@publish-update)\n15. [Example files](@example-files)",
+          "nl": "## Kies één taak\n\n1. [Maak je eerste pakket](@first-mod) — geef je mod een naam en importeer het.\n2. [Inschakelen en herstarten](@activation) — bepaal wanneer de mod draait.\n3. [Voeg een Instellen-knop toe](@configure) — laat spelers een instelling aanpassen.\n4. [Kies invoervelden](@controls) — getallen, schakelaars en lijsten.\n5. [Instellingen per profiel](@profiles) — andere voorkeuren per personage.\n6. [Vertaal je instellingslabels](@languages) — toon tekst in de taal van de speler.\n7. [Bied modupdates aan](@updates-intro) — toon een nieuwe GitHub-release.\n8. [Voeg zo nodig een helper toe](@helpers-intro) — voer voorbereidende code uit.\n9. [Verwijderen en herstellen](@removal) — begrijp eigendom en herstel.\n10. [Afhankelijkheden en laadvolgorde](@dependencies)\n11. [Serverbronbestanden integreren](@source-integration)\n12. [Aanpassingen voor clientbestanden](@client-files)\n13. [Reageren op clientstart en afsluiten](@client-events)\n14. [Een modupdate publiceren](@publish-update)\n15. [Voorbeeldbestanden](@example-files)",
+          "fr": "## Choisissez une tâche\n\n1. [Créer votre premier paquet](@first-mod) — nommer et importer le mod.\n2. [Activer et redémarrer](@activation) — choisir quand le mod fonctionne.\n3. [Ajouter le bouton Configure](@configure) — laisser les joueurs modifier un réglage.\n4. [Choisir les champs du formulaire](@controls) — nombres, interrupteurs et listes.\n5. [Séparer les réglages par profil](@profiles) — des préférences différentes par personnage.\n6. [Traduire les libellés](@languages) — afficher le texte dans la langue du joueur.\n7. [Proposer des mises à jour](@updates-intro) — afficher une nouvelle version GitHub.\n8. [Ajouter un programme d’assistance](@helpers-intro) — exécuter du code de préparation si nécessaire.\n9. [Supprimer et restaurer](@removal) — comprendre la gestion et la restauration des fichiers.\n10. [Dépendances et ordre de chargement](@dependencies)\n11. [Intégrer des fichiers du serveur](@source-integration)\n12. [Gérer les fichiers du client](@client-files)\n13. [Réagir au démarrage et à la fermeture](@client-events)\n14. [Publier une mise à jour](@publish-update)\n15. [Fichiers exemples](@example-files)",
+          "de": "## Wähle eine Aufgabe\n\n1. [Dein erstes Paket erstellen](@first-mod) — den Mod benennen und importieren.\n2. [Aktivieren und neu starten](@activation) — bestimmen, wann der Mod läuft.\n3. [Konfigurieren-Schaltfläche hinzufügen](@configure) — Spieler eine Einstellung ändern lassen.\n4. [Formularfelder auswählen](@controls) — Zahlen, Schalter und Listen.\n5. [Einstellungen pro Profil](@profiles) — verschiedene Einstellungen pro Charakter.\n6. [Beschriftungen übersetzen](@languages) — Texte in der Sprache des Spielers anzeigen.\n7. [Mod-Updates anbieten](@updates-intro) — eine neuere GitHub-Version anzeigen.\n8. [Bei Bedarf einen Helper hinzufügen](@helpers-intro) — Vorbereitungscode ausführen.\n9. [Entfernen und wiederherstellen](@removal) — Dateiverwaltung und Wiederherstellung verstehen.\n10. [Abhängigkeiten und Ladereihenfolge](@dependencies)\n11. [Serverdateien integrieren](@source-integration)\n12. [Modifikationen für Clientdateien](@client-files)\n13. [Auf Clientstart und Ende reagieren](@client-events)\n14. [Ein Mod-Update veröffentlichen](@publish-update)\n15. [Beispieldateien](@example-files)",
+          "ru": "## Выберите задачу\n\n1. [Создать первый пакет](@first-mod) — назвать мод и импортировать его.\n2. [Включить и перезапустить](@activation) — определить, когда мод работает.\n3. [Добавить кнопку Configure](@configure) — дать игрокам возможность менять настройку.\n4. [Выбрать поля формы](@controls) — числа, переключатели и списки.\n5. [Разделить настройки по профилям](@profiles) — разные параметры для разных персонажей.\n6. [Перевести подписи настроек](@languages) — показывать текст на языке игрока.\n7. [Предложить обновления](@updates-intro) — показать новый выпуск на GitHub.\n8. [Добавить помощник при необходимости](@helpers-intro) — выполнить подготовительный код.\n9. [Удалить и восстановить](@removal) — разобраться с владением файлами и восстановлением.\n10. [Зависимости и порядок загрузки](@dependencies)\n11. [Интеграция файлов сервера](@source-integration)\n12. [Моды файлов клиента](@client-files)\n13. [События запуска и выхода клиента](@client-events)\n14. [Опубликовать обновление мода](@publish-update)\n15. [Файлы примеров](@example-files)",
+          "zh_CN": "## 选择一项任务\n\n1. [制作第一个包](@first-mod) — 为模组命名并导入。\n2. [启用与重启](@activation) — 控制模组何时运行。\n3. [添加 配置 按钮](@configure) — 让玩家修改设置。\n4. [选择表单控件](@controls) — 数值、开关和列表。\n5. [按配置档案分开保存设置](@profiles) — 为不同角色保留不同偏好。\n6. [翻译设置标签](@languages) — 用玩家的语言显示文字。\n7. [提供模组更新](@updates-intro) — 显示 GitHub 上的新版本。\n8. [按需添加辅助程序](@helpers-intro) — 执行准备代码。\n9. [移除与恢复](@removal) — 了解文件归属与恢复。\n10. [依赖与加载顺序](@dependencies)\n11. [集成服务器源文件](@source-integration)\n12. [客户端文件模组](@client-files)\n13. [响应客户端启动与退出](@client-events)\n14. [发布模组更新](@publish-update)\n15. [示例文件](@example-files)",
+          "ja": "## 目的を選ぶ\n\n1. [最初のパッケージを作る](@first-mod) — MOD に名前を付けて取り込む。\n2. [有効化と再起動](@activation) — MOD が動作するタイミングを決める。\n3. [設定 ボタンを追加する](@configure) — プレイヤーが設定を変更できるようにする。\n4. [入力欄を選ぶ](@controls) — 数値、スイッチ、選択リスト。\n5. [プロファイル別に設定する](@profiles) — キャラクターごとに設定を分ける。\n6. [設定のラベルを翻訳する](@languages) — プレイヤーの言語で表示する。\n7. [MOD の更新を提供する](@updates-intro) — GitHub の新しいリリースを表示する。\n8. [必要な場合にヘルパーを追加する](@helpers-intro) — 準備コードを実行する。\n9. [削除と復元](@removal) — ファイルの管理と復元を理解する。\n10. [依存関係と読み込み順](@dependencies)\n11. [サーバーソースの連携](@source-integration)\n12. [クライアントファイルの MOD](@client-files)\n13. [クライアントの起動と終了を受け取る](@client-events)\n14. [MOD の更新を公開する](@publish-update)\n15. [サンプルファイル](@example-files)",
+          "ko": "## 작업 선택\n\n1. [첫 패키지 만들기](@first-mod) — 모드 이름을 정하고 가져오기.\n2. [활성화와 재시작](@activation) — 모드가 실행되는 시점 정하기.\n3. [설정 버튼 추가](@configure) — 플레이어가 설정을 변경하게 하기.\n4. [입력 항목 선택](@controls) — 숫자, 스위치, 목록.\n5. [프로필별 설정 분리](@profiles) — 캐릭터마다 다른 설정 사용.\n6. [설정 이름 번역](@languages) — 플레이어의 언어로 표시.\n7. [모드 업데이트 제공](@updates-intro) — 새 GitHub 릴리스 표시.\n8. [필요할 때 도우미 추가](@helpers-intro) — 준비 코드 실행.\n9. [제거와 복구](@removal) — 파일 관리 및 복원 이해.\n10. [의존성과 로드 순서](@dependencies)\n11. [서버 소스 파일 연동](@source-integration)\n12. [클라이언트 파일 모드](@client-files)\n13. [클라이언트 시작과 종료에 반응](@client-events)\n14. [모드 업데이트 게시](@publish-update)\n15. [예제 파일](@example-files)"
+        },
+        {
+          "en": "## How to use this guide\n\nChoose a feature from the list on the left. Each page shows what it does and how to check it. All screenshots use clearly labelled examples. Open an image to enlarge it. Code examples are at the bottom of each relevant page, below a dividing line.\n\n[14. Publish a mod update](@publish-update) explains the release files. [15. Example files](@example-files) lets you save the working examples.",
+          "nl": "## Deze handleiding gebruiken\n\nKies links een functie. Elke pagina laat zien wat die doet en hoe je het controleert. Alle afbeeldingen zijn herkenbare voorbeelden. Open ze om te vergroten. Codevoorbeelden staan onderaan de betreffende pagina, onder een scheidingslijn.\n\n[14. Een modupdate publiceren](@publish-update) legt releasebestanden uit. Via [15. Voorbeeldbestanden](@example-files) sla je werkende voorbeelden op.",
+          "fr": "## Utiliser ce guide\n\nChoisissez une fonction à gauche. Chaque page montre son effet et comment le vérifier. Les images sont des démonstrations clairement indiquées. Ouvrez-les pour agrandir. Les exemples de code sont au bas des pages concernées, sous une ligne de séparation.\n\n[14. Publier une mise à jour](@publish-update) explique les fichiers de publication. [15. Fichiers exemples](@example-files) permet d’enregistrer les exemples.",
+          "de": "## Diese Anleitung nutzen\n\nWähle links eine Funktion. Jede Seite zeigt ihre Wirkung und die Prüfung. Alle Bilder sind gekennzeichnete Beispiele. Öffne sie zum Vergrößern. Codebeispiele stehen unten auf der jeweiligen Seite, unter einer Trennlinie.\n\n[14. Ein Mod-Update veröffentlichen](@publish-update) erklärt Release-Dateien. Unter [15. Beispieldateien](@example-files) kannst du die Beispiele speichern.",
+          "ru": "## Как пользоваться руководством\n\nВыберите функцию слева. Каждая страница показывает результат и проверку. Снимки помечены как примеры; откройте их для увеличения. Примеры кода находятся внизу соответствующей страницы, под разделительной линией.\n\n[14. Опубликовать обновление мода](@publish-update) объясняет файлы выпуска. На странице [15. Файлы примеров](@example-files) можно сохранить примеры.",
+          "zh_CN": "## 如何使用本指南\n\n从左侧列表选择功能。每一页都会说明它的作用和检查方法。所有截图都明确标为示例，可以打开并放大。代码示例位于相关页面底部，在分隔线下方。\n\n[14. 发布模组更新](@publish-update)解释发布所需文件。[15. 示例文件](@example-files)可以保存可用的示例。",
+          "ja": "## このガイドの使い方\n\n左の一覧から機能を選びます。各ページで効果と確認方法を説明します。画像は明示されたデモで、開いて拡大できます。コード例は該当ページの末尾、区切り線の下にあります。\n\n[14. MOD の更新を公開する](@publish-update)で公開用ファイルを説明します。[15. サンプルファイル](@example-files)から例を保存できます。",
+          "ko": "## 안내 사용 방법\n\n왼쪽에서 기능을 선택하세요. 각 페이지가 기능과 확인 방법을 설명합니다. 화면은 명시된 데모이며 열어서 확대할 수 있습니다. 코드 예시는 해당 페이지 맨 아래의 구분선 밑에 있습니다.\n\n[14. 모드 업데이트 게시](@publish-update)에서 게시 파일을 설명합니다. [15. 예제 파일](@example-files)에서 예제를 저장할 수 있습니다."
+        }
+      ],
+      "handoffFiles": [
+        "docs/mod-authoring/manifest.md",
+        "docs/mod-authoring/settings-reference.md"
+      ]
+    },
+    {
+      "id": "first-mod",
+      "path": "docs/mod-authoring/first-mod.md",
+      "title": {
+        "en": "1. Make your first package",
+        "nl": "1. Maak je eerste pakket",
+        "fr": "1. Créer votre premier paquet",
+        "de": "1. Dein erstes Paket erstellen",
+        "ru": "1. Создайте первый пакет",
+        "zh_CN": "1. 制作第一个包",
+        "ja": "1. 最初のパッケージを作る",
+        "ko": "1. 첫 패키지 만들기"
+      },
+      "blocks": [
+        {
+          "en": "## What the player sees\n\nA named row in **Mods**, with an on/off switch. This first example writes a message to the server console when loaded. It does not add gameplay.\n\n## What you add\n\nCreate these two files in a folder named `hello-loader`. Start with the loader disabled. The manifest is a small instruction file: it tells the launcher the mod’s name and which buttons it can offer. The loader is the mod code that EveJS runs when the mod is enabled.",
+          "nl": "## Wat de speler ziet\n\nEen rij met een naam en een aan/uit-schakelaar in **Aanpassingen**. Dit eerste voorbeeld schrijft bij het laden een bericht naar de serverconsole. Het voegt geen spelgedrag toe.\n\n## Wat je toevoegt\n\nMaak deze twee bestanden in een map genaamd `hello-loader`. Begin met de loader uitgeschakeld. Het manifest is een klein instructiebestand: het vertelt de launcher hoe de mod heet en welke knoppen erbij horen. De loader is de modcode die EveJS uitvoert wanneer de mod is ingeschakeld.",
+          "fr": "## Ce que voit le joueur\n\nUne ligne avec un nom et un interrupteur dans **Modifications**. Ce premier exemple écrit un message dans la console du serveur au chargement. Il n’ajoute aucun comportement de jeu.\n\n## Ce que vous ajoutez\n\nCréez ces deux fichiers dans un dossier nommé `hello-loader`. Le chargeur est désactivé au départ. Le manifeste est un petit fichier d’instructions : il donne le nom du mod et les boutons à proposer. Le chargeur est le code qu’EveJS exécute quand le mod est activé.",
+          "de": "## Was der Spieler sieht\n\nEine benannte Zeile mit Ein-/Aus-Schalter unter **Modifikationen**. Dieses Beispiel schreibt beim Laden eine Meldung in die Serverkonsole. Es fügt kein Spielverhalten hinzu.\n\n## Was du hinzufügst\n\nErstelle diese beiden Dateien in einem Ordner namens `hello-loader`. Der Loader ist anfangs deaktiviert. Das Manifest ist eine kleine Beschreibungsdatei mit Modname und verfügbaren Schaltflächen. Der Loader ist der Modcode, den EveJS bei aktiviertem Mod ausführt.",
+          "ru": "## Что видит игрок\n\nСтроку с именем и переключателем в **Моды**. При загрузке этот пример пишет сообщение в консоль сервера. Он не добавляет игровое поведение.\n\n## Что добавить\n\nСоздайте два файла в папке `hello-loader`. Изначально загрузчик отключён. Манифест — небольшой файл инструкций с именем мода и его кнопками. Загрузчик — код мода, который EveJS выполняет, когда мод включён.",
+          "zh_CN": "## 玩家会看到什么\n\n**模组** 中出现一行带名称和启用开关的模组。这个初始示例加载时会向服务器控制台输出消息，不会添加游戏行为。\n\n## 需要添加什么\n\n在名为 `hello-loader` 的文件夹内创建以下两个文件。让加载器初始处于禁用状态。 模组说明文件是一份小型指令文件，用来告诉启动器模组名称以及可以提供哪些按钮。加载器是模组启用时由 EveJS 执行的代码。",
+          "ja": "## プレイヤーに見えるもの\n\n**モッド** に名前とオン／オフスイッチのある行が表示されます。この例は読み込み時にサーバーコンソールへメッセージを出すだけで、ゲーム内の動作は追加しません。\n\n## 追加するもの\n\n`hello-loader` フォルダーに次の二つのファイルを作成します。最初はローダーを無効にします。 マニフェストは、MOD 名や表示できるボタンを伝える小さな説明ファイルです。ローダーは、MOD を有効にしたとき EveJS が実行するコードです。",
+          "ko": "## 플레이어가 보는 화면\n\n**모드**에 이름과 켜기/끄기 스위치가 있는 행이 나타납니다. 이 첫 예시는 로드될 때 서버 콘솔에 메시지만 출력합니다. 게임 동작은 추가하지 않습니다.\n\n## 추가할 내용\n\n`hello-loader` 폴더에 다음 두 파일을 만드세요. 로더는 처음에 비활성화된 상태로 둡니다. 매니페스트는 모드 이름과 제공할 버튼을 알려 주는 작은 설명 파일입니다. 로더는 모드가 켜졌을 때 EveJS가 실행하는 코드입니다.",
+          "visuals": {
+            "1": [
+              "loader-imported"
+            ],
+            "3": [
+              "package-files"
+            ]
+          }
+        },
+        {
+          "syntax": "text",
+          "code": "hello-loader/\n  evejs-launcher.mod.json\n  loader.js.disabled",
+          "afterImages": [
+            "package-files"
+          ]
+        },
+        {
+          "syntax": "json",
+          "code": "{\n  \"schemaVersion\": 3,\n  \"id\": \"hello-loader\",\n  \"displayName\": \"Hello Loader\",\n  \"version\": \"1.0.0\",\n  \"kind\": \"loader\",\n  \"supportedBackends\": [\n    \"native\",\n    \"docker\"\n  ],\n  \"activation\": {\n    \"strategy\": \"loader_rename\"\n  },\n  \"restart\": \"game_server\"\n}",
+          "afterImages": [
+            "loader-imported"
+          ]
+        },
+        {
+          "syntax": "javascript",
+          "code": "// loader.js.disabled\n\"use strict\";\nconsole.log(\"[Hello Loader] Loaded by EveJS Launcher.\");",
+          "afterImages": [
+            "console-loaded"
+          ]
+        },
+        {
+          "en": "## Try it in the launcher\n\n1. Open **Mods → Add Folder** and select `hello-loader`. You can also ZIP the folder and use **Add ZIP**.\n2. After selecting the folder, check that the mod appears disabled in the list.\n3. Follow [Enable and restart](@activation) to load it.\n\nKeep permanent mod identifier stable when you release a new version. name shown to players is the name players see. A folder copied manually may need **Adopt** before the launcher can manage it.\n\n[15. Example files](@example-files)",
+          "nl": "## Probeer het in de launcher\n\n1. Open **Aanpassingen → Map toevoegen** en kies `hello-loader`. Je kunt de map ook zippen en **ZIP toevoegen** gebruiken.\n2. Controleer na het kiezen van de map of de mod uitgeschakeld in de lijst staat.\n3. Volg [Inschakelen en herstarten](@activation) om de mod te laden.\n\nHoud vaste identificatie gelijk bij nieuwe versies. zichtbare modnaam is de naam die spelers zien. Een handmatig gekopieerde map moet mogelijk eerst via **In beheer nemen** worden overgenomen.\n\n[15. Voorbeeldbestanden](@example-files)",
+          "fr": "## Essayer dans le lanceur\n\n1. Ouvrez **Modifications → Ajouter un dossier** et sélectionnez `hello-loader`. Vous pouvez aussi compresser le dossier en ZIP et utiliser **Ajouter un ZIP**.\n2. Après avoir choisi le dossier, vérifiez que le mod apparaît désactivé.\n3. Suivez [Activer et redémarrer](@activation) pour le charger.\n\nConservez le même identifiant fixe entre les versions. nom affiché du mod est le nom affiché. Un dossier copié manuellement peut nécessiter **Prendre en charge** avant sa gestion par le lanceur.\n\n[15. Fichiers exemples](@example-files)",
+          "de": "## Im Launcher ausprobieren\n\n1. Öffne **Modifikationen → Ordner hinzufügen** und wähle `hello-loader`. Du kannst den Ordner auch als ZIP packen und **ZIP hinzufügen** verwenden.\n2. Prüfe nach der Ordnerauswahl, ob der Mod deaktiviert in der Liste erscheint.\n3. Folge [Aktivieren und neu starten](@activation), um ihn zu laden.\n\nBehalte feste Kennung bei neuen Versionen bei. sichtbarer Modname ist der angezeigte Name. Ein manuell kopierter Ordner muss eventuell zuerst über **Verwaltung übernehmen** übernommen werden.\n\n[15. Beispieldateien](@example-files)",
+          "ru": "## Проверка в лаунчере\n\n1. Откройте **Моды → Добавить папку** и выберите `hello-loader`. Можно также упаковать папку в ZIP и использовать **Добавить ZIP**.\n2. После выбора папки проверьте, что мод появился в списке выключенным.\n3. Следуйте странице [Включение и перезапуск](@activation), чтобы загрузить его.\n\nНе меняйте постоянный идентификатор при выпуске новой версии. видимое имя мода — имя, которое видят игроки. Для папки, скопированной вручную, может сначала потребоваться **Принять под управление**.\n\n[15. Файлы примеров](@example-files)",
+          "zh_CN": "## 在启动器中试用\n\n1. 打开 **模组 → 添加文件夹** 并选择 `hello-loader`。也可以将文件夹压缩为 ZIP 后使用 **添加 ZIP**。\n2. 选择文件夹后，确认模组以禁用状态出现在列表中。\n3. 按[启用与重启](@activation)中的步骤加载模组。\n\n发布新版本时保持 固定标识 不变。显示的模组名称 是玩家看到的名称。手动复制的文件夹可能需要先通过 **接管管理** 纳入启动器管理。\n\n[15. 示例文件](@example-files)",
+          "ja": "## ランチャーで試す\n\n1. **モッド → フォルダーを追加** で `hello-loader` を選びます。フォルダーを ZIP にして **ZIP を追加** から取り込むこともできます。\n2. フォルダーを選んだ後、無効状態で一覧に表示されることを確認します。\n3. [有効化と再起動](@activation)に従って読み込みます。\n\n新しい版でも 固定の識別名 は変えません。表示する MOD 名 はプレイヤーに表示される名前です。手動でコピーしたフォルダーは、管理前に **管理対象にする** が必要な場合があります。\n\n[15. サンプルファイル](@example-files)",
+          "ko": "## 런처에서 확인하기\n\n1. **모드 → 폴더 추가**에서 `hello-loader`를 선택하세요. 폴더를 ZIP으로 압축한 후 **ZIP 추가**으로 가져올 수도 있습니다.\n2. 폴더를 선택한 뒤 모드가 꺼진 상태로 목록에 표시되는지 확인하세요.\n3. [활성화와 재시작](@activation)에 따라 모드를 로드하세요.\n\n새 버전에서도 고정 식별자는 유지하세요. 표시되는 모드 이름은 플레이어에게 표시되는 이름입니다. 직접 복사한 폴더는 런처에서 관리하기 전에 **관리 대상으로 등록**가 필요할 수 있습니다.\n\n[15. 예제 파일](@example-files)",
+          "visuals": {
+            "1": [
+              "import-folder"
+            ],
+            "2": [
+              "loader-imported"
+            ],
+            "3": [
+              "loader-enabled"
+            ],
+            "4": [
+              "loader-imported"
+            ],
+            "5": [
+              "package-files"
+            ]
+          }
+        }
+      ],
+      "handoffFiles": [
+        "docs/mod-authoring/manifest.md",
+        "docs/mod-authoring/legacy.md",
+        "examples/mods/hello-loader/README.md",
+        "examples/mods/hello-loader/evejs-launcher.mod.json",
+        "examples/mods/hello-loader/loader.js.disabled"
+      ]
+    },
+    {
+      "id": "activation",
+      "path": "docs/mod-authoring/activation.md",
+      "title": {
+        "en": "2. Enable and restart",
+        "nl": "2. Inschakelen en herstarten",
+        "fr": "2. Activer et redémarrer",
+        "de": "2. Aktivieren und neu starten",
+        "ru": "2. Включение и перезапуск",
+        "zh_CN": "2. 启用与重启",
+        "ja": "2. 有効化と再起動",
+        "ko": "2. 활성화와 재시작"
+      },
+      "blocks": [
+        {
+          "en": "## What the player sees\n\nThe switch changes the mod’s saved on/off state. **CONFIGURED ON** means the next applicable start should use the mod. It does not prove the running server has loaded it.\n\n## Try the loader example\n\n1. Turn on **Hello Loader**.\n2. Use **Apply & Restart Server** when a restart is offered, or start the stopped Game server normally.\n3. Look for `[Hello Loader] Loaded by EveJS Launcher.` in the server console.\n4. Turn it off and restart again. That message should not appear in the new run.\n\nNormal Native startup includes enabled loaders. Explicit **Vanilla** startup omits them.",
+          "nl": "## Wat de speler ziet\n\nDe schakelaar verandert de opgeslagen aan/uit-status. **INGESCHAKELD** betekent dat de mod bij de volgende toepasselijke start gebruikt hoort te worden. Het bewijst niet dat de draaiende server hem al heeft geladen.\n\n## Probeer het loadervoorbeeld\n\n1. Schakel **Hello Loader** in.\n2. Gebruik **Toepassen en server herstarten** wanneer herstarten wordt aangeboden, of start de gestopte Game-server normaal.\n3. Zoek `[Hello Loader] Loaded by EveJS Launcher.` in de serverconsole.\n4. Schakel de mod uit en herstart opnieuw. Het bericht hoort in de nieuwe sessie niet te verschijnen.\n\nNormaal Native opstarten laadt ingeschakelde loaders. Expliciet **Vanilla** opstarten slaat ze over.",
+          "fr": "## Ce que voit le joueur\n\nL’interrupteur change l’état enregistré. **ACTIVÉ DANS LA CONFIGURATION** signifie que le prochain démarrage concerné doit utiliser le mod. Cela ne prouve pas que le serveur en cours l’a chargé.\n\n## Essayer l’exemple\n\n1. Activez **Hello Loader**.\n2. Utilisez **Appliquer et redémarrer le serveur** si proposé, ou démarrez normalement le serveur Game arrêté.\n3. Cherchez `[Hello Loader] Loaded by EveJS Launcher.` dans la console.\n4. Désactivez le mod et redémarrez. Le message ne doit pas apparaître dans cette nouvelle exécution.\n\nLe démarrage Native normal charge les mods activés. Le démarrage explicite **Vanilla** les ignore.",
+          "de": "## Was der Spieler sieht\n\nDer Schalter ändert den gespeicherten Zustand. **AKTIVIERT** bedeutet, dass der Mod beim nächsten passenden Start verwendet werden soll. Das beweist nicht, dass der laufende Server ihn bereits geladen hat.\n\n## Loader-Beispiel ausprobieren\n\n1. Aktiviere **Hello Loader**.\n2. Nutze **Anwenden und Server neu starten**, wenn angeboten, oder starte den gestoppten Game-Server normal.\n3. Suche `[Hello Loader] Loaded by EveJS Launcher.` in der Serverkonsole.\n4. Deaktiviere den Mod und starte erneut. Die Meldung sollte im neuen Lauf fehlen.\n\nDer normale Native-Start lädt aktivierte Loader. Ein ausdrücklicher **Vanilla**-Start lässt sie aus.",
+          "ru": "## Что видит игрок\n\nПереключатель меняет сохранённое состояние. **ВКЛЮЧЁН В НАСТРОЙКАХ** означает, что мод должен использоваться при следующем подходящем запуске. Это не доказывает, что уже работающий сервер его загрузил.\n\n## Проверка загрузчика\n\n1. Включите **Hello Loader**.\n2. Нажмите **Применить и перезапустить сервер**, если предлагается перезапуск, или обычно запустите остановленный сервер Game.\n3. Найдите `[Hello Loader] Loaded by EveJS Launcher.` в консоли сервера.\n4. Выключите мод и перезапустите сервер. При новом запуске сообщение появляться не должно.\n\nОбычный запуск Native загружает включённые моды. Явный запуск **Vanilla** пропускает их.",
+          "zh_CN": "## 玩家会看到什么\n\n开关修改模组保存的启用状态。**已设为启用** 表示下次相关启动应使用该模组，并不能证明当前运行的服务器已加载它。\n\n## 试用加载器示例\n\n1. 启用 **Hello Loader**。\n2. 如果出现重启选项，使用 **应用并重启服务器**；否则正常启动已停止的 Game 服务器。\n3. 在服务器控制台查找 `[Hello Loader] Loaded by EveJS Launcher.`。\n4. 禁用模组并再次重启。新一轮运行中不应出现该消息。\n\n正常 Native 启动会加载已启用的加载器。明确选择 **Vanilla** 启动则会跳过它们。",
+          "ja": "## プレイヤーに見えるもの\n\nスイッチは保存された有効／無効状態を変更します。**有効に設定済み** は次の対象起動時に MOD を使用する設定です。実行中のサーバーが読み込んだ証拠ではありません。\n\n## ローダーの例を試す\n\n1. **Hello Loader** を有効にします。\n2. 再起動が提示されたら **適用してサーバーを再起動** を使うか、停止中の Game サーバーを通常起動します。\n3. コンソールで `[Hello Loader] Loaded by EveJS Launcher.` を確認します。\n4. 無効にして再起動します。新しい実行ではこのメッセージが出ないはずです。\n\n通常の Native 起動は有効なローダーを読み込みます。明示的な **Vanilla** 起動では読み込みません。",
+          "ko": "## 플레이어가 보는 화면\n\n스위치는 저장된 활성화 상태를 바꿉니다. **활성화 설정됨**은 다음 해당 시작 시 모드를 사용하도록 설정됐다는 뜻입니다. 실행 중인 서버가 이미 로드했다는 증거는 아닙니다.\n\n## 로더 예시 확인\n\n1. **Hello Loader**를 켜세요.\n2. 재시작이 제안되면 **적용 후 서버 재시작**를 사용하거나, 중지된 Game 서버를 정상 시작하세요.\n3. 서버 콘솔에서 `[Hello Loader] Loaded by EveJS Launcher.`를 확인하세요.\n4. 모드를 끄고 다시 시작하세요. 새 실행에서는 이 메시지가 나타나지 않아야 합니다.\n\n일반 Native 시작은 활성화된 로더를 포함합니다. 명시적으로 **Vanilla**를 선택하면 제외합니다.",
+          "visuals": {
+            "1": [
+              "loader-enabled"
+            ],
+            "3": [
+              "loader-enabled"
+            ],
+            "4": [
+              "apply-restart"
+            ],
+            "5": [
+              "console-loaded"
+            ],
+            "6": [
+              "console-disabled"
+            ],
+            "7": [
+              "loader-disabled"
+            ]
+          }
+        },
+        {
+          "en": "## What you declare\n\nFor this loader, the manifest uses the following fields. Other mod kinds have different activation contracts; see the [1. Make your first package](@first-mod).",
+          "nl": "## Wat je opgeeft\n\nDeze loader gebruikt de volgende manifestvelden. Andere modtypen gebruiken andere activeringsafspraken; zie de [1. Maak je eerste pakket](@first-mod).",
+          "fr": "## Ce que vous déclarez\n\nCe chargeur utilise les champs ci-dessous. Les autres types de mods ont des règles d’activation différentes : voir la [1. Créer votre premier paquet](@first-mod).",
+          "de": "## Was du angibst\n\nDieser Loader verwendet die folgenden Manifest-Felder. Andere Mod-Arten haben andere Aktivierungsregeln; siehe [1. Dein erstes Paket erstellen](@first-mod).",
+          "ru": "## Что указать\n\nЭтот загрузчик использует следующие поля манифеста. Для других типов модов правила активации отличаются; см. [1. Создайте первый пакет](@first-mod).",
+          "zh_CN": "## 需要声明什么\n\n这个加载器使用以下清单字段。其他模组类型有不同的激活规范，请查看[1. 制作第一个包](@first-mod)。",
+          "ja": "## 指定する内容\n\nこのローダーは次のマニフェスト項目を使います。他の MOD 種類の有効化ルールは[1. 最初のパッケージを作る](@first-mod)をご覧ください。",
+          "ko": "## 선언할 내용\n\n이 로더는 다음 매니페스트 항목을 사용합니다. 다른 모드 종류는 활성화 규약이 다릅니다. [1. 첫 패키지 만들기](@first-mod)를 확인하세요.",
+          "visuals": {
+            "1": [
+              "loader-enabled"
+            ]
+          },
+          "detailOnly": true
+        },
+        {
+          "code": "\"activation\": {\"strategy\": \"loader_rename\"},\n\"restart\": \"game_server\"",
+          "afterImages": [
+            "loader-enabled"
+          ]
+        }
+      ],
+      "handoffFiles": [
+        "docs/mod-authoring/manifest.md",
+        "docs/mod-authoring/legacy.md",
+        "examples/mods/hello-loader/README.md",
+        "examples/mods/hello-loader/evejs-launcher.mod.json",
+        "examples/mods/hello-loader/loader.js.disabled"
+      ]
+    },
+    {
+      "id": "configure",
+      "path": "docs/mod-authoring/configure.md",
+      "title": {
+        "en": "3. Add a Configure button",
+        "nl": "3. Voeg een Instellen-knop toe",
+        "fr": "3. Ajouter le bouton Configurer",
+        "de": "3. Konfigurieren-Schaltfläche hinzufügen",
+        "ru": "3. Добавьте кнопку Настроить",
+        "zh_CN": "3. 添加 配置 按钮",
+        "ja": "3. 設定 ボタンを追加する",
+        "ko": "3. 설정 버튼 추가"
+      },
+      "blocks": [
+        {
+          "en": "## What the player sees\n\n**Configure** opens your mod’s settings window. The launcher builds this window from the settings described in your mod’s instruction file. You choose the questions and values; you do not have to design or program a window.\n\n![Demo mod row with the Configure button](@docs/mod-authoring/images/configure-row.png)\n\n*Real launcher row, fictional demo mod. Configure edits preferences; the separate switch enables or disables the mod.*",
+          "nl": "## Wat de speler ziet\n\n**Instellen** opent het instellingenvenster van je mod. De launcher maakt dit venster op basis van het instructiebestand van de mod. Jij kiest de vragen en waarden; je hoeft geen venster te ontwerpen of te programmeren.\n\n![Demomod met de Instellen-knop](@docs/mod-authoring/images/configure-row.png)\n\n*Echte launcherrij, fictieve demomod. Instellen wijzigt voorkeuren; de aparte schakelaar zet de mod aan of uit.*",
+          "fr": "## Ce que voit le joueur\n\n**Configurer** ouvre les réglages de votre mod. Le lanceur crée cette fenêtre à partir du fichier d’instructions du mod. Vous choisissez les questions et les valeurs ; vous n’avez pas à concevoir ni à programmer la fenêtre.\n\n![Ligne du mod de démonstration avec Configure](@docs/mod-authoring/images/configure-row.png)\n\n*Vraie ligne du lanceur, mod fictif. Configurer modifie les préférences ; l’interrupteur séparé active ou désactive le mod.*",
+          "de": "## Was der Spieler sieht\n\n**Konfigurieren** öffnet die Einstellungen deines Mods. Der Launcher erstellt das Fenster aus der Beschreibungsdatei des Mods. Du legst Fragen und Werte fest und musst kein eigenes Fenster gestalten oder programmieren.\n\n![Beispiel-Mod mit Konfigurieren-Schaltfläche](@docs/mod-authoring/images/configure-row.png)\n\n*Echte Launcher-Zeile, erfundener Beispiel-Mod. Konfigurieren bearbeitet Einstellungen; der separate Schalter aktiviert oder deaktiviert den Mod.*",
+          "ru": "## Что видит игрок\n\nКнопка **Настроить** открывает настройки мода. Лаунчер создаёт это окно по описанию в файле инструкций мода. Вы выбираете вопросы и значения, а создавать или программировать само окно не нужно.\n\n![Строка демонстрационного мода с Configure](@docs/mod-authoring/images/configure-row.png)\n\n*Настоящая строка лаунчера, вымышленный мод. Настроить меняет настройки; отдельный переключатель включает или выключает мод.*",
+          "zh_CN": "## 玩家会看到什么\n\n**配置**按钮会打开模组设置窗口。启动器根据模组说明文件中的设置描述自动生成窗口。你只需要决定要让玩家调整哪些选项和数值，不需要自己设计或编写窗口。\n\n![带 配置 按钮的演示模组行](@docs/mod-authoring/images/configure-row.png)\n\n*真实的启动器列表行，使用虚构模组。配置 用于编辑偏好；旁边独立的开关用于启用或禁用模组。*",
+          "ja": "## プレイヤーに見えるもの\n\n**設定**ボタンで MOD の設定画面を開きます。ランチャーが MOD の説明ファイルを読み、画面を自動で作ります。プレイヤーが選ぶ項目や値を決めるだけで、画面そのものを設計・実装する必要はありません。\n\n![設定 ボタンのあるデモ MOD 行](@docs/mod-authoring/images/configure-row.png)\n\n*実際のランチャー行に架空の MOD を表示しています。設定 は設定編集、別のスイッチは MOD の有効／無効切り替えです。*",
+          "ko": "## 플레이어가 보는 화면\n\n**설정** 버튼은 모드 설정 창을 엽니다. 런처가 모드 설명 파일을 읽어 창을 자동으로 만듭니다. 플레이어가 바꿀 항목과 값만 정하면 되며 창 자체를 설계하거나 프로그래밍할 필요는 없습니다.\n\n![설정 버튼이 있는 데모 모드 행](@docs/mod-authoring/images/configure-row.png)\n\n*가상 모드를 표시한 실제 런처 행입니다. 설정는 설정을 편집하며 별도의 스위치는 모드를 켜거나 끕니다.*"
+        },
+        {
+          "en": "## How the code becomes a screen\n\n- Give the setting a clear name so players know what it changes.\n- This example accepts whole numbers from **1 to 300**.\n- It starts at **10** when the player has not saved a value yet.\n- Clicking Save writes the chosen number into `preferences.json` in the mod folder.\n- The mod must read that file to use the chosen number.\n- A reminder explains when a server restart is needed. Saving does not restart the server.\n\n![Configure window with the interval changed to 20 and a restart reminder](@docs/mod-authoring/images/configure-dialog.png)\n\n*Real settings window. The example changes 10 to 20. The screenshot uses English labels; the explanation can be read in your chosen language.*",
+          "nl": "## Hoe de code een scherm wordt\n\n- Geef de instelling een duidelijke naam, zodat spelers weten wat ze aanpassen.\n- Dit voorbeeld accepteert hele getallen van **1 tot 300**.\n- Zolang de speler niets heeft opgeslagen, begint de waarde op **10**.\n- Opslaan schrijft het gekozen getal naar `preferences.json` in de modmap.\n- De mod moet dat bestand lezen om het getal te gebruiken.\n- Een melding vertelt wanneer de server opnieuw moet starten. Opslaan herstart de server niet.\n\n![Instellen-venster met interval 20 en herstartmelding](@docs/mod-authoring/images/configure-dialog.png)\n\n*Echt instellingenvenster. Het voorbeeld verandert 10 in 20. De afbeelding heeft Engelse labels; de uitleg is in je gekozen taal.*",
+          "fr": "## Du code à l’écran\n\n- Donnez un nom clair au réglage pour que le joueur comprenne son effet.\n- Cet exemple accepte les nombres entiers de **1 à 300**.\n- La valeur initiale est **10** tant que le joueur n’a rien enregistré.\n- Enregistrer écrit le nombre choisi dans `preferences.json`, dans le dossier du mod.\n- Le mod doit lire ce fichier pour utiliser le nombre.\n- Un rappel indique si le serveur doit redémarrer. Enregistrer ne le redémarre pas.\n\n![Fenêtre Configurer avec intervalle 20 et rappel de redémarrage](@docs/mod-authoring/images/configure-dialog.png)\n\n*Vraie fenêtre de réglages. L’exemple passe de 10 à 20. Les images sont en anglais ; les explications sont traduites.*",
+          "de": "## Vom Code zum Bildschirm\n\n- Gib der Einstellung einen verständlichen Namen.\n- Dieses Beispiel erlaubt ganze Zahlen von **1 bis 300**.\n- Ohne gespeicherten Wert beginnt es bei **10**.\n- Speichern schreibt die gewählte Zahl in `preferences.json` im Modordner.\n- Der Mod muss die Datei lesen, um die Zahl zu verwenden.\n- Ein Hinweis zeigt, wann ein Serverneustart nötig ist. Speichern startet den Server nicht neu.\n\n![Konfigurieren-Fenster mit Intervall 20 und Neustarthinweis](@docs/mod-authoring/images/configure-dialog.png)\n\n*Echtes Einstellungsfenster. Das Beispiel ändert 10 auf 20. Die Bilder verwenden englische Beschriftungen; die Erklärung ist übersetzt.*",
+          "ru": "## Как код превращается в экран\n\n- Дайте настройке понятное имя, чтобы игрок знал, что меняет.\n- В примере доступны целые числа от **1 до 300**.\n- Пока игрок ничего не сохранил, используется **10**.\n- Сохранение записывает выбранное число в `preferences.json` в папке мода.\n- Мод должен прочитать файл, чтобы использовать число.\n- Напоминание сообщает о необходимости перезапуска сервера. Сохранение само его не перезапускает.\n\n![Окно Настроить со значением 20 и напоминанием о перезапуске](@docs/mod-authoring/images/configure-dialog.png)\n\n*Настоящее окно настроек. В примере значение меняется с 10 на 20. Подписи на снимке английские; пояснения переведены.*",
+          "zh_CN": "## 代码如何变成界面\n\n- 给设置取一个清楚的名称，让玩家知道它会改变什么。\n- 本例允许输入 **1 到 300** 之间的整数。\n- 玩家尚未保存数值时，初始值为 **10**。\n- 点击保存后，所选数值会写入模组文件夹中的 `preferences.json`。\n- 模组必须读取这个文件，才能实际使用所选数值。\n- 提示会说明何时需要重启服务器。保存设置不会自动重启服务器。\n\n![间隔改为 20 并显示重启提示的 配置 窗口](@docs/mod-authoring/images/configure-dialog.png)\n\n*真实的设置窗口。示例将 10 改为 20。截图使用英语标签，说明文字可以使用所选语言。*",
+          "ja": "## コードが画面になる仕組み\n\n- 何を変える設定なのか分かる名前を付けます。\n- この例では **1 から 300** までの整数を入力できます。\n- まだ保存していない場合の初期値は **10** です。\n- 保存すると、選んだ数値が MOD フォルダーの `preferences.json` に書き込まれます。\n- MOD 側でそのファイルを読み取ると、選んだ値を使えます。\n- 再起動が必要な場合は案内が表示されます。保存だけでサーバーが再起動することはありません。\n\n![間隔を 20 に変更した 設定 画面と再起動の案内](@docs/mod-authoring/images/configure-dialog.png)\n\n*実際の設定ウィンドウです。例では 10 を 20 に変更しています。画像は英語表示ですが、説明は選んだ言語で読めます。*",
+          "ko": "## 코드가 화면이 되는 방식\n\n- 플레이어가 무엇을 바꾸는지 알 수 있도록 설정 이름을 명확하게 지으세요.\n- 이 예제는 **1부터 300**까지의 정수를 받습니다.\n- 아직 저장한 값이 없으면 **10**으로 시작합니다.\n- 저장하면 선택한 숫자가 모드 폴더의 `preferences.json`에 기록됩니다.\n- 모드는 이 파일을 읽어야 선택한 숫자를 사용할 수 있습니다.\n- 서버 재시작이 필요한 경우 안내가 표시됩니다. 저장만으로 서버가 재시작되지는 않습니다.\n\n![간격을 20으로 변경하고 재시작 안내를 표시한 설정 창](@docs/mod-authoring/images/configure-dialog.png)\n\n*실제 설정 창입니다. 예시는 10을 20으로 바꿉니다. 스크린샷은 영어이며 설명은 선택한 언어로 읽을 수 있습니다.*"
+        },
+        {
+          "en": "## What you add\n\nAdd this settings form property inside your existing **schema-3** `evejs-launcher.mod.json`. This is a manifest fragment, not a complete file. Do not change the manifest’s own `schemaVersion: 3`; the settings object has its own `schemaVersion: 1`.",
+          "nl": "## Wat je toevoegt\n\nVoeg deze instellingen-eigenschap toe aan je bestaande `evejs-launcher.mod.json` met **schema 3**. Dit is een fragment, geen volledig bestand. Laat manifestversie 3 van het manifest staan; het instellingen-object heeft zijn eigen instellingenformaat versie 1.",
+          "fr": "## Ce que vous ajoutez\n\nAjoutez cette propriété réglages dans votre `evejs-launcher.mod.json` au **schéma 3**. C’est un fragment, pas un fichier complet. Gardez version 3 du manifeste pour le manifeste ; l’objet réglages utilise son propre format des réglages version 1.",
+          "de": "## Was du hinzufügst\n\nFüge die Eigenschaft Einstellungen in deine bestehende `evejs-launcher.mod.json` mit **Schema 3** ein. Dies ist ein Ausschnitt, keine vollständige Datei. Behalte Manifestversion 3 des Manifests bei; das Einstellungsobjekt hat sein eigenes Einstellungsformat Version 1.",
+          "ru": "## Что добавить\n\nДобавьте свойство настройки в существующий `evejs-launcher.mod.json` со **схемой 3**. Это фрагмент, а не полный файл. Оставьте версия манифеста 3 у манифеста; у объекта настройки своя версия — формат настроек версии 1.",
+          "zh_CN": "## 需要添加什么\n\n将以下 设置 属性加入现有的**架构 3** `evejs-launcher.mod.json`。这只是清单片段，不是完整文件。清单本身仍需使用 模组说明文件版本 3；设置 对象单独使用 设置格式版本 1。",
+          "ja": "## 追加するもの\n\n既存の**スキーマ 3** の `evejs-launcher.mod.json` に次の 設定 プロパティを追加します。これは断片であり、完全なファイルではありません。マニフェストの 定義ファイルの形式バージョン 3 は変更せず、設定 内だけ 設定形式バージョン 1 にします。",
+          "ko": "## 추가할 내용\n\n기존 **스키마 3** `evejs-launcher.mod.json` 안에 다음 설정 속성을 추가하세요. 전체 파일이 아닌 매니페스트 일부입니다. 매니페스트의 모드 설명 파일 형식 버전 3은 유지하고 설정 객체만 별도의 설정 형식 버전 1을 사용합니다.",
+          "visuals": {
+            "1": [
+              "configure-default"
+            ]
+          },
+          "detailOnly": true
+        },
+        {
+          "code": "\"settings\": {\n  \"schemaVersion\": 1,\n  \"files\": [\n    {\n      \"id\": \"prefs\",\n      \"base\": \"mod\",\n      \"path\": \"preferences.json\",\n      \"format\": \"json\"\n    }\n  ],\n  \"fields\": [\n    {\n      \"id\": \"scanInterval\",\n      \"label\": \"Scan interval (seconds)\",\n      \"description\": \"How often your mod should scan.\",\n      \"type\": \"integer\",\n      \"default\": 10,\n      \"minimum\": 1,\n      \"maximum\": 300,\n      \"restart\": \"game_server\",\n      \"file\": \"prefs\",\n      \"key\": [\n        \"scanInterval\"\n      ]\n    }\n  ]\n}",
+          "afterImages": [
+            "configure-dialog"
+          ]
+        },
+        {
+          "en": "## Check the result\n\n1. Import the complete demo and open **Configure**.\n\n2. Change **10** to **20**.\n\n3. Click **Save**. Open `preferences.json`: the saved scan interval is **20**.\n\n4. Close and reopen Configure. It should still show **20**.\n\n5. Try another value, then click **Cancel**. Reopen the form: the saved value is still **20**.\n\nThe launcher saves a preference. Your own mod code must read it and use it; this demo does not perform scans. A helper is not needed just to show the form or save values.\n\nNo button? Check that the package has a valid schema-3 manifest and a valid, nonempty settings form declaration.",
+          "nl": "## Controleer het resultaat\n\n1. Importeer het volledige voorbeeld en open **Instellen**.\n\n2. Verander **10** in **20**.\n\n3. Klik op **Opslaan**. Open `preferences.json`: de opgeslagen scaninterval is **20**.\n\n4. Sluit Instellen en open het opnieuw. Er moet nog **20** staan.\n\n5. Probeer een andere waarde en klik op **Annuleren**. Open het formulier opnieuw: de opgeslagen waarde blijft **20**.\n\nDe launcher slaat een voorkeur op. Je eigen modcode moet die lezen en gebruiken; deze demo scant niets. Een helper is niet nodig om het formulier te tonen of waarden op te slaan.\n\nGeen knop? Controleer het schema-3-manifest en de geldige, niet-lege instellingen-declaratie.",
+          "fr": "## Vérifier le résultat\n\n1. Importez l’exemple complet et ouvrez **Configurer**.\n\n2. Remplacez **10** par **20**.\n\n3. Cliquez sur **Enregistrer**. Ouvrez `preferences.json` : l’intervalle enregistré est **20**.\n\n4. Fermez puis rouvrez Configurer. La valeur doit rester **20**.\n\n5. Essayez une autre valeur puis cliquez sur **Annuler**. Rouvrez le formulaire : la valeur enregistrée reste **20**.\n\nLe lanceur enregistre une préférence. Votre code doit la lire et l’utiliser ; cette démo n’effectue aucun scan. Aucun programme d’assistance n’est nécessaire pour afficher le formulaire ou enregistrer les valeurs.\n\nPas de bouton ? Vérifiez le manifeste de schéma 3 et la déclaration réglages, valide et non vide.",
+          "de": "## Ergebnis prüfen\n\n1. Importiere das vollständige Beispiel und öffne **Konfigurieren**.\n\n2. Ändere **10** auf **20**.\n\n3. Klicke auf **Speichern**. Öffne `preferences.json`: Das gespeicherte Intervall ist **20**.\n\n4. Schließe und öffne Konfigurieren erneut. Es muss weiterhin **20** anzeigen.\n\n5. Probiere einen anderen Wert und klicke auf **Abbrechen**. Öffne das Formular erneut: Der gespeicherte Wert bleibt **20**.\n\nDer Launcher speichert eine Einstellung. Dein Mod-Code muss sie lesen und verwenden; diese Demo führt keine Scans aus. Für Formular und Speichern ist kein Helper nötig.\n\nKein Button? Prüfe das Schema-3-Manifest und die gültige, nicht leere Einstellungen-Deklaration.",
+          "ru": "## Проверка результата\n\n1. Импортируйте полный пример и откройте **Настроить**.\n\n2. Измените **10** на **20**.\n\n3. Нажмите **Сохранить**. Откройте `preferences.json`: сохранённый интервал равен **20**.\n\n4. Закройте и снова откройте Настроить. Значение должно оставаться **20**.\n\n5. Введите другое значение и нажмите **Отмена**. Откройте форму снова: сохранённое значение по-прежнему **20**.\n\nЛаунчер сохраняет параметр. Код мода должен прочитать и использовать его; эта демонстрация ничего не сканирует. Для формы и сохранения помощник не нужен.\n\nНет кнопки? Проверьте манифест схемы 3 и допустимое непустое объявление настройки.",
+          "zh_CN": "## 检查结果\n\n1. 导入完整演示包并打开 **配置**。\n\n2. 将 **10** 改为 **20**。\n\n3. 点击 **保存**。打开 `preferences.json`：保存的扫描间隔应为 **20**。\n\n4. 关闭并重新打开 配置，仍应显示 **20**。\n\n5. 尝试另一个数值，再点击 **取消**。重新打开表单：保存的数值仍为 **20**。\n\n启动器只保存偏好。模组代码必须读取并使用它；此演示不会执行扫描。仅显示表单或保存数值不需要辅助程序。\n\n没有按钮？检查架构 3 清单是否有效，以及 设置 声明是否有效且非空。",
+          "ja": "## 結果を確認する\n\n1. 完全なデモを取り込み、**設定** を開きます。\n\n2. **10** を **20** に変更します。\n\n3. **保存** を押します。`preferences.json` を開くと、保存された間隔は **20** です。\n\n4. 設定 を閉じて開き直します。引き続き **20** が表示されます。\n\n5. 別の値を試して **キャンセル** を押します。開き直しても保存値は **20** のままです。\n\nランチャーは設定を保存するだけです。MOD のコードが読み取って使う必要があります。このデモはスキャンしません。フォーム表示と保存だけならヘルパーは不要です。\n\nボタンがない場合は、スキーマ 3 のマニフェストと空でない有効な 設定 宣言を確認してください。",
+          "ko": "## 결과 확인\n\n1. 전체 데모를 가져오고 **설정**를 여세요.\n\n2. **10**을 **20**으로 바꾸세요.\n\n3. **저장**를 누르세요. `preferences.json`을 열면 저장된 간격은 **20**이어야 합니다.\n\n4. 설정를 닫았다가 다시 여세요. 여전히 **20**이 표시되어야 합니다.\n\n5. 다른 값을 입력한 뒤 **취소**을 누르세요. 다시 열면 저장된 값은 여전히 **20**입니다.\n\n런처는 설정을 저장할 뿐입니다. 모드 코드가 읽고 사용해야 하며 이 데모는 스캔하지 않습니다. 폼 표시와 저장만을 위해 도우미를 만들 필요는 없습니다.\n\n버튼이 없나요? 스키마 3 매니페스트와 비어 있지 않은 유효한 설정 선언을 확인하세요.",
+          "visuals": {
+            "1": [
+              "configure-default"
+            ],
+            "2": [
+              "configure-dialog"
+            ],
+            "3": [
+              "saved-preferences"
+            ],
+            "4": [
+              "configure-reopened"
+            ],
+            "5": [
+              "configure-reopened"
+            ],
+            "6": [
+              "saved-preferences"
+            ],
+            "7": [
+              "configure-row"
+            ]
+          }
+        }
+      ],
+      "handoffFiles": [
+        "docs/mod-authoring/settings-reference.md",
+        "examples/mods/configure-demo/README.md",
+        "examples/mods/configure-demo/evejs-launcher.mod.json"
+      ]
+    },
+    {
+      "id": "controls",
+      "path": "docs/mod-authoring/controls.md",
+      "title": {
+        "en": "4. Choose form controls",
+        "nl": "4. Kies invoervelden",
+        "fr": "4. Choisir les champs",
+        "de": "4. Formularfelder auswählen",
+        "ru": "4. Выберите поля формы",
+        "zh_CN": "4. 选择表单控件",
+        "ja": "4. 入力欄を選ぶ",
+        "ko": "4. 입력 항목 선택"
+      },
+      "blocks": [
+        {
+          "en": "## What each type looks like\n\n| `type` | Player sees | Example |\n| --- | --- | --- |\n| `boolean` | On/off switch | Show hints |\n| whole-number input | Whole-number input | 10 seconds |\n| `number` | Decimal-number input | 0.5 strength |\n| `string` | Text box | A profile label |\n| `choice` | Drop-down list | Low / High |\n\n![Real settings controls with fictional example values](@docs/mod-authoring/images/controls.png)\n\n*Demo form using actual launcher controls. These preferences do not change gameplay by themselves.*",
+          "nl": "## Hoe elk type eruitziet\n\n| soort invoerveld | De speler ziet | Voorbeeld |\n| --- | --- | --- |\n| aan/uit-schakelaar | Aan/uit-schakelaar | Tips tonen |\n| geheel getal | Heel getal | 10 seconden |\n| kommagetal | Decimaal getal | 0,5 sterkte |\n| tekst | Tekstvak | Een profielnaam |\n| keuzelijst | Keuzelijst | Laag / Hoog |\n\n![Echte instellingenvelden met fictieve waarden](@docs/mod-authoring/images/controls.png)\n\n*Demoformulier met echte launcheronderdelen. Deze voorkeuren veranderen op zichzelf geen spelgedrag.*",
+          "fr": "## Apparence de chaque type\n\n| type de champ | Le joueur voit | Exemple |\n| --- | --- | --- |\n| interrupteur | Interrupteur | Afficher les conseils |\n| nombre entier | Nombre entier | 10 secondes |\n| nombre décimal | Nombre décimal | Intensité 0,5 |\n| texte | Zone de texte | Nom du profil |\n| liste de choix | Liste déroulante | Faible / Élevée |\n\n![Vrais champs avec des valeurs fictives](@docs/mod-authoring/images/controls.png)\n\n*Formulaire de démonstration utilisant les composants du lanceur. Ces préférences ne changent pas le jeu à elles seules.*",
+          "de": "## So sehen die Typen aus\n\n| Art des Eingabefelds | Anzeige für Spieler | Beispiel |\n| --- | --- | --- |\n| Ein-/Aus-Schalter | Ein-/Aus-Schalter | Hinweise anzeigen |\n| ganze Zahl | Ganzzahlfeld | 10 Sekunden |\n| Dezimalzahl | Dezimalzahlfeld | Stärke 0,5 |\n| Text | Textfeld | Profilname |\n| Auswahlliste | Auswahlliste | Niedrig / Hoch |\n\n![Echte Einstellungsfelder mit Beispieldaten](@docs/mod-authoring/images/controls.png)\n\n*Beispielformular mit echten Launcher-Komponenten. Diese Einstellungen allein verändern das Spiel nicht.*",
+          "ru": "## Как выглядит каждый тип\n\n| тип поля | Что видит игрок | Пример |\n| --- | --- | --- |\n| переключатель | Переключатель | Показывать подсказки |\n| целое число | Целое число | 10 секунд |\n| дробное число | Дробное число | Сила 0,5 |\n| текст | Текстовое поле | Название профиля |\n| список вариантов | Выпадающий список | Низкое / Высокое |\n\n![Настоящие поля настроек с вымышленными значениями](@docs/mod-authoring/images/controls.png)\n\n*Демонстрационная форма из настоящих элементов лаунчера. Сами по себе эти параметры не меняют игру.*",
+          "zh_CN": "## 各种类型的外观\n\n| 输入项类型 | 玩家看到的控件 | 示例 |\n| --- | --- | --- |\n| 开关 | 开关 | 显示提示 |\n| 整数 | 整数输入框 | 10 秒 |\n| 小数 | 小数输入框 | 强度 0.5 |\n| 文本 | 文本框 | 配置档案名称 |\n| 下拉选项 | 下拉列表 | 低 / 高 |\n\n![使用虚构数值的真实设置控件](@docs/mod-authoring/images/controls.png)\n\n*使用真实启动器控件的演示表单。这些偏好本身不会改变游戏行为。*",
+          "ja": "## 各種類の見た目\n\n| 入力欄の種類 | 表示されるもの | 例 |\n| --- | --- | --- |\n| オン／オフ | オン／オフスイッチ | ヒント表示 |\n| 整数 | 整数の入力欄 | 10 秒 |\n| 小数 | 小数の入力欄 | 強度 0.5 |\n| 文字列 | テキスト欄 | プロファイル名 |\n| 選択リスト | ドロップダウン | 低 / 高 |\n\n![架空の値を表示した実際の設定部品](@docs/mod-authoring/images/controls.png)\n\n*実際のランチャー部品を使ったデモです。これらの設定だけでゲームの動作は変わりません。*",
+          "ko": "## 각 유형의 모습\n\n| 입력 항목 유형 | 표시되는 항목 | 예시 |\n| --- | --- | --- |\n| 켜기/끄기 | 켜기/끄기 스위치 | 힌트 표시 |\n| 정수 | 정수 입력 | 10초 |\n| 소수 | 소수 입력 | 강도 0.5 |\n| 텍스트 | 텍스트 상자 | 프로필 이름 |\n| 선택 목록 | 드롭다운 목록 | 낮음 / 높음 |\n\n![가상 값을 표시한 실제 설정 위젯](@docs/mod-authoring/images/controls.png)\n\n*실제 런처 위젯을 사용한 데모입니다. 이 설정만으로 게임 동작이 변경되지는 않습니다.*",
+          "afterImages": [
+            "control-boolean",
+            "control-integer",
+            "control-number",
+            "control-string",
+            "control-choice"
+          ]
+        },
+        {
+          "en": "## A drop-down example\n\nAdd this field to your list of form fields array. It uses the `prefs` file declared on the [Configure page](@configure). Players see **Low** or **High**; the file stores `\"low\"` or `\"high\"`.",
+          "nl": "## Een keuzelijst toevoegen\n\nVoeg dit veld toe aan lijst met invoervelden. Het gebruikt het bestand `prefs` van de [Instellen-pagina](@configure). Spelers zien **Laag** of **Hoog**; het bestand bewaart `\"low\"` of `\"high\"`.",
+          "fr": "## Exemple de liste déroulante\n\nAjoutez ce champ à liste des champs. Il utilise le fichier `prefs` déclaré sur la [page Configure](@configure). Les joueurs voient **Faible** ou **Élevé** ; le fichier contient `\"low\"` ou `\"high\"`.",
+          "de": "## Beispiel einer Auswahlliste\n\nFüge dieses Feld zu Liste der Eingabefelder hinzu. Es verwendet die auf der [Konfigurieren-Seite](@configure) angegebene Datei `prefs`. Spieler sehen **Niedrig** oder **Hoch**; gespeichert wird `\"low\"` oder `\"high\"`.",
+          "ru": "## Пример выпадающего списка\n\nДобавьте это поле в массив список полей. Оно использует файл `prefs` со [страницы Configure](@configure). Игрок видит **Низкое** или **Высокое**, а в файл записывается `\"low\"` или `\"high\"`.",
+          "zh_CN": "## 下拉列表示例\n\n将此字段加入 设置项列表 数组。它使用 [配置 页面](@configure)中声明的 `prefs` 文件。玩家看到 **低** 或 **高**；文件保存 `\"low\"` 或 `\"high\"`。",
+          "ja": "## ドロップダウンの例\n\nこの項目を 設定項目の一覧 配列に追加します。[設定 のページ](@configure)で宣言した `prefs` ファイルを使用します。画面には **低** または **高**、ファイルには `\"low\"` または `\"high\"` が入ります。",
+          "ko": "## 드롭다운 예시\n\n이 필드를 설정 항목 목록 배열에 추가하세요. [설정 페이지](@configure)에서 선언한 `prefs` 파일을 사용합니다. 플레이어에게는 **낮음** 또는 **높음**가 보이고 파일에는 `\"low\"` 또는 `\"high\"`가 저장됩니다.",
+          "visuals": {
+            "1": [
+              "control-choice"
+            ]
+          }
+        },
+        {
+          "code": "{\n  \"id\": \"quality\",\n  \"label\": \"Quality\",\n  \"type\": \"choice\",\n  \"default\": \"high\",\n  \"choices\": [\n    {\n      \"value\": \"low\",\n      \"label\": \"Low\"\n    },\n    {\n      \"value\": \"high\",\n      \"label\": \"High\"\n    }\n  ],\n  \"file\": \"prefs\",\n  \"key\": [\n    \"quality\"\n  ]\n}",
+          "afterImages": [
+            "control-choice"
+          ]
+        },
+        {
+          "en": "Use group heading to place related fields together. Mark rarely used fields with advanced option; players reveal them with **Show advanced settings**. Forms with eight or more fields show a search box.\n\nGive every field a valid default and useful limits. Invalid existing values produce an error rather than silently becoming defaults. See [3. Add a Configure button](@configure).",
+          "nl": "Gebruik groep om verwante velden bij elkaar te zetten. Geef zelden gebruikte velden alleen bij geavanceerde instellingen; spelers tonen ze met **Show advanced instellingen**. Vanaf acht velden verschijnt een zoekvak.\n\nGeef elk veld een geldige standaardwaarde en nuttige grenzen. Ongeldige bestaande waarden geven een fout en worden niet stil vervangen. Zie de [3. Voeg een Instellen-knop toe](@configure).",
+          "fr": "Utilisez groupe pour regrouper les champs. Avec affichage dans les réglages avancés, un champ apparaît après **Show advanced réglages**. Les formulaires d’au moins huit champs affichent une recherche.\n\nDonnez des valeurs par défaut valides et des limites utiles. Une valeur existante invalide produit une erreur, sans remplacement silencieux. Voir les [3. Ajouter le bouton Configurer](@configure).",
+          "de": "Mit Gruppe fasst du verwandte Felder zusammen. nur in erweiterten Einstellungen versteckt selten genutzte Felder hinter **Show advanced Einstellungen**. Ab acht Feldern gibt es eine Suche.\n\nNutze gültige Standardwerte und sinnvolle Grenzen. Ungültige vorhandene Werte führen zu einem Fehler statt zu stiller Ersetzung. Siehe [3. Konfigurieren-Schaltfläche hinzufügen](@configure).",
+          "ru": "Используйте группа для объединения полей. Редкие настройки с только в расширенных настройках видны после **Show advanced настройки**. В формах от восьми полей есть поиск.\n\nЗадавайте допустимые значения по умолчанию и полезные ограничения. Недопустимые сохранённые значения вызывают ошибку, а не тихую замену. См. [3. Добавьте кнопку Настроить](@configure).",
+          "zh_CN": "用 分组 将相关字段分组。为不常用的字段设置 仅在高级设置中显示，玩家可通过 **Show advanced 设置** 显示它们。至少八个字段的表单会显示搜索框。\n\n请提供有效默认值和合理限制。已有值无效时会报错，而不是悄悄换成默认值。详见[3. 添加 配置 按钮](@configure)。",
+          "ja": "グループ で関連する項目をまとめます。詳細設定でのみ表示 の項目は **Show advanced 設定** で表示できます。項目が八つ以上あるフォームには検索欄が表示されます。\n\n有効な初期値と適切な制限を指定してください。既存の値が無効なら、初期値に黙って置き換えずエラーになります。[3. 設定 ボタンを追加する](@configure)を参照してください。",
+          "ko": "그룹으로 관련 필드를 묶으세요. 잘 쓰지 않는 항목에 고급 설정에서만 표시를 지정하면 **Show advanced 설정**로 표시할 수 있습니다. 필드가 여덟 개 이상이면 검색창이 나타납니다.\n\n유효한 기본값과 적절한 범위를 지정하세요. 기존 값이 잘못되면 기본값으로 조용히 바꾸지 않고 오류를 표시합니다. [3. 설정 버튼 추가](@configure)을 참고하세요.",
+          "visuals": {
+            "0": [
+              "advanced-hidden",
+              "advanced-shown",
+              "advanced-search"
+            ],
+            "1": [
+              "configure-default"
+            ]
+          }
+        }
+      ],
+      "handoffFiles": [
+        "docs/mod-authoring/settings-reference.md"
+      ]
+    },
+    {
+      "id": "profiles",
+      "path": "docs/mod-authoring/profiles.md",
+      "title": {
+        "en": "5. Separate settings by profile",
+        "nl": "5. Instellingen per profiel",
+        "fr": "5. Réglages par profil",
+        "de": "5. Einstellungen pro Profil",
+        "ru": "5. Настройки по профилям",
+        "zh_CN": "5. 按配置档案保存设置",
+        "ja": "5. プロファイル別の設定",
+        "ko": "5. 프로필별 설정"
+      },
+      "blocks": [
+        {
+          "en": "## What the player sees\n\nWhen a form uses profile storage, the launcher asks which character profile to edit. **Pilot A** can use quality **Low**, while **Pilot B** uses **High**. Saving one profile must not change the other.\n\n## What you change\n\nUse `base: \"profile\"` in your settings file declaration. The rest of the form works as before.",
+          "nl": "## Wat de speler ziet\n\nBij profielopslag vraagt de launcher welk personageprofiel je wilt bewerken. **Pilot A** kan kwaliteit **Laag** gebruiken en **Pilot B** **Hoog**. Opslaan voor het ene profiel mag het andere niet veranderen.\n\n## Wat je verandert\n\nGebruik opslag per profiel in de bestandsdeclaratie. De rest van het formulier werkt hetzelfde.",
+          "fr": "## Ce que voit le joueur\n\nPour un formulaire stocké par profil, le lanceur demande quel profil de personnage modifier. **Pilot A** peut choisir **Faible** et **Pilot B** **Élevé**. Enregistrer un profil ne doit pas modifier l’autre.\n\n## Ce que vous changez\n\nUtilisez stockage par profil dans la déclaration du fichier. Le reste du formulaire fonctionne comme avant.",
+          "de": "## Was der Spieler sieht\n\nBei Profilspeicherung fragt der Launcher nach dem Charakterprofil. **Pilot A** kann **Niedrig** verwenden, **Pilot B** dagegen **Hoch**. Das Speichern eines Profils darf das andere nicht ändern.\n\n## Was du änderst\n\nVerwende Speichern je Profil in der Dateideklaration. Der Rest des Formulars bleibt gleich.",
+          "ru": "## Что видит игрок\n\nДля формы с настройками профиля лаунчер предлагает выбрать профиль персонажа. **Pilot A** может использовать качество **Низкое**, а **Pilot B** — **Высокое**. Сохранение одного профиля не должно менять другой.\n\n## Что изменить\n\nУкажите хранение по профилям в объявлении файла. Остальная форма работает как раньше.",
+          "zh_CN": "## 玩家会看到什么\n\n表单使用配置档案存储时，启动器会询问要编辑哪个角色的配置档案。**Pilot A** 可以使用 **低** 画质，**Pilot B** 使用 **高**。保存一个档案不应改变另一个。\n\n## 需要修改什么\n\n在设置文件声明中使用 按配置档案保存。表单的其他部分保持不变。",
+          "ja": "## プレイヤーに見えるもの\n\nプロファイル保存を使うフォームでは、編集するキャラクターのプロファイルを選びます。**Pilot A** は **低**、**Pilot B** は **高** を使えます。一方の保存で他方が変わってはいけません。\n\n## 変更するもの\n\n設定ファイルの宣言に プロファイルごとの保存 を指定します。フォームの他の部分は同じです。",
+          "ko": "## 플레이어가 보는 화면\n\n프로필 저장을 사용하는 폼에서는 편집할 캐릭터 프로필을 선택합니다. **Pilot A**는 **낮음**, **Pilot B**는 **높음**를 사용할 수 있습니다. 한 프로필을 저장해도 다른 프로필은 바뀌면 안 됩니다.\n\n## 변경할 내용\n\n설정 파일 선언에 프로필별 저장을 사용하세요. 나머지 폼은 동일하게 동작합니다.",
+          "visuals": {
+            "1": [
+              "profile-picker"
+            ],
+            "3": [
+              "profile-a"
+            ]
+          }
+        },
+        {
+          "code": "{\n  \"id\": \"prefs\",\n  \"base\": \"profile\",\n  \"path\": \"preferences.json\",\n  \"format\": \"json\"\n}",
+          "afterImages": [
+            "profile-a"
+          ]
+        },
+        {
+          "en": "## Choose the right location\n\n- `mod`: one file in the mod package; shared by its users.\n- `evejs`: a server configuration file; its path must start with `config/`.\n- `profile`: private data for this mod and this profile.\n- `profile_settings`: the selected profile’s actual EVE text settings. Use only known supported keys.\n- `client`: the physical copied client; shared by profiles using that client.\n\nA profile is not a separate installation of renderer DLLs. Binary installation remains shared. Do not mix server-coordinated and client-coordinated files in one form.\n\n## Check it\n\nSave different values for two profiles, then reopen both. For a complete profile example, see [15. Example files](@example-files).",
+          "nl": "## Kies de juiste plek\n\n- modmap: één bestand in het modpakket, gedeeld door gebruikers.\n- servermap: een serverconfiguratiebestand; het pad begint met `config/`.\n- privéprofiel: privégegevens voor deze mod en dit profiel.\n- EVE-instellingen van het profiel: de echte EVE-tekstinstellingen van het gekozen profiel. Gebruik alleen bekende ondersteunde sleutels.\n- gedeelde clientmap: de fysieke gekopieerde client, gedeeld door profielen die deze gebruiken.\n\nEen profiel heeft geen eigen installatie van renderer-DLL’s. Die installatie blijft gedeeld. Meng geen server- en clientgecoördineerde bestanden in één formulier.\n\n## Controleer het\n\nSla verschillende waarden op voor twee profielen en open beide opnieuw. Zie [15. Voorbeeldbestanden](@example-files) voor een volledig voorbeeld.",
+          "fr": "## Choisir le bon emplacement\n\n- dossier du mod : un fichier partagé dans le paquet du mod.\n- dossier du serveur : un fichier de configuration du serveur ; le chemin commence par `config/`.\n- profil privé : des données privées pour ce mod et ce profil.\n- réglages EVE du profil : les vrais réglages texte EVE du profil choisi. Utilisez seulement des clés connues et prises en charge.\n- dossier partagé du client : le client physique copié, partagé par ses profils.\n\nUn profil n’a pas sa propre installation de DLL de rendu. Les binaires restent partagés. Ne mélangez pas dans un même formulaire des fichiers coordonnés par le serveur et par le client.\n\n## Vérifier\n\nEnregistrez des valeurs différentes pour deux profils, puis rouvrez-les. Voir [15. Fichiers exemples](@example-files) pour un exemple complet.",
+          "de": "## Den richtigen Speicherort wählen\n\n- Modordner: eine gemeinsame Datei im Mod-Paket.\n- Serverordner: eine Server-Konfigurationsdatei; der Pfad beginnt mit `config/`.\n- privates Profil: private Daten für diesen Mod und dieses Profil.\n- EVE-Einstellungen des Profils: echte EVE-Texteinstellungen des gewählten Profils. Verwende nur bekannte unterstützte Schlüssel.\n- gemeinsamer Clientordner: der physisch kopierte Client, gemeinsam für seine Profile.\n\nEin Profil besitzt keine eigene Installation der Renderer-DLLs. Binärdateien bleiben gemeinsam. Mische keine server- und clientkoordinierten Dateien in einem Formular.\n\n## Prüfen\n\nSpeichere unterschiedliche Werte für zwei Profile und öffne beide erneut. Ein vollständiges Beispiel bietet [15. Beispieldateien](@example-files).",
+          "ru": "## Выберите место хранения\n\n- папка мода: общий файл в пакете мода.\n- папка сервера: конфигурация сервера; путь начинается с `config/`.\n- личный профиль: личные данные этого мода и профиля.\n- настройки EVE профиля: настоящие текстовые настройки EVE выбранного профиля. Используйте только известные поддерживаемые ключи.\n- общая папка клиента: физическая копия клиента, общая для использующих её профилей.\n\nПрофиль не имеет отдельной установки DLL рендеринга. Двоичные файлы остаются общими. Не смешивайте в одной форме файлы, координируемые сервером и клиентом.\n\n## Проверка\n\nСохраните разные значения для двух профилей и снова откройте оба. Полный пример: [15. Файлы примеров](@example-files).",
+          "zh_CN": "## 选择正确的存储位置\n\n- 模组文件夹：模组包内的共享文件。\n- 服务器文件夹：服务器配置文件，路径必须以 `config/` 开头。\n- 私有配置档案：此模组在此配置档案内的私有数据。\n- 该配置档案的 EVE 设置：所选档案的实际 EVE 文本设置，仅使用已知且受支持的键。\n- 共享客户端文件夹：物理复制的客户端，由使用它的档案共享。\n\n配置档案并非独立的渲染 DLL 安装。二进制安装仍是共享的。不要在一个表单中混合由服务器协调和由客户端协调的文件。\n\n## 检查方法\n\n为两个档案保存不同的值，然后分别重新打开。完整示例见 [15. 示例文件](@example-files)。",
+          "ja": "## 保存先を選ぶ\n\n- MOD フォルダー: MOD パッケージ内の共有ファイル。\n- サーバーフォルダー: サーバーの設定。パスは `config/` で始まります。\n- 個別プロファイル: この MOD とプロファイル専用のデータ。\n- プロファイルの EVE 設定: 選択したプロファイルの実際の EVE テキスト設定。対応が分かっているキーだけ使います。\n- 共有クライアントフォルダー: コピーされた物理クライアント。同じクライアントのプロファイルで共有します。\n\nプロファイルごとに描画 DLL がインストールされるわけではありません。バイナリは共有です。一つのフォームでサーバー側とクライアント側の管理対象ファイルを混在させないでください。\n\n## 確認する\n\n二つのプロファイルに別々の値を保存して開き直します。完全な例は [15. サンプルファイル](@example-files) にあります。",
+          "ko": "## 올바른 저장 위치 선택\n\n- 모드 폴더: 모드 패키지 안의 공유 파일.\n- 서버 폴더: 서버 설정 파일. 경로가 `config/`로 시작해야 합니다.\n- 개별 프로필: 이 모드와 프로필만 사용하는 데이터.\n- 프로필의 EVE 설정: 선택한 프로필의 실제 EVE 텍스트 설정. 지원이 확인된 키만 사용하세요.\n- 공유 클라이언트 폴더: 물리적으로 복사된 클라이언트. 해당 클라이언트를 쓰는 프로필이 공유합니다.\n\n프로필마다 렌더러 DLL이 따로 설치되는 것은 아닙니다. 바이너리 설치는 공유됩니다. 하나의 폼에 서버와 클라이언트가 각각 조정하는 파일을 섞지 마세요.\n\n## 확인 방법\n\n두 프로필에 서로 다른 값을 저장한 다음 다시 열어 보세요. 전체 예시는 [15. 예제 파일](@example-files)에 있습니다.",
+          "visuals": {
+            "1": [
+              "storage-locations"
+            ],
+            "2": [
+              "client-row"
+            ],
+            "4": [
+              "profile-a",
+              "profile-b"
+            ]
+          }
+        }
+      ],
+      "handoffFiles": [
+        "docs/mod-authoring/settings-reference.md",
+        "docs/mod-authoring/helpers.md",
+        "examples/mods/profile-options/README.md",
+        "examples/mods/profile-options/evejs-launcher.mod.json",
+        "examples/mods/profile-options/helper.js"
+      ]
+    },
+    {
+      "id": "languages",
+      "path": "docs/mod-authoring/languages.md",
+      "title": {
+        "en": "6. Translate setting labels",
+        "nl": "6. Vertaal instellingslabels",
+        "fr": "6. Traduire les libellés",
+        "de": "6. Beschriftungen übersetzen",
+        "ru": "6. Переведите подписи",
+        "zh_CN": "6. 翻译设置标签",
+        "ja": "6. 設定ラベルを翻訳する",
+        "ko": "6. 설정 이름 번역"
+      },
+      "blocks": [
+        {
+          "en": "## What the player sees\n\nAn English player sees **Quality**. A Dutch player sees **Kwaliteit**. Both edit the same setting and save the same value.\n\n## What you add\n\nReplace a field’s plain field name with a language map. Always include `en` as the fallback. This is a fragment inside a field:",
+          "nl": "## Wat de speler ziet\n\nEen Engelse speler ziet **Kwaliteit**. Een Nederlandse speler ziet **Kwaliteit**. Beiden wijzigen dezelfde instelling en slaan dezelfde waarde op.\n\n## Wat je toevoegt\n\nVervang de gewone veldnaam door een taaloverzicht. Voeg altijd `en` toe als terugvaltaal. Dit fragment hoort binnen een veld:",
+          "fr": "## Ce que voit le joueur\n\nUn joueur anglais voit **Qualité**. Un joueur néerlandais voit **Kwaliteit**. Les deux modifient le même réglage et enregistrent la même valeur.\n\n## Ce que vous ajoutez\n\nRemplacez le libellé simple par une table de langues. Incluez toujours `en` comme langue de secours. Ce fragment va dans un champ :",
+          "de": "## Was der Spieler sieht\n\nEin englischer Spieler sieht **Qualität**, ein niederländischer **Kwaliteit**. Beide ändern dieselbe Einstellung und speichern denselben Wert.\n\n## Was du hinzufügst\n\nErsetze den einfachen Beschriftung-Text durch eine Sprachzuordnung. `en` muss als Rückfallwert enthalten sein. Dieser Ausschnitt gehört in ein Feld:",
+          "ru": "## Что видит игрок\n\nАнглоязычный игрок видит **Качество**, нидерландоязычный — **Kwaliteit**. Оба меняют одну настройку и сохраняют одно значение.\n\n## Что добавить\n\nЗамените простой подпись картой языков. Всегда включайте `en` как запасной язык. Этот фрагмент находится внутри поля:",
+          "zh_CN": "## 玩家会看到什么\n\n英语玩家看到 **画质**，荷兰语玩家看到 **Kwaliteit**。他们编辑的是同一设置，保存的值也相同。\n\n## 需要添加什么\n\n将字段的纯文本 标签 替换为语言映射。必须包含 `en` 作为回退语言。以下片段放在一个字段内部：",
+          "ja": "## プレイヤーに見えるもの\n\n英語のプレイヤーには **画質**、オランダ語のプレイヤーには **Kwaliteit** と表示されます。どちらも同じ設定を変更し、同じ値を保存します。\n\n## 追加するもの\n\n項目の 表示名 を言語別の表に置き換えます。代替用の `en` を必ず含めてください。次は項目内に置く断片です。",
+          "ko": "## 플레이어가 보는 화면\n\n영어 사용자는 **품질**, 네덜란드어 사용자는 **Kwaliteit**를 봅니다. 두 사용자는 같은 설정을 편집하고 같은 값을 저장합니다.\n\n## 추가할 내용\n\n필드의 일반 표시 이름을 언어별 맵으로 바꾸세요. 대체 언어인 `en`을 반드시 포함하세요. 다음은 필드 안에 넣는 일부 코드입니다.",
+          "visuals": {
+            "1": [
+              "language-en",
+              "language-nl"
+            ],
+            "3": [
+              "language-nl"
+            ]
+          }
+        },
+        {
+          "code": "\"label\": {\n  \"en\": \"Quality\",\n  \"nl\": \"Kwaliteit\",\n  \"fr\": \"Qualité\",\n  \"de\": \"Qualität\",\n  \"ru\": \"Качество\",\n  \"zh_CN\": \"质量\",\n  \"ja\": \"品質\",\n  \"ko\": \"품질\"\n}",
+          "afterImages": [
+            "language-nl"
+          ]
+        },
+        {
+          "en": "You can translate `description`, group heading and choice labels the same way. Keep permanent mod identifier, saved setting name, file paths, enum names and stored values unchanged. For example, the stored value `\"high\"` stays `\"high\"` in every language.\n\nThe launcher does not automatically translate text written by your mod. Supply the translations you want to offer. English-only text is valid.\n\n## Check it\n\nChange the launcher language, reopen Configure, and check the labels. Change a value and confirm the saved keys are unchanged. The language selector in this guide changes only the guide; it does not change the launcher’s language or your mod settings.",
+          "nl": "Je kunt uitleg, groep en keuzelabels op dezelfde manier vertalen. Laat vaste identificatie, opgeslagen veldnaam, bestandspaden, vaste namen en opgeslagen waarden gelijk. De opgeslagen waarde `\"high\"` blijft bijvoorbeeld in elke taal `\"high\"`.\n\nDe launcher vertaalt tekst van je mod niet automatisch. Lever zelf de gewenste vertalingen aan. Alleen Engelse tekst is ook geldig.\n\n## Controleer het\n\nVerander de launchertaal, open Instellen opnieuw en controleer de labels. Wijzig een waarde en controleer dat de opgeslagen sleutels gelijk blijven. De taalkiezer in deze handleiding verandert alleen de handleiding, niet de launchertaal of modinstellingen.",
+          "fr": "Vous pouvez traduire description, groupe et les libellés des choix de la même façon. Ne changez pas identifiant fixe, nom du champ enregistré, les chemins, les noms fixes ou les valeurs enregistrées. Par exemple, `\"high\"` reste `\"high\"` dans toutes les langues.\n\nLe lanceur ne traduit pas automatiquement les textes de votre mod. Fournissez les traductions souhaitées. Un texte uniquement anglais reste valide.\n\n## Vérifier\n\nChangez la langue du lanceur, rouvrez Configurer et vérifiez les libellés. Modifiez une valeur et vérifiez que les clés restent identiques. Le sélecteur de langue de ce guide change uniquement le guide, pas la langue du lanceur ni les réglages du mod.",
+          "de": "Erklärung, Gruppe und Auswahlbeschriftungen werden genauso übersetzt. feste Kennung, gespeicherter Feldname, Dateipfade, feste Namen und gespeicherte Werte bleiben unverändert. Der Wert `\"high\"` bleibt beispielsweise in jeder Sprache `\"high\"`.\n\nDer Launcher übersetzt Mod-Texte nicht automatisch. Liefere die gewünschten Übersetzungen selbst. Rein englischer Text ist gültig.\n\n## Prüfen\n\nÄndere die Launcher-Sprache, öffne Konfigurieren erneut und prüfe die Beschriftungen. Ändere einen Wert und kontrolliere, dass die Schlüssel gleich bleiben. Die Sprachauswahl dieser Anleitung ändert nur die Anleitung, nicht den Launcher oder Mod-Einstellungen.",
+          "ru": "Так же можно перевести пояснение, группа и подписи вариантов. Не меняйте постоянный идентификатор, имя сохраняемого поля, пути, фиксированные имена и сохранённые значения. Например, значение `\"high\"` остаётся `\"high\"` на любом языке.\n\nЛаунчер не переводит тексты мода автоматически. Предоставьте нужные переводы сами. Текст только на английском тоже допустим.\n\n## Проверка\n\nСмените язык лаунчера, снова откройте Настроить и проверьте подписи. Измените значение и убедитесь, что ключи остались прежними. Выбор языка в этом руководстве меняет только руководство, а не язык лаунчера или настройки мода.",
+          "zh_CN": "说明、分组 和选项标签也可以这样翻译。保持 固定标识、保存的字段名、文件路径、枚举名称和保存的值不变。例如，`\"high\"` 在任何语言下都仍保存为 `\"high\"`。\n\n启动器不会自动翻译模组提供的文字。你需要提供希望支持的翻译。只使用英语也有效。\n\n## 检查方法\n\n切换启动器语言，重新打开 配置 并检查标签。修改数值，确认保存的键没有改变。本指南的语言选择器只改变指南，不改变启动器语言或模组设置。",
+          "ja": "説明、グループ、選択肢のラベルも同じ方法で翻訳できます。固定の識別名、保存先の項目名、パス、固定名、保存値は変えません。例えば `\"high\"` はどの言語でも `\"high\"` のままです。\n\nランチャーは MOD の文章を自動翻訳しません。必要な翻訳を作者が用意します。英語のみでも有効です。\n\n## 確認する\n\nランチャーの言語を変え、設定 を開き直して表示を確認します。値を変更しても保存キーが同じであることを確認してください。このガイドの言語選択はガイドだけに作用し、ランチャーや MOD 設定を変更しません。",
+          "ko": "설명, 그룹, 선택 항목 이름도 같은 방식으로 번역할 수 있습니다. 고정 식별자, 저장할 항목 이름, 파일 경로, 열거형 이름과 저장값은 바꾸지 마세요. 예를 들어 `\"high\"`는 모든 언어에서 `\"high\"`로 저장됩니다.\n\n런처는 모드가 제공한 문장을 자동 번역하지 않습니다. 필요한 번역을 직접 제공하세요. 영어만 사용해도 유효합니다.\n\n## 확인 방법\n\n런처 언어를 변경한 다음 설정를 다시 열어 이름을 확인하세요. 값을 바꾸고 저장된 키가 그대로인지 확인하세요. 이 안내의 언어 선택은 안내만 바꾸며 런처 언어나 모드 설정을 변경하지 않습니다.",
+          "visuals": {
+            "0": [
+              "language-value"
+            ],
+            "1": [
+              "language-en"
+            ],
+            "3": [
+              "language-nl",
+              "language-value"
+            ]
+          }
+        }
+      ],
+      "handoffFiles": [
+        "docs/mod-authoring/settings-reference.md"
+      ]
+    },
+    {
+      "id": "updates-intro",
+      "path": "docs/mod-authoring/mod-updates.md",
+      "title": {
+        "en": "7. Offer mod updates",
+        "nl": "7. Bied modupdates aan",
+        "fr": "7. Proposer des mises à jour",
+        "de": "7. Mod-Updates anbieten",
+        "ru": "7. Предложите обновления",
+        "zh_CN": "7. 提供模组更新",
+        "ja": "7. MOD の更新を提供する",
+        "ko": "7. 모드 업데이트 제공"
+      },
+      "blocks": [
+        {
+          "en": "## What the player sees\n\nWhen a compatible newer release exists, Mods shows an update button and a gold count badge. The player can read the release notes and choose whether to install it. Checking for updates does not install anything.\n\n## What you add\n\nAdd `updates` to the existing schema-3 manifest. Replace this example repository and filename with your own:",
+          "nl": "## Wat de speler ziet\n\nAls een passende nieuwere versie bestaat, toont Aanpassingen een updateknop en een goudkleurige teller. De speler kan de wijzigingsnotities lezen en zelf kiezen of de update wordt geïnstalleerd. Controleren installeert niets.\n\n## Wat je toevoegt\n\nVoeg update-informatie toe aan je schema-3-manifest. Vervang de voorbeeldrepository en bestandsnaam door je eigen gegevens:",
+          "fr": "## Ce que voit le joueur\n\nSi une version plus récente et compatible existe, Modifications affiche un bouton de mise à jour et un compteur doré. Le joueur lit les notes et choisit de l’installer ou non. La recherche n’installe rien.\n\n## Ce que vous ajoutez\n\nAjoutez informations de mise à jour au manifeste de schéma 3. Remplacez le dépôt et le nom de fichier par les vôtres :",
+          "de": "## Was der Spieler sieht\n\nBei einer neueren kompatiblen Version zeigt Modifikationen eine Update-Schaltfläche und einen goldenen Zähler. Spieler können die Versionshinweise lesen und die Installation wählen. Eine Suche installiert nichts.\n\n## Was du hinzufügst\n\nErgänze Updateangaben im Schema-3-Manifest. Ersetze Repository und Dateinamen durch deine eigenen:",
+          "ru": "## Что видит игрок\n\nПри наличии новой совместимой версии Моды показывает кнопку обновления и золотой счётчик. Игрок читает описание выпуска и сам решает, устанавливать ли его. Проверка ничего не устанавливает.\n\n## Что добавить\n\nДобавьте сведения об обновлениях в манифест схемы 3. Замените репозиторий и имя файла своими:",
+          "zh_CN": "## 玩家会看到什么\n\n有兼容的新版本时，模组 会显示更新按钮和金色数量徽标。玩家可以阅读更新说明并决定是否安装。检查更新不会自动安装任何内容。\n\n## 需要添加什么\n\n向架构 3 清单添加 更新信息。将示例仓库和文件名替换为自己的内容：",
+          "ja": "## プレイヤーに見えるもの\n\n互換性のある新しい版があると、モッド に更新ボタンと金色の件数表示が出ます。プレイヤーは変更点を読み、インストールするか選べます。確認だけではインストールしません。\n\n## 追加するもの\n\nスキーマ 3 のマニフェストに 更新情報 を追加します。例のリポジトリとファイル名を自分のものに置き換えてください。",
+          "ko": "## 플레이어가 보는 화면\n\n호환되는 새 버전이 있으면 모드에 업데이트 버튼과 금색 개수 배지가 표시됩니다. 플레이어는 릴리스 설명을 읽고 설치 여부를 선택합니다. 업데이트 확인만으로 설치되지는 않습니다.\n\n## 추가할 내용\n\n스키마 3 매니페스트에 업데이트 정보를 추가하세요. 예시 저장소와 파일명은 자신의 것으로 바꾸세요."
+        },
+        {
+          "en": "![A demo mod with a gold Update v1.2.3 button](@docs/mod-authoring/images/update-available.png)\n\n*Actual launcher widgets, fictional update. The gold **Update v1.2.3** button belongs to this mod. Clicking it opens the review before installation. The Configure button beside it changes settings; the switch controls activation.*",
+          "nl": "![Een voorbeeldmod met een gouden updateknop voor v1.2.3](@docs/mod-authoring/images/update-available.png)\n\n*Echte launcheronderdelen, fictieve update. De gouden knop **Bijwerken naar v1.2.3** hoort bij deze mod. Een klik opent de controle vóór installatie. De knop Instellen ernaast wijzigt instellingen; de schakelaar bepaalt of de mod is ingeschakeld.*",
+          "fr": "![Un mod de démonstration avec un bouton doré de mise à jour v1.2.3](@docs/mod-authoring/images/update-available.png)\n\n*Vrais composants du lanceur, mise à jour fictive. Le bouton doré **Mettre à jour vers v1.2.3** concerne ce mod. Un clic ouvre la vérification avant installation. Le bouton Configurer voisin change les réglages ; l’interrupteur contrôle l’activation.*",
+          "de": "![Ein Beispiel-Mod mit goldener Update-Schaltfläche für v1.2.3](@docs/mod-authoring/images/update-available.png)\n\n*Echte Launcher-Elemente, fiktives Update. Die goldene Schaltfläche **Auf v1.2.3 aktualisieren** gehört zu diesem Mod. Ein Klick öffnet die Prüfung vor der Installation. Konfigurieren daneben ändert die Einstellungen; der Schalter steuert die Aktivierung.*",
+          "ru": "![Пример мода с золотой кнопкой обновления v1.2.3](@docs/mod-authoring/images/update-available.png)\n\n*Настоящие элементы лаунчера, вымышленное обновление. Золотая кнопка **Обновление v1.2.3** относится к этому моду. Нажатие открывает проверку перед установкой. Соседняя кнопка Настроить меняет настройки, а переключатель управляет включением мода.*",
+          "zh_CN": "![带有金色 v1.2.3 更新按钮的示例模组](@docs/mod-authoring/images/update-available.png)\n\n*真实启动器控件，虚构更新。金色 **更新至 v1.2.3** 按钮属于此模组。点击后会先显示安装前的确认内容。旁边的 配置 按钮用于修改设置，开关控制是否启用模组。*",
+          "ja": "![金色の v1.2.3 更新ボタンが表示されたデモ MOD](@docs/mod-authoring/images/update-available.png)\n\n*実際のランチャー部品と架空の更新です。金色の **v1.2.3 に更新** ボタンはこの MOD の更新用です。クリックするとインストール前の確認画面が開きます。隣の 設定 は設定変更、スイッチは有効／無効の切り替えです。*",
+          "ko": "![금색 v1.2.3 업데이트 버튼이 표시된 데모 모드](@docs/mod-authoring/images/update-available.png)\n\n*실제 런처 위젯과 가상의 업데이트입니다. 금색 **v1.2.3 업데이트** 버튼은 이 모드의 업데이트용입니다. 클릭하면 설치 전 검토 화면이 열립니다. 옆의 설정 버튼은 설정을 바꾸고, 스위치는 모드 활성화를 제어합니다.*"
+        },
+        {
+          "code": "\"updates\": {\n  \"provider\": \"github\",\n  \"repository\": \"your-name/your-mod\",\n  \"asset\": \"YourMod-{version}.zip\",\n  \"channel\": \"stable\",\n  \"tagPrefix\": \"v\",\n  \"preserveFiles\": []\n}",
+          "afterImages": [
+            "update-available"
+          ]
+        },
+        {
+          "en": "## Publish the new version\n\nThe update button needs two downloadable files on your GitHub release: your mod ZIP and a small information file ending in `.update.json`. That second file tells the launcher which mod and version it is downloading and lets it check the ZIP. The included packaging program creates it from the ZIP; the next chapter explains how.\n\nFollow [14. Publish a mod update](@publish-update). It explains both files and the check before you publish.\n\n## Try it\n\nOpen the offered update, read the version and release notes, then choose Cancel. Nothing should be installed. After installing a real update in a test copy, check that your saved preferences remain.",
+          "nl": "## De nieuwe versie publiceren\n\nDe updateknop heeft twee downloadbestanden bij je GitHub-release nodig: de ZIP van je mod en een klein informatiebestand met `.update.json` als uitgang. Dat tweede bestand vertelt welke mod en versie worden gedownload en maakt controle van de ZIP mogelijk. Het meegeleverde programma maakt het uit de ZIP; het volgende hoofdstuk legt uit hoe.\n\nVolg [14. Een modupdate publiceren](@publish-update). Daar staan beide bestanden en de controle vóór publicatie uitgelegd.\n\n## Probeer het\n\nOpen de update, lees versie en wijzigingen en kies Annuleren. Er mag niets geïnstalleerd worden. Controleer na een echte update in een testkopie of je voorkeuren bewaard zijn.",
+          "fr": "## Publier la nouvelle version\n\nLe bouton de mise à jour nécessite deux fichiers joints à la version GitHub : le ZIP du mod et un petit fichier d’information se terminant par `.update.json`. Ce second fichier indique le mod et sa version et permet de vérifier le ZIP. Le programme fourni le génère depuis le ZIP ; le chapitre suivant explique comment.\n\nSuivez [14. Publier une mise à jour](@publish-update) pour comprendre ces fichiers et les vérifications.\n\n## Essayer\n\nOuvrez la mise à jour, lisez la version et les changements, puis annulez. Rien ne doit être installé. Après une vraie mise à jour dans une copie de test, vérifiez que vos préférences restent présentes.",
+          "de": "## Die neue Version veröffentlichen\n\nDie Update-Schaltfläche benötigt zwei Dateien im GitHub-Release: das Mod-ZIP und eine kleine Informationsdatei mit der Endung `.update.json`. Sie nennt Mod und Version und ermöglicht die Prüfung des ZIPs. Das beiliegende Programm erzeugt sie aus dem ZIP; das nächste Kapitel erklärt den Ablauf.\n\nFolge [14. Ein Mod-Update veröffentlichen](@publish-update). Dort werden beide Dateien und die Prüfung erklärt.\n\n## Ausprobieren\n\nÖffne das Update, lies Version und Änderungen und brich ab. Es darf nichts installiert werden. Prüfe nach einem echten Update in einer Testkopie, ob deine Einstellungen erhalten bleiben.",
+          "ru": "## Публикация новой версии\n\nДля кнопки обновления нужны два файла в выпуске GitHub: ZIP мода и небольшой файл сведений с окончанием `.update.json`. Он указывает мод и версию и позволяет проверить ZIP. Приложенная программа создаёт его из ZIP; следующая глава объясняет как.\n\nОткройте [14. Опубликовать обновление мода](@publish-update): там объяснены оба файла и проверка.\n\n## Проверка\n\nОткройте обновление, прочитайте версию и изменения, затем отмените. Ничего не должно установиться. После настоящего обновления в тестовой копии проверьте сохранность настроек.",
+          "zh_CN": "## 发布新版本\n\n更新按钮需要 GitHub 发布中附带两个可下载文件：模组 ZIP 压缩包，以及一个以 `.update.json` 结尾的小型信息文件。第二个文件说明正在下载哪个模组、哪个版本，并帮助启动器检查压缩包。附带的程序可以从 ZIP 生成它；下一章会说明操作方法。\n\n请看[14. 发布模组更新](@publish-update)，了解两个文件的用途和发布前的检查。\n\n## 试试看\n\n打开更新，阅读版本和更新说明，然后选择取消。此时不应安装任何内容。在测试副本中安装真正的更新后，确认已保存的偏好仍然存在。",
+          "ja": "## 新しい版を公開する\n\n更新ボタンには GitHub のリリースに二つのファイルが必要です。MOD の ZIP と、末尾が `.update.json` の小さな情報ファイルです。後者は MOD と版を示し、ZIP の確認に使います。付属のプログラムが ZIP から生成します。次の章で操作を説明します。\n\n[14. MOD の更新を公開する](@publish-update)で、二つのファイルと公開前の確認を説明します。\n\n## 試す\n\n更新を開いて版と変更点を読み、キャンセルします。何もインストールされないことを確認します。テスト用コピーで実際に更新した後、保存した設定が残ることを確認します。",
+          "ko": "## 새 버전 게시\n\n업데이트 버튼에는 GitHub 릴리스에 첨부한 두 파일이 필요합니다. 모드 ZIP과 `.update.json`으로 끝나는 작은 정보 파일입니다. 두 번째 파일은 모드와 버전을 알려 주고 ZIP 검증에 사용됩니다. 포함된 프로그램이 ZIP에서 생성합니다. 다음 장에서 방법을 설명합니다.\n\n[14. 모드 업데이트 게시](@publish-update)에서 두 파일과 게시 전 확인을 설명합니다.\n\n## 확인하기\n\n업데이트를 열어 버전과 변경 내용을 읽고 취소하세요. 아무것도 설치되지 않아야 합니다. 테스트 복사본에서 실제 업데이트를 설치한 뒤 저장한 설정이 남는지 확인하세요.",
+          "visuals": {
+            "1": [
+              "release-files"
+            ],
+            "3": [
+              "update-review"
+            ]
+          }
+        }
+      ],
+      "handoffFiles": [
+        "docs/mod-authoring/updates.md",
+        "examples/mods/github-update-demo/README.md",
+        "examples/mods/github-update-demo/evejs-launcher.mod.json",
+        "examples/mods/github-update-demo/loader.js.disabled"
+      ]
+    },
+    {
+      "id": "helpers-intro",
+      "path": "docs/mod-authoring/helper-intro.md",
+      "title": {
+        "en": "8. Add a helper when needed",
+        "nl": "8. Voeg zo nodig een helper toe",
+        "fr": "8. Ajouter un programme d’assistance",
+        "de": "8. Bei Bedarf einen Helper hinzufügen",
+        "ru": "8. Добавьте помощник при необходимости",
+        "zh_CN": "8. 按需添加辅助程序",
+        "ja": "8. 必要な場合にヘルパーを追加する",
+        "ko": "8. 필요할 때 도우미 추가"
+      },
+      "blocks": [
+        {
+          "en": "## When you need this\n\nA Configure form can save values without a helper. Add a helper only when your mod needs executable preparation: for example, converting a saved preference into profile settings before EVE starts.\n\n## What the player sees\n\nThe player uses the normal mod or launch action. The launcher runs the declared helper, checks its reply and shows any failure. There is no arbitrary script button to add to the form.\n\nThe example below declares only `prepare_profile`. It belongs in an existing schema-3 manifest.",
+          "nl": "## Wanneer je dit nodig hebt\n\nEen Instellen-formulier kan zonder helper opslaan. Voeg alleen een helper toe als je mod uitvoerbare voorbereiding nodig heeft, bijvoorbeeld een voorkeur omzetten naar profielinstellingen voordat EVE start.\n\n## Wat de speler ziet\n\nDe speler gebruikt de gewone mod- of startactie. De launcher voert de opgegeven helper uit, controleert het antwoord en toont fouten. Je voegt geen willekeurige scriptknop aan het formulier toe.\n\nDit voorbeeld geeft alleen profielvoorbereiding op. Het hoort in een bestaand schema-3-manifest.",
+          "fr": "## Quand l’utiliser\n\nUn formulaire Configurer enregistre sans programme d’assistance. Ajoutez-en un seulement pour exécuter une préparation, par exemple convertir une préférence en réglages de profil avant le démarrage d’EVE.\n\n## Ce que voit le joueur\n\nLe joueur utilise l’action habituelle du mod ou du lancement. Le lanceur exécute le programme déclaré, vérifie sa réponse et affiche les erreurs. Il n’y a pas de bouton de script arbitraire à ajouter au formulaire.\n\nCet exemple déclare seulement préparation du profil. Il va dans un manifeste existant de schéma 3.",
+          "de": "## Wann du das brauchst\n\nEin Konfigurieren-Formular speichert ohne Helper. Ergänze einen Helper nur für ausführbare Vorbereitung, etwa um eine Einstellung vor dem EVE-Start in Profilwerte umzusetzen.\n\n## Was der Spieler sieht\n\nDer Spieler verwendet die normale Mod- oder Startaktion. Der Launcher führt den deklarierten Helper aus, prüft die Antwort und zeigt Fehler. Es gibt keine beliebige Skript-Schaltfläche für das Formular.\n\nDas Beispiel deklariert nur Profilvorbereitung und gehört in ein bestehendes Schema-3-Manifest.",
+          "ru": "## Когда это нужно\n\nФорма Настроить сохраняет значения без помощника. Добавляйте его только для выполнения подготовительного кода, например преобразования параметра в настройки профиля перед запуском EVE.\n\n## Что видит игрок\n\nИгрок использует обычное действие мода или запуска. Лаунчер выполняет объявленный помощник, проверяет ответ и показывает ошибки. Произвольную кнопку запуска скрипта в форму добавлять нельзя.\n\nПример объявляет только подготовка профиля и добавляется в существующий манифест схемы 3.",
+          "zh_CN": "## 何时需要它\n\n配置 表单无需辅助程序即可保存数值。只有模组需要执行准备代码时才添加，例如在 EVE 启动前将偏好转换为配置档案设置。\n\n## 玩家会看到什么\n\n玩家使用普通的模组操作或启动操作。启动器运行已声明的辅助程序，检查响应并显示错误。表单不提供任意脚本执行按钮。\n\n以下示例仅声明 启动前准备配置档案，应放入现有架构 3 清单。",
+          "ja": "## 必要になる場面\n\n設定 の保存にヘルパーは不要です。EVE 起動前に設定値をプロファイル設定へ変換するなど、準備コードの実行が必要な場合だけ追加します。\n\n## プレイヤーに見えるもの\n\nプレイヤーは通常の MOD 操作や起動操作を行います。ランチャーが宣言済みのヘルパーを実行し、応答を確認して失敗を表示します。フォームに任意スクリプトのボタンを追加する仕組みではありません。\n\n次の例は 起動前のプロファイル準備 のみを宣言し、既存のスキーマ 3 マニフェスト内に置きます。",
+          "ko": "## 언제 필요한가요?\n\n설정 폼은 도우미 없이 값을 저장할 수 있습니다. EVE 시작 전에 설정을 프로필 값으로 변환하는 등 준비 코드가 필요할 때만 도우미를 추가하세요.\n\n## 플레이어가 보는 화면\n\n플레이어는 일반 모드 작업이나 실행 작업을 사용합니다. 런처는 선언된 도우미를 실행하고 응답을 검사하며 오류를 표시합니다. 폼에 임의의 스크립트 버튼을 추가하는 기능은 아닙니다.\n\n다음 예시는 시작 전 프로필 준비만 선언하며 기존 스키마 3 매니페스트 안에 넣습니다.",
+          "visuals": {
+            "1": [
+              "configure-default"
+            ],
+            "3": [
+              "helper-launch"
+            ],
+            "4": [
+              "helper-request"
+            ]
+          }
+        },
+        {
+          "code": "\"launcherApi\": {\n  \"version\": 1,\n  \"minLauncherVersion\": \"1.0.53\",\n  \"helper\": {\"runtime\": \"node\", \"path\": \"helper.js\"},\n  \"capabilities\": [\"prepare_profile\"]\n}",
+          "afterImages": [
+            "helper-request"
+          ]
+        },
+        {
+          "en": "## Use a complete working example\n\nGet `profile-options` from [15. Example files](@example-files). This example turns a saved preference into a setting used when a profile starts. The helper receives the chosen values and sends back its proposed changes. The launcher checks those changes before saving them.\n\nUse the paths supplied by the launcher. Request shared setting changes through contributions so the launcher can track ownership and restore them later. Do not replace whole shared files to change one key.\n\nTest success, failure and cancellation in a disposable setup.",
+          "nl": "## Gebruik een volledig werkend voorbeeld\n\nHaal `profile-options` op via [15. Voorbeeldbestanden](@example-files). Dit voorbeeld zet een opgeslagen voorkeur om in een instelling bij het starten van een profiel. De helper ontvangt de gekozen waarden en stelt wijzigingen voor. De launcher controleert die voordat hij ze opslaat.\n\nGebruik de paden die de launcher aanlevert. Vraag wijzigingen aan gedeelde instellingen via contributions, zodat de launcher eigendom en herstel kan bijhouden. Vervang geen heel gedeeld bestand voor één sleutel.\n\nTest succes, fouten en annuleren in een wegwerpopstelling.",
+          "fr": "## Utiliser un exemple complet\n\nPrenez `profile-options` dans [15. Fichiers exemples](@example-files). Cet exemple transforme une préférence sauvegardée en réglage au démarrage du profil. Le programme reçoit les valeurs et propose les modifications. Le lanceur les vérifie avant de les enregistrer.\n\nUtilisez les chemins fournis par le lanceur. Demandez les modifications partagées par contributions, afin de suivre leur propriétaire et de les restaurer. Ne remplacez pas un fichier partagé entier pour changer une clé.\n\nTestez réussite, échec et annulation dans un environnement jetable.",
+          "de": "## Ein vollständiges Beispiel verwenden\n\nHole `profile-options` unter [15. Beispieldateien](@example-files). Es setzt eine gespeicherte Vorliebe beim Profilstart in eine Einstellung um. Das Hilfsprogramm erhält die Werte und schlägt Änderungen vor. Der Launcher prüft sie vor dem Speichern.\n\nVerwende die vom Launcher gelieferten Pfade. Fordere gemeinsame Einstellungsänderungen über Contributions an, damit der Launcher Zuordnung und Wiederherstellung verwalten kann. Ersetze keine ganze gemeinsame Datei für einen Schlüssel.\n\nTeste Erfolg, Fehler und Abbruch in einer Testumgebung.",
+          "ru": "## Используйте полный пример\n\nВозьмите `profile-options` на странице [15. Файлы примеров](@example-files). Он превращает сохранённое предпочтение в настройку при запуске профиля. Помощник получает выбранные значения и предлагает изменения, которые лаунчер проверяет перед сохранением.\n\nИспользуйте пути от лаунчера. Предлагайте изменения общих настроек через contributions: так лаунчер отслеживает владельца и может восстановить значения. Не заменяйте целый общий файл ради одного ключа.\n\nПроверьте успех, ошибку и отмену в тестовой среде.",
+          "zh_CN": "## 使用完整示例\n\n从[15. 示例文件](@example-files)获取 `profile-options`。这个示例会在配置档案启动时，把保存的偏好转成实际设置。辅助程序收到所选数值后提出修改，启动器检查后才会保存。\n\n使用启动器提供的路径。通过 contributions 请求修改共享设置，以便启动器跟踪归属并在之后恢复。不要为了修改一个键而替换整个共享文件。\n\n在可丢弃环境中测试成功、失败和取消。",
+          "ja": "## 完全な例を使う\n\n[15. サンプルファイル](@example-files)から `profile-options` を入手します。保存した好みを、プロファイル起動時に使う設定へ変える例です。補助プログラムが値を受け取り変更を提案し、ランチャーが確認して保存します。\n\nランチャーが渡すパスを使います。共有設定の変更は contributions で提案し、ランチャーが管理・復元できるようにします。一つのキーを変えるために共有ファイル全体を置き換えないでください。\n\n使い捨て環境で成功・失敗・キャンセルを確認します。",
+          "ko": "## 완전한 예시 사용\n\n[15. 예제 파일](@example-files)에서 `profile-options`를 받으세요. 프로필 시작 시 저장된 선호 값을 실제 설정으로 바꾸는 예제입니다. 도우미가 선택한 값을 받아 변경을 제안하고 런처가 확인한 뒤 저장합니다.\n\n런처가 제공한 경로를 사용하세요. 공유 설정 변경은 contributions로 요청해야 런처가 소유권을 추적하고 나중에 복원할 수 있습니다. 키 하나를 바꾸려고 공유 파일 전체를 덮어쓰지 마세요.\n\n테스트 환경에서 성공, 실패, 취소를 확인하세요.",
+          "visuals": {
+            "1": [
+              "helper-request",
+              "helper-reply"
+            ],
+            "2": [
+              "helper-result"
+            ],
+            "3": [
+              "helper-failure"
+            ]
+          }
+        }
+      ],
+      "handoffFiles": [
+        "docs/mod-authoring/helpers.md",
+        "docs/mod-authoring/ownership.md",
+        "examples/mods/profile-options/README.md",
+        "examples/mods/profile-options/evejs-launcher.mod.json",
+        "examples/mods/profile-options/helper.js"
+      ]
+    },
+    {
+      "id": "removal",
+      "path": "docs/mod-authoring/removal.md",
+      "title": {
+        "en": "9. Remove and recover",
+        "nl": "9. Verwijderen en herstellen",
+        "fr": "9. Supprimer et restaurer",
+        "de": "9. Entfernen und wiederherstellen",
+        "ru": "9. Удаление и восстановление",
+        "zh_CN": "9. 移除与恢复",
+        "ja": "9. 削除と復元",
+        "ko": "9. 제거와 복구"
+      },
+      "blocks": [
+        {
+          "en": "## What the player sees\n\nDisabling a mod changes whether it should run; it keeps the package. Removing a launcher-owned local package moves it out of the active mod folder into recoverable storage. **Undo Removal** can bring it back.\n\nIf the launcher does not own the package, it may offer **Adopt** first. Unknown or externally changed files can require repair instead of automatic removal.\n\n## What the author provides\n\nAn ordinary local package uses the launcher’s package management. A mod that installs client binaries or changes source files also needs its own verified cleanup and recovery logic. A manifest alone does not make those changes reversible.",
+          "nl": "## Wat de speler ziet\n\nUitschakelen verandert of de mod moet draaien; het pakket blijft bestaan. Verwijderen verplaatst een lokaal pakket dat de launcher beheert naar herstelbare opslag. **Verwijdering ongedaan maken** kan het terugzetten.\n\nBeheert de launcher het pakket nog niet, dan kan eerst **In beheer nemen** verschijnen. Onbekende of extern gewijzigde bestanden kunnen herstel vereisen in plaats van automatisch verwijderen.\n\n## Wat de maker levert\n\nEen gewoon lokaal pakket gebruikt het pakketbeheer van de launcher. Een mod die clientbestanden installeert of broncode wijzigt, heeft ook eigen gecontroleerde opruim- en herstellogica nodig. Alleen een manifest maakt die wijzigingen niet terugdraaibaar.",
+          "fr": "## Ce que voit le joueur\n\nDésactiver change l’exécution du mod mais garde le paquet. Supprimer un paquet local géré par le lanceur le déplace hors du dossier actif vers un stockage récupérable. **Annuler le retrait** permet de le restaurer.\n\nSi le paquet n’est pas géré, **Prendre en charge** peut être proposé d’abord. Des fichiers inconnus ou modifiés ailleurs peuvent nécessiter une réparation.\n\n## Ce que fournit l’auteur\n\nUn paquet local ordinaire utilise la gestion du lanceur. Un mod qui installe des binaires ou modifie le code source doit aussi fournir une logique vérifiée de nettoyage et de restauration. Un manifeste seul ne rend pas ces changements réversibles.",
+          "de": "## Was der Spieler sieht\n\nDeaktivieren ändert die Ausführung und behält das Paket. Entfernen verschiebt ein vom Launcher verwaltetes lokales Paket aus dem aktiven Ordner in wiederherstellbaren Speicher. **Entfernung rückgängig machen** kann es zurückholen.\n\nNicht verwaltete Pakete benötigen eventuell zuerst **Verwaltung übernehmen**. Unbekannte oder extern geänderte Dateien können eine Reparatur erfordern.\n\n## Was der Autor bereitstellt\n\nNormale lokale Pakete nutzen die Paketverwaltung des Launchers. Ein Mod, der Client-Binärdateien installiert oder Quellcode ändert, braucht zusätzlich geprüfte Bereinigungs- und Wiederherstellungslogik. Ein Manifest allein macht solche Änderungen nicht umkehrbar.",
+          "ru": "## Что видит игрок\n\nОтключение меняет запуск мода, но сохраняет пакет. Удаление локального пакета, которым управляет лаунчер, переносит его из активной папки в восстанавливаемое хранилище. **Отменить удаление** возвращает его.\n\nЕсли пакет не находится под управлением лаунчера, сначала может предлагаться **Принять под управление**. Неизвестные или изменённые извне файлы могут требовать восстановления вместо автоматического удаления.\n\n## Что должен предоставить автор\n\nОбычный локальный пакет использует управление лаунчера. Моду, устанавливающему двоичные файлы или меняющему исходный код, нужна собственная проверенная логика очистки и восстановления. Один манифест не делает эти изменения обратимыми.",
+          "zh_CN": "## 玩家会看到什么\n\n禁用模组会改变其是否运行，但保留模组包。移除由启动器管理的本地包，会将其从活动模组文件夹移到可恢复存储中。**撤销移除** 可以将其还原。\n\n如果包尚未由启动器管理，可能先显示 **接管管理**。未知或被外部修改的文件可能需要修复，而不能自动移除。\n\n## 作者需要提供什么\n\n普通本地包使用启动器的包管理。安装客户端二进制文件或修改源文件的模组，还必须提供经过验证的清理与恢复逻辑。清单本身无法让这些修改自动变得可逆。",
+          "ja": "## プレイヤーに見えるもの\n\n無効化は実行状態を変えますが、パッケージを残します。ランチャー管理のローカルパッケージを削除すると、アクティブなフォルダーから復元可能な保管先へ移します。**削除を元に戻す** で戻せます。\n\n未管理のパッケージには先に **管理対象にする** が出る場合があります。不明なファイルや外部で変更されたファイルは修復が必要なことがあります。\n\n## 作者が用意するもの\n\n通常のローカルパッケージはランチャーの管理機能を使います。クライアントのバイナリやソースを変更する MOD には、検証済みの後片付け・復元処理も必要です。マニフェストだけで変更が元に戻せるわけではありません。",
+          "ko": "## 플레이어가 보는 화면\n\n비활성화는 실행 여부만 바꾸고 패키지는 유지합니다. 런처가 관리하는 로컬 패키지를 제거하면 활성 모드 폴더에서 복구 가능한 저장소로 이동합니다. **제거 취소**로 되돌릴 수 있습니다.\n\n아직 관리하지 않는 패키지는 먼저 **관리 대상으로 등록**가 표시될 수 있습니다. 알 수 없거나 외부에서 변경된 파일은 자동 제거 대신 복구가 필요할 수 있습니다.\n\n## 제작자가 제공할 내용\n\n일반 로컬 패키지는 런처의 패키지 관리를 사용합니다. 클라이언트 바이너리를 설치하거나 소스를 변경하는 모드는 검증된 정리 및 복구 로직도 제공해야 합니다. 매니페스트만으로 변경이 되돌릴 수 있게 되는 것은 아닙니다.",
+          "visuals": {
+            "1": [
+              "remove-confirm",
+              "undo-removal"
+            ],
+            "2": [
+              "restored-mod"
+            ],
+            "4": [
+              "client-receipt"
+            ]
+          }
+        },
+        {
+          "en": "## Check it in a disposable installation\n\n1. Import and enable your mod; make one setting change.\n2. Disable it and perform the required restart. Confirm its behaviour stops.\n3. Remove the package. Check that unrelated files and other mods still work.\n4. Restore it. Check the expected saved preferences and activation state before enabling it again.\n\nShared settings should use owned key contributions. On removal, the launcher can remove your contribution without deleting another mod’s unrelated keys.",
+          "nl": "## Controleer in een wegwerpinstallatie\n\n1. Importeer en activeer je mod; wijzig één instelling.\n2. Schakel hem uit en voer de vereiste herstart uit. Controleer dat het gedrag stopt.\n3. Verwijder het pakket. Controleer dat andere bestanden en mods blijven werken.\n4. Herstel het. Controleer voorkeuren en activeringsstatus voordat je het weer inschakelt.\n\nGebruik contributions met eigenaarschap voor gedeelde instellingen. Bij verwijderen kan de launcher jouw bijdrage weghalen zonder sleutels van andere mods te verwijderen.",
+          "fr": "## Vérifier dans une installation jetable\n\n1. Importez et activez le mod ; modifiez un réglage.\n2. Désactivez-le et effectuez le redémarrage requis. Vérifiez que son comportement cesse.\n3. Supprimez le paquet. Vérifiez les fichiers sans rapport et les autres mods.\n4. Restaurez-le. Vérifiez les préférences et l’état avant de le réactiver.\n\nUtilisez des contributions de clés attribuées pour les réglages partagés. Le lanceur pourra retirer votre contribution sans effacer les clés sans rapport d’un autre mod.",
+          "de": "## In einer Testinstallation prüfen\n\n1. Importiere und aktiviere den Mod; ändere eine Einstellung.\n2. Deaktiviere ihn und führe den nötigen Neustart durch. Prüfe, ob sein Verhalten endet.\n3. Entferne das Paket. Prüfe andere Dateien und Modifikationen.\n4. Stelle es wieder her. Kontrolliere Einstellungen und Zustand vor der erneuten Aktivierung.\n\nVerwende zugeordnete Schlüssel-Contributions für gemeinsame Einstellungen. Beim Entfernen kann der Launcher deinen Beitrag zurücknehmen, ohne fremde Schlüssel zu löschen.",
+          "ru": "## Проверка в тестовой установке\n\n1. Импортируйте и включите мод; измените одну настройку.\n2. Выключите его и выполните нужный перезапуск. Убедитесь, что поведение прекратилось.\n3. Удалите пакет. Проверьте несвязанные файлы и другие моды.\n4. Восстановите его. Проверьте настройки и состояние до повторного включения.\n\nДля общих настроек используйте contributions с учётом владельца ключей. При удалении лаунчер сможет убрать ваш вклад, не удаляя посторонние ключи другого мода.",
+          "zh_CN": "## 在可丢弃安装中检查\n\n1. 导入并启用模组，修改一个设置。\n2. 禁用并执行所需重启，确认其行为停止。\n3. 移除包，检查无关文件和其他模组仍正常工作。\n4. 恢复包，在重新启用前检查保存的偏好和启用状态。\n\n共享设置应使用带归属记录的键贡献。移除时，启动器可以撤销你的贡献，而不删除其他模组的无关键。",
+          "ja": "## 使い捨ての環境で確認\n\n1. 取り込んで有効にし、設定を一つ変更します。\n2. 無効にして必要な再起動を行い、動作が止まることを確認します。\n3. 削除して、他のファイルや MOD に問題がないことを確認します。\n4. 復元して、保存設定と状態を確認してから再度有効にします。\n\n共有設定には所有者を記録するキー contributions を使います。削除時に、他の MOD の無関係なキーを消さず自分の変更を取り除けます。",
+          "ko": "## 테스트용 설치에서 확인\n\n1. 모드를 가져와 켜고 설정 하나를 바꾸세요.\n2. 끄고 필요한 재시작을 수행한 뒤 동작이 멈췄는지 확인하세요.\n3. 패키지를 제거하고 관련 없는 파일과 다른 모드가 정상인지 확인하세요.\n4. 복구 후 저장된 설정과 활성화 상태를 확인하고 다시 켜세요.\n\n공유 설정은 소유권이 기록된 키 contributions를 사용해야 합니다. 제거 시 다른 모드의 무관한 키를 지우지 않고 해당 변경만 되돌릴 수 있습니다.",
+          "visuals": {
+            "1": [
+              "settings-enabled",
+              "configure-dialog"
+            ],
+            "2": [
+              "loader-disabled",
+              "apply-restart"
+            ],
+            "3": [
+              "remove-confirm"
+            ],
+            "4": [
+              "undo-removal",
+              "restored-mod"
+            ],
+            "5": [
+              "owned-settings"
+            ]
+          }
+        }
+      ],
+      "handoffFiles": [
+        "docs/mod-authoring/ownership.md",
+        "docs/mod-authoring/legacy-removal.md"
+      ]
+    },
+    {
+      "id": "dependencies",
+      "path": "docs/mod-authoring/dependencies.md",
+      "title": {
+        "en": "10. Dependencies and load order",
+        "nl": "10. Afhankelijkheden en laadvolgorde",
+        "fr": "10. Dépendances et ordre de chargement",
+        "de": "10. Abhängigkeiten und Ladereihenfolge",
+        "ru": "10. Зависимости и порядок загрузки",
+        "zh_CN": "10. 依赖与加载顺序",
+        "ja": "10. 依存関係と読み込み順",
+        "ko": "10. 의존성과 로드 순서"
+      },
+      "blocks": [
+        {
+          "en": "## What the player sees\n\nIf your mod needs another mod, the launcher explains which prerequisite is missing or disabled. It blocks incompatible pairs and reports ordering cycles before startup. It does not silently disable another mod.\n\n## What you add\n\nAdd these optional fields to the manifest. Use real mod IDs. `requires` needs an installed, enabled, valid mod. `loadAfter` and `loadBefore` order loader preloads only; absent targets are ignored. `conflicts` prevents the pair from being enabled together.",
+          "nl": "## Wat de speler ziet\n\nAls jouw mod een andere mod nodig heeft, meldt de launcher welke vereiste mod ontbreekt of uitstaat. Onverenigbare combinaties worden geblokkeerd; kringlopen in de laadvolgorde worden vóór het starten gemeld. Andere mods worden niet stilzwijgend uitgeschakeld.\n\n## Wat je toevoegt\n\nVoeg deze optionele velden aan het manifest toe met echte mod-ID’s. vereiste mods vereist een geïnstalleerde, ingeschakelde, geldige mod. later laden en eerder laden bepalen alleen de volgorde van loaders; ontbrekende doelen worden genegeerd. onverenigbare mods voorkomt gelijktijdig inschakelen.",
+          "fr": "## Ce que voit le joueur\n\nLe lanceur indique quelle dépendance manque ou est désactivée. Il bloque les paires incompatibles et signale les cycles avant le démarrage. Il ne désactive pas un autre mod silencieusement.\n\n## Ce que vous ajoutez\n\nAjoutez ces champs facultatifs au manifeste avec de vrais identifiants. mods nécessaires exige un mod installé, activé et valide. charger après et charger avant ordonnent seulement les préchargements ; les cibles absentes sont ignorées. mods incompatibles empêche l’activation simultanée des deux mods.",
+          "de": "## Was der Spieler sieht\n\nDer Launcher nennt fehlende oder deaktivierte Voraussetzungen. Er blockiert inkompatible Paare und meldet zyklische Reihenfolgen vor dem Start. Andere Modifikationen werden nicht still deaktiviert.\n\n## Was du hinzufügst\n\nErgänze diese optionalen Manifestfelder mit echten Mod-IDs. benötigte Modifikationen verlangt einen installierten, aktivierten und gültigen Mod. später laden und früher laden ordnen nur Loader-Preloads; fehlende Ziele werden ignoriert. unverträgliche Modifikationen verhindert, dass beide Modifikationen gleichzeitig aktiviert werden.",
+          "ru": "## Что видит игрок\n\nЛаунчер сообщает, какой обязательный мод отсутствует или выключен. Он блокирует несовместимые пары и обнаруживает циклы порядка загрузки до запуска. Другие моды не отключаются без предупреждения.\n\n## Что добавить\n\nДобавьте эти необязательные поля с настоящими ID модов. обязательные моды требует установленный, включённый и допустимый мод. загружать после и загружать до задают порядок только загрузчиков; отсутствующие цели игнорируются. несовместимые моды запрещает одновременное включение пары.",
+          "zh_CN": "## 玩家会看到什么\n\n启动器会指出缺少或已禁用的必需模组，阻止不兼容的组合，并在启动前报告加载顺序循环。它不会悄悄禁用其他模组。\n\n## 需要添加什么\n\n将这些可选字段添加到清单，并使用真实模组 ID。必需模组 要求目标模组已安装、已启用且有效。在指定模组之后加载 和 在指定模组之前加载 只安排加载器的预加载顺序，忽略不存在的目标。不兼容的模组 阻止两个模组同时启用。",
+          "ja": "## プレイヤーに見えるもの\n\nランチャーは必要な MOD の不足や無効状態を表示します。互換性のない組み合わせを拒否し、起動前に読み込み順の循環を報告します。他の MOD を黙って無効にはしません。\n\n## 追加するもの\n\n実際の MOD ID を使って任意の項目を追加します。必要な MOD はインストール済みで有効かつ正常な MOD を要求します。指定 MOD より後に読み込む と 指定 MOD より前に読み込む はローダーの事前読み込み順だけを決め、存在しない対象は無視します。併用できない MOD は同時有効化を防ぎます。",
+          "ko": "## 플레이어가 보는 화면\n\n런처는 필요한 모드가 없거나 꺼져 있으면 알려 줍니다. 호환되지 않는 조합을 차단하고 시작 전에 로드 순서의 순환을 보고합니다. 다른 모드를 몰래 끄지 않습니다.\n\n## 추가할 내용\n\n실제 모드 ID로 선택 항목을 추가하세요. 필수 모드는 설치되고 활성화된 유효한 모드를 요구합니다. 지정 모드 뒤에 로드와 지정 모드 앞에 로드는 로더의 사전 로드 순서만 정하며 없는 대상은 무시합니다. 함께 사용할 수 없는 모드는 두 모드의 동시 활성화를 막습니다.",
+          "visuals": {
+            "1": [
+              "dependency-missing"
+            ],
+            "3": [
+              "dependency-order"
+            ]
+          }
+        },
+        {
+          "syntax": "json",
+          "code": "\"requires\": [\"base-content\"],\n\"loadAfter\": [\"mining-rules\"],\n\"loadBefore\": [\"final-overlay\"],\n\"conflicts\": [\"alternative-overhaul\"]",
+          "afterImages": [
+            "dependency-order"
+          ]
+        },
+        {
+          "en": "## Try it\n\nEnable the dependent mod without its prerequisite: the launcher should name the missing mod. Then install and enable the prerequisite and retry. [1. Make your first package](@first-mod).",
+          "nl": "## Probeer het\n\nSchakel de afhankelijke mod in zonder de vereiste mod: de launcher moet die bij naam noemen. Installeer en activeer de vereiste mod en probeer opnieuw. [1. Maak je eerste pakket](@first-mod).",
+          "fr": "## Essayer\n\nActivez le mod sans sa dépendance : le lanceur doit la nommer. Installez et activez ensuite cette dépendance, puis réessayez. [1. Créer votre premier paquet](@first-mod).",
+          "de": "## Ausprobieren\n\nAktiviere den Mod ohne seine Voraussetzung: Der Launcher sollte den fehlenden Mod nennen. Installiere und aktiviere ihn, dann versuche es erneut. [1. Dein erstes Paket erstellen](@first-mod).",
+          "ru": "## Проверка\n\nВключите мод без обязательной зависимости: лаунчер должен назвать её. Установите и включите зависимость, затем повторите. [1. Создайте первый пакет](@first-mod).",
+          "zh_CN": "## 试试看\n\n在缺少依赖时启用模组，启动器应指出缺少的模组。安装并启用依赖后重试。[1. 制作第一个包](@first-mod)。",
+          "ja": "## 試す\n\n依存先なしで有効にすると、不足している MOD 名が表示されます。依存先をインストールして有効にし、再試行します。[1. 最初のパッケージを作る](@first-mod)。",
+          "ko": "## 확인하기\n\n필수 모드 없이 활성화하면 런처가 누락된 모드 이름을 알려야 합니다. 필수 모드를 설치하고 켠 다음 다시 시도하세요. [1. 첫 패키지 만들기](@first-mod).",
+          "visuals": {
+            "1": [
+              "dependency-missing",
+              "dependency-order"
+            ]
+          }
+        }
+      ],
+      "handoffFiles": [
+        "docs/mod-authoring/manifest.md"
+      ]
+    },
+    {
+      "id": "source-integration",
+      "path": "docs/mod-authoring/source-integration.md",
+      "title": {
+        "en": "11. Integrate server source files",
+        "nl": "11. Serverbronbestanden integreren",
+        "fr": "11. Intégrer des fichiers du serveur",
+        "de": "11. Serverdateien integrieren",
+        "ru": "11. Интеграция файлов сервера",
+        "zh_CN": "11. 集成服务器源文件",
+        "ja": "11. サーバーソースの連携",
+        "ko": "11. 서버 소스 파일 연동"
+      },
+      "blocks": [
+        {
+          "en": "## What the player sees\n\nA source integration can have its own Mods row, toggle and Configure form. A packaged overlay starts disabled. Enabling runs its declared installer before recording the enabled state; disabling or removing runs cleanup. Undo restores it disabled.\n\n## Start from a working example\n\nGet `source-overlay-demo` from [15. Example files](@example-files). Try it only in a spare test installation. Its form lets you choose which example section to change and the replacement text. It demonstrates changing one owned part of a server file and restoring it later.\n\nAn existing source patch can use on/off value in a settings file instead. The mod must check its enabled flag before creating entities, timers or other effects. [1. Make your first package](@first-mod).",
+          "nl": "## Wat de speler ziet\n\nEen bronintegratie kan een eigen rij, schakelaar en instellingenformulier hebben. Een verpakte bronaanpassing begint uitgeschakeld. Inschakelen voert eerst de opgegeven installatie uit; uitschakelen of verwijderen voert opruiming uit. Herstellen zet het pakket uitgeschakeld terug.\n\n## Begin met een werkend voorbeeld\n\nHaal `source-overlay-demo` op via [15. Voorbeeldbestanden](@example-files). Gebruik alleen een aparte testinstallatie. Het formulier laat je een voorbeeldgedeelte en vervangende tekst kiezen. Het toont hoe je één beheerd deel van een serverbestand wijzigt en later herstelt.\n\nEen bestaande bronpatch kan aan/uit-vlag in een instellingenbestand gebruiken. Controleer de vlag vóór het aanmaken van entiteiten, timers of andere effecten. [1. Maak je eerste pakket](@first-mod).",
+          "fr": "## Ce que voit le joueur\n\nUne intégration peut avoir sa ligne, son interrupteur et son formulaire. Un paquet de fichiers démarre désactivé. L’activation exécute d’abord l’installation déclarée ; la désactivation et la suppression exécutent le nettoyage. La restauration le remet désactivé.\n\n## Partir d’un exemple\n\nPrenez `source-overlay-demo` dans [15. Fichiers exemples](@example-files), uniquement dans une installation de test. Son formulaire permet de choisir une section et le texte de remplacement. Il montre comment modifier une partie gérée d’un fichier serveur puis la restaurer.\n\nUne modification existante peut utiliser indicateur activé/désactivé dans un fichier. Vérifiez ce drapeau avant de créer entités, minuteurs ou autres effets. [1. Créer votre premier paquet](@first-mod).",
+          "de": "## Was der Spieler sieht\n\nEine Integration kann eine eigene Zeile, einen Schalter und ein Einstellungsformular haben. Ein Dateipaket beginnt deaktiviert. Aktivieren führt zuerst die deklarierte Installation aus; Deaktivieren und Entfernen führen die Bereinigung aus. Wiederherstellen setzt es deaktiviert zurück.\n\n## Mit einem Beispiel beginnen\n\nHole `source-overlay-demo` unter [15. Beispieldateien](@example-files) und nutze eine Testinstallation. Im Formular wählst du einen Beispielabschnitt und Ersatztext. Es zeigt, wie ein verwalteter Teil einer Serverdatei geändert und später wiederhergestellt wird.\n\nEin bestehender Quellcodepatch kann Ein-/Aus-Wert in einer Einstellungsdatei nutzen. Prüfe das Flag vor Entitäten, Timern oder anderen Effekten. [1. Dein erstes Paket erstellen](@first-mod).",
+          "ru": "## Что видит игрок\n\nИнтеграция может иметь свою строку, переключатель и форму настроек. Пакет файлов изначально выключен. Включение сначала запускает заявленную установку, а отключение и удаление — очистку. Восстановленный пакет остаётся выключенным.\n\n## Рабочий пример\n\nВозьмите `source-overlay-demo` на странице [15. Файлы примеров](@example-files) и используйте только тестовую установку. В форме выбираются пример участка и заменяющий текст. Показано изменение одной управляемой части серверного файла и её восстановление.\n\nСуществующий патч может использовать флаг включения в файле настроек. Проверяйте флаг до создания сущностей, таймеров и других эффектов. [1. Создайте первый пакет](@first-mod).",
+          "zh_CN": "## 玩家会看到什么\n\n源文件集成可以拥有独立模组行、开关和设置表单。文件覆盖包默认禁用。启用时先执行声明的安装程序，再保存启用状态；禁用或移除时执行清理。撤销移除后仍保持禁用。\n\n## 从可用示例开始\n\n从[15. 示例文件](@example-files)获取 `source-overlay-demo`，仅在独立测试安装中使用。表单可以选择示例区域和替换文字。它演示如何修改服务器文件中由模组负责的一部分，并在之后恢复。\n\n现有源文件补丁可以使用 设置文件中的启用开关。模组必须在创建实体、计时器或其他效果前检查启用标志。[1. 制作第一个包](@first-mod)。",
+          "ja": "## プレイヤーに見えるもの\n\n連携用の行、スイッチ、設定フォームを表示できます。ファイル差し替えパッケージは無効状態で始まります。有効化は宣言したインストールの成功後に記録され、無効化と削除は後片付けを実行します。復元後も無効です。\n\n## 実例から始める\n\n[15. サンプルファイル](@example-files)から `source-overlay-demo` を入手し、テスト環境だけで試します。フォームで例の範囲と置き換える文字を選べます。サーバーファイルの管理対象部分だけを変更し、後で戻す例です。\n\n既存のソース変更には 設定ファイル内の有効／無効の値 も使えます。エンティティやタイマーなどを作る前に有効フラグを確認してください。[1. 最初のパッケージを作る](@first-mod)。",
+          "ko": "## 플레이어가 보는 화면\n\n소스 연동에는 자체 모드 행, 스위치, 설정 폼을 제공할 수 있습니다. 파일 교체 패키지는 꺼진 상태로 시작합니다. 활성화 시 선언된 설치를 먼저 실행하고, 비활성화나 제거 시 정리합니다. 복원 후에도 꺼진 상태입니다.\n\n## 작동하는 예시로 시작\n\n[15. 예제 파일](@example-files)에서 `source-overlay-demo`를 받아 별도 테스트 설치에서만 사용하세요. 폼에서 예제 구역과 대체 텍스트를 선택합니다. 모드가 담당하는 서버 파일 일부를 변경하고 나중에 복원하는 예제입니다.\n\n기존 소스 패치는 설정 파일의 켜기/끄기 값을 사용할 수 있습니다. 개체, 타이머, 효과를 만들기 전에 활성화 플래그를 확인하세요. [1. 첫 패키지 만들기](@first-mod).",
+          "visuals": {
+            "1": [
+              "source-row"
+            ],
+            "3": [
+              "source-options"
+            ],
+            "4": [
+              "source-files"
+            ]
+          }
+        }
+      ],
+      "handoffFiles": [
+        "docs/mod-authoring/manifest.md",
+        "docs/mod-authoring/ownership.md",
+        "docs/mod-authoring/helpers.md",
+        "examples/mods/source-overlay-demo/README.md",
+        "examples/mods/source-overlay-demo/evejs-launcher.mod.json",
+        "examples/mods/source-overlay-demo/helper.js",
+        "examples/mods/source-overlay-demo/example-source.js"
+      ]
+    },
+    {
+      "id": "client-files",
+      "path": "docs/mod-authoring/client-files.md",
+      "title": {
+        "en": "12. Support client file mods",
+        "nl": "12. Aanpassingen voor clientbestanden",
+        "fr": "12. Gérer les fichiers du client",
+        "de": "12. Modifikationen für Clientdateien",
+        "ru": "12. Моды файлов клиента",
+        "zh_CN": "12. 客户端文件模组",
+        "ja": "12. クライアントファイルの MOD",
+        "ko": "12. 클라이언트 파일 모드"
+      },
+      "blocks": [
+        {
+          "en": "## What the player sees\n\nA client package can offer Install / Update, Verify and Recover through its Actions menu when those capabilities are declared. Before launching a client, the launcher verifies the enabled package. Installing shared files and changing one character’s preferences are separate operations.\n\n## Build from the receipt example\n\nGet `client-receipt-demo` from [15. Example files](@example-files). It demonstrates how a mod records what it installed, checks it, and cleans up. It does not install a graphics upgrade. A real graphics mod must also check the game version and keep the original files so it can restore them.\n\nKeep shared binary installation global to the physical client. Store character preferences in profile data. Never install shared binaries from `prepare_profile`. [8. Add a helper when needed](@helpers-intro).",
+          "nl": "## Wat de speler ziet\n\nEen clientpakket kan via Acties installatie, controle en herstel aanbieden als die mogelijkheden zijn opgegeven. Vóór een clientstart controleert de launcher het ingeschakelde pakket. Gedeelde bestanden installeren en voorkeuren van één personage aanpassen zijn afzonderlijke handelingen.\n\n## Gebruik het ontvangstbewijsvoorbeeld\n\nHaal `client-receipt-demo` op via [15. Voorbeeldbestanden](@example-files). Het toont hoe een mod bijhoudt wat hij installeerde, dit controleert en opruimt. Het installeert geen grafische verbetering. Een echte grafische mod moet ook de spelversie controleren en originele bestanden bewaren voor herstel.\n\nGedeelde binaire installatie hoort bij de fysieke client. Personagevoorkeuren horen in profielgegevens. Installeer nooit gedeelde bestanden vanuit profielvoorbereiding. [8. Voeg zo nodig een helper toe](@helpers-intro).",
+          "fr": "## Ce que voit le joueur\n\nLe menu Actions peut proposer installation, vérification et récupération si ces capacités sont déclarées. Avant de lancer le client, le lanceur vérifie le paquet activé. Installer des fichiers partagés et modifier les préférences d’un personnage sont des opérations distinctes.\n\n## Utiliser l’exemple de reçu\n\nPrenez `client-receipt-demo` dans [15. Fichiers exemples](@example-files). Il montre comment noter les fichiers installés, les vérifier et les nettoyer. Il n’installe pas d’amélioration graphique. Un vrai mod graphique doit vérifier la version du jeu et conserver les originaux pour les restaurer.\n\nL’installation binaire concerne le client physique ; les préférences vont dans le profil. N’installez jamais de binaires partagés depuis préparation du profil. [8. Ajouter un programme d’assistance](@helpers-intro).",
+          "de": "## Was der Spieler sieht\n\nDas Menü Aktionen kann Installation, Prüfung und Wiederherstellung anbieten, wenn diese Fähigkeiten deklariert sind. Vor dem Clientstart prüft der Launcher das aktivierte Paket. Gemeinsame Dateien installieren und Charaktereinstellungen ändern sind getrennte Vorgänge.\n\n## Mit dem Belegbeispiel beginnen\n\nHole `client-receipt-demo` unter [15. Beispieldateien](@example-files). Es zeigt, wie ein Mod installierte Dateien dokumentiert, prüft und entfernt. Es installiert keine Grafikverbesserung. Ein echter Grafikmod muss die Spielversion prüfen und Originaldateien für die Wiederherstellung behalten.\n\nGemeinsame Binärdateien gehören zum physischen Client, Charaktereinstellungen zum Profil. Installiere nie gemeinsame Binärdateien aus Profilvorbereitung. [8. Bei Bedarf einen Helper hinzufügen](@helpers-intro).",
+          "ru": "## Что видит игрок\n\nМеню Действия может предлагать установку, проверку и восстановление при наличии соответствующих возможностей. Перед запуском клиента лаунчер проверяет включённый пакет. Установка общих файлов и изменение настроек персонажа — разные операции.\n\n## Пример квитанции\n\nВозьмите `client-receipt-demo` на странице [15. Файлы примеров](@example-files). Он показывает учёт установленных файлов, проверку и очистку. Графическое улучшение не устанавливается. Настоящий графический мод должен проверять версию игры и хранить оригиналы для восстановления.\n\nОбщие бинарные файлы относятся к физическому клиенту, предпочтения персонажа — к профилю. Не устанавливайте общие файлы из подготовка профиля. [8. Добавьте помощник при необходимости](@helpers-intro).",
+          "zh_CN": "## 玩家会看到什么\n\n声明相关能力后，操作 菜单可以提供安装、验证和恢复。启动客户端前，启动器会验证已启用的包。安装共享文件与修改某个角色的偏好是不同操作。\n\n## 从回执示例开始\n\n从[15. 示例文件](@example-files)获取 `client-receipt-demo`。它演示如何记录安装内容、检查内容和清理文件，不会安装画面增强功能。真正的画面模组还必须检查游戏版本，并保存原始文件以便恢复。\n\n共享二进制文件属于物理客户端，角色偏好存放在配置档案数据中。不要在 启动前准备配置档案 中安装共享二进制文件。[8. 按需添加辅助程序](@helpers-intro)。",
+          "ja": "## プレイヤーに見えるもの\n\n宣言した機能に応じて 操作 メニューにインストール、検証、復旧が表示されます。クライアント起動前に有効なパッケージを検証します。共有ファイルのインストールとキャラクター設定の変更は別の処理です。\n\n## レシートの例から始める\n\n[15. サンプルファイル](@example-files)から `client-receipt-demo` を入手します。インストールした内容の記録、確認、後片付けの例で、画質向上機能は入れません。実際の描画 MOD ではゲームの版を確認し、復元用の原本を保持する必要があります。\n\n共有バイナリは物理クライアント全体、キャラクター設定はプロファイルで管理します。起動前のプロファイル準備 から共有バイナリをインストールしないでください。[8. 必要な場合にヘルパーを追加する](@helpers-intro)。",
+          "ko": "## 플레이어가 보는 화면\n\n기능을 선언하면 작업 메뉴에 설치, 검증, 복구가 표시됩니다. 클라이언트를 시작하기 전에 활성화된 패키지를 검증합니다. 공유 파일 설치와 캐릭터별 설정 변경은 별개입니다.\n\n## 영수증 예시로 시작\n\n[15. 예제 파일](@example-files)에서 `client-receipt-demo`를 받으세요. 설치 내용을 기록하고 검증하고 정리하는 예제이며 그래픽 개선을 설치하지 않습니다. 실제 그래픽 모드는 게임 버전을 확인하고 복원용 원본을 보관해야 합니다.\n\n공유 바이너리는 물리 클라이언트 전체에, 캐릭터 설정은 프로필에 저장하세요. 시작 전 프로필 준비에서 공유 바이너리를 설치하지 마세요. [8. 필요할 때 도우미 추가](@helpers-intro).",
+          "visuals": {
+            "1": [
+              "client-actions"
+            ],
+            "3": [
+              "client-receipt"
+            ],
+            "4": [
+              "storage-locations"
+            ]
+          }
+        }
+      ],
+      "handoffFiles": [
+        "docs/mod-authoring/helpers.md",
+        "docs/mod-authoring/ownership.md",
+        "examples/mods/client-receipt-demo/README.md",
+        "examples/mods/client-receipt-demo/evejs-launcher.mod.json",
+        "examples/mods/client-receipt-demo/helper.ps1"
+      ]
+    },
+    {
+      "id": "client-events",
+      "path": "docs/mod-authoring/client-events.md",
+      "title": {
+        "en": "13. React to client start and exit",
+        "nl": "13. Reageren op clientstart en afsluiten",
+        "fr": "13. Réagir au démarrage et à la fermeture",
+        "de": "13. Auf Clientstart und Ende reagieren",
+        "ru": "13. События запуска и выхода клиента",
+        "zh_CN": "13. 响应客户端启动与退出",
+        "ja": "13. クライアントの起動と終了を受け取る",
+        "ko": "13. 클라이언트 시작과 종료에 반응"
+      },
+      "blocks": [
+        {
+          "en": "## What the player sees\n\nThese are background notifications for your helper. They do not add a button or prove a successful game login. `launch_result` reports whether the process started; `client_exit` reports that same process’s exit code while the launcher remains open.\n\n## What you declare\n\nAdd either capability to the existing list of helper tasks list. Preserve capabilities your helper already needs. Both events share an opaque `launchId` so your helper can match a start with its exit. Notifications cannot change an already submitted launch.",
+          "nl": "## Wat de speler ziet\n\nDit zijn achtergrondmeldingen voor je helper. Ze voegen geen knop toe en bewijzen geen geslaagde spelinlog. melding van het startresultaat meldt of het proces is gestart; melding bij afsluiten meldt de afsluitcode van datzelfde proces zolang de launcher openblijft.\n\n## Wat je opgeeft\n\nVoeg één of beide mogelijkheden toe aan lijst met helpertaken. Behoud bestaande mogelijkheden die je helper nodig heeft. Beide gebeurtenissen delen een ondoorzichtige gedeeld startkenmerk, zodat je start en afsluiting kunt koppelen. Meldingen kunnen een al ingediende start niet veranderen.",
+          "fr": "## Ce que voit le joueur\n\nCe sont des notifications en arrière-plan pour votre programme. Elles n’ajoutent aucun bouton et ne prouvent pas une connexion réussie au jeu. notification du résultat du démarrage indique si le processus a démarré ; notification de fermeture donne son code de sortie tant que le lanceur reste ouvert.\n\n## Ce que vous déclarez\n\nAjoutez l’une ou les deux capacités à liste des tâches du programme, en conservant les capacités nécessaires. Les événements partagent un identifiant de lancement commun opaque pour associer début et fin. Ils ne peuvent pas modifier un lancement déjà soumis.",
+          "de": "## Was der Spieler sieht\n\nDies sind Hintergrundmeldungen für deinen Helper. Sie fügen keine Schaltfläche hinzu und beweisen keinen erfolgreichen Spiel-Login. Meldung des Startergebnisses meldet den Prozessstart; Meldung beim Beenden meldet dessen Exitcode, solange der Launcher offen bleibt.\n\n## Was du deklarierst\n\nErgänze eine oder beide Fähigkeiten in Liste der Helper-Aufgaben und behalte bereits benötigte Einträge. Beide Ereignisse teilen eine undurchsichtige gemeinsame Startkennung, um Start und Ende zuzuordnen. Meldungen können einen bereits eingereichten Start nicht verändern.",
+          "ru": "## Что видит игрок\n\nЭто фоновые уведомления помощнику. Они не добавляют кнопку и не подтверждают вход в игру. сообщение о результате запуска сообщает о создании процесса, а сообщение о завершении — о коде завершения этого процесса, пока лаунчер открыт.\n\n## Что объявить\n\nДобавьте одну или обе возможности в список задач помощника, сохранив уже нужные. События имеют общий непрозрачный общий идентификатор запуска, позволяющий связать запуск с выходом. Уведомления не могут изменить уже отправленный запуск.",
+          "zh_CN": "## 玩家会看到什么\n\n这些是发给辅助程序的后台通知，不会添加按钮，也不能证明已成功登录游戏。启动结果通知 报告进程是否启动；当启动器仍打开时，退出通知 报告同一进程的退出码。\n\n## 需要声明什么\n\n将其中一个或两个能力添加到现有 辅助程序的任务列表 列表，并保留原有必需能力。两个事件共享不透明的 同一次启动的标识，用于配对启动与退出。通知不能改变已提交的启动。",
+          "ja": "## プレイヤーに見えるもの\n\nヘルパーへのバックグラウンド通知です。ボタンは追加されず、ゲームへのログイン成功も示しません。起動結果の通知 はプロセスの起動結果、終了通知 はランチャーが開いている間の同じプロセスの終了コードを伝えます。\n\n## 宣言するもの\n\n既存の 補助プログラムの処理一覧 に一方または両方を追加し、必要な既存項目を残します。共通の不透明な 共通の起動識別子 で起動と終了を対応付けます。通知は送信済みの起動内容を変更できません。",
+          "ko": "## 플레이어가 보는 화면\n\n도우미에 전달되는 백그라운드 알림입니다. 버튼을 추가하거나 게임 로그인 성공을 증명하지 않습니다. 시작 결과 알림는 프로세스 시작 여부를, 종료 알림는 런처가 열려 있는 동안 같은 프로세스의 종료 코드를 알립니다.\n\n## 선언할 내용\n\n기존 도우미의 작업 목록에 하나 또는 둘 다 추가하고 필요한 기존 기능을 유지하세요. 두 이벤트는 불투명한 동일한 시작 작업의 식별자를 공유하여 시작과 종료를 연결합니다. 알림은 이미 제출한 시작 작업을 바꿀 수 없습니다.",
+          "visuals": {
+            "1": [
+              "event-started",
+              "event-exited"
+            ],
+            "3": [
+              "event-started"
+            ]
+          }
+        },
+        {
+          "syntax": "json",
+          "code": "\"capabilities\": [\"launch_result\", \"client_exit\"]",
+          "afterImages": [
+            "event-started"
+          ]
+        },
+        {
+          "en": "## Example result\n\nA started process followed by exit code `0` gives your helper two matched events. A failed spawn reports an exception type, not credentials or a command line. [8. Add a helper when needed](@helpers-intro).",
+          "nl": "## Voorbeeldresultaat\n\nEen gestart proces gevolgd door afsluitcode `0` levert twee gekoppelde gebeurtenissen op. Een mislukte start meldt een fouttype, geen inloggegevens of opdrachtregel. [8. Voeg zo nodig een helper toe](@helpers-intro).",
+          "fr": "## Exemple de résultat\n\nUn démarrage suivi du code de sortie `0` produit deux événements associés. Un échec indique un type d’exception, sans identifiants ni ligne de commande. [8. Ajouter un programme d’assistance](@helpers-intro).",
+          "de": "## Beispielergebnis\n\nEin gestarteter Prozess mit anschließendem Exitcode `0` erzeugt zwei zusammengehörige Ereignisse. Ein fehlgeschlagener Start meldet einen Fehlertyp, keine Zugangsdaten oder Befehlszeile. [8. Bei Bedarf einen Helper hinzufügen](@helpers-intro).",
+          "ru": "## Пример результата\n\nЗапуск процесса и выход с кодом `0` дают два связанных события. Неудачный запуск сообщает тип исключения, но не учётные данные и не командную строку. [8. Добавьте помощник при необходимости](@helpers-intro).",
+          "zh_CN": "## 结果示例\n\n进程启动后以 `0` 退出，辅助程序会收到两个配对事件。启动失败会报告异常类型，不包含凭据或命令行。[8. 按需添加辅助程序](@helpers-intro)。",
+          "ja": "## 結果の例\n\nプロセスが起動して終了コード `0` で終わると、対応する二つのイベントを受け取ります。起動失敗では例外の種類のみを通知し、認証情報やコマンドラインは含めません。[8. 必要な場合にヘルパーを追加する](@helpers-intro)。",
+          "ko": "## 결과 예시\n\n프로세스가 시작되고 코드 `0`으로 종료되면 연결된 두 이벤트가 전달됩니다. 시작 실패는 예외 유형만 알리며 자격 증명이나 명령줄은 포함하지 않습니다. [8. 필요할 때 도우미 추가](@helpers-intro).",
+          "visuals": {
+            "1": [
+              "event-started",
+              "event-exited",
+              "event-failed"
+            ]
+          }
+        }
+      ],
+      "handoffFiles": [
+        "docs/mod-authoring/helpers.md"
+      ]
+    },
+    {
+      "id": "publish-update",
+      "path": "docs/mod-authoring/publish-update.md",
+      "title": {
+        "en": "14. Publish a mod update",
+        "nl": "14. Een modupdate publiceren",
+        "fr": "14. Publier une mise à jour",
+        "de": "14. Ein Mod-Update veröffentlichen",
+        "ru": "14. Опубликовать обновление мода",
+        "zh_CN": "14. 发布模组更新",
+        "ja": "14. MOD の更新を公開する",
+        "ko": "14. 모드 업데이트 게시"
+      },
+      "blocks": [
+        {
+          "en": "A release is a downloadable version of your mod on GitHub. The launcher reads it to offer the update button. You publish your mod; you do not need to change the launcher. The version 1.2.3 below is an example.",
+          "nl": "Een release is een downloadbare versie van je mod op GitHub. De launcher leest die om de updateknop te tonen. Je publiceert je mod; je hoeft de launcher niet aan te passen. Versie 1.2.3 hieronder is een voorbeeld.",
+          "fr": "Une publication est une version téléchargeable de votre mod sur GitHub. Le lanceur la lit pour proposer le bouton de mise à jour. Vous publiez votre mod sans modifier le lanceur. La version 1.2.3 est un exemple.",
+          "de": "Ein Release ist eine herunterladbare Version deines Mods auf GitHub. Daraus erkennt der Launcher verfügbare Updates. Du veröffentlichst deinen Mod, ohne den Launcher zu ändern. Version 1.2.3 ist hier ein Beispiel.",
+          "ru": "Выпуск — это версия мода для скачивания с GitHub. Лаунчер читает её данные и предлагает обновление. Вы публикуете мод, не изменяя лаунчер. Версия 1.2.3 ниже — пример.",
+          "zh_CN": "发布是 GitHub 上可供下载的模组版本。启动器读取发布信息后显示更新按钮。你只需要发布模组，不需要修改启动器。下面的 1.2.3 仅为示例版本。",
+          "ja": "リリースとは GitHub からダウンロードできる MOD の版です。ランチャーが情報を読み取り、更新ボタンを表示します。MOD を公開すればよく、ランチャーの変更は不要です。以下の 1.2.3 は例です。",
+          "ko": "릴리스는 GitHub에서 다운로드할 수 있는 모드 버전입니다. 런처가 정보를 읽고 업데이트 버튼을 표시합니다. 런처를 바꾸지 않고 모드만 게시하면 됩니다. 아래의 1.2.3은 예시 버전입니다.",
+          "afterImages": [
+            "update-available"
+          ]
+        },
+        {
+          "en": "1. Prepare the mod ZIP. Its name and the version inside the mod must agree: for this example, use `YourMod-1.2.3.zip` and version 1.2.3. First check that this ZIP imports and works in a spare test installation.",
+          "nl": "1. Maak de ZIP van de mod. De bestandsnaam en de versie in de mod moeten overeenkomen: in dit voorbeeld `YourMod-1.2.3.zip` en versie 1.2.3. Controleer eerst of deze ZIP kan worden geïmporteerd en werkt in een aparte testinstallatie.",
+          "fr": "1. Préparez le ZIP du mod. Son nom et la version indiquée dans le mod doivent correspondre : `YourMod-1.2.3.zip` et version 1.2.3 ici. Vérifiez d’abord son importation et son fonctionnement dans une installation de test.",
+          "de": "1. Erstelle das Mod-ZIP. Dateiname und Version im Mod müssen übereinstimmen: hier `YourMod-1.2.3.zip` und Version 1.2.3. Prüfe zuerst Import und Funktion in einer separaten Testinstallation.",
+          "ru": "1. Подготовьте ZIP мода. Имя файла и версия внутри мода должны совпадать: здесь `YourMod-1.2.3.zip` и версия 1.2.3. Сначала проверьте импорт и работу в отдельной тестовой установке.",
+          "zh_CN": "1. 准备模组 ZIP 压缩包。文件名与模组内部版本必须一致：本例使用 `YourMod-1.2.3.zip` 和版本 1.2.3。先在独立测试安装中确认可以导入并正常工作。",
+          "ja": "1. MOD の ZIP を用意します。ファイル名と MOD 内の版を一致させます。この例では `YourMod-1.2.3.zip` と版 1.2.3 です。まず別のテスト環境で取り込みと動作を確認します。",
+          "ko": "1. 모드 ZIP을 준비하세요. 파일 이름과 모드 내부 버전이 같아야 합니다. 예시는 `YourMod-1.2.3.zip`과 버전 1.2.3입니다. 별도 테스트 설치에서 가져오기와 작동을 먼저 확인하세요.",
+          "afterImages": [
+            "release-zip"
+          ]
+        },
+        {
+          "en": "2. Create the small update information file. It tells the launcher the mod name, version and ZIP filename. The included `build_mod_update_metadata.py` program creates it from your ZIP. Get the program from [15. Example files](@example-files). It needs Python installed. In the folder containing both files, open a terminal and run the command under “Code examples”. It creates `YourMod-1.2.3.update.json` beside the ZIP. Opening the program as text does not run it.",
+          "nl": "2. Maak het kleine update-informatiebestand. Het vertelt de launcher welke mod, versie en ZIP erbij horen. Het meegeleverde programma `build_mod_update_metadata.py` maakt dit uit je ZIP. Haal het op via [15. Voorbeeldbestanden](@example-files). Python moet geïnstalleerd zijn. Open een terminal in de map met beide bestanden en voer de opdracht onder “Codevoorbeelden” uit. Er verschijnt `YourMod-1.2.3.update.json` naast de ZIP. Het programma als tekst openen voert het niet uit.",
+          "fr": "2. Créez le petit fichier d’information de mise à jour. Il indique le mod, sa version et le nom du ZIP. Le programme fourni `build_mod_update_metadata.py` le génère depuis le ZIP. Récupérez-le dans [15. Fichiers exemples](@example-files). Python doit être installé. Ouvrez un terminal dans le dossier des deux fichiers et exécutez la commande sous « Exemples de code ». Le fichier `YourMod-1.2.3.update.json` apparaît à côté du ZIP. Ouvrir le programme comme du texte ne l’exécute pas.",
+          "de": "2. Erzeuge die kleine Update-Informationsdatei. Sie nennt Mod, Version und ZIP-Dateiname. Das beiliegende Programm `build_mod_update_metadata.py` erzeugt sie aus dem ZIP. Du findest es unter [15. Beispieldateien](@example-files). Python muss installiert sein. Öffne im Ordner mit beiden Dateien ein Terminal und führe den Befehl unter „Codebeispiele“ aus. Neben dem ZIP entsteht `YourMod-1.2.3.update.json`. Das Programm als Text zu öffnen führt es nicht aus.",
+          "ru": "2. Создайте небольшой файл сведений об обновлении. Он указывает мод, версию и имя ZIP. Приложенная программа `build_mod_update_metadata.py` создаёт его из архива. Возьмите её на странице [15. Файлы примеров](@example-files). Требуется установленный Python. Откройте терминал в папке с обоими файлами и выполните команду из раздела «Примеры кода». Рядом появится `YourMod-1.2.3.update.json`. Открытие программы как текста не запускает её.",
+          "zh_CN": "2. 创建小型更新信息文件。它告诉启动器模组、版本和 ZIP 文件名。附带的 `build_mod_update_metadata.py` 程序可以从 ZIP 自动生成它。请从[15. 示例文件](@example-files)获取程序。需要先安装 Python。在包含这两个文件的文件夹中打开终端，执行“代码示例”下的命令。ZIP 旁会生成 `YourMod-1.2.3.update.json`。把程序当作文本打开并不会运行它。",
+          "ja": "2. 小さな更新情報ファイルを作ります。MOD、版、ZIP 名をランチャーに伝えるファイルです。付属の `build_mod_update_metadata.py` が ZIP から生成します。[15. サンプルファイル](@example-files)で入手できます。Python のインストールが必要です。二つのファイルがあるフォルダーで端末を開き、「コード例」のコマンドを実行します。ZIP の隣に `YourMod-1.2.3.update.json` ができます。テキストとして開くだけでは実行されません。",
+          "ko": "2. 작은 업데이트 정보 파일을 만드세요. 모드, 버전, ZIP 파일 이름을 런처에 알려 줍니다. 포함된 `build_mod_update_metadata.py` 프로그램이 ZIP에서 생성합니다. [15. 예제 파일](@example-files)에서 받으세요. Python이 설치되어 있어야 합니다. 두 파일이 있는 폴더에서 터미널을 열고 “코드 예시”의 명령을 실행하세요. ZIP 옆에 `YourMod-1.2.3.update.json`이 생성됩니다. 텍스트로 여는 것만으로는 실행되지 않습니다.",
+          "afterImages": [
+            "release-information"
+          ]
+        },
+        {
+          "en": "3. Create a GitHub release in the repository named by your mod. For version 1.2.3, use the tag `v1.2.3`. Attach BOTH files: `YourMod-1.2.3.zip` and `YourMod-1.2.3.update.json`. Write a short list of changes. GitHub’s automatic “Source code” downloads do not replace your mod ZIP.",
+          "nl": "3. Maak een GitHub-release in de repository die je mod opgeeft. Gebruik voor versie 1.2.3 de tag `v1.2.3`. Voeg BEIDE bestanden toe: `YourMod-1.2.3.zip` en `YourMod-1.2.3.update.json`. Schrijf kort wat is veranderd. De automatische broncodedownloads van GitHub vervangen je mod-ZIP niet.",
+          "fr": "3. Créez une publication GitHub dans le dépôt indiqué par le mod. Pour la version 1.2.3, utilisez l’étiquette `v1.2.3`. Joignez LES DEUX fichiers : `YourMod-1.2.3.zip` et `YourMod-1.2.3.update.json`. Résumez les changements. Les téléchargements automatiques du code source ne remplacent pas le ZIP du mod.",
+          "de": "3. Erstelle ein GitHub-Release im vom Mod angegebenen Repository. Nutze für Version 1.2.3 den Tag `v1.2.3`. Hänge BEIDE Dateien an: `YourMod-1.2.3.zip` und `YourMod-1.2.3.update.json`. Beschreibe die Änderungen kurz. GitHubs automatische Quellcode-Downloads ersetzen dein Mod-ZIP nicht.",
+          "ru": "3. Создайте выпуск GitHub в репозитории, указанном в моде. Для версии 1.2.3 используйте тег `v1.2.3`. Прикрепите ОБА файла: `YourMod-1.2.3.zip` и `YourMod-1.2.3.update.json`. Кратко опишите изменения. Автоматические архивы исходного кода GitHub не заменяют ZIP мода.",
+          "zh_CN": "3. 在模组指定的 GitHub 仓库中创建发布。版本 1.2.3 使用标签 `v1.2.3`。同时附加两个文件：`YourMod-1.2.3.zip` 和 `YourMod-1.2.3.update.json`。简要写明改动。GitHub 自动提供的源代码下载不能替代模组 ZIP。",
+          "ja": "3. MOD が指定する GitHub リポジトリでリリースを作成します。版 1.2.3 のタグは `v1.2.3` にします。`YourMod-1.2.3.zip` と `YourMod-1.2.3.update.json` の両方を添付し、変更点を書きます。GitHub の自動生成ソースダウンロードは MOD の ZIP の代わりになりません。",
+          "ko": "3. 모드에서 지정한 GitHub 저장소에 릴리스를 만드세요. 버전 1.2.3의 태그는 `v1.2.3`입니다. `YourMod-1.2.3.zip`과 `YourMod-1.2.3.update.json` 두 파일을 모두 첨부하고 변경 사항을 짧게 적으세요. GitHub의 자동 소스 코드 다운로드는 모드 ZIP을 대신하지 않습니다.",
+          "afterImages": [
+            "release-files"
+          ]
+        },
+        {
+          "en": "4. Check the player’s experience in a spare installation with an older version. Use Check mod updates, open the offered update and check the version and notes. Cancel once to check that nothing installs. Then update the test copy and confirm that your saved settings still work. Publish only a real version you have tested.",
+          "nl": "4. Controleer de ervaring in een aparte installatie met een oudere versie. Zoek naar modupdates, open het aanbod en controleer versie en wijzigingen. Annuleer een keer om te zien dat niets wordt geïnstalleerd. Werk daarna de testkopie bij en controleer je opgeslagen instellingen. Publiceer alleen een echte, geteste versie.",
+          "fr": "4. Vérifiez l’expérience dans une installation de test avec une ancienne version. Recherchez les mises à jour, ouvrez celle proposée et vérifiez version et notes. Annulez une fois pour confirmer qu’aucune installation ne se produit. Mettez ensuite la copie de test à jour et vérifiez les réglages sauvegardés. Ne publiez qu’une vraie version testée.",
+          "de": "4. Prüfe den Ablauf in einer separaten Installation mit älterer Version. Suche nach Mod-Updates und kontrolliere angebotene Version und Hinweise. Brich einmal ab, damit nichts installiert wird. Aktualisiere danach die Testkopie und prüfe gespeicherte Einstellungen. Veröffentliche nur echte, getestete Versionen.",
+          "ru": "4. Проверьте работу в отдельной установке со старой версией. Найдите обновления, откройте предложение и проверьте версию и описание. Один раз отмените, убедившись, что ничего не установилось. Затем обновите тестовую копию и проверьте сохранённые настройки. Публикуйте только настоящие проверенные версии.",
+          "zh_CN": "4. 在安装旧版本的独立测试环境中检查玩家体验。检查模组更新，打开更新提示并核对版本与说明。先取消一次，确认没有安装内容。然后更新测试副本，检查已保存的设置仍可使用。只发布经过测试的真实版本。",
+          "ja": "4. 古い版を入れた別のテスト環境で操作を確認します。更新を検索して版と説明を確認し、一度キャンセルして何も入らないことを確かめます。その後テスト環境を更新し、保存済み設定を確認します。テストした本当の版だけを公開してください。",
+          "ko": "4. 이전 버전이 설치된 별도 테스트 환경에서 확인하세요. 모드 업데이트를 확인하고 제안된 버전과 설명을 읽으세요. 한 번 취소하여 설치되지 않는지 확인하세요. 이후 테스트 복사본을 업데이트하고 저장된 설정을 확인하세요. 실제로 테스트한 버전만 게시하세요.",
+          "afterImages": [
+            "update-review",
+            "configure-reopened"
+          ]
+        },
+        {
+          "syntax": "powershell",
+          "code": "python build_mod_update_metadata.py YourMod-1.2.3.zip"
+        }
+      ],
+      "handoffFiles": [
+        "docs/mod-authoring/updates.md",
+        "examples/mods/github-update-demo/README.md",
+        "examples/mods/github-update-demo/evejs-launcher.mod.json",
+        "examples/mods/github-update-demo/loader.js.disabled",
+        "examples/tools/build_mod_update_metadata.py"
+      ]
+    },
+    {
+      "id": "example-files",
+      "path": "docs/mod-authoring/example-files.md",
+      "title": {
+        "en": "15. Example files",
+        "nl": "15. Voorbeeldbestanden",
+        "fr": "15. Fichiers exemples",
+        "de": "15. Beispieldateien",
+        "ru": "15. Файлы примеров",
+        "zh_CN": "15. 示例文件",
+        "ja": "15. サンプルファイル",
+        "ko": "15. 예제 파일"
+      },
+      "blocks": [
+        {
+          "en": "These are small working examples you can inspect or adapt. They are demonstrations, not finished gameplay or graphics mods. In the launcher guide, use **Save example files as ZIP** above the page. On GitHub, the files are in this repository’s `examples` folder.",
+          "nl": "Dit zijn kleine werkende voorbeelden die je kunt bekijken of aanpassen. Het zijn demonstraties, geen voltooide gameplay- of grafische mods. Gebruik in de launcherhandleiding **Voorbeeldbestanden opslaan als ZIP** boven deze pagina. Op GitHub staan ze in de map `examples` van deze repository.",
+          "fr": "Ce sont de petits exemples fonctionnels à consulter ou adapter, pas des mods de jeu ou de graphismes terminés. Dans le guide du lanceur, utilisez **Enregistrer les exemples en ZIP** au-dessus de la page. Sur GitHub, les fichiers sont dans le dossier `examples` du dépôt.",
+          "de": "Dies sind kleine funktionierende Beispiele zum Ansehen oder Anpassen, keine fertigen Spiel- oder Grafikmods. Nutze im Launcher **Beispieldateien als ZIP speichern** über dieser Seite. Auf GitHub liegen die Dateien im Ordner `examples` des Repositorys.",
+          "ru": "Это небольшие рабочие примеры для изучения и изменения, а не готовые игровые или графические моды. В руководстве лаунчера нажмите **Сохранить примеры в ZIP** над страницей. На GitHub файлы находятся в папке `examples` репозитория.",
+          "zh_CN": "这些是可以查看和修改的小型可用示例，并不是完整的游戏或画面模组。在启动器指南中，使用页面上方的**将示例文件保存为 ZIP**按钮。在 GitHub 上，文件位于仓库的 `examples` 文件夹。",
+          "ja": "内容を確認して変更できる小さな動作例です。完成したゲームや描画の MOD ではありません。ランチャーでは上部の**サンプルを ZIP として保存**を使います。GitHub ではリポジトリの `examples` フォルダーにあります。",
+          "ko": "살펴보고 수정할 수 있는 작은 작동 예제이며 완성된 게임 또는 그래픽 모드는 아닙니다. 런처 안내에서는 위쪽의 **예제 파일을 ZIP으로 저장**을 사용하세요. GitHub에서는 저장소의 `examples` 폴더에 있습니다.",
+          "afterImages": [
+            "package-files"
+          ]
+        },
+        {
+          "en": "1. Save the ZIP somewhere you can find it, then extract it. Open `examples/mods`. Each subfolder is a separate example. Start with `hello-loader` for a mod that prints a message, or `configure-demo` for a settings form.",
+          "nl": "1. Sla de ZIP op waar je hem terugvindt en pak hem uit. Open `examples/mods`. Elke submap is een apart voorbeeld. Begin met `hello-loader` voor een mod die een bericht toont, of `configure-demo` voor een instellingenformulier.",
+          "fr": "1. Enregistrez puis extrayez le ZIP. Ouvrez `examples/mods`. Chaque sous-dossier est un exemple distinct. Commencez par `hello-loader` pour afficher un message ou `configure-demo` pour un formulaire de réglages.",
+          "de": "1. Speichere und entpacke das ZIP. Öffne `examples/mods`. Jeder Unterordner ist ein eigenes Beispiel. Beginne mit `hello-loader` für eine Meldung oder `configure-demo` für ein Einstellungsformular.",
+          "ru": "1. Сохраните и распакуйте ZIP. Откройте `examples/mods`. Каждая подпапка — отдельный пример. Начните с `hello-loader` для вывода сообщения или `configure-demo` для формы настроек.",
+          "zh_CN": "1. 保存 ZIP 到容易找到的位置并解压。打开 `examples/mods`。每个子文件夹都是独立示例。`hello-loader` 演示显示一条消息，`configure-demo` 演示设置表单。",
+          "ja": "1. ZIP を保存して展開し、`examples/mods` を開きます。各フォルダーが別の例です。メッセージを表示する `hello-loader`、設定フォームの `configure-demo` から始められます。",
+          "ko": "1. ZIP을 찾기 쉬운 곳에 저장하고 압축을 푸세요. `examples/mods`를 여세요. 하위 폴더마다 별도 예제입니다. 메시지 출력은 `hello-loader`, 설정 폼은 `configure-demo`로 시작하세요.",
+          "afterImages": [
+            "package-files"
+          ]
+        },
+        {
+          "en": "2. In a spare launcher setup, open Mods and choose Add Folder. Select ONE example’s folder, not the whole collection. It appears in the mod list, initially disabled. Read the matching chapter before enabling it. The packaging program for updates is in `examples/tools`.",
+          "nl": "2. Open Mods in een aparte testopstelling en kies Map toevoegen. Selecteer de map van ÉÉN voorbeeld, niet de hele verzameling. Het verschijnt uitgeschakeld in de modlijst. Lees het bijbehorende hoofdstuk voordat je het inschakelt. Het programma voor updatebestanden staat in `examples/tools`.",
+          "fr": "2. Dans une installation de test, ouvrez les mods et ajoutez un dossier. Choisissez UN exemple, pas toute la collection. Il apparaît désactivé. Lisez le chapitre correspondant avant de l’activer. Le programme de préparation des mises à jour est dans `examples/tools`.",
+          "de": "2. Öffne in einer Testinstallation die Mods und füge einen Ordner hinzu. Wähle EIN Beispiel, nicht die ganze Sammlung. Es erscheint zunächst deaktiviert. Lies vor dem Aktivieren das passende Kapitel. Das Update-Werkzeug liegt in `examples/tools`.",
+          "ru": "2. В тестовой установке откройте моды и добавьте папку ОДНОГО примера, а не всю коллекцию. Он появится выключенным. Перед включением прочитайте нужную главу. Программа подготовки обновлений находится в `examples/tools`.",
+          "zh_CN": "2. 在独立测试安装中打开模组页面并选择添加文件夹。只选择一个示例的文件夹，不要选择整个合集。它会以禁用状态出现在列表中。启用前请阅读对应章节。更新信息生成程序位于 `examples/tools`。",
+          "ja": "2. テスト環境の MOD ページでフォルダーを追加します。コレクション全体ではなく一つの例を選びます。無効状態で一覧に表示されます。有効にする前に対応する章を読んでください。更新用のプログラムは `examples/tools` にあります。",
+          "ko": "2. 테스트 설치의 모드 페이지에서 폴더 추가를 선택하세요. 전체 모음이 아니라 예제 하나의 폴더를 선택하세요. 처음에는 꺼진 상태로 표시됩니다. 켜기 전에 해당 장을 읽으세요. 업데이트 파일 생성 프로그램은 `examples/tools`에 있습니다.",
+          "afterImages": [
+            "import-folder",
+            "loader-imported"
+          ]
+        }
+      ],
+      "handoffFiles": [
+        "docs/mod-authoring/recipes.md",
+        "docs/mod-authoring/examples.md"
+      ]
+    }
+  ]
+}

@@ -178,7 +178,7 @@ def test_existing_folder_shows_open_action_and_install_guidance_with_rows(
         "To add a mod, place the mod's folder inside this folder, then click "
         "Refresh."
     )
-    assert "mod authors" in page.author_guide_label.text()
+    assert "illustrated guide" in page.author_guide_label.text()
 
 
 def test_create_button_creates_only_canonical_child_and_refreshes_controls(
@@ -439,7 +439,7 @@ def test_folder_controls_and_guidance_retranslate_live(
     assert page.folder_mark.text() == "フォルダ"
     assert page.create_mod_folder_btn.text() == "MOD フォルダーを作成"
     assert "まず MOD フォルダー" in page.folder_guidance.text()
-    assert page.mod_author_guide_btn.text() == "MOD 作者ガイド ↗"
+    assert page.mod_author_guide_btn.text() == "MOD を作る"
     assert page.open_mod_folder_btn.accessibleDescription() == (
         "設定済みの MOD フォルダーをエクスプローラーで開きます。"
     )

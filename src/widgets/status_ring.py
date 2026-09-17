@@ -216,6 +216,7 @@ class StatusRing(QWidget):
         if self._detail:
             parts.append(translate_ui_phrase(self._detail))
         self.setAccessibleDescription(". ".join(parts))
+        self.setToolTip(translated_label + ": " + ". ".join(parts))
 
     def retranslate_ui(self) -> None:
         """Refresh custom-painted and accessible copy for the active language."""
@@ -266,6 +267,12 @@ class StatusRing(QWidget):
         value_font.setWeight(QFont.Weight.DemiBold)
         painter.setFont(value_font)
         painter.setPen(QColor(SEMANTIC_COLORS["text_primary"]))
+        # Compact dashboard rings already have a full-size caption beside
+        # them. Keep the value readable instead of squeezing duplicate text
+        # into the centre; accessibility and the tooltip retain all details.
+        if side < 100:
+            painter.drawText(ring_rect, Qt.AlignmentFlag.AlignCenter, translate_ui_phrase(self._value))
+            return
         painter.drawText(
             QRectF(left, top + side * 0.27, side, side * 0.24),
             Qt.AlignmentFlag.AlignCenter,
@@ -273,23 +280,23 @@ class StatusRing(QWidget):
         )
 
         label_font = QFont("Segoe UI")
-        label_font.setPixelSize(max(9, int(side * 0.075)))
+        label_font.setPixelSize(max(13, int(side * 0.075)))
         label_font.setWeight(QFont.Weight.DemiBold)
         painter.setFont(label_font)
         painter.setPen(QColor(color))
         painter.drawText(
-            QRectF(left, top + side * 0.51, side, side * 0.13),
+            QRectF(left, top + side * 0.51, side, max(18, side * 0.13)),
             Qt.AlignmentFlag.AlignCenter,
             translate_ui_phrase(self._label).upper(),
         )
 
         if self._detail:
             detail_font = QFont("Segoe UI")
-            detail_font.setPixelSize(max(8, int(side * 0.06)))
+            detail_font.setPixelSize(max(13, int(side * 0.06)))
             painter.setFont(detail_font)
             painter.setPen(QColor(SEMANTIC_COLORS["text_muted"]))
             painter.drawText(
-                QRectF(left + 10.0, top + side * 0.64, side - 20.0, side * 0.12),
+                QRectF(left + 10.0, top + side * 0.68, side - 20.0, max(18, side * 0.12)),
                 Qt.AlignmentFlag.AlignCenter,
                 translate_ui_phrase(self._detail),
             )

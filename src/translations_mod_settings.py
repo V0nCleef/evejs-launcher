@@ -267,6 +267,30 @@ _PHRASES.update({
     ),
 })
 
+_PHRASES.update({
+    "MAKE A MOD": ("制作模组", "MOD を作る", "모드 만들기", "CRÉER UN MOD", "MOD ERSTELLEN", "MAAK EEN MOD", "СОЗДАТЬ МОД"),
+    "Mod integration guide": ("模组集成指南", "MOD 連携ガイド", "모드 연동 가이드", "Guide d’intégration des mods", "Mod-Integrationsanleitung", "Handleiding voor modintegratie", "Руководство по интеграции модов"),
+    "Open the mod integration guide": ("打开模组集成指南", "MOD 連携ガイドを開く", "모드 연동 가이드 열기", "Ouvrir le guide d’intégration des mods", "Mod-Integrationsanleitung öffnen", "Open de handleiding voor modintegratie", "Открыть руководство по интеграции модов"),
+    "Build a mod with launcher support. Follow the illustrated guide.": (
+        "制作支持启动器的模组。请参阅图文指南。",
+        "ランチャー対応の MOD を作りましょう。画像付きガイドをご覧ください。",
+        "런처를 지원하는 모드를 만들어 보세요. 그림 안내를 참고하세요.",
+        "Créez un mod compatible avec le lanceur. Suivez le guide illustré.",
+        "Erstelle einen Mod mit Launcher-Unterstützung. Folge der bebilderten Anleitung.",
+        "Maak een mod met launcherondersteuning. Volg de handleiding met afbeeldingen.",
+        "Создайте мод с поддержкой лаунчера. Следуйте иллюстрированному руководству."
+    ),
+    "Read the illustrated guide in your language, without leaving the launcher.": (
+        "在启动器内阅读你所选语言的图文指南。",
+        "ランチャー内で、選んだ言語の画像付きガイドを読めます。",
+        "런처 안에서 원하는 언어로 그림 안내를 읽으세요.",
+        "Lisez le guide illustré dans votre langue, sans quitter le lanceur.",
+        "Lies die bebilderte Anleitung in deiner Sprache direkt im Launcher.",
+        "Lees de handleiding met afbeeldingen in je eigen taal, direct in de launcher.",
+        "Читайте руководство с иллюстрациями на своём языке прямо в лаунчере."
+    ),
+})
+
 SOURCE_PHRASES = tuple(_PHRASES)
 UI_PHRASES_BY_LANGUAGE = {
     language: {source: values[index] for source, values in _PHRASES.items()}

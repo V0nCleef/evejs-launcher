@@ -270,7 +270,7 @@ class UpdateProgressDialog(QDialog):
             QLabel#dialogEyebrow {{
                 color: {S['accent']};
                 font-family: '{header}';
-                font-size: 9px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 2px;
             }}
@@ -288,7 +288,7 @@ class UpdateProgressDialog(QDialog):
                 border-radius: 5px;
                 padding: 5px 9px;
                 font-family: '{mono}';
-                font-size: 10px;
+                font-size: 13px;
                 font-weight: 700;
             }}
             QLabel#updateHero {{
@@ -303,14 +303,14 @@ class UpdateProgressDialog(QDialog):
                 border-radius: 4px;
                 padding: 5px 8px;
                 font-family: '{header}';
-                font-size: 10px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 1.4px;
             }}
             QLabel#heroDetail {{
                 color: {S['text_muted']};
                 font-family: '{mono}';
-                font-size: 8px;
+                font-size: 13px;
                 letter-spacing: 0.7px;
             }}
             QFrame#updateStatusPanel {{
@@ -336,7 +336,7 @@ class UpdateProgressDialog(QDialog):
                 font-weight: 700;
             }}
             QLabel#updateStatus[state="error"] {{ color: {S['danger']}; }}
-            QLabel#updateDetail {{ color: {S['text_muted']}; font-size: 11px; }}
+            QLabel#updateDetail {{ color: {S['text_muted']}; font-size: 13px; }}
             QLabel#stateBadge {{
                 color: {S['accent']};
                 background-color: rgba(0, 200, 224, 14);
@@ -344,7 +344,7 @@ class UpdateProgressDialog(QDialog):
                 border-radius: 4px;
                 padding: 3px 6px;
                 font-family: '{header}';
-                font-size: 7px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 1px;
             }}
@@ -382,12 +382,12 @@ class UpdateProgressDialog(QDialog):
             QLabel#phaseNumber {{
                 color: {S['text_muted']};
                 font-family: '{mono}';
-                font-size: 7px;
+                font-size: 13px;
             }}
             QLabel#phaseLabel {{
                 color: {S['text_muted']};
                 font-family: '{header}';
-                font-size: 8px;
+                font-size: 13px;
                 font-weight: 600;
                 letter-spacing: 0.5px;
             }}
@@ -404,7 +404,7 @@ class UpdateProgressDialog(QDialog):
                 border-radius: 8px;
                 color: {S['text_primary']};
                 font-family: '{mono}';
-                font-size: 9px;
+                font-size: 13px;
                 text-align: center;
             }}
             QProgressBar#updateProgress::chunk {{
@@ -419,7 +419,7 @@ class UpdateProgressDialog(QDialog):
                 padding: 0 14px;
                 border-radius: 5px;
                 font-family: '{header}';
-                font-size: 9px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 0.7px;
             }}

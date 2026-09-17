@@ -760,7 +760,7 @@ class ModsPage(QWidget):
         folder_copy.addWidget(self.folder_guidance)
 
         self.author_guide_label = QLabel(
-            "Making a mod? Read the launcher compatibility guide for mod authors."
+            "Build a mod with launcher support. Follow the illustrated guide."
         )
         self.author_guide_label.setProperty("class", "modsRuntimeDescription")
         self.author_guide_label.setWordWrap(True)
@@ -799,16 +799,17 @@ class ModsPage(QWidget):
         self.open_mod_folder_btn.clicked.connect(self._open_mod_folder)
         folder_layout.addWidget(self.open_mod_folder_btn)
 
-        self.mod_author_guide_btn = QPushButton("MOD AUTHOR GUIDE ↗")
-        self.mod_author_guide_btn.setProperty("class", "signalSecondary")
+        self.mod_author_guide_btn = QPushButton("MAKE A MOD")
+        self.mod_author_guide_btn.setProperty("class", "signalPrimary")
+        self.mod_author_guide_btn.setMinimumHeight(42)
         self.mod_author_guide_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         set_translatable_accessible_name(
             self.mod_author_guide_btn,
-            "Open Mod Author Guide",
+            "Open the mod integration guide",
         )
         set_translatable_accessible_description(
             self.mod_author_guide_btn,
-            "Open the bundled mod-authoring guide.",
+            "Read the illustrated guide in your language, without leaving the launcher.",
         )
         self.mod_author_guide_btn.clicked.connect(self._open_mod_author_guide)
         folder_layout.addWidget(self.mod_author_guide_btn)
@@ -1049,7 +1050,7 @@ class ModsPage(QWidget):
             guide.raise_()
             guide.activateWindow()
         except (OSError, ValueError) as exc:
-            QMessageBox.warning(self, "Mod Author Guide", str(exc))
+            QMessageBox.warning(self, "Mod integration guide", str(exc))
 
     def set_evejs_root(self, evejs_root: str) -> None:
         """Select the root scanned by both Native and Docker mod views."""

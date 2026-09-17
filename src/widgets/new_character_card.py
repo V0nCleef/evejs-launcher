@@ -235,22 +235,22 @@ class NewCharacterCard(QFrame):
         )
         self._signal_dot.setStyleSheet(
             f"color: {accent}; border: none; background: transparent; "
-            "font-size: 10px; font-weight: 700;"
+            "font-size: 13px; font-weight: 700;"
         )
         self._signal_label.setStyleSheet(
             f"color: {S['text_secondary']}; border: none; background: transparent; "
-            "font-size: 9px; font-weight: 700; letter-spacing: 1px;"
+            "font-size: 13px; font-weight: 700; letter-spacing: 1px;"
         )
         self._accent_line.setStyleSheet(
             f"background-color: {accent}; border: none;"
         )
         self._title.setStyleSheet(
             f"color: {text}; border: none; background: transparent; "
-            "font-size: 12px; font-weight: 700; letter-spacing: 1px;"
+            "font-size: 13px; font-weight: 700; letter-spacing: 1px;"
         )
         self._subtitle.setStyleSheet(
             f"color: {S['text_muted']}; border: none; background: transparent; "
-            "font-size: 9px;"
+            "font-size: 13px;"
         )
         self._button.setStyleSheet(
             f"""
@@ -259,7 +259,8 @@ class NewCharacterCard(QFrame):
                 color: {S['background']};
                 border: 1px solid {accent};
                 border-radius: 4px;
-                font-size: 10px;
+                font-size: 13px;
+                padding: 2px 6px;
                 font-weight: 700;
                 letter-spacing: 1px;
             }}

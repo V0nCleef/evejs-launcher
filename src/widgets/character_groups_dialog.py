@@ -317,7 +317,7 @@ class CharacterGroupsDialog(QDialog):
             QLabel {{ background: transparent; color: {S['text_secondary']}; }}
             QLabel#dialogEyebrow {{
                 color: {S['accent']};
-                font-size: 9px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 2px;
             }}
@@ -327,7 +327,7 @@ class CharacterGroupsDialog(QDialog):
                 font-weight: 700;
                 letter-spacing: 2px;
             }}
-            QLabel#dialogIntro {{ color: {S['text_secondary']}; font-size: 11px; }}
+            QLabel#dialogIntro {{ color: {S['text_secondary']}; font-size: 13px; }}
             QFrame#groupsRail, QFrame#groupEditor {{
                 background-color: rgba(10, 24, 36, 232);
                 border: 1px solid {S['border']};
@@ -335,7 +335,7 @@ class CharacterGroupsDialog(QDialog):
             }}
             QLabel#groupsTitle, QLabel#editorTitle {{
                 color: {S['accent']};
-                font-size: 10px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 1px;
             }}
@@ -451,7 +451,7 @@ class CharacterGroupsDialog(QDialog):
                 border: 1px solid {border};
                 border-radius: 5px;
                 padding: 0 10px;
-                font-size: 9px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 1px;
             }}

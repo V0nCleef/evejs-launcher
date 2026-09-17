@@ -1,16 +1,230 @@
 {
   "schemaVersion": 1,
   "pages": [
-    {"title": "Start here", "path": "docs/MOD_AUTHORING.md"},
-    {"title": "Manifest", "path": "docs/mod-authoring/manifest.md"},
-    {"title": "Helper API", "path": "docs/mod-authoring/helpers.md"},
-    {"title": "Settings and languages", "path": "docs/mod-authoring/settings.md"},
-    {"title": "Mod updates", "path": "docs/mod-authoring/updates.md"},
-    {"title": "Ownership and recovery", "path": "docs/mod-authoring/ownership.md"},
-    {"title": "Recipes", "path": "docs/mod-authoring/recipes.md"},
-    {"title": "Working examples", "path": "docs/mod-authoring/examples.md"},
-    {"title": "Legacy loaders / schema 2", "path": "docs/mod-authoring/legacy.md"},
-    {"title": "Legacy installer removal", "path": "docs/mod-authoring/legacy-removal.md"}
+    {
+      "title": "Build an EveJS Mod — Launcher Integration Guide",
+      "titles": {
+        "en": "Build an EveJS Mod — Launcher Integration Guide",
+        "nl": "Maak een EveJS-mod — Handleiding voor launcherintegratie",
+        "fr": "Créer un mod EveJS — Guide d’intégration au lanceur",
+        "de": "Einen EveJS-Mod erstellen — Launcher-Integration",
+        "ru": "Создание мода EveJS — Интеграция с лаунчером",
+        "zh_CN": "制作 EveJS 模组 — 启动器集成指南",
+        "ja": "EveJS MOD を作る — ランチャー連携ガイド",
+        "ko": "EveJS 모드 만들기 — 런처 연동 가이드"
+      },
+      "path": "docs/MOD_AUTHORING.md"
+    },
+    {
+      "title": "1. Make your first package",
+      "titles": {
+        "en": "1. Make your first package",
+        "nl": "1. Maak je eerste pakket",
+        "fr": "1. Créer votre premier paquet",
+        "de": "1. Dein erstes Paket erstellen",
+        "ru": "1. Создайте первый пакет",
+        "zh_CN": "1. 制作第一个包",
+        "ja": "1. 最初のパッケージを作る",
+        "ko": "1. 첫 패키지 만들기"
+      },
+      "path": "docs/mod-authoring/first-mod.md"
+    },
+    {
+      "title": "2. Enable and restart",
+      "titles": {
+        "en": "2. Enable and restart",
+        "nl": "2. Inschakelen en herstarten",
+        "fr": "2. Activer et redémarrer",
+        "de": "2. Aktivieren und neu starten",
+        "ru": "2. Включение и перезапуск",
+        "zh_CN": "2. 启用与重启",
+        "ja": "2. 有効化と再起動",
+        "ko": "2. 활성화와 재시작"
+      },
+      "path": "docs/mod-authoring/activation.md"
+    },
+    {
+      "title": "3. Add a Configure button",
+      "titles": {
+        "en": "3. Add a Configure button",
+        "nl": "3. Voeg een Instellen-knop toe",
+        "fr": "3. Ajouter le bouton Configurer",
+        "de": "3. Konfigurieren-Schaltfläche hinzufügen",
+        "ru": "3. Добавьте кнопку Настроить",
+        "zh_CN": "3. 添加 配置 按钮",
+        "ja": "3. 設定 ボタンを追加する",
+        "ko": "3. 설정 버튼 추가"
+      },
+      "path": "docs/mod-authoring/configure.md"
+    },
+    {
+      "title": "4. Choose form controls",
+      "titles": {
+        "en": "4. Choose form controls",
+        "nl": "4. Kies invoervelden",
+        "fr": "4. Choisir les champs",
+        "de": "4. Formularfelder auswählen",
+        "ru": "4. Выберите поля формы",
+        "zh_CN": "4. 选择表单控件",
+        "ja": "4. 入力欄を選ぶ",
+        "ko": "4. 입력 항목 선택"
+      },
+      "path": "docs/mod-authoring/controls.md"
+    },
+    {
+      "title": "5. Separate settings by profile",
+      "titles": {
+        "en": "5. Separate settings by profile",
+        "nl": "5. Instellingen per profiel",
+        "fr": "5. Réglages par profil",
+        "de": "5. Einstellungen pro Profil",
+        "ru": "5. Настройки по профилям",
+        "zh_CN": "5. 按配置档案保存设置",
+        "ja": "5. プロファイル別の設定",
+        "ko": "5. 프로필별 설정"
+      },
+      "path": "docs/mod-authoring/profiles.md"
+    },
+    {
+      "title": "6. Translate setting labels",
+      "titles": {
+        "en": "6. Translate setting labels",
+        "nl": "6. Vertaal instellingslabels",
+        "fr": "6. Traduire les libellés",
+        "de": "6. Beschriftungen übersetzen",
+        "ru": "6. Переведите подписи",
+        "zh_CN": "6. 翻译设置标签",
+        "ja": "6. 設定ラベルを翻訳する",
+        "ko": "6. 설정 이름 번역"
+      },
+      "path": "docs/mod-authoring/languages.md"
+    },
+    {
+      "title": "7. Offer mod updates",
+      "titles": {
+        "en": "7. Offer mod updates",
+        "nl": "7. Bied modupdates aan",
+        "fr": "7. Proposer des mises à jour",
+        "de": "7. Mod-Updates anbieten",
+        "ru": "7. Предложите обновления",
+        "zh_CN": "7. 提供模组更新",
+        "ja": "7. MOD の更新を提供する",
+        "ko": "7. 모드 업데이트 제공"
+      },
+      "path": "docs/mod-authoring/mod-updates.md"
+    },
+    {
+      "title": "8. Add a helper when needed",
+      "titles": {
+        "en": "8. Add a helper when needed",
+        "nl": "8. Voeg zo nodig een helper toe",
+        "fr": "8. Ajouter un programme d’assistance",
+        "de": "8. Bei Bedarf einen Helper hinzufügen",
+        "ru": "8. Добавьте помощник при необходимости",
+        "zh_CN": "8. 按需添加辅助程序",
+        "ja": "8. 必要な場合にヘルパーを追加する",
+        "ko": "8. 필요할 때 도우미 추가"
+      },
+      "path": "docs/mod-authoring/helper-intro.md"
+    },
+    {
+      "title": "9. Remove and recover",
+      "titles": {
+        "en": "9. Remove and recover",
+        "nl": "9. Verwijderen en herstellen",
+        "fr": "9. Supprimer et restaurer",
+        "de": "9. Entfernen und wiederherstellen",
+        "ru": "9. Удаление и восстановление",
+        "zh_CN": "9. 移除与恢复",
+        "ja": "9. 削除と復元",
+        "ko": "9. 제거와 복구"
+      },
+      "path": "docs/mod-authoring/removal.md"
+    },
+    {
+      "title": "10. Dependencies and load order",
+      "titles": {
+        "en": "10. Dependencies and load order",
+        "nl": "10. Afhankelijkheden en laadvolgorde",
+        "fr": "10. Dépendances et ordre de chargement",
+        "de": "10. Abhängigkeiten und Ladereihenfolge",
+        "ru": "10. Зависимости и порядок загрузки",
+        "zh_CN": "10. 依赖与加载顺序",
+        "ja": "10. 依存関係と読み込み順",
+        "ko": "10. 의존성과 로드 순서"
+      },
+      "path": "docs/mod-authoring/dependencies.md"
+    },
+    {
+      "title": "11. Integrate server source files",
+      "titles": {
+        "en": "11. Integrate server source files",
+        "nl": "11. Serverbronbestanden integreren",
+        "fr": "11. Intégrer des fichiers du serveur",
+        "de": "11. Serverdateien integrieren",
+        "ru": "11. Интеграция файлов сервера",
+        "zh_CN": "11. 集成服务器源文件",
+        "ja": "11. サーバーソースの連携",
+        "ko": "11. 서버 소스 파일 연동"
+      },
+      "path": "docs/mod-authoring/source-integration.md"
+    },
+    {
+      "title": "12. Support client file mods",
+      "titles": {
+        "en": "12. Support client file mods",
+        "nl": "12. Aanpassingen voor clientbestanden",
+        "fr": "12. Gérer les fichiers du client",
+        "de": "12. Modifikationen für Clientdateien",
+        "ru": "12. Моды файлов клиента",
+        "zh_CN": "12. 客户端文件模组",
+        "ja": "12. クライアントファイルの MOD",
+        "ko": "12. 클라이언트 파일 모드"
+      },
+      "path": "docs/mod-authoring/client-files.md"
+    },
+    {
+      "title": "13. React to client start and exit",
+      "titles": {
+        "en": "13. React to client start and exit",
+        "nl": "13. Reageren op clientstart en afsluiten",
+        "fr": "13. Réagir au démarrage et à la fermeture",
+        "de": "13. Auf Clientstart und Ende reagieren",
+        "ru": "13. События запуска и выхода клиента",
+        "zh_CN": "13. 响应客户端启动与退出",
+        "ja": "13. クライアントの起動と終了を受け取る",
+        "ko": "13. 클라이언트 시작과 종료에 반응"
+      },
+      "path": "docs/mod-authoring/client-events.md"
+    },
+    {
+      "title": "14. Publish a mod update",
+      "titles": {
+        "en": "14. Publish a mod update",
+        "nl": "14. Een modupdate publiceren",
+        "fr": "14. Publier une mise à jour",
+        "de": "14. Ein Mod-Update veröffentlichen",
+        "ru": "14. Опубликовать обновление мода",
+        "zh_CN": "14. 发布模组更新",
+        "ja": "14. MOD の更新を公開する",
+        "ko": "14. 모드 업데이트 게시"
+      },
+      "path": "docs/mod-authoring/publish-update.md"
+    },
+    {
+      "title": "15. Example files",
+      "titles": {
+        "en": "15. Example files",
+        "nl": "15. Voorbeeldbestanden",
+        "fr": "15. Fichiers exemples",
+        "de": "15. Beispieldateien",
+        "ru": "15. Файлы примеров",
+        "zh_CN": "15. 示例文件",
+        "ja": "15. サンプルファイル",
+        "ko": "15. 예제 파일"
+      },
+      "path": "docs/mod-authoring/example-files.md"
+    }
   ],
   "examples": [
     "examples/tools/build_mod_update_metadata.py",
@@ -34,6 +248,112 @@
     "examples/mods/source-overlay-demo/README.md",
     "examples/mods/source-overlay-demo/evejs-launcher.mod.json",
     "examples/mods/source-overlay-demo/helper.js",
-    "examples/mods/source-overlay-demo/example-source.js"
+    "examples/mods/source-overlay-demo/example-source.js",
+    "examples/mods/configure-demo/README.md",
+    "examples/mods/configure-demo/evejs-launcher.mod.json"
+  ],
+  "references": [
+    {
+      "title": "Reference index",
+      "path": "docs/mod-authoring/reference.md"
+    },
+    {
+      "title": "Manifest",
+      "path": "docs/mod-authoring/manifest.md"
+    },
+    {
+      "title": "Helper API",
+      "path": "docs/mod-authoring/helpers.md"
+    },
+    {
+      "title": "Settings schema 1",
+      "path": "docs/mod-authoring/settings-reference.md"
+    },
+    {
+      "title": "Mod updates",
+      "path": "docs/mod-authoring/updates.md"
+    },
+    {
+      "title": "Ownership and recovery",
+      "path": "docs/mod-authoring/ownership.md"
+    },
+    {
+      "title": "Recipes",
+      "path": "docs/mod-authoring/recipes.md"
+    },
+    {
+      "title": "Working examples",
+      "path": "docs/mod-authoring/examples.md"
+    },
+    {
+      "title": "Legacy loaders / schema 2",
+      "path": "docs/mod-authoring/legacy.md"
+    },
+    {
+      "title": "Legacy installer removal",
+      "path": "docs/mod-authoring/legacy-removal.md"
+    },
+    {
+      "title": "Settings: choose a topic",
+      "path": "docs/mod-authoring/settings.md"
+    }
+  ],
+  "assets": [
+    "docs/mod-authoring/images/configure-row.png",
+    "docs/mod-authoring/images/configure-dialog.png",
+    "docs/mod-authoring/images/controls.png",
+    "docs/mod-authoring/images/update-available.png",
+    "docs/mod-authoring/images/advanced-hidden.png",
+    "docs/mod-authoring/images/advanced-search.png",
+    "docs/mod-authoring/images/advanced-shown.png",
+    "docs/mod-authoring/images/apply-restart.png",
+    "docs/mod-authoring/images/client-actions.png",
+    "docs/mod-authoring/images/client-receipt.png",
+    "docs/mod-authoring/images/client-row.png",
+    "docs/mod-authoring/images/configure-default.png",
+    "docs/mod-authoring/images/configure-reopened.png",
+    "docs/mod-authoring/images/console-disabled.png",
+    "docs/mod-authoring/images/console-loaded.png",
+    "docs/mod-authoring/images/control-boolean.png",
+    "docs/mod-authoring/images/control-choice.png",
+    "docs/mod-authoring/images/control-integer.png",
+    "docs/mod-authoring/images/control-number.png",
+    "docs/mod-authoring/images/control-string.png",
+    "docs/mod-authoring/images/dependency-missing.png",
+    "docs/mod-authoring/images/dependency-order.png",
+    "docs/mod-authoring/images/event-exited.png",
+    "docs/mod-authoring/images/event-failed.png",
+    "docs/mod-authoring/images/event-started.png",
+    "docs/mod-authoring/images/helper-failure.png",
+    "docs/mod-authoring/images/helper-launch.png",
+    "docs/mod-authoring/images/helper-reply.png",
+    "docs/mod-authoring/images/helper-request.png",
+    "docs/mod-authoring/images/helper-result.png",
+    "docs/mod-authoring/images/import-folder.png",
+    "docs/mod-authoring/images/language-en.png",
+    "docs/mod-authoring/images/language-nl.png",
+    "docs/mod-authoring/images/language-value.png",
+    "docs/mod-authoring/images/loader-disabled.png",
+    "docs/mod-authoring/images/loader-enabled.png",
+    "docs/mod-authoring/images/loader-imported.png",
+    "docs/mod-authoring/images/mods-overview.png",
+    "docs/mod-authoring/images/owned-settings.png",
+    "docs/mod-authoring/images/package-files.png",
+    "docs/mod-authoring/images/profile-a.png",
+    "docs/mod-authoring/images/profile-b.png",
+    "docs/mod-authoring/images/profile-picker.png",
+    "docs/mod-authoring/images/release-files.png",
+    "docs/mod-authoring/images/remove-confirm.png",
+    "docs/mod-authoring/images/restored-mod.png",
+    "docs/mod-authoring/images/saved-preferences.png",
+    "docs/mod-authoring/images/settings-enabled.png",
+    "docs/mod-authoring/images/source-files.png",
+    "docs/mod-authoring/images/source-options.png",
+    "docs/mod-authoring/images/source-row.png",
+    "docs/mod-authoring/images/storage-locations.png",
+    "docs/mod-authoring/images/undo-removal.png",
+    "docs/mod-authoring/images/update-review.png",
+    "docs/mod-authoring/images/release-zip.png",
+    "docs/mod-authoring/images/release-information.png"
   ]
 }

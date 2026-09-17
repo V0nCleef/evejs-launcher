@@ -1,43 +1,48 @@
-# Make a mod work with EveJS Launcher
+# Build an EveJS Mod — Launcher Integration Guide
 
-This guide describes **Launcher 1.0.53**, public **manifest schema 3**, **helper API 1**, and **settings schema 1**. It ships with the launcher and opens from the Mods page without an internet connection.
+Add launcher support to your mod, one feature at a time. You do not need every feature. Start with a small package, then add only what your mod needs.
 
-The launcher manages discovery, local package ownership, settings, launch preparation and recovery. Your mod still owns its gameplay integration and any binary patcher. A descriptor does not create an upstream EveJS plugin API or make arbitrary source changes reversible.
+The examples use manifest schema **3**, settings schema **1** and helper API **1** (Launcher **1.0.53 or newer**). Your mod still provides the gameplay or graphics behaviour.
 
-## Start here
+![Demo screenshot — open to enlarge](mod-authoring/images/mods-overview.png)
 
-| Your mod | Start with |
-| --- | --- |
-| A JavaScript preload | [Hello Loader](../examples/mods/hello-loader/README.md). Existing `loader.js` mods also work without a descriptor. |
-| Preferences or profile preparation | [Profile Options](../examples/mods/profile-options/README.md). No binary installer is needed. |
-| A physical EVE client package | [Client Receipt](../examples/mods/client-receipt-demo/README.md), then replace its demonstration lifecycle with your verified installer. |
-| A source-integrated schema-2 mod | Keep the [legacy contract](mod-authoring/legacy.md), or follow the [upgrade recipe](mod-authoring/recipes.md). |
-| A mod distributed through GitHub releases | Add [update metadata](mod-authoring/updates.md), using DLSS5 as the worked example. |
+[Open full-size image](mod-authoring/images/mods-overview.png)
 
-1. Keep the package in its own directory under `<evejs>/mods/<folder>` or, for reviewed source integration, `<evejs>/server/mods/<folder>`.
-2. Add `evejs-launcher.mod.json`. Choose a supported kind and activation in the [manifest reference](mod-authoring/manifest.md).
-3. Add optional [settings](mod-authoring/settings.md). Add a [helper](mod-authoring/helpers.md) only for executable preparation.
-4. Import or explicitly adopt the local package in Mods. Inspect the displayed paths before enabling it.
-5. Test enable, the appropriate restart, disable, another restart, interrupted work and recovery in a disposable installation.
+## Choose one task
 
-Copying a directory makes it discoverable. A public package's enabled state also needs launcher ownership; discovery alone does not authorize deleting an existing folder or installing into the client.
 
-## Reference
+1. [Make your first package](mod-authoring/first-mod.md) — give the mod a name and import it.
 
-| Page | Covers |
-| --- | --- |
-| [Manifest](mod-authoring/manifest.md) | Exact fields, kinds, activation, versions and backends |
-| [Helper protocol](mod-authoring/helpers.md) | Requests, replies, actions, environment, arguments and execution limits |
-| [Settings and languages](mod-authoring/settings.md) | Controls, labels, global/profile scope and text formats |
-| [GitHub updates](mod-authoring/updates.md) | Update metadata, release notes, config preservation and the DLSS5 migration example |
-| [Ownership and recovery](mod-authoring/ownership.md) | Key conflicts, preferences, shared clients, receipts and rollback |
-| [Recipes](mod-authoring/recipes.md) | Layouts, client upgrades and legacy migration |
-| [Working examples](mod-authoring/examples.md) | Complete Node and PowerShell packages |
-| [Legacy loaders and schema 2](mod-authoring/legacy.md) | Existing loader and Game-server status contracts |
-| [Legacy installer removal](mod-authoring/legacy-removal.md) | Existing schema-2 enrollment and uninstall handshake |
+2. [Enable and restart](mod-authoring/activation.md) — control when the mod runs.
 
-## What a successful launch proves
+3. [Add a Configure button](mod-authoring/configure.md) — let players change a setting.
 
-Configured enabled, helper ready and running in Game are separate states. A public client package verifies its physical installation before client launch; profile contributions commit before spawning. A server mod's configured flag alone does not prove gameplay behavior is active. Legacy status markers and loader evidence retain their existing rules.
+4. [Choose form controls](mod-authoring/controls.md) — numbers, switches and lists.
 
-Tie compatibility to what the mod actually changes. A client-only mod verifies its EVE build, renderer and files. If its loader, helper or installer touches EveJS internals, document and test those EveJS dependencies too. Its location inside an EveJS directory does not itself create a server-version dependency.
+5. [Separate settings by profile](mod-authoring/profiles.md) — different preferences for different characters.
+
+6. [Translate your setting labels](mod-authoring/languages.md) — display text in the player’s language.
+
+7. [Offer mod updates](mod-authoring/mod-updates.md) — show a newer GitHub release.
+
+8. [Add a helper when needed](mod-authoring/helper-intro.md) — run preparation code.
+
+9. [Remove and recover](mod-authoring/removal.md) — understand ownership and restoration.
+
+10. [Dependencies and load order](mod-authoring/dependencies.md)
+
+11. [Integrate server source files](mod-authoring/source-integration.md)
+
+12. [Support client file mods](mod-authoring/client-files.md)
+
+13. [React to client start and exit](mod-authoring/client-events.md)
+
+14. [Publish a mod update](mod-authoring/publish-update.md)
+
+15. [Example files](mod-authoring/example-files.md)
+
+## How to use this guide
+
+Choose a feature from the list on the left. Each page shows what it does and how to check it. All screenshots use clearly labelled examples. Open an image to enlarge it. Code examples are at the bottom of each relevant page, below a dividing line.
+
+[14. Publish a mod update](mod-authoring/publish-update.md) explains the release files. [15. Example files](mod-authoring/example-files.md) lets you save the working examples.

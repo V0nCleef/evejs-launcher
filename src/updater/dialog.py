@@ -333,7 +333,7 @@ class UpdateDialog(QDialog):
             QLabel#dialogEyebrow {{
                 color: {S['accent']};
                 font-family: '{header}';
-                font-size: 9px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 2px;
             }}
@@ -351,7 +351,7 @@ class UpdateDialog(QDialog):
                 border-radius: 5px;
                 padding: 5px 9px;
                 font-family: '{header}';
-                font-size: 8px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 1px;
             }}
@@ -363,7 +363,7 @@ class UpdateDialog(QDialog):
             QLabel#versionCaption {{
                 color: {S['text_muted']};
                 font-family: '{header}';
-                font-size: 8px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 1.5px;
             }}
@@ -390,13 +390,13 @@ class UpdateDialog(QDialog):
             QLabel#releaseNotesTitle {{
                 color: {S['text_primary']};
                 font-family: '{header}';
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 0.5px;
             }}
             QLabel#releaseDate {{
                 color: {S['text_muted']};
-                font-size: 10px;
+                font-size: 13px;
             }}
             QTextEdit#releaseNotes {{
                 background-color: rgba(8, 20, 31, 232);
@@ -405,7 +405,7 @@ class UpdateDialog(QDialog):
                 border-radius: 9px;
                 padding: 11px;
                 font-family: '{body}';
-                font-size: 12px;
+                font-size: 13px;
                 selection-background-color: {S['accent_soft']};
             }}
             QTextEdit#releaseNotes:focus {{ border-color: {S['accent_dim']}; }}
@@ -427,7 +427,7 @@ class UpdateDialog(QDialog):
                 padding: 0 15px;
                 border-radius: 5px;
                 font-family: '{header}';
-                font-size: 9px;
+                font-size: 13px;
                 font-weight: 700;
                 letter-spacing: 0.7px;
             }}
