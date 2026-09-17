@@ -1,416 +1,185 @@
 # EveJS Launcher
 
-EveJS Launcher is a Windows desktop control panel for a local EveJS installation. It brings the game server, market server, EVE clients, character profiles, mods, maintenance tools, launcher updates, and local shipboard audio into one application, with an explicit choice between Native processes and Docker Compose.
+A Windows launcher for your local EveJS server and EVE clients. Start Game and Market, launch characters and groups, manage mods, and open maintenance tools from one place. Choose Native or Docker Compose to match your EveJS installation.
 
-[Download the latest release](https://github.com/V0nCleef/evejs-launcher/releases/latest) · [Read the release notes](https://github.com/V0nCleef/evejs-launcher/releases) · [Join the EveJS Discord](https://discord.gg/HVTfKeqX3t)
+[Download the latest release](https://github.com/V0nCleef/evejs-launcher/releases/latest) · [Release notes](https://github.com/V0nCleef/evejs-launcher/releases) · [How to make a mod](docs/how-to-make-a-mod/) · [EveJS Discord](https://discord.gg/HVTfKeqX3t)
 
-![EveJS Launcher Home page with group launch controls and service status](screenshots/home.png)
+![EveJS Launcher v1.0.56 Home page](screenshots/home.png)
 
-Home is the Deep Signal command network: authoritative Game and Market state, recent service activity, running-client telemetry, stack lifecycle controls, and selected-group launch controls.
+*Screenshots show the current v1.0.56 interface with fictional demo characters and mods. Online service states and the offered mod update are examples; no game services were started for these captures. Click an image to see it at full size.*
 
-## Start here
+## What's new
 
-### What you need
+- **A clearer mod guide.** The former Mod Author Guide is now **Build an EveJS Mod — Launcher Integration Guide**, found under **Mods → Make a mod**. Separate feature pages explain what players see, with screenshots and code below each explanation.
+- **An optional AI handoff.** Each topic in the launcher guide has a **Hand off to your AI** button. It copies a ready-to-paste prompt with that feature's instructions, examples, and technical details. Nothing is sent automatically.
+- **Larger text.** Small labels, mod paths, hints, status text, and dialogs are easier to read throughout the launcher.
+- **The same guide on GitHub.** [How to make a mod](docs/how-to-make-a-mod/) contains numbered pages in the same order as the launcher. The launcher guide supports eight languages; GitHub stays English.
 
-- Windows 10 or Windows 11
-- An existing EveJS checkout or Compose project
-- An EVE client prepared for use with EveJS
-- For Native runtime: Node.js and npm, plus Rust/Cargo or an already-built Market Server binary
-- For Docker runtime: Docker Desktop in Linux-container mode with Docker Compose v2
+## Install and start
 
-### Native or Docker?
+You need Windows 10 or 11, an existing EveJS installation, and an EVE client prepared for EveJS. The launcher does not include the game client or server.
 
-| Choose | What it does | Best for |
-|---|---|---|
-| **Native** | Runs the EveJS Game and Market services directly on Windows from the selected EveJS folder. Docker Desktop is not required. | A traditional EveJS installation already run from Windows. |
-| **Docker Compose** | Uses an existing EveJS Compose project through Docker Desktop in Linux-container mode. | An EveJS project that already includes `compose.yaml` and Docker support. |
+1. Download **EveJS-Launcher-V1.zip** from the [latest release](https://github.com/V0nCleef/evejs-launcher/releases/latest).
+2. Extract the **complete folder**, then run `EveJS-Launcher-V1.exe`. Keep `_internal` beside it. You do not need Python for a release build.
+3. Follow the setup wizard. Select your EveJS root and EVE client folder, then choose the runtime that your installation uses.
+4. For Docker, run **Test Docker setup** before continuing.
+5. On Home, choose **Start Stack**. Market starts first, followed by Game.
+6. When both are Online, open **Characters** and launch a character or group.
 
-Changing runtime does not move characters, market data, or server data between Native and Docker. Choose the setup your EveJS project already uses. The launcher never switches the runtime automatically.
+| Runtime | What it needs | What the launcher does |
+| --- | --- | --- |
+| **Native** | Node.js and npm; a built Market Server binary or the Rust/Cargo tools to build it | Runs Game and Market directly on Windows. Docker Desktop is not required. |
+| **Docker Compose — Managed** | Docker Desktop in Linux-container mode, Compose v2, and an existing EveJS Compose project | Starts, stops, and maintains the selected stack. |
+| **Docker Compose — Connect only** | An existing Docker stack controlled elsewhere | Shows status and logs without changing containers. |
 
-### Install the launcher
+Changing runtime does **not** move characters, market data, or server data. The launcher never silently switches runtimes.
 
-1. Open the [latest release](https://github.com/V0nCleef/evejs-launcher/releases/latest).
-2. Download `EveJS-Launcher-V1.zip`.
-3. Extract the complete `EveJS-Launcher-V1` folder.
-4. Run `EveJS-Launcher-V1.exe` from inside that folder.
-5. On first launch, select the root folder and explicitly choose **Native** or **Docker Compose**.
+## Home: services and group launches
 
-Keep the `_internal` folder beside the executable. The release is a portable application folder, not a single standalone executable. Python is not required when using a release build.
+Home shows separate Game, Market, and client states, recent activity, stack controls, and your selected character group. Open service consoles from the status controls to inspect output.
 
-### First launch
+For Native Game, the enabled loader mods determine the startup mode automatically: no enabled loaders means **Vanilla**; enabled loaders means **Modded**. There is no server-script selector and no separate modded `.bat` file to configure. Restart Game after changing server mods.
 
-The setup wizard explains both runtimes and validates the selected backend before it writes configuration. Native keeps the existing installation checks. Docker accepts a pristine Compose project before generated certificates or databases exist, then runs a read-only check of Docker Desktop, Compose, required services, loopback endpoints, current containers, and initialization state.
+Services started elsewhere are detected as externally managed. The launcher does not claim them as its own or force-stop them.
 
-1. Choose **Native** or **Docker Compose** in the wizard. The launcher may recommend Docker when a Compose file is present, but never switches the selection automatically.
-2. Select the EveJS Root folder.
-3. For Native, select the supported vanilla/modded start indicator or keep **Always ask**.
-4. For Docker:
-   - Normally leave **Compose File** blank; the launcher automatically uses `<EveJS Root>\compose.yaml`.
-   - Normally leave **Compose Project Name** blank. The advanced field is only for an existing custom name, a stable name after moving the folder, or multiple separate stacks.
-   - Choose **Managed** when the launcher should control the stack, or **Connect only** when another tool already controls it.
-   - Use **Test Docker setup**. **Next** remains unavailable until the exact current fields pass.
-5. Finish setup, then use **Start Stack** on Home to start Market followed by Game.
-6. Wait for both services to report **Online**.
-7. Open **Characters** and launch the account you want to use.
-8. Either enter the password in the EVE client, or enable **Auto-Login Character** under Settings → Launch when the launcher reports that the selected Native client is compatible. Real account passwords are never stored.
+## Characters: launch one pilot or a group
 
-#### Native setup example
+![Characters page with a selected fictional three-pilot group](screenshots/characters.png)
 
-![Setup wizard with Native selected](screenshots/wizard-runtime-native.png)
+- Browse characters from the selected EveJS installation, with portraits, wallet and ship information. Select a card for more detail.
+- Search, filter, hide characters, and create named launch groups with **Manage Groups**.
+- Launch one character, all visible characters, or the selected group. Launches are staggered, and the same account cannot be launched twice at once.
+- Cancel a launch queue without closing clients that already started.
+- Create characters on Native or compatible Managed Docker installations. Optional GM and overview-copy controls are available where supported.
+- On Native, deletion requires services and clients to be offline, makes a backup, and asks for typed confirmation.
 
-Native runs Game and Market directly on Windows. Select the EveJS project and EVE client folders; Docker Desktop is not required.
+Each account uses its own launcher profile. Normal login stays inside the EVE client. Compatible Native installations can opt into **Auto-Login Character** after the launcher verifies the supported client and local server setup; real account passwords are not stored.
 
-#### Docker Compose setup example
+## Mods: install, configure, update, and recover
 
-![Setup wizard with Docker Compose selected](screenshots/wizard-runtime-docker.png)
+![Mods page showing Configure, an available update, and the Make a mod guide button](screenshots/mods.png)
 
-Docker uses an existing EveJS Compose project. The normal setup leaves **Compose File** and **Compose Project Name** blank, selects the desired control policy, and runs the read-only setup test before continuing.
+Use **Add ZIP** or **Add Folder** to import a compatible package, or **Open Mod Folder** to inspect the selected installation's mods. The buttons a mod offers depend on what its author supports.
 
-## Interface tour
+| Control | What it does |
+| --- | --- |
+| **Enable switch** | Changes whether the mod is configured to run. Server mods need a Game restart. |
+| **Configure** | Opens the settings form supplied by the mod. It may include switches, number fields, lists, translated labels, and settings for individual profiles. |
+| **Check mod updates** | Looks for compatible releases. Checking does not install anything. |
+| **Gold Update button** | Opens the offered version and release notes for review before installation. A gold badge on Mods shows available updates. |
+| **Actions** | Shows supported package actions, such as client preparation or removal. |
+| **Remove / Undo Removal** | Removes supported local packages and restores them from launcher recovery storage where available. |
+| **Apply & Restart Server** | Applies configured server-mod changes through the normal restart flow and checks the resulting state. |
 
-The launcher has five navigation pages. The captures below show v1.0.38 in one isolated documentation run. Real character and account labels are blurred in memory before capture, setup fields use generic example paths, and the displayed Online states are simulated without starting services.
+The launcher supports loader packages, declared source integrations, settings-only packages, and compatible client-file integrations. It also supports declared dependencies, load order, helper programs, and client start/exit events. It does not guess how an arbitrary source patch should be enabled or removed.
 
-### Home
+Compatible mod updates preserve declared settings files. Other mutable files must be declared by the mod author. Source integrations and client-file packages can have their own removal and recovery rules; follow the actions offered by that package.
 
-Home combines service controls and status in one place. Game and Market are tracked independently through Offline, Starting, Online, Stopping, and Failed states. A service started outside the launcher is detected as externally managed and is never force-stopped by the launcher.
+## How to make a mod
 
-The screenshot at the top of this page uses a simulated healthy Native observation; the Docker example below uses the same safe presentation approach. No server process or container was started to create either image.
+![The illustrated launcher guide with feature navigation and the AI handoff button](screenshots/mod-guide.png)
 
-### Characters
+Open **Mods → Make a mod**, or read [How to make a mod on GitHub](docs/how-to-make-a-mod/).
 
-![Characters page with portraits, launch-group controls, and private names obscured](screenshots/characters.png)
+The guide starts with a small package, then covers Configure forms, controls, profiles, translations, updates, helpers, removal, dependencies, server integration, client files, client events, and publishing. Pick only the features your mod needs.
 
-Characters are read from the configured EveJS installation and grouped into account-aware cards. Each card shows the portrait, wallet balance, ship, launch state, and account state. Selecting a card opens the detail panel with skill points, location, security status, and launch controls. The New Character tile supports Native and compatible Managed Docker Compose projects; creation remains disabled in Connect-only mode.
+Every topic includes screenshots that show what the instructions mean in the launcher. Code examples are at the bottom, below a clear divider. The launcher version also lets you:
 
-![Character group editor with configurable membership](screenshots/character-groups.png)
+- Choose English, Simplified Chinese, Japanese, Korean, French, German, Dutch, or Russian for explanations. Code and filenames stay literal.
+- Search the current page, enlarge text, resize or maximize the window, and open screenshots at full size.
+- Download the bundled example files as a ZIP.
+- Copy the current feature's prompt using **Hand off to your AI**, then paste it into the tool you use.
 
-Groups are completely user-configurable. Create and rename groups, add or remove any character, then select a group on Home or Characters to launch its eligible accounts. The launcher still prevents two characters on the same account from being launched at the same time.
+The guide explains launcher support. Your mod still supplies its own gameplay or graphics behaviour.
 
-![New Character dialog with optional GM and overview-copy settings](screenshots/new-character.png)
+## Tools: utilities from your EveJS installation
 
-On Native and compatible Managed Docker Compose installations, New Character accepts an account name, character name, optional GM status, and an optional captured overview source. Overview transfer uses an opt-in, reversible bridge that is installed only for the exact supported EVE client build 3396210. When a source still needs capture, launch that source once through the launcher, then launch the new character to apply the queued copy.
+![Tool Deck showing searchable utilities and their requirements](screenshots/tools.png)
 
-The character card menu can hide a character without touching game data, assign it to groups, or begin deletion. Character/account deletion is Native-only, requires Game, Market, and all EVE clients to be offline, creates a scoped backup, and requires typed confirmation before any database change.
+Tool Deck finds supported utilities in the selected EveJS `tools` folder. Search by name or filter by category. Each card shows its requirements, availability, and actions. Destructive or system-changing operations ask for confirmation.
 
-### Mods
-
-![Mod Manager page](screenshots/mods.png)
-
-The Mod Manager scans reviewed loader and source-integration contracts and shows each discovered mod's configured and verified runtime state. A successful toggle changes configuration only; it is not reported as runtime-effective until the restarted Game server provides the exact expected evidence. **Apply & Restart Server** routes through the same server-mode selection used by every other start path.
-
-A source-integrated mod installed by a launcher-compatible Setup also has **Remove** on its row. The v2 provider binds the exact `unins000.exe`, `unins000.dat`, recovery bundle, helper, active journal, and post-removal inventory by SHA-256. Removal is serialized against compatible Setup and direct uninstall runs, stops launcher-owned Game and Market processes, then runs the verified uninstaller with an explicit choice to keep saved data or quarantine local mod data. The launcher checks every enrolled integration path before reporting success, and the stack remains stopped afterward. Source-integrated mods installed another way are marked **External**; run that mod's matching compatible Setup once to enroll its removal kit. Legacy loader-only mods remain toggleable but cannot enroll the current removal provider. Windows **Installed apps** is only a fallback, not the normal removal path.
-
-The current v2 installer provider supports one installation of a given mod per Windows user. Launcher removal binds the verified child to the exact selected EveJS root and refuses divergent provider registry roots before touching files. To move that mod to another EveJS root, remove it from the original root first, select the other root in the launcher, and run Setup again.
-
-Start with [Build an EveJS Mod — Launcher Integration Guide](docs/MOD_AUTHORING.md). Each page covers one task, with real launcher screenshots and a working example: importing a package, enabling it, adding Configure, choosing controls, using profiles, translating labels, offering updates, and removal. Open **Mods → Make a mod** for the offline walkthrough in your language. The guide places code below the illustrated explanations and includes publishing and downloadable example files. An optional handoff button copies the current topic and its technical details for your AI.
-
-### Tools
-
-![Tool Deck page](screenshots/tools.png)
-
-Tool Deck exposes a reviewed set of utilities from the configured EveJS `tools` folder. It supports text search, category filtering, prerequisite labels, wrapper availability, and responsive one- or two-column layouts.
-
-The launcher does not recursively expose arbitrary scripts. It resolves only known top-level wrappers, opens them in independent visible consoles, and asks for confirmation before destructive or system-changing actions.
-
-### Settings
-
-#### Native runtime
-
-![Native settings with generic example paths](screenshots/native-settings.png)
-
-*v1.0.38 Native Runtime settings. Game and Market run directly on Windows, and Docker Desktop is not required.*
-
-#### Docker Compose runtime
-
-![Docker Compose settings with generic example paths](screenshots/docker-settings.png)
-
-*v1.0.38 Managed Docker Runtime settings. Compose File is blank so `<EveJS Root>\compose.yaml` is selected automatically; the advanced Project Name is also optional and blank.*
-
-#### Audio and LYRA
-
-![Audio and Voice settings showing the bundled LYRA Balanced Lift profile ready for preview](screenshots/audio-settings.png)
-
-The Audio & Voice panel controls the bundled **Celestial Transit** track, optional user-selected local music, and local prerecorded launcher announcements. LYRA is distinct from EVE's Aura: v1.0.38 ships an English (UK) prerecorded catalog using the **Balanced Lift** profile. Music and voice can be enabled and balanced independently, event announcements and ducking remain optional, and **Preview LYRA** verifies the bundled voice locally.
-
-Settings covers the EveJS root, EVE client path, proxy address, Native/Docker runtime selection, Compose target and control policy, launch timing, service auto-start, compatible local auto-login, soundtrack and LYRA controls, motion preferences, update checks, server-mode selection, hidden characters, and local-data cleanup.
-
-## What the launcher manages
-
-| Area | Behaviour |
-|---|---|
-| Runtime backend | Persists Native, Managed Docker Compose, or read-only Connect-only Docker operation without silent switching. |
-| Game service | Starts Node.js directly in vanilla or modded mode and reports lifecycle state. |
-| Market service | Starts the market service before Game when the complete stack is requested. |
-| Docker target | Resolves effective services, health, endpoints, mounts, data sources, and capabilities from one selected Compose project. |
-| EVE clients | Creates account-specific profiles, launches clients through the local proxy, optionally performs verified local auto-login, and tracks running state. |
-| Bulk launch | Launches all visible characters or a selected user-defined group serially with a configurable delay; remaining queued launches can be cancelled. |
-| Characters | Reads character data and current portraits; supports search, hiding, grouping, Native creation with optional GM/overview copy, and backup-first deletion. |
-| Mods | Discovers reviewed activation contracts, toggles state, removes installer-enrolled mods, and restarts Game when requested. |
-| Tools | Resolves 11 reviewed external utility wrappers with prerequisite and risk information. |
-| Audio and voice | Plays the bundled **Celestial Transit** track or user-selected local music, with local prerecorded LYRA announcements and separate volume, event, ducking, and preview controls. |
-| Languages | Switches the complete launcher interface live between English, Simplified Chinese, Japanese, Korean, French, German, Dutch, and Russian. |
-| Updates | Checks GitHub Releases, downloads the release ZIP, shows progress, stages replacement, restarts, and cleans validated update artifacts. |
-
-## Service startup and detection
-
-For the native runtime, enable the loader mods you want on the **Mods** page, then start or restart **Game**. The launcher loads enabled loader mods automatically. With none enabled, Game starts in Vanilla mode.
-
-No `StartServerWithMods.bat` file or script selection is needed. The launcher starts Game directly through Node.js. Home shows the running mode, or the mode selected for the next start.
-
-When **Start Stack** is used, Market is started first and Game waits for the required readiness state. Controls remain responsive while startup and shutdown checks run in background workers.
-
-If an already-running Game or Market endpoint is detected, it is shown as externally managed. The launcher can use that service but will not claim ownership or terminate it.
-
-### Docker Compose runtime
-
-![Managed Docker Compose runtime](screenshots/docker-home.png)
-
-*Documentation capture using generic account totals and a simulated healthy service observation. The controls and status presentation are the production UI.*
-
-Docker is a persisted runtime backend, not an automatic fallback. The launcher never silently switches a Native installation to Docker or changes an unselected Compose project.
-
-Configure it under **Settings → Runtime**:
-
-1. Set **How should EveJS run?** to **Docker Compose**.
-2. Set **EveJS Root** to the absolute Compose project directory.
-3. **Leave Compose File blank in the normal setup.** The launcher automatically uses `<EveJS Root>\compose.yaml`. Select an absolute file only when it has a different name or location.
-4. Choose **Managed** when the launcher should start, stop, restart, and maintain the stack. Choose **Connect only** to observe an existing stack without changing it.
-5. **Leave Compose Project Name blank in the normal setup.** Docker Compose will choose it automatically. The advanced override is useful only to match a stack created with a custom `-p` name, keep a stable name if the folder moves, or separate multiple stacks. A different name may target or create a different stack.
-6. In Managed mode, choose whether the stack should remain running when the launcher exits.
-7. Select **Test Docker setup**. Testing never saves, starts containers, or initializes data. Selecting **Save** with an untested or edited Docker draft runs the same read-only preflight first and writes only after that exact draft succeeds.
-
-The preflight requires Docker Desktop in Linux-container mode, the Compose v2 plugin, and effective `server` and `market` services. All published EveJS endpoints must bind to loopback (`127.0.0.1` or `::1`). Optional `init` and tools-profile `market-tools` services enable the matching Tool Deck actions when present.
-
-A valid pristine project is reported separately from runtime readiness and data initialization. Preflight never builds, starts, initializes, or seeds anything. Game-data initialization and Market seeding/rebuild are separate Managed actions with separate confirmation; no seed preset is chosen automatically. Connect-only mode explains what must be performed externally and remains observational.
-
-| Policy | Observation | Lifecycle and tools | Window close |
-|---|---|---|---|
-| **Connect only** | Services, health, effective endpoints, mounts, data sources, and logs | All container, mod, and Docker Tool Deck mutations are disabled | Never stops the Compose stack |
-| **Managed** | Same read-only observation | Start, stop, restart, force-recreate, supported mod activation, and reviewed Docker Tool Deck actions | Honors **Keep Stack Running on Exit**; otherwise stops Game before Market |
-
-Managed lifecycle work, Compose inspection, log streaming, setup preflight, and container-side tools run on workers rather than the Qt GUI thread. Status is based on Compose state and health: a healthy running service is Online, an unhealthy service is Failed, and an intentionally exited service is Offline with its exit code retained for diagnostics. When a required service has no health check, Game becomes Online only after its effective Game TCP endpoint and Proxy `/health` respond; Market requires its effective `/health` endpoint.
-
-#### Managed Docker character creation
-
-New Character is available only in **Managed** Docker mode; Connect-only remains read-only, and character/account deletion remains Native-only. Close every EVE client before starting. The launcher records the prior service state, temporarily stops the selected Compose stack, creates and verifies a scoped game-store backup, creates the account and character, verifies the character and rookie ship, and checks for unexpected data changes. If creation or verification fails, it attempts and verifies a rollback from that backup. Services that were previously online are restored only after success or a confirmed rollback and maintenance-lease release; if safety cannot be confirmed, the backup is retained and the stack stays offline.
-
-This mutation path has a strict compatibility gate. It accepts only the reviewed EveJS v0.12.5 `server`, `market`, and `init` Compose layout with no extra effective services, the supported game-store mount, `pull_policy: never`, and the expected runtime package and API fingerprints. The selected project and container contract are revalidated immediately before maintenance begins, so an unsupported or changed target fails before game data is modified.
-
-#### Docker endpoints
-
-The launcher reads effective host publications from Compose and carries the complete endpoint set through monitoring, portraits, data access, and client launch. Remapped host ports are supported; the client does not fall back to Native defaults when Docker endpoint authority is unavailable.
-
-| Endpoint | Typical host port | Compose container target |
-|---|---:|---:|
-| Assets | 443 | 26003 |
-| XMPP | 5222 | 5222 |
-| Game | 26000 | 26000 |
-| Images | 26001 | 26001 |
-| Proxy | 26002 | 26002 |
-| Market HTTP and health | 40110 | 40110 |
-
-Market RPC `40111` is used by Native status checks and normally remains private inside the Docker network.
-
-#### Docker mods and Tool Deck
-
-In Managed mode, applying mods creates a deterministic launcher-owned Compose override. It mounts the reviewed mod directory and preloads selected `mods/*/loader.js` files in visible order through `NODE_OPTIONS`. Connect-only mode can inspect the selected project but cannot change its mod or Compose state.
-
-When the effective project provides the required services, the Docker Tool Deck exposes only reviewed semantic actions: database initialization; Market status, doctor, backup inventory, backups, preset inventory, snapshot information, fixed v1 rebuild presets, v2 rebuild, and latest-backup restore. Actions revalidate the selected target immediately before execution. Operations that change Market data require both Game and Market to be stopped, and arbitrary container commands are never accepted from the UI.
+Available tools depend on your EveJS installation and runtime. They are not bundled into the launcher.
 
 <details>
-<summary>Service ports and readiness checks</summary>
+<summary>Supported tool categories and examples</summary>
 
-| Port | Purpose |
-|---:|---|
-| `443` | Typical Docker host publication for assets |
-| `5222` | XMPP |
-| `26000` | Game TCP endpoint used by EVE clients |
-| `26001` | Image service in EveJS v0.12.3; legacy layouts may differ |
-| `26002` | Local HTTP proxy used by launched clients |
-| `40110` | Market HTTP administration endpoint |
-| `40111` | Market RPC used for Native readiness; normally private in Docker |
+| Category | Tools |
+| --- | --- |
+| Client & Setup | Client Setup Wizard, Blue DLL Patcher, Client Code Grabber |
+| Configuration | Server Config Editor |
+| Data & Content | Local Database Creator, Reset Local Databases, New Eden Store Editor |
+| Market | Market Seed Builder, Market Seed Builder GUI, TQ Market Snapshot Seeder v2, Rust & MSVC Market Setup |
 
-Native Market readiness is checked against port `40111`, not `26001`. Port `26001` is the image service in EveJS v0.12.3 and can be reachable while Market is offline. Docker uses Compose health plus host HTTP `40110`; it does not require host publication of `40111`.
+Native actions use known wrapper files. Managed Docker offers supported Compose actions when the project provides the required services. Connect-only mode keeps container-changing actions unavailable.
 
 </details>
 
-## Client profiles and launching
+## Settings: paths, runtime, audio, and readability
 
-Each account receives an isolated launcher profile under:
+![Native settings with generic example paths and launch preferences](screenshots/native-settings.png)
 
-```text
-%APPDATA%\EveJS-Launcher\Profiles\<account>\tq
-```
+Settings contains the EveJS and client paths, proxy address, runtime selection, launch delay, service auto-start, compatible auto-login, hidden characters, update checks, and local-data maintenance. Unsaved changes are tracked before you leave the page.
 
-On Windows these profiles use directory junctions rather than copying the complete EVE client. The launcher prepares the minimum settings required by the client, pre-fills the account username, points traffic at the configured local proxy, and launches the selected EVE executable.
+The language selector changes the launcher interface between eight languages. **Reduce motion** pauses optional interface motion. Version 1.0.56 increases the small text throughout the interface; the guide also has its own **A− / A+** controls.
 
-Real passwords are never stored or typed by the launcher. By default, password entry remains inside the EVE client.
+### Docker setup
 
-For the exact supported Native EVE client build 3396210, Settings can enable **Auto-Login Character** after the launcher verifies the required client code and EveJS local password-bypass configuration. This opt-in path sends a fixed development credential only to the configured loopback EveJS service; the fixed value may be visible in the local process command line, but it is not a real account password. Unsupported or changed clients keep normal manual login.
+![Docker settings showing the selected control policy and read-only setup check](screenshots/docker-settings.png)
 
-**Launch All** and selected-group launch use a serial queue instead of opening every client at once. The configured stagger delay is applied between accounts, the application stays responsive, and cancelling the queue stops only future launches. Clients that already started remain open. Group membership is stored in launcher configuration by stable account/character identity.
+Normally leave **Compose File** blank to use `<EveJS Root>\compose.yaml`. Leave the advanced **Compose Project Name** blank unless you need to match an existing custom project name. Choose **Managed** or **Connect only**, then use **Test Docker setup**.
 
-## Mod handling
+The setup test checks the selected project without starting containers or initializing data. Docker Desktop must use Linux containers, the project must provide the expected Game and Market services, and published EveJS endpoints must bind to loopback. An uninitialized project can pass setup checks while still needing its normal initialization steps.
 
-The launcher supports two explicit contracts. Loader mods are discovered under `<evejs>/mods` and toggle by renaming their preload. Source-integrated schema-v2 mods are discovered under `<evejs>/server/mods` and toggle through a validated top-level Boolean in `<evejs>/config/mods`. Arbitrary source patches are not guessed at or presented as safely toggleable.
+### Audio and LYRA
 
-This is a launcher-side management framework around existing EveJS loading mechanisms, not a universal upstream EveJS plugin API. Disabled loader code is not loaded; a disabled source-integrated mod keeps only its tiny configuration/status gate active and must return before loading gameplay code or touching state.
+![Audio settings with separate music and voice controls](screenshots/audio-settings.png)
 
-Use **Apply & Restart Server** when the new configured mod state should become effective. The restart uses the same saved or prompted vanilla/modded selection as Home, client-triggered auto-start, and the navigation controls. Configured enabled does not by itself prove that the current Game server loaded the mod.
+Control music and voice independently, including their volume. The title bar provides music mute and previous/next controls. The launcher can play bundled music and supported local tracks.
 
-In Managed Docker mode, Apply & Restart instead regenerates the launcher-owned Compose override from the visible ordered selection and recreates Game with those preloads. Connect-only mode never changes loader or Compose state.
+**LYRA** is the bundled English (UK), prerecorded voice pack for launcher events. It is separate from EVE's Aura. Use **Preview LYRA** to hear it, choose whether results are announced, and set how much music plays while LYRA speaks. Announcements run locally.
 
-Managed Docker writes a durable transaction marker before replacing its exact launcher-owned override. If the launcher or computer stops during that handoff, ordinary Docker start/restart operations fail closed instead of consuming an uncertain override. Return to **Mods**, keep the same visible toggle selection, and press **Apply & Restart Server** again to resume the exact transaction. If the override no longer matches either its enrolled prior or desired hash, leave the launcher-owned files untouched and repair the artifact; the launcher deliberately refuses to guess.
+## Launcher updates and saved settings
 
-See [Build an EveJS Mod — Launcher Integration Guide](docs/MOD_AUTHORING.md) for the illustrated walkthrough, publishing instructions, and working example packages.
+The launcher checks GitHub Releases when automatic checks are enabled. You can also check manually in Settings. The update window shows download and installation progress, then restarts the launcher.
 
-## Tool Deck catalogue
-
-Tool Deck currently recognises 11 reviewed wrappers. Availability is resolved from the selected EveJS installation; the tools are not bundled into the launcher.
+The updater replaces the launcher executable and its `_internal` folder. Your launcher configuration lives separately in `%APPDATA%\EveJS-Launcher`; updating the launcher does not migrate or replace your EveJS game data.
 
 <details>
-<summary>View the complete tool catalogue</summary>
+<summary>Local files and defaults</summary>
 
-| Category | Tool | Notes shown by the launcher |
-|---|---|---|
-| Client & Setup | Client Setup Wizard | Prepares client paths, certificates, `blue.dll`, and `start.ini`. |
-| Client & Setup | Blue DLL Patcher | Opens the guided patcher for a selected client DLL. |
-| Client & Setup | Client Code Grabber | Requires Python; extracts and processes client code. |
-| Configuration | Server Config Editor | Docker Desktop is required for containerized installations. |
-| Data & Content | Local Database Creator | Downloads SDE data and generates local database content. |
-| Data & Content | Reset Local Databases | Includes a non-destructive preview and confirmation before reset. |
-| Data & Content | New Eden Store Editor | Requires Python; edits store catalogue and configuration data. |
-| Market | Market Seed Builder | Opens an interactive build, smoke-check, and diagnostics menu. |
-| Market | Market Seed Builder GUI | Opens graphical market-seed build and diagnostics controls. |
-| Market | TQ Market Snapshot Seeder v2 | Builds and inspects public market snapshot seed data. |
-| Market | Rust & MSVC Market Setup | May request Administrator permission and change the system toolchain. |
+| Item | Location or default |
+| --- | --- |
+| Launcher settings | `%APPDATA%\EveJS-Launcher\config.json` |
+| Account profiles | `%APPDATA%\EveJS-Launcher\Profiles` |
+| Launcher logs | `%APPDATA%\EveJS-Launcher\logs` |
+| Client proxy | `http://127.0.0.1:26002` |
+| Delay between launches | 3 seconds |
+| Auto-start Game / Market | Off |
+| Auto-Login Character | Off |
+| Music / voice volume | 50% / 100% |
+| Automatic update interval | 6 hours |
 
-Every launch request is re-resolved against the current EveJS root before a process is created. Destructive and system-level actions are confirmed at the final launch boundary rather than relying only on the visible card state.
+Settings are saved atomically. If the configuration is malformed, the launcher backs it up before recovering with defaults.
 
 </details>
-
-## Updates
-
-The launcher checks the latest GitHub Release on startup when automatic checks are enabled. Manual checks are available in Settings.
-
-For an update, the launcher:
-
-1. Downloads the release ZIP with visible byte progress.
-2. Extracts and validates the new application folder in a staging location.
-3. Keeps the update window open while the old launcher exits.
-4. Moves only the launcher-owned executable and `_internal` runtime into a private rollback directory.
-5. Copies and verifies only those two launcher-owned entries from the new onedir installation.
-6. Restarts the new executable.
-7. Removes only the validated staging and rollback artifacts after successful restart.
-
-The launcher folder is treated as a shared directory: every pre-existing file or folder outside the launcher executable and `_internal` is left in place, including a colocated EveJS installation. Update cleanup metadata lives inside the launcher-owned `_internal` directory; a private rollback directory may exist temporarily while an update is being verified. The executable and `_internal` must still remain together because they form the complete launcher application.
-
-## Language and Unicode paths
-
-The language selector sits in the bottom footer/status bar and in the first-run wizard. Each option uses a painted flag and its native language name, so it does not depend on emoji-font support. On a fresh profile, the launcher selects a supported system language automatically; otherwise it falls back to English, and a saved choice always wins. English, Simplified Chinese, Japanese, Korean, French, German, Dutch, and Russian cover the complete launcher interface, including the first-run wizard, main pages, Settings, dialogs, updater, and LYRA text captions. User data, server messages, paths, raw log output, and semantic combo-box values are deliberately preserved instead of being mistaken for translatable interface text.
-
-Launcher-owned paths use Windows Unicode APIs. Client discovery accepts UTF-8, UTF-8 with BOM, UTF-16 with BOM, and the active Windows legacy code page for `EvEJSConfig.bat` without discarding undecodable bytes. Real profile, AppData, temp, EveJS, and client paths remain unchanged when they contain Chinese, Japanese, Korean, or other non-ASCII characters.
-
-If a Docker project directory has no usable ASCII-derived name and the Compose file has no top-level `name`, set **Compose Project Name** to the stack's existing lowercase ASCII name, such as `evejs-local`. The launcher never invents a different stack identity automatically.
-
-## Configuration reference
-
-Configuration is stored in:
-
-```text
-%APPDATA%\EveJS-Launcher\config.json
-```
-
-| Setting | Purpose | Default |
-|---|---|---|
-| EveJS Root | Installation containing the server, mods, tools, and game data | Not set |
-| EVE Client Path | Copied EVE client `tq` folder containing `start.ini` and `bin64/exefile.exe` | Detected during setup when possible |
-| Proxy URL | Local client-traffic proxy | `http://127.0.0.1:26002` |
-| Runtime Backend | Native processes or Docker Compose | Native |
-| Docker Compose File | Absolute primary Compose file | Not set |
-| Docker Control Policy | Read-only observation or launcher-managed lifecycle | Connect only |
-| Docker Project Name | Optional explicit Compose project identity | Empty |
-| Keep Stack Running on Exit | Leaves a Managed Compose stack running when the launcher closes | On |
-| Stagger Delay | Delay between queued client launches | `3 seconds` |
-| Auto-Start Server | Starts Game when a client requires it | Off |
-| Auto-Start Market | Starts Market when required | Off |
-| Auto-Login Character | Uses the verified local auto-login path for a compatible Native client | Off |
-| Server Start Selection | Always ask or a detected vanilla/modded indicator | Always ask |
-| Launcher Language | Saved language for the complete launcher interface | English |
-| Music | Enables bundled **Celestial Transit** and configured local music | On |
-| Music Volume | Playback level for launcher music | `50%` |
-| LYRA Voice | Enables bundled prerecorded launcher announcements | On |
-| LYRA Voice Volume | Playback level for LYRA announcements | `100%` |
-| Announce Results | Announces supported completion and failure events | On |
-| Music Ducking | Adjusts music while LYRA announcements play | On |
-| Animations | Deep Signal traffic, signal motion, and page effects | On |
-| Hero Rotation Interval | Time between Home banner images | `6 seconds` |
-| Auto-Check for Updates | Periodic GitHub Release checks | On |
-| Update Check Interval | Time between automatic checks | `6 hours` |
-| Hidden Characters | Characters omitted from the normal grid | Empty |
-| Character Groups | User-defined launch groups and selected group | Empty / All Visible |
-
-Settings are written atomically. If the stored configuration is malformed, the launcher backs it up and recovers with defaults rather than continuing with a partially loaded file.
 
 ## Common questions
 
-<details>
-<summary>Why does a service say it is managed externally?</summary>
+**My mod is enabled, but nothing changed.** Restart Game for server-mod changes. Configure changes a mod's preferences; it does not enable the mod. Some packages apply changes when a client next starts instead. Follow the package's instructions.
 
-The endpoint is reachable, but the process was not started by this launcher instance. The launcher reports the service and can continue using it, but it will not terminate a process it does not own. Stop it from the console or application that originally started it.
+**A tool is unavailable.** Check that it exists in the selected EveJS installation and that its prerequisites are met, then Refresh. Runtime and control-policy restrictions can also disable an action.
 
-</details>
+**A service is marked External.** It was started outside this launcher instance. Stop it through the process or console that owns it.
 
-<details>
-<summary>Why is Auto-Login Character unavailable?</summary>
+**A portrait is missing after moving EveJS.** Portraits are generated by EveJS and are separate from the game database. Transfer the generated Character images too, or let the server regenerate them.
 
-Auto-login is deliberately build-gated. It is available only for Native runtime when the selected EVE client is the exact supported build 3396210, the required code entries match their known hashes, the local proxy is loopback-only, and EveJS has local development password validation bypass enabled. Settings shows the failed capability check; unsupported clients are not modified.
+**Can I move just the EXE?** No. Keep the extracted application folder together, including `_internal`.
 
-</details>
+## Optional DLSS5 package
 
-<details>
-<summary>How does overview copy work for a new character?</summary>
+[EveJS-DLSS5](https://github.com/V0nCleef/EveJS-DLSS5) is a separate optional project. It is not bundled with the launcher, and a launcher update does not install it. See that project's current package, supported client build, requirements, installation instructions, and component licences.
 
-The optional overview bridge is installed from the New Character dialog only after exact client build and hash checks. It first preserves the original client archive entry and can be removed later. Select a source character whose overview has already been captured, or launch the source once through the launcher after creating the new character. The queued overview is imported when the new character next logs in through the launcher.
-
-</details>
-
-<details>
-<summary>Why are Docker controls disabled or the project unavailable?</summary>
-
-Use **Test Docker setup** for an actionable result. If the Docker CLI is missing, install Docker Desktop or add `docker.exe` to `PATH`. If the CLI exists but the engine is unavailable, start Docker Desktop and wait for its Linux-container engine. A separate result identifies a missing Compose plugin, invalid Compose configuration, or missing required `server` and `market` services. Required host endpoints must publish on loopback only; wildcard or LAN-facing bindings are rejected.
-
-Connect-only mode deliberately disables all container, mod, and Docker Tool Deck mutations. Select **Managed** only when this launcher should control the chosen project. An unhealthy service remains running but reports Failed; inspect its launcher console and Compose health check before deciding whether to restart or recreate it.
-
-</details>
-
-<details>
-<summary>Why did a mod change not take effect?</summary>
-
-Mod toggles change configured state on disk; they do not change an already-running Game server. **Apply & Restart Server** performs the required restart and runtime verification through the normal server-mode resolver. In Managed Docker mode, an interrupted Apply leaves ordinary lifecycle operations blocked: keep the same visible toggles and press **Apply & Restart Server** again to resume the exact transaction.
-
-</details>
-
-<details>
-<summary>Why is a tool marked unavailable?</summary>
-
-Tool Deck checks the configured EveJS root and the known wrapper path under its `tools` folder. Use Refresh after changing the root or adding a tool. An inaccessible wrapper disables only that card; it does not break the rest of the page.
-
-</details>
-
-<details>
-<summary>Why is a character portrait missing?</summary>
-
-Portraits are generated by the EveJS server and are not stored in the main game database. After moving or upgrading an EveJS installation, copy the generated Character image directory as well or let the server regenerate the portraits.
-
-</details>
-
-<details>
-<summary>Can I move the executable out of the extracted folder?</summary>
-
-No. The current release uses PyInstaller onedir packaging. Run the executable with its `_internal` directory beside it.
-
-</details>
+Compatible packages can expose their setup and removal actions on Mods. Follow the package instructions and keep its saved installation receipts and backups. Do not stack separate installations on the same physical client.
 
 ## Running from source
 
@@ -425,85 +194,16 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
-The full developer repository also contains automated tests. In that checkout,
-install its development requirements before running:
+The application uses PyQt6. Build the complete Windows application folder with `python -m PyInstaller build.spec`; distribute the entire onedir output. Match a released binary to its release tag when inspecting or rebuilding its source.
 
-```text
-python -m pytest
-```
+Tests live in `tests`. Guide maintenance instructions are in [the guide reference folder](docs/how-to-make-a-mod/reference/MAINTAINING.md).
 
-<details>
-<summary>Project layout</summary>
+## Support and licence
 
-```text
-main.py                     Application entry point
-src/app.py                  Main window and application wiring
-src/config.py               Atomic JSON configuration storage
-src/core/                    Service, client, character, group, overview, database, mod, and tool logic
-src/pages/home_page.py       Runtime dashboard
-src/pages/characters_page.py Character grid and detail panel
-src/pages/mods_page.py       Mod discovery and toggles
-src/pages/tools_page.py      Curated external Tool Deck
-src/pages/settings_page.py   Configuration and maintenance controls
-src/widgets/                 Shared PyQt6 controls and panels
-src/workers/                 Background character, patch, database, portrait, and service work
-src/updater/                 Release checks, progress UI, and staged replacement
-tests/                       Automated regression and layout coverage
-```
-
-The application is built with PyQt6 and packaged for Windows with PyInstaller in onedir mode.
-
-</details>
-
-## Project status
-
-The launcher is Windows-only. Releases are published as portable ZIP archives on the [Releases page](https://github.com/V0nCleef/evejs-launcher/releases).
-
-Bug reports and focused pull requests are welcome. When reporting a service problem, include the launcher version, which service failed, whether it was started inside or outside the launcher, and the relevant console output. Do not include account names, character names, passwords, or tokens in public reports.
-
-## Optional DLSS5 package
-
-DLSS5 is a separate optional project, not bundled with this launcher. Updating
-the launcher does not install DLSS5 or change the renderer for users without it.
-See [EveJS-DLSS5](https://github.com/V0nCleef/EveJS-DLSS5) for its package,
-supported client build, requirements and separate component licence notices.
-
-For launcher-managed installation, extract the complete `DLSS5` folder into
-the selected EveJS root's `mods` directory and refresh Mods. The enabled package
-is detected automatically. Dependencies are prepared on the first client launch,
-not on server startup; that first launch can take longer while downloads and
-verification complete. Use its Mods-page Uninstall action with all clients
-sharing that physical client folder closed. DLSS5 0.5.6 and later keep their receipt,
-downloads, backups, and audit state beside that physical copied client under
-`_evejs/dlss5/install`, so the same package can be copied into a later EveJS
-root without abandoning its rollback history. Keep that retained state.
-
-The standalone installer remains available for users who use `Play.bat`, and a
-verified standalone installation can also be launched here without creating a
-Mods entry. Do not stack separate installations on the same physical client.
-An incomplete or unknown DLSS5 installation is reported rather than guessed safe.
-New schema-3 packages are independent of the EveJS server version while still
-pinning the exact supported copied-client build and reviewed renderer bytes.
-
-## Matching source and build
-
-Each published binary must be accompanied by the matching source revision or
-source archive and clear source access on the release page. The source package
-contains `src`, `main.py`, `build.spec`, `build_support.py`, required repository
-assets, licence files and dependency requirements. Do not build from an unrelated
-branch and assume it matches a downloaded executable.
-
-The candidate build uses Python 3.11.15, PyInstaller 6.21.0 and the dependency
-versions listed in `THIRD_PARTY_NOTICES.md`. From a clean Windows environment
-with those dependencies installed, run `python -m PyInstaller build.spec` from
-the source root. Distribute the complete resulting onedir folder, including
-`_internal`, not its EXE alone. This is a build recipe, not a byte-identical
-reproducible-build guarantee.
-
-## License
+Use [GitHub issues](https://github.com/V0nCleef/evejs-launcher/issues) or the [EveJS Discord](https://discord.gg/HVTfKeqX3t) for support. Include the launcher version, runtime, and the relevant error. Remove private account details, passwords, and tokens from public reports.
 
 EveJS Launcher is free and open-source software licensed under the [GNU General Public License version 3](LICENSE). You may use, copy, modify, and redistribute it, including commercially, under the GPLv3 terms. Distributed modified versions must keep the same freedoms and provide their corresponding source.
 
-Packaged dependency licenses and source links are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Packaged dependency licences and source links are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Each release provides its matching source through its tag and GitHub source archives.
 
 EVE Online and EVE are registered trademarks of CCP hf. This project is not affiliated with CCP Games.

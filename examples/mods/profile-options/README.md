@@ -1,6 +1,6 @@
 # Profile Options
 
-[Guide home](../../../docs/MOD_AUTHORING.md) | [Descriptor/form](evejs-launcher.mod.json) | [Node helper](helper.js)
+[Guide home](../../../docs/how-to-make-a-mod/00-start-here.md) | [Descriptor/form](evejs-launcher.mod.json) | [Node helper](helper.js)
 
 This complete settings package stores a label, integer and Boolean in private per-profile INI files. Its options are deliberately demonstration values; they do not change rendering or gameplay. No binary installer or package-specific launcher code is involved.
 

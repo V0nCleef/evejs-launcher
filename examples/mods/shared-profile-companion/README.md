@@ -1,6 +1,6 @@
 # Shared Profile Companion
 
-[Guide home](../../../docs/MOD_AUTHORING.md) | [Profile Options](../profile-options/README.md) | [Ownership](../../../docs/mod-authoring/ownership.md)
+[Guide home](../../../docs/how-to-make-a-mod/00-start-here.md) | [Profile Options](../profile-options/README.md) | [Ownership](../../../docs/how-to-make-a-mod/reference/ownership.md)
 
 This complete settings-only mod needs no helper, Node runtime or author-supplied
 hashes. Its [descriptor](evejs-launcher.mod.json) creates a profile form through

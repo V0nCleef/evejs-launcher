@@ -258,7 +258,7 @@ def test_author_guide_uses_bundled_matching_document(
 
     assert not opened
     assert page._authoring_guide.isVisible()
-    assert page._authoring_guide._current.name == "MOD_AUTHORING.md"
+    assert page._authoring_guide._current.name == "00-start-here.md"
     page._authoring_guide.close()
 
 

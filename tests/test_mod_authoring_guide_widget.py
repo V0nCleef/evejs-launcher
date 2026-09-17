@@ -32,18 +32,18 @@ def test_guide_navigation_examples_search_and_back_are_local(qapp, tmp_path):
     source = Path(__file__).resolve().parents[1]
     guide = ModAuthoringGuide(bundle_root=source)
     assert "Build an EveJS Mod" in guide.browser.toPlainText()
-    guide._follow_link(QUrl("mod-authoring/helper-intro.md"))
-    assert guide.location.text() == "docs/mod-authoring/helper-intro.md"
+    guide._follow_link(QUrl("08-helper-intro.md"))
+    assert guide.location.text() == "docs/how-to-make-a-mod/08-helper-intro.md"
     guide.search.setText("preparation")
     guide._find()
     assert guide.browser.textCursor().selectedText().casefold() == "preparation"
     before = guide.browser.toPlainText()
     guide._follow_link(QUrl("../../examples/mods/profile-options/helper.js"))
     assert guide.browser.toPlainText() == before
-    guide._follow_link(QUrl('example-files.md'))
+    guide._follow_link(QUrl('15-example-files.md'))
     assert guide.navigation.currentItem().text() == '15. Example files'
     guide._back()
-    assert guide.location.text() == "docs/mod-authoring/helper-intro.md"
+    assert guide.location.text() == "docs/how-to-make-a-mod/08-helper-intro.md"
     before = guide.browser.toPlainText()
     guide._follow_link(QUrl.fromLocalFile(str(tmp_path / "outside.md")))
     assert guide.browser.toPlainText() == before
@@ -52,8 +52,8 @@ def test_guide_navigation_examples_search_and_back_are_local(qapp, tmp_path):
 
 
 def test_all_walkthrough_languages_keep_code_and_links_and_english_export_in_sync():
-    source = json.loads((ROOT / "docs/mod-authoring/guide-content.json").read_text(encoding="utf-8"))
-    catalog = json.loads((ROOT / "docs/mod-authoring/navigation.json").read_text(encoding="utf-8"))
+    source = json.loads((ROOT / "docs/how-to-make-a-mod/guide-content.json").read_text(encoding="utf-8"))
+    catalog = json.loads((ROOT / "docs/how-to-make-a-mod/navigation.json").read_text(encoding="utf-8"))
     allowed = {(ROOT / path).resolve() for path in catalog_paths(catalog)}
     for page in source["pages"]:
         english = render_page(source, page, "en")
@@ -74,21 +74,21 @@ def test_guide_switches_language_without_changing_launcher_or_losing_page(qapp):
     guide = ModAuthoringGuide(bundle_root=ROOT)
     try:
         assert guide.language.currentData() == "nl"
-        guide._display(ROOT / "docs/mod-authoring/configure.md")
+        guide._display(ROOT / "docs/how-to-make-a-mod/03-configure.md")
         before_history = list(guide._history)
         assert "Wat de speler ziet" in guide.browser.toPlainText()
         guide.language.setCurrentIndex(guide.language.findData("ja"))
         assert current_language() == "nl"
         assert guide._history == before_history
-        assert guide._current.name == "configure.md"
+        assert guide._current.name == "03-configure.md"
         assert "プレイヤーに見えるもの" in guide.browser.toPlainText()
         assert not hasattr(guide, 'show_code')
         assert '"scanInterval"' in guide.browser.toPlainText()
         guide._back()
-        assert guide._current.name == "MOD_AUTHORING.md"
+        assert guide._current.name == "00-start-here.md"
         assert not hasattr(guide, 'section')
         previous_page = guide._current
-        guide._display(ROOT / 'docs/mod-authoring/reference.md')
+        guide._display(ROOT / 'docs/how-to-make-a-mod/reference/reference.md')
         assert guide._current == previous_page
     finally:
         guide.close()
@@ -117,7 +117,7 @@ def test_zoom_changes_rendered_text_with_launcher_styles_and_survives_navigation
         guide.zoom_out.click()
         assert abs(size() - initial) < 0.01
         guide.zoom_in.click()
-        guide._display(ROOT / 'docs/mod-authoring/mod-updates.md')
+        guide._display(ROOT / 'docs/how-to-make-a-mod/07-mod-updates.md')
         assert size() > initial
     finally:
         guide.close()
@@ -126,8 +126,8 @@ def test_zoom_changes_rendered_text_with_launcher_styles_and_survives_navigation
 
 def test_update_screenshot_opens_zoomable_local_original(qapp):
     guide = ModAuthoringGuide(bundle_root=ROOT)
-    guide._display(ROOT / 'docs/mod-authoring/mod-updates.md')
-    image_path = ROOT / 'docs/mod-authoring/images/update-available.png'
+    guide._display(ROOT / 'docs/how-to-make-a-mod/07-mod-updates.md')
+    image_path = ROOT / 'docs/how-to-make-a-mod/images/update-available.png'
     image = QImage(str(image_path))
     assert image.width() >= 2 * int(image.text('logicalWidth'))
     guide._follow_link(QUrl.fromLocalFile(str(image_path)))
@@ -149,7 +149,7 @@ def test_local_images_load_on_first_visit_fit_and_reject_unlisted_resources(qapp
     guide = ModAuthoringGuide(bundle_root=ROOT)
     guide.resize(850, 600)
     guide.show()
-    guide._display(ROOT / "docs/mod-authoring/configure.md")
+    guide._display(ROOT / "docs/how-to-make-a-mod/03-configure.md")
     qapp.processEvents()
     try:
         formats = [fragment.charFormat().toImageFormat() for fragment in guide._fragments()
@@ -169,8 +169,8 @@ def test_local_images_load_on_first_visit_fit_and_reject_unlisted_resources(qapp
 
 
 def test_walkthrough_links_are_visible_topics_and_instructions_have_screenshots():
-    source = json.loads((ROOT / 'docs/mod-authoring/guide-content.json').read_text(encoding='utf-8'))
-    catalog = json.loads((ROOT / 'docs/mod-authoring/navigation.json').read_text(encoding='utf-8'))
+    source = json.loads((ROOT / 'docs/how-to-make-a-mod/guide-content.json').read_text(encoding='utf-8'))
+    catalog = json.loads((ROOT / 'docs/how-to-make-a-mod/navigation.json').read_text(encoding='utf-8'))
     topics = {(ROOT / p['path']).resolve() for p in catalog['pages']}
     images = {(ROOT / p).resolve() for p in catalog['assets']}
     for page in source['pages']:
@@ -193,7 +193,7 @@ def test_walkthrough_links_are_visible_topics_and_instructions_have_screenshots(
 def test_plain_chinese_prose_and_opt_in_handoff_preserve_code(qapp, tmp_path):
     guide = ModAuthoringGuide(bundle_root=ROOT)
     guide.language.setCurrentIndex(guide.language.findData('zh_CN'))
-    guide._display(ROOT / 'docs/mod-authoring/configure.md')
+    guide._display(ROOT / 'docs/how-to-make-a-mod/03-configure.md')
     try:
         prose = guide.browser.toPlainText().split('代码示例')[0]
         for word in ('Configure', 'Save', 'Cancel', 'settings', 'label', 'minimum', 'maximum'):
@@ -202,7 +202,7 @@ def test_plain_chinese_prose_and_opt_in_handoff_preserve_code(qapp, tmp_path):
         handoff = guide._handoff_text()
         assert '"scanInterval"' in handoff
         assert '"schemaVersion": 1' in handoff
-        assert 'docs/mod-authoring/settings-reference.md' in handoff
+        assert 'docs/how-to-make-a-mod/reference/settings-reference.md' in handoff
         assert len(guide.browser.originals) <= 12
         archive = tmp_path / 'examples.zip'
         guide._write_examples(archive)

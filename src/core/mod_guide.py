@@ -38,9 +38,9 @@ def render_page(source: dict, page: dict, language: str, *, include_code: bool =
             for index, paragraph in enumerate(paragraphs):
                 parts.append(prose(paragraph))
                 for asset in visuals.get(str(index), []):
-                    parts.append(prose(f"![{source['ui']['demoImage'][language]}](@docs/mod-authoring/images/{asset}.png)"))
+                    parts.append(prose(f"![{source['ui']['demoImage'][language]}](@docs/how-to-make-a-mod/images/{asset}.png)"))
         for asset in block.get('afterImages', []):
-            parts.append(prose(f"![{source['ui']['demoImage'][language]}](@docs/mod-authoring/images/{asset}.png)"))
+            parts.append(prose(f"![{source['ui']['demoImage'][language]}](@docs/how-to-make-a-mod/images/{asset}.png)"))
     if include_code and code_blocks:
         parts.extend(['---', '## '+source['ui']['codeHeading'][language], *code_blocks])
     return "\n\n".join(parts) + "\n"
@@ -48,10 +48,10 @@ def render_page(source: dict, page: dict, language: str, *, include_code: bool =
 
 def catalog_paths(catalog: dict) -> list[str]:
     """The single explicit allow-list for navigation, images and packaging."""
-    paths = ["docs/mod-authoring/navigation.json"]
+    paths = ["docs/how-to-make-a-mod/navigation.json"]
     paths += [row["path"] for key in ("pages", "references") for row in catalog.get(key, [])]
     paths += catalog.get("examples", []) + catalog.get("assets", [])
-    paths += ["docs/mod-authoring/guide-content.json"]
+    paths += ["docs/how-to-make-a-mod/guide-content.json"]
     if len(paths) != len(set(paths)):
         raise ValueError("Duplicate bundled guide path.")
     for path in paths:

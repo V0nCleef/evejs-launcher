@@ -64,11 +64,11 @@ class ModAuthoringGuide(QDialog):
         self.resize(1140, 800)
         self.setMinimumSize(1140, 800)
         self._root = (bundle_root or authoring_bundle_root()).resolve(strict=True)
-        catalog = json.loads((self._root / "docs/mod-authoring/navigation.json").read_text(encoding="utf-8"))
+        catalog = json.loads((self._root / "docs/how-to-make-a-mod/navigation.json").read_text(encoding="utf-8"))
         bundled = {(self._root / value).resolve() for value in catalog_paths(catalog)}
         if any(not path.is_relative_to(self._root) or not path.is_file() for path in bundled):
             raise ValueError("The bundled guide is incomplete or has an invalid path.")
-        self._source = json.loads((self._root / "docs/mod-authoring/guide-content.json").read_text(encoding="utf-8"))
+        self._source = json.loads((self._root / "docs/how-to-make-a-mod/guide-content.json").read_text(encoding="utf-8"))
         self._content = {(self._root / page["path"]).resolve(): page for page in self._source["pages"]}
         self._contents = catalog["pages"]
         self._pages = tuple((row["title"], self._root / row["path"]) for row in catalog["pages"])
@@ -201,7 +201,7 @@ class ModAuthoringGuide(QDialog):
         self.navigation.clear()
         for row in self._contents:
             title = row.get("titles", {}).get(self._language, row["title"])
-            if row["path"] == "docs/MOD_AUTHORING.md":
+            if row["path"] == "docs/how-to-make-a-mod/00-start-here.md":
                 title = self._text("home")
             self.navigation.addItem(title)
         self.navigation.blockSignals(False)

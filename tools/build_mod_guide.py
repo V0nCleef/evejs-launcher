@@ -13,8 +13,8 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from src.core.mod_guide import render_page
-SOURCE = ROOT / "docs/mod-authoring/guide-content.json"
-CATALOG = ROOT / "docs/mod-authoring/navigation.json"
+SOURCE = ROOT / "docs/how-to-make-a-mod/guide-content.json"
+CATALOG = ROOT / "docs/how-to-make-a-mod/navigation.json"
 LANGUAGES = ("en", "zh_CN", "ja", "ko", "fr", "de", "nl", "ru")
 
 

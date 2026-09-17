@@ -1,6 +1,6 @@
 # Client Receipt
 
-[Guide home](../../../docs/MOD_AUTHORING.md) | [Descriptor](evejs-launcher.mod.json) | [PowerShell helper](helper.ps1)
+[Guide home](../../../docs/how-to-make-a-mod/00-start-here.md) | [Descriptor](evejs-launcher.mod.json) | [PowerShell helper](helper.ps1)
 
 This is a working protocol demonstration, not a renderer. It writes only its own demonstration receipt under the selected disposable client's `_local/mod-receipts/`. It installs no DLL, modifies no EVE binary and changes no gameplay.
 

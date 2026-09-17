@@ -50,7 +50,7 @@ def main() -> None:
     app.setPalette(_build_palette())
     app.setStyleSheet(theme.build_qss(theme.load_fonts()))
     set_language("en")
-    destination = ROOT / "docs/mod-authoring/images"
+    destination = ROOT / "docs/how-to-make-a-mod/images"
     destination.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="evejs-guide-demo-") as folder:
         root = Path(folder)

@@ -1,6 +1,6 @@
 # Cleanup Retry Demo
 
-[Guide home](../../../docs/MOD_AUTHORING.md) | [Descriptor](evejs-launcher.mod.json) | [Helper](helper.js)
+[Guide home](../../../docs/how-to-make-a-mod/00-start-here.md) | [Descriptor](evejs-launcher.mod.json) | [Helper](helper.js)
 
 Import this folder into a disposable installation and enable it. It creates two
 synthetic owned records in its own `demo-state.json`; it changes no game data,

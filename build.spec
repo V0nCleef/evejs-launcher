@@ -25,7 +25,7 @@ block_cipher = None
 
 # One reviewed catalog drives both offline navigation and release data. No
 # directory wildcard can pull investigation notes into the public guide.
-_guide_catalog_path = Path('docs/mod-authoring/navigation.json')
+_guide_catalog_path = Path('docs/how-to-make-a-mod/navigation.json')
 _guide_catalog = json.loads(_guide_catalog_path.read_text(encoding='utf-8'))
 _guide_paths = [Path(path) for path in catalog_paths(_guide_catalog)]
 for _guide_path in _guide_paths:

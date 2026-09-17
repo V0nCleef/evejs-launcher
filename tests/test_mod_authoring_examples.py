@@ -229,7 +229,7 @@ def test_shared_profile_examples_remove_one_owner_without_erasing_the_other(tmp_
 
 
 def test_guide_catalog_contains_every_local_documentation_link_and_no_external_files():
-    catalog_path = SOURCE / "docs/mod-authoring/navigation.json"
+    catalog_path = SOURCE / "docs/how-to-make-a-mod/navigation.json"
     catalog = json.loads(catalog_path.read_bytes())
     paths = [SOURCE / path for path in catalog_paths(catalog)]
     allowed = {path.resolve() for path in paths}

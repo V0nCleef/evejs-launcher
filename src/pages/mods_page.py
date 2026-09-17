@@ -70,7 +70,7 @@ from src.widgets.ui_translation import (
 )
 
 
-MOD_AUTHORING_GUIDE_URL = "docs/MOD_AUTHORING.md"
+MOD_AUTHORING_GUIDE_URL = "docs/how-to-make-a-mod/00-start-here.md"
 
 
 class ModFolderError(RuntimeError):

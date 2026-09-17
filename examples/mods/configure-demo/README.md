@@ -10,4 +10,4 @@ This package demonstrates a real Configure form. It saves a preference and has n
 
 The restart reminder demonstrates the field's `restart` declaration; this demo does not actually scan. A real mod must read the value and implement that behaviour itself.
 
-[Manifest](evejs-launcher.mod.json) | [Illustrated walkthrough](../../../docs/mod-authoring/configure.md)
+[Manifest](evejs-launcher.mod.json) | [Illustrated walkthrough](../../../docs/how-to-make-a-mod/03-configure.md)
