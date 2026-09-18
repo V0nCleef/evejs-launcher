@@ -47,8 +47,8 @@ running it is not part of an unattended source-integrity check.
 
 ## What the source bundle proves
 
-The packaging gate verifies the final build snapshot's 180 inputs, 121 app
-modules, 55 packaged data inputs and exact final executable hash. It includes
+The packaging gate verifies the final build snapshot's 318 inputs, 156 app
+modules, 160 packaged data inputs and exact final executable hash. It includes
 the same Python source, JS helpers, templates, reviewed artwork/audio, licences,
 documentation and build spec used by that build. The extra build documentation,
 version lock and four audio scripts are source-only additions; they are not

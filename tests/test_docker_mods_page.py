@@ -181,9 +181,8 @@ def test_native_integrated_mod_uses_declared_config_and_marks_restart_required(
     assert row.toggle.isChecked()
     assert row.kind_badge.text() == "CFG"
     assert row.kind_badge.toolTip() == "SOURCE-INTEGRATED MOD"
-    assert row.path_label.text() == (
-        "config / mods / evejs-temp-npc.json → enabled"
-    )
+    assert row.path_label.text() == "v0.4.2-prototype"
+    assert "config / mods / evejs-temp-npc.json → enabled" in row.path_label.toolTip()
     assert page.selected_loader_names() == ()
 
     row.toggle.setChecked(False)
@@ -628,3 +627,26 @@ def test_deep_signal_manifest_is_accessible_and_privacy_safe_at_minimum_width(
     finally:
         page.close()
         page.deleteLater()
+
+def test_loader_row_reads_updated_manifest_version_without_renaming_folder(qapp, tmp_path):
+    folder = _loader(tmp_path, 'AutoMining-1.0.0').parent
+    manifest = folder / 'evejs-launcher.mod.json'
+    data = {
+        'schemaVersion': 3, 'id': 'automining', 'displayName': 'AutoMining',
+        'version': '1.0.5', 'kind': 'loader', 'supportedBackends': ['native', 'docker'],
+        'activation': {'strategy': 'loader_rename'}, 'restart': 'game_server',
+    }
+    manifest.write_text(json.dumps(data), encoding='utf-8')
+    page = ModsPage()
+    page.set_evejs_root(str(tmp_path))
+    row = page._rows[0]
+    assert row.name_label.text() == 'AutoMining'
+    assert row.path_label.text() == 'v1.0.5'
+    assert 'AutoMining-1.0.0' in row.path_label.toolTip()
+    identity = row.mod.identity
+    data['version'] = '1.0.6'
+    manifest.write_text(json.dumps(data), encoding='utf-8')
+    page.set_evejs_root(str(tmp_path))
+    assert page._rows[0].path_label.text() == 'v1.0.6'
+    assert page._rows[0].mod.identity == identity
+    assert folder.exists()

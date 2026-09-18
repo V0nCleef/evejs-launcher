@@ -104,6 +104,37 @@ def test_real_package_swap_preserves_settings_order_and_active(fixture):
     assert list((root / mod_updates.UPDATE_ROOT).glob('*/previous/loader.js.off')) or list((root / mod_updates.UPDATE_ROOT).glob('*/previous/loader.js.disabled'))
 
 
+def test_package_update_through_dialog_signal_preserves_settings(qapp, fixture):
+    from concurrent.futures import ThreadPoolExecutor
+    from src.widgets.mod_update_dialog import ModUpdateDialog
+    from src.workers.mod_operation_worker import ModOperationResult
+    root, target, offer, downloader = fixture
+    mod = scan_mods(root)[0]
+    dialog = ModUpdateDialog(mod, offer)
+    dialog.begin()
+    try:
+        # The controller passes this exact Qt signal to the worker. Plain
+        # Python callbacks with default arguments previously hid the mismatch.
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(mod_updates.install_release, mod, offer,
+                        ModOperationContext(root), guard=lambda: None,
+                        downloader=downloader,
+                        progress=dialog.progress_received.emit).result(timeout=15)
+        qapp.processEvents()
+        assert dialog.status.text() == 'Verifying installation'
+        assert scan_mods(root)[0].version == '1.1.0'
+        assert scan_mods(root)[0].active
+        assert json.loads((target / 'config.json').read_text()) == {'user': 42}
+        assert not mod_updates.pending_updates(root)
+        dialog.finish(ModOperationResult(None, True))
+        assert dialog.status.text() == 'Update complete.'
+        assert dialog.close_btn.isEnabled()
+    finally:
+        dialog.running = False
+        dialog.close()
+        dialog.deleteLater()
+
+
 def test_failed_new_activation_restores_old_version(fixture, monkeypatch):
     root, target, offer, downloader = fixture
     original = mod_updates.change_mod_state

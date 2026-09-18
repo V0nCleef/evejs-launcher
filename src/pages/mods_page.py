@@ -307,14 +307,20 @@ class ModRow(QFrame):
             config_key = mod.config_key or "enabled"
             display_path = f"config / mods / {config_name} → {config_key}"
             troubleshooting_path = config_path or mod.manifest_path or mod.path
-        self.path_label = QLabel(display_path)
+        # Package folders stay stable across updates because settings ownership
+        # depends on their identity. Show the declared version, not a stale
+        # version embedded in an installation folder such as AutoMining-1.0.0.
+        self.path_label = QLabel(f"v{mod.version}" if mod.version else display_path)
         self.path_label.setProperty("i18nIgnore", True)
         self.path_label.setProperty("class", "modPath")
         self.path_label.setSizePolicy(
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Preferred,
         )
-        self.path_label.setToolTip(str(troubleshooting_path))
+        self.path_label.setToolTip(
+            f"{display_path}\n{troubleshooting_path}"
+            if mod.version else str(troubleshooting_path)
+        )
         text_col.addWidget(self.path_label)
 
         layout.addLayout(text_col, stretch=1)

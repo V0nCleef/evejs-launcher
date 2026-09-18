@@ -2,6 +2,13 @@
 
 ## Changelog
 
+## v1.0.57 — 2026-09-18
+
+- Fixed mod updates failing immediately with a progress signal argument error, including AutoMining 1.0.4 to 1.0.5. Update phases now supply the complete progress event to the dialog.
+- Mod rows now show the name and installed version declared in the mod manifest. An old installation folder name no longer looks like the current mod version.
+- Folder and configuration paths remain available in the tooltip. Legacy mods without version metadata keep their existing path display.
+- Mod folders and saved settings keep their existing identities across updates.
+
 ## v1.0.56 — 2026-09-17
 
 - Replaced the flat mod-author guide with an illustrated, task-by-task Launcher Integration Guide, available from **Mods → Make a mod**.

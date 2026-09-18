@@ -74,7 +74,12 @@ def install_release(mod, release, operation, *, guard, downloader=download_relea
     Every runtime mutation is preceded by the caller's stop/reachability guard.
     The package remains disabled until the final provider install succeeds.
     """
-    report = progress or (lambda phase, done=0, total=0: None)
+    def report(phase, done=0, total=0):
+        # Qt signal emitters require all three arguments, including during
+        # phases that have no byte counts yet.
+        if progress is not None:
+            progress(phase, done, total)
+
     report("Checking update")
     current = operation.current(mod)
     descriptor = current.api_descriptor
