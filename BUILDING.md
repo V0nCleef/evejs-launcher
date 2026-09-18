@@ -18,7 +18,7 @@ CPython distribution. This document does not claim there is an official
 Windows installer for every CPython maintenance version. A different Python
 patch/build or package version may produce different bytecode or native files.
 
-Extract this source ZIP into a new directory. In PowerShell, from its root,
+Extract the matching source archive into a new directory. In PowerShell, from its root,
 with the intended interpreter selected as `python`:
 
 ```powershell
@@ -47,8 +47,8 @@ running it is not part of an unattended source-integrity check.
 
 ## What the source bundle proves
 
-The packaging gate verifies the final build snapshot's 318 inputs, 156 app
-modules, 160 packaged data inputs and exact final executable hash. It includes
+The packaging gate verifies the final build snapshot's 322 inputs, 159 app
+modules, 161 packaged data inputs and exact final executable hash. It includes
 the same Python source, JS helpers, templates, reviewed artwork/audio, licences,
 documentation and build spec used by that build. The extra build documentation,
 version lock and four audio scripts are source-only additions; they are not
@@ -95,3 +95,14 @@ corresponding binary release. Keep the dependency source/licence directions in
 `THIRD_PARTY_NOTICES.md`. This document is not a legal-clearance statement.
 Any changed final package requires the owner's fresh manual acceptance before
 publication; passing tests alone does not authorize publishing.
+
+## Matching release source
+
+For 1.0.60, use the release asset `EveJS-Launcher-1.0.60-source.tar.gz` for
+exact build inputs. Its manifest describes that archive. Repository README and
+CHANGELOG may contain newer release notes added after the accepted binary was
+built; the archive preserves their original build-time bytes.
+
+The character-name catalog is rebuilt with `python scripts/build_character_names.py
+SDE_DIRECTORY assets/data/character_names.json` from CCP build 3396210 JSONL.
+Input file hashes are recorded in the catalog.

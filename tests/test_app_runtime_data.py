@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
+from types import SimpleNamespace
 import threading
 import time
 
@@ -63,6 +65,92 @@ def _close_window(qapp: QApplication, window: MainWindow) -> None:
     _wait_until(qapp, lambda: not window._data_load_active())
     window.deleteLater()
     qapp.processEvents()
+
+
+def test_client_exit_refreshes_existing_card_and_selected_details(qapp, monkeypatch):
+    cfg = _config()
+    account = _account("Activity")
+    account.characters[0].isk = 1_000_000
+    calls = []
+
+    def load(_root):
+        calls.append(True)
+        return [deepcopy(account)]
+
+    monkeypatch.setattr(config, "load", lambda: deepcopy(cfg))
+    monkeypatch.setattr(config, "save", lambda _cfg: None)
+    monkeypatch.setattr(app_module, "load_accounts", load)
+    monkeypatch.setattr(app_module.CharactersPage, "_load_portrait_for_card", lambda *_args: None)
+    monkeypatch.setattr(app_module, "is_server_running", lambda **_kwargs: False)
+    window = MainWindow()
+    try:
+        window._status_timer.stop()
+        window._prune_timer.stop()
+        _wait_until(qapp, lambda: not window._data_load_active() and bool(window._accounts))
+        page = window._characters_page
+        key = (account.username, 101)
+        card = page._cards[key]
+        page._selected_key = key
+        page._show_in_detail(*key)
+        process = SimpleNamespace(pid=987654, poll=lambda: 0)
+        window._tracker.add(account.username, account.characters[0].name, process)
+        character = account.characters[0]
+        character.isk = 2_500_000
+        character.skill_points = 12000
+        character.ship_name = "Retriever"
+        character.location = "Jita · 0.9"
+        character.security_status = 0.13
+        window._prune_and_update()
+        _wait_until(qapp, lambda: len(calls) >= 2 and not window._data_load_active())
+        assert page._cards[key] is card
+        assert card.isk == "2.5M"
+        assert card.sp == "12k"
+        assert card.ship == "Retriever"
+        assert card.location == "Jita · 0.9"
+        assert card.sec_status == "0.13"
+        assert "2.5M ISK" in card._summary_label.toolTip()
+        assert "2.5M" in card.accessibleDescription()
+        assert page._selected_key == key
+        assert page.detail_panel._stat_rows["ISK"][1].text() == "2.5M"
+        assert page.detail_panel._stat_rows["Location"][1].text() == "Jita · 0.9"
+        assert page.detail_panel._stat_rows["Sec Status"][1].text() == "0.13"
+    finally:
+        _close_window(qapp, window)
+
+
+@pytest.mark.parametrize("backend", [RuntimeBackend.NATIVE, RuntimeBackend.DOCKER_COMPOSE])
+def test_service_activity_refresh_is_coalesced_and_unchanged_polls_are_ignored(qapp, backend):
+    from PyQt6.QtCore import QTimer
+
+    window = MainWindow.__new__(MainWindow)
+    window._close_in_progress = False
+    window._character_activity_key = None
+    timer = QTimer()
+    timer.setSingleShot(True)
+    timer.setInterval(10)
+    window._character_activity_timer = timer
+    calls = []
+    timer.timeout.connect(lambda: calls.append(True))
+    snapshot = RuntimeSnapshot(ServiceState.OFFLINE, ServiceState.OFFLINE, 0, backend=backend)
+    window._observe_character_activity(snapshot)
+    assert not timer.isActive()  # initial load owns the first read
+    window._observe_character_activity(replace(snapshot, game=ServiceState.ONLINE))
+    window._observe_character_activity(replace(snapshot, game=ServiceState.ONLINE, market=ServiceState.ONLINE))
+    _wait_until(qapp, lambda: len(calls) == 1)
+    online = replace(snapshot, game=ServiceState.ONLINE, market=ServiceState.ONLINE)
+    window._observe_character_activity(replace(online))
+    assert not timer.isActive()
+    window._observe_character_activity(replace(online, market=ServiceState.OFFLINE))
+    _wait_until(qapp, lambda: len(calls) == 2)
+    window._observe_character_activity(replace(online, running_clients=1))
+    _wait_until(qapp, lambda: len(calls) == 3)
+    window._observe_character_activity(replace(online, running_clients=0))
+    _wait_until(qapp, lambda: len(calls) == 4)
+    window._observe_character_activity(replace(online, game_runtime_identity="restarted"))
+    _wait_until(qapp, lambda: len(calls) == 5)
+    window._close_in_progress = True
+    window._observe_character_activity(snapshot)
+    assert not timer.isActive()
 
 
 def test_native_account_refresh_uses_existing_loader_seam_off_gui_thread(
@@ -218,7 +306,7 @@ def test_selected_character_detail_is_loaded_off_thread_and_applied(
             "skillPoints": 12_500,
             "shipName": "Fixture Cruiser",
             "solarSystemName": "Fixture System",
-            "securityStatus": 2.5,
+            "securityStatus": 0.0324,
         }
 
     monkeypatch.setattr(config, "load", lambda: deepcopy(cfg))
@@ -244,6 +332,7 @@ def test_selected_character_detail_is_loaded_off_thread_and_applied(
 
         assert detail_threads and detail_threads[0] is not gui_thread
         assert window._characters_page.detail_panel._stat_rows["ISK"][1].text() == "2.5M"
+        assert window._characters_page.detail_panel._stat_rows["Sec Status"][1].text() == "0.03"
         assert window._characters_page.detail_panel._stat_rows["SP"][1].text() == "12k"
     finally:
         _close_window(qapp, window)

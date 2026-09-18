@@ -311,11 +311,12 @@ def test_prune_repairs_card_and_detail_after_an_earlier_status_read(
 
         window._refresh_character_views = refresh_views
         window._refresh_characters = lambda: events.append("reload")
+        window._queue_character_activity_refresh = lambda: events.append("queued reload")
         window._update_status_bar = lambda: events.append("status")
 
         window._prune_and_update()
 
-        assert events == ["views", "reload", "status"]
+        assert events == ["views", "status", "queued reload"]
         assert card._launch_btn.text() == "LAUNCH"
         assert card._launch_btn.isEnabled()
         assert page.detail_panel._launch_btn.text() == "LAUNCH"

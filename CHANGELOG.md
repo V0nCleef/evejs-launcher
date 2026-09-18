@@ -2,6 +2,14 @@
 
 ## Changelog
 
+## v1.0.60 — 2026-09-18
+
+- Fixed stale ISK by reading the current personal wallet balance.
+- The whole character page now refreshes after client starts/exits and Game or Market state changes. Existing cards and the selected details update in place.
+- Personal security shows two decimals. Solar-system security appears beside the location.
+- Added official ship and system names for the selected language where available, including Chinese, Japanese and Korean. Custom names stay unchanged.
+- Translated the balance and skill-point headings and security/location tooltips. Language changes keep the selected character and displayed data intact.
+
 ## v1.0.57 — 2026-09-18
 
 - Fixed mod updates failing immediately with a progress signal argument error, including AutoMining 1.0.4 to 1.0.5. Update phases now supply the complete progress event to the dialog.

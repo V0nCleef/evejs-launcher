@@ -1,5 +1,12 @@
 # Third-party notices
 
+`assets/data/character_names.json` contains ship and solar-system names from
+CCP's EVE Online Static Data Export, build 3396210. EVE Online and these game
+names belong to CCP hf. This catalog is used for display localization and does
+not contain game state or player information. Its input hashes are recorded in
+the file; `scripts/build_character_names.py` rebuilds it from the matching JSONL
+export. Missing translations retain their original names.
+
 EveJS Launcher is distributed under the GNU General Public License version 3. See [LICENSE](LICENSE).
 
 The Windows release includes or links the following third-party software. Copyright remains with the respective authors. The corresponding license texts are included in the release under `licenses/`, except where the project's main GPLv3 text in `LICENSE` is the applicable text.

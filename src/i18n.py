@@ -6,6 +6,7 @@ from functools import lru_cache
 import re
 
 from .translations_eu import UI_PHRASES_BY_LANGUAGE as EU_UI_PHRASES
+from .translations_character_details import TRANSLATIONS as _CHARACTER_TRANSLATIONS
 from .translations_ja_ko import UI_PHRASES_BY_LANGUAGE as JA_KO_UI_PHRASES
 from .translations_ru import UI_PHRASES as RU_UI_PHRASES
 from .translations_source import SOURCE_PHRASES, SOURCE_PHRASE_SET
@@ -515,6 +516,10 @@ _CHARACTER_DELETION_TRANSLATIONS: dict[str, dict[str, str]] = {
 
 for _language, _catalog in _TRANSLATIONS.items():
     _catalog.update(_CHARACTER_DELETION_TRANSLATIONS[_language])
+
+
+for _code, _phrases in _CHARACTER_TRANSLATIONS.items():
+    _TRANSLATIONS[_code].update(_phrases)
 
 
 def normalize_language(value: object) -> str:

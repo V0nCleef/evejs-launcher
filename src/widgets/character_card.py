@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.constants import COLORS as C, SEMANTIC_COLORS as S, Status
+from src.core.character_names import ship_display_name, location_display_name
 from src.i18n import (
     current_language,
     format_ui_phrase,
@@ -268,6 +269,9 @@ class CharacterCard(QFrame):
         self.sp = sp
         self.location = location
         self.sec_status = sec_status
+        self._raw_ship = ship
+        self._raw_location = location
+        self._ship_type_id = 0
         self._status = status
         self._portrait_pixmap: Optional[QPixmap] = None
         self._launch_available = True
@@ -543,6 +547,20 @@ class CharacterCard(QFrame):
         """Update card status."""
         self._apply_status(status)
 
+    def set_stats(self, *, isk: str, ship: str, sp: str, location: str, sec_status: str, ship_type_id: int = 0) -> None:
+        """Update retained card values without replacing its portrait or selection."""
+        self._raw_ship, self._raw_location, self._ship_type_id = ship, location, ship_type_id
+        ship = ship_display_name(ship, ship_type_id)
+        location = location_display_name(location)
+        values = (isk, ship, sp, location, sec_status)
+        if values == (self.isk, self.ship, self.sp, self.location, self.sec_status):
+            return
+        self.isk, self.ship, self.sp, self.location, self.sec_status = values
+        self._isk_label.setText(isk)
+        self._ship_label.setText(ship)
+        self._elide_name()
+        self._update_accessibility()
+
     def set_launch_available(self, enabled: bool, reason: str = "") -> None:
         """Enable Native launch controls or present a read-only card."""
         self._launch_available = bool(enabled)
@@ -551,6 +569,9 @@ class CharacterCard(QFrame):
 
     def retranslate_ui(self) -> None:
         """Refresh retained status and accessibility copy in place."""
+        self.set_stats(isk=self.isk, ship=self._raw_ship, sp=self.sp,
+                       location=self._raw_location, sec_status=self.sec_status,
+                       ship_type_id=self._ship_type_id)
         self._apply_status(self._status)
         set_translatable_accessible_name(
             self._launch_btn,

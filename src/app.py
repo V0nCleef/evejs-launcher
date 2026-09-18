@@ -719,6 +719,12 @@ class MainWindow(QMainWindow):
         self._apply_update_settings()
 
         # ── Periodic timers ────────────────────────────────────────────
+        self._character_activity_key = None
+        self._character_activity_timer = QTimer(self)
+        self._character_activity_timer.setSingleShot(True)
+        self._character_activity_timer.setInterval(750)
+        self._character_activity_timer.timeout.connect(self._refresh_characters)
+
         self._status_timer = QTimer(self)
         self._status_timer.timeout.connect(self._update_status_bar)
         self._status_timer.start(5000)
@@ -6721,6 +6727,9 @@ class MainWindow(QMainWindow):
         """Schedule one serialized account refresh outside the GUI thread."""
         if self._close_in_progress:
             return
+        activity_timer = self.__dict__.get("_character_activity_timer")
+        if activity_timer is not None:
+            activity_timer.stop()
 
         evejs_root = str(self._cfg.get("evejs_root", ""))
         if not evejs_root:
@@ -7354,8 +7363,29 @@ class MainWindow(QMainWindow):
             # Cards and group eligibility use cached account data, so repair
             # their process state synchronously before the slower data reload.
             self._refresh_character_views()
-            self._refresh_characters()
             self._update_status_bar()
+            self._queue_character_activity_refresh()
+
+    def _queue_character_activity_refresh(self) -> None:
+        """Coalesce nearby lifecycle changes into one background data reload."""
+        timer = self.__dict__.get("_character_activity_timer")
+        if timer is not None and not self._close_in_progress and not timer.isActive():
+            timer.start()
+
+    def _observe_character_activity(self, snapshot: RuntimeSnapshot) -> None:
+        # Ignore observation timestamps and repeated health polls. Process
+        # identities also catch service restarts that remain ONLINE between polls.
+        key = (
+            snapshot.backend, snapshot.target_identity,
+            snapshot.game, snapshot.market, snapshot.running_clients,
+            snapshot.game_pid, snapshot.market_pid,
+            snapshot.game_container, snapshot.market_container,
+            snapshot.game_runtime_identity,
+        )
+        previous = self.__dict__.get("_character_activity_key")
+        self._character_activity_key = key
+        if previous is not None and previous != key:
+            self._queue_character_activity_refresh()
 
     def _build_runtime_snapshot(
         self,
@@ -7721,6 +7751,7 @@ class MainWindow(QMainWindow):
 
     def _apply_runtime_snapshot(self, snapshot: RuntimeSnapshot) -> None:
         """Fan one snapshot out to footer, navigation, and Home."""
+        self._observe_character_activity(snapshot)
         self._sync_runtime_pages(snapshot)
         self._status_bar.set_server_state(
             snapshot.game, pid=snapshot.game_pid, container=snapshot.game_container,

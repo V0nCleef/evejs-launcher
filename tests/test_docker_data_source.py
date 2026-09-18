@@ -31,6 +31,7 @@ from src.core.runtime.docker_compose import (
     parse_compose_config,
 )
 from src.core.service_status import DockerControlPolicy, ServiceState
+from src.core.runtime.character_display import DISPLAY_SCRIPT
 
 
 _FIXTURE_CHARACTER_ID = 900000001
@@ -54,6 +55,8 @@ class FakeRunner:
         timeout: float = 10.0,
     ) -> DockerCommandResult:
         self.calls.append((args, cwd, timeout))
+        if DISPLAY_SCRIPT in args:
+            return DockerCommandResult((self.executable, *args), 0, '{"players":[]}', "", False, False)
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, BaseException):
             raise outcome
@@ -217,13 +220,14 @@ def test_running_container_read_uses_exact_allowlisted_exec(tmp_path: Path) -> N
         "/app/tools/ConfigEditor/config-manager-cli.js",
         "database-export",
     )
-    assert runner.calls == [
+    assert runner.calls[:1] == [
         (
             _target(tmp_path).compose_args(runner.executable, *expected_tail),
             tmp_path.resolve(),
             _EXPORT_TIMEOUT,
         )
     ]
+    assert runner.calls[1][0] == _target(tmp_path).compose_args(runner.executable, "exec", "-T", "-e", "NODE_OPTIONS=", "server", "node", "-e", DISPLAY_SCRIPT)
     assert len(accounts) == 1
     account = accounts[0]
     assert (account.username, account.account_id, account.role, account.banned) == (
@@ -264,7 +268,7 @@ def test_real_runner_preserves_secret_pattern_in_valid_export_text(
         _cwd: Path,
         _timeout: float,
     ) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(argv, 0, raw, "")
+        return subprocess.CompletedProcess(argv, 0, '{"players":[]}' if DISPLAY_SCRIPT in argv else raw, "")
 
     runner = DockerCommandRunner(
         executable="docker.exe",
@@ -524,7 +528,7 @@ def test_verified_bind_reader_uses_that_game_store_for_accounts_and_detail(
     detail = source.get_character_detail(_FIXTURE_CHARACTER_ID)
 
     assert accounts[0].characters[0].location == "Fixture System"
-    assert detail == character_payload
+    assert detail == {**character_payload, "securityStatus": 0.0, "solarSystemName": "Fixture System"}
 
 
 def test_connect_only_export_has_no_lifecycle_or_write_command(tmp_path: Path) -> None:

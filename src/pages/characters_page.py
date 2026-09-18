@@ -57,6 +57,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.constants import COLORS as C, SEMANTIC_COLORS as S, Status
+from src.core.character_names import ship_display_name, location_display_name
 from src.core.dashboard import visible_character_rows
 from src.core.db import Account, Character, _fmt_isk, _fmt_sp
 from src.core.groups import TargetGroupState
@@ -546,7 +547,7 @@ class CharactersPage(QWidget):
                     ship=char.ship_name or "—",
                     sp=_fmt_sp(char.skill_points),
                     location=char.location or "—",
-                    sec_status=f"{char.security_status:.1f}",
+                    sec_status=f"{char.security_status:.2f}",
                     parent=self._grid_container,
                 )
                 card.launched.connect(self.launch_character.emit)
@@ -564,6 +565,14 @@ class CharactersPage(QWidget):
                     self.delete_account_requested.emit
                 )
                 self._cards[key] = card
+            card.set_stats(
+                ship_type_id=char.ship_type_id,
+                isk=_fmt_isk(char.isk),
+                ship=char.ship_name or "—",
+                sp=_fmt_sp(char.skill_points),
+                location=char.location or "—",
+                sec_status=f"{char.security_status:.2f}",
+            )
             card.set_status(self._status_for(username, char))
             card.set_launch_available(
                 self._launch_available,
@@ -589,7 +598,7 @@ class CharactersPage(QWidget):
         elif self._selected_key not in desired_keys:
             self.clear_selection()
         else:
-            self._sync_selected_detail_status()
+            self._show_in_detail(*self._selected_key)
         self._schedule_launch_status_refresh()
 
     def _remove_skeletons(self) -> None:
@@ -908,6 +917,8 @@ class CharactersPage(QWidget):
         for card in self._cards.values():
             card.retranslate_ui()
         self.detail_panel.retranslate_ui()
+        if self._selected_key is not None:
+            self._show_in_detail(*self._selected_key)
         if self._new_character_card is not None:
             self._new_character_card.retranslate_ui()
 
@@ -1310,11 +1321,12 @@ class CharactersPage(QWidget):
             if isinstance(skill_points, (int, float))
             and not isinstance(skill_points, bool)
             else card.sp,
-            "Ship": ship_name if isinstance(ship_name, str) and ship_name else card.ship,
-            "Location": location
+            "Ship": ship_display_name(ship_name, detail.get("shipTypeID", char.ship_type_id))
+            if isinstance(ship_name, str) and ship_name else card.ship,
+            "Location": location_display_name(location)
             if isinstance(location, str) and location
             else card.location,
-            "Sec Status": f"{float(security_status):.1f}"
+            "Sec Status": f"{float(security_status):.2f}"
             if isinstance(security_status, (int, float))
             and not isinstance(security_status, bool)
             else card.sec_status,

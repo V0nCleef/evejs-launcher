@@ -1,10 +1,43 @@
 """Account and character discovery from EveJS SQLite database."""
 import json
+import math
 import sqlite3
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
+
+
+def _finite_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _security_status(data: dict) -> float:
+    for key in ("securityStatus", "securityRating"):
+        value = data.get(key)
+        if _finite_number(value):
+            return float(value)
+    return 0.0
+
+
+def _location_label(name: str, security: object = None) -> str:
+    return f"{name} · {security:.1f}" if _finite_number(security) else name
+
+
+def _system_label(system: dict) -> str:
+    return _location_label(system["solarSystemName"], system.get("securityStatus", system.get("security")))
+
+
+def _wallet_balances(con: sqlite3.Connection, char_id: int | None = None) -> dict[str, float]:
+    """Read only authoritative personal balances; never load wallet histories."""
+    if not con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='walletAuthorityState'").fetchone():
+        return {}
+    sql = "SELECT c.key, json_extract(w.json, '$.balance') FROM characters c JOIN walletAuthorityState w ON w.key = 'character:' || c.key"
+    args = ()
+    if char_id is not None:
+        sql += " WHERE c.key = ?"
+        args = (str(char_id),)
+    return {str(key): value for key, value in con.execute(sql, args) if _finite_number(value)}
 
 
 # ── Solar system name cache ────────────────────────────────────────────────
@@ -41,7 +74,7 @@ def _load_solar_system_names(evejs_root: str) -> dict[int, str]:
             if path.exists():
                 data = json.loads(path.read_text(encoding="utf-8"))
                 names = {
-                    system["solarSystemID"]: system["solarSystemName"]
+                    system["solarSystemID"]: _system_label(system)
                     for system in data.get("solarSystems", [])
                 }
             else:
@@ -141,7 +174,7 @@ def _load_game_store_solar_system_names(game_store_path: Path) -> dict[int, str]
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return {
-            system["solarSystemID"]: system["solarSystemName"]
+            system["solarSystemID"]: _system_label(system)
             for system in data.get("solarSystems", [])
         }
     except (OSError, json.JSONDecodeError, KeyError, TypeError):
@@ -157,7 +190,15 @@ def _load_accounts_from_database(
         return []
 
     con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        return _read_accounts(con, resolve_location)
+    finally:
+        con.close()
+
+
+def _read_accounts(con: sqlite3.Connection, resolve_location: Callable[[int], str]) -> list[Account]:
     cur = con.cursor()
+    con.execute("BEGIN")
 
     # Load accounts
     accounts: dict[str, Account] = {}
@@ -171,9 +212,9 @@ def _load_accounts_from_database(
                 banned=data.get("banned", False),
             )
     except sqlite3.OperationalError:
-        con.close()
         return []
 
+    balances = _wallet_balances(con)
     # Load characters and attach to accounts
     for char_id, json_blob in cur.execute("SELECT key, json FROM characters"):
         data = json.loads(json_blob)
@@ -184,16 +225,15 @@ def _load_accounts_from_database(
                     acc.characters.append(Character(
                         char_id=int(char_id),
                         name=data.get("characterName", "Unknown"),
-                        isk=data.get("balance", 0),
+                        isk=balances.get(str(char_id), data.get("balance", 0)),
                         skill_points=data.get("skillPoints", 0),
                         ship_name=data.get("shipName", "—"),
                         ship_type_id=data.get("shipTypeID", 0),
-                        security_status=data.get("securityStatus", 0.0),
+                        security_status=_security_status(data),
                         location=resolve_location(data.get("solarSystemID", 0)),
                     ))
                     break
 
-    con.close()
 
     # Sort by username
     result = sorted(accounts.values(), key=lambda a: a.username.lower())
@@ -236,8 +276,18 @@ def _get_character_detail_from_database(
     con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     cur = con.cursor()
     try:
+        con.execute("BEGIN")
         for (blob,) in cur.execute("SELECT json FROM characters WHERE key = ?", (str(char_id),)):
-            return json.loads(blob)
+            data = json.loads(blob)
+            balances = _wallet_balances(con, char_id)
+            if str(char_id) in balances:
+                data["balance"] = balances[str(char_id)]
+            data["securityStatus"] = _security_status(data)
+            names = _load_game_store_solar_system_names(db_path.parent)
+            location = names.get(data.get("solarSystemID"))
+            if location:
+                data["solarSystemName"] = location
+            return data
     finally:
         con.close()
     return None

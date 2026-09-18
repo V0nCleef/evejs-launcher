@@ -6,14 +6,15 @@ A Windows launcher for your local EveJS server and EVE clients. Start Game and M
 
 ![EveJS Launcher v1.0.56 Home page](screenshots/home.png)
 
-*Screenshots show the current v1.0.56 interface with fictional demo characters and mods. Online service states and the offered mod update are examples; no game services were started for these captures. Click an image to see it at full size.*
+*Screenshots show the v1.0.56 interface with fictional demo characters and mods. Online service states and the offered mod update are examples; no game services were started for these captures. Click an image to see it at full size.*
 
-## What's new
+## What's new in 1.0.60
 
-- **A clearer mod guide.** The former Mod Author Guide is now **Build an EveJS Mod — Launcher Integration Guide**, found under **Mods → Make a mod**. Separate feature pages explain what players see, with screenshots and code below each explanation.
-- **An optional AI handoff.** Each topic in the launcher guide has a **Hand off to your AI** button. It copies a ready-to-paste prompt with that feature's instructions, examples, and technical details. Nothing is sent automatically.
-- **Larger text.** Small labels, mod paths, hints, status text, and dialogs are easier to read throughout the launcher.
-- **The same guide on GitHub.** [How to make a mod](docs/how-to-make-a-mod/) contains numbered pages in the same order as the launcher. The launcher guide supports eight languages; GitHub stays English.
+- Fixed stale ISK by reading the current personal wallet balance.
+- The whole character page now refreshes after client starts/exits and Game or Market state changes. Existing cards and the selected details update in place.
+- Personal security shows two decimals. Solar-system security appears beside the location.
+- Added official ship and system names for the selected language where available, including Chinese, Japanese and Korean. Custom names stay unchanged.
+- Translated the balance and skill-point headings and security/location tooltips. Language changes keep the selected character and displayed data intact.
 
 ## Install and start
 

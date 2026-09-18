@@ -16,6 +16,7 @@ from typing import Callable, Mapping, Protocol
 
 from src.core import db
 from src.core.db import Account, Character
+from src.core.runtime.character_display import DISPLAY_SCRIPT
 from src.core.runtime.docker_cli import (
     DockerCommandError,
     DockerCommandRunner,
@@ -152,6 +153,13 @@ class DockerExportDataSource:
                 "malformed_export",
                 "Docker character export returned an invalid account projection.",
             )
+        display = self._load_export(None, _map_display_values, display=True)
+        for account in value:
+            for character in account.characters:
+                current = display.get(character.char_id, {})
+                character.isk = current.get("balance", character.isk)
+                character.security_status = current.get("securityStatus", character.security_status)
+                character.location = current.get("solarSystemName", character.location)
         return value
 
     def get_character_detail(self, char_id: int) -> dict | None:
@@ -165,16 +173,20 @@ class DockerExportDataSource:
                 "malformed_export",
                 "Docker character export returned an invalid character projection.",
             )
+        if value is not None:
+            display = self._load_export(requested_id, _map_display_values, display=True)
+            value.update(display.get(requested_id, {}))
         return value
 
     def _load_export(
         self,
         char_id: int | None,
         projector: Callable[[Mapping[str, object]], object],
+        *, display: bool = False,
     ) -> object | None:
-        command = self._command(char_id)
+        command = self._command(char_id, display=display)
         args = self.target.compose_args(self.runner.executable, *command)
-        self._assert_allowlisted(args, char_id)
+        self._assert_allowlisted(args, char_id, display=display)
         try:
             projection = self.runner.run_parsed(
                 args,
@@ -226,7 +238,7 @@ class DockerExportDataSource:
             )
         return projection.value
 
-    def _command(self, char_id: int | None) -> tuple[str, ...]:
+    def _command(self, char_id: int | None, *, display: bool = False) -> tuple[str, ...]:
         raw_state = (self.server_record.raw_state or "").casefold()
         if not self.server_record.exists:
             raise DataSourceError(
@@ -247,6 +259,9 @@ class DockerExportDataSource:
                 "container_busy",
                 "Docker character data is unavailable while the Server container changes state.",
             )
+        if display:
+            command = (*prefix, "-e", "NODE_OPTIONS=", "server", "node", "-e", DISPLAY_SCRIPT)
+            return command if char_id is None else (*command, str(char_id))
         command = (
             *prefix,
             "-e",
@@ -262,10 +277,11 @@ class DockerExportDataSource:
         self,
         args: tuple[str, ...],
         char_id: int | None,
+        *, display: bool = False,
     ) -> None:
         expected = self.target.compose_args(
             self.runner.executable,
-            *self._command(char_id),
+            *self._command(char_id, display=display),
         )
         if args != expected:
             raise RuntimeError("Docker data command is outside the exact export allowlist.")
@@ -609,7 +625,7 @@ def _parse_export_player(
         ship_name=_optional_text(player.get("shipName"), "—"),
         ship_type_id=_number_as_int(player.get("shipTypeID", 0)),
         location=_optional_text(player.get("solarSystemName"), "—"),
-        security_status=_finite_float(player.get("securityStatus", 0.0)),
+        security_status=_finite_float(player.get("securityStatus") if player.get("securityStatus") is not None else player.get("securityRating", 0.0)),
     )
     return username, account_id, role, banned, character
 
@@ -660,6 +676,32 @@ def _map_export_accounts(payload: Mapping[str, object]) -> list[Account]:
     result = sorted(accounts.values(), key=lambda account: account.username.casefold())
     for account in result:
         account.characters.sort(key=lambda character: character.name.casefold())
+    return result
+
+
+def _map_display_values(payload: Mapping[str, object]) -> dict[int, dict]:
+    rows = payload.get("players")
+    if not isinstance(rows, list) or len(rows) > _MAX_PLAYERS:
+        raise DataSourceError("malformed_export", "Invalid character display data.")
+    result = {}
+    try:
+        for row in rows:
+            if not isinstance(row, Mapping):
+                raise ValueError
+            char_id = _positive_id(row.get("characterId"))
+            if char_id in result:
+                raise ValueError
+            current = {}
+            for key in ("balance", "securityStatus"):
+                if key in row:
+                    current[key] = _finite_float(row[key])
+            if "solarSystemName" in row:
+                name = _required_text(row["solarSystemName"])
+                security = _finite_float(row["solarSystemSecurity"]) if "solarSystemSecurity" in row else None
+                current["solarSystemName"] = db._location_label(name, security)
+            result[char_id] = current
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise DataSourceError("malformed_export", "Invalid character display data.") from exc
     return result
 
 

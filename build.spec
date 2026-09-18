@@ -99,6 +99,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
+        ('assets/data/character_names.json', 'assets/data'),
         ("assets/hero/hero_nebula.png", "assets/hero"),  # updater artwork fallback
         ('assets/deep_signal/operations_orbital.png', 'assets/deep_signal'),
         ('assets/deep_signal/operations_scene.json', 'assets/deep_signal'),

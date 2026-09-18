@@ -1,16 +1,16 @@
 {
-  "applicationModuleCount": 156,
+  "applicationModuleCount": 159,
   "binary": {
-    "bytes": 5189330,
+    "bytes": 5199247,
     "file": "EveJS-Launcher-V1.exe",
-    "sha256": "3b923075feebf75dbe5914cd92b44cd5bae2035511faf8215182aa8a17d05451"
+    "sha256": "33d8789a4f7a62e323c76c2d1509019a283cc0d82e3f09585815d4fc251d08d5"
   },
-  "buildInputCount": 318,
+  "buildInputCount": 322,
   "files": {
     "BUILDING.md": {
-      "bytes": 4953,
+      "bytes": 5499,
       "kind": "source-only-extra",
-      "sha256": "07ee0f4f2409197d1d8ed2f34a46108b0ce12928c83ac5f7005e781212f27aa4"
+      "sha256": "bdf9b1a39d2bcfd4f9c6bac417399ea831c8f822a342d1b401f4153d0f56152c"
     },
     "CHANGELOG.md": {
       "bytes": 74737,
@@ -28,14 +28,14 @@
       "sha256": "4476ae438e08472d21e21b82dba5ca9cc5f3e8b856cb8ca9ca6bcf33cb545c62"
     },
     "THIRD_PARTY_NOTICES.md": {
-      "bytes": 4219,
+      "bytes": 4672,
       "kind": "exact-build-input",
-      "sha256": "1c75c14abb01a47e350a86249a575f0956fcf285ef407b010d3987ab809c7f3e"
+      "sha256": "f6b245290423d78f0d88df8dc53129464e8a3938c081bb28da85d08df485ea1b"
     },
     "VERSION": {
       "bytes": 7,
       "kind": "exact-build-input",
-      "sha256": "936444f78a73525053954bbb81f540d6aeaa0b7fe3017bed0bcad71bd817c25f"
+      "sha256": "ec046849c5fdce6e4600cf10c6f09097d12fe2b5a10fae338dc454733ac4f195"
     },
     "assets/audio/music/celestial_transit.wav": {
       "bytes": 9676844,
@@ -172,6 +172,11 @@
       "kind": "exact-build-input",
       "sha256": "342714a55a89b3030fd8f96d8e46259867035fba95cfc3a4da290ad453c85325"
     },
+    "assets/data/character_names.json": {
+      "bytes": 1077816,
+      "kind": "exact-build-input",
+      "sha256": "b032a66bdfbcdd9f6d1af8ca4d99736ad48816388ea642c670d9c79802a60f6a"
+    },
     "assets/deep_signal/operations_orbital.png": {
       "bytes": 1648056,
       "kind": "exact-build-input",
@@ -198,9 +203,9 @@
       "sha256": "99a2f98a52e101e046aa547f3d20e746493fc9cbb18bed01d5427a27ef847434"
     },
     "build.spec": {
-      "bytes": 10085,
+      "bytes": 10146,
       "kind": "exact-build-input",
-      "sha256": "549ca91cd866681a7933ad27e9309b8a3a5a3724204a885226c714cf43b51b78"
+      "sha256": "3e7c9d98dba483fdc891de758404ad7fd43dbfe86e31daa42008bb2afb866e78"
     },
     "build_support.py": {
       "bytes": 2577,
@@ -792,6 +797,11 @@
       "kind": "source-only-extra",
       "sha256": "5290b82b6ed5106ea37193ba91d8eb33a012ecc52b93c5f8cb9c26789405af46"
     },
+    "scripts/build_character_names.py": {
+      "bytes": 1770,
+      "kind": "source-only-extra",
+      "sha256": "a1cc4af99d2fb25bf8916d96f41d9d7846f8dafe173c7d7375aa2af82f18233c"
+    },
     "scripts/celestial_transit_synthesis.py": {
       "bytes": 11302,
       "kind": "source-only-extra",
@@ -818,9 +828,9 @@
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "src/app.py": {
-      "bytes": 371878,
+      "bytes": 373460,
       "kind": "exact-build-input",
-      "sha256": "9b871fbc3e73d844b47c8d64378aa0feae784f4943ad50a2007715f642941d34"
+      "sha256": "ae096901e41839c0807490666ca7cc13d26069b84f1ec58e2ebfe2800db7f14f"
     },
     "src/audio/__init__.py": {
       "bytes": 506,
@@ -887,6 +897,11 @@
       "kind": "exact-build-input",
       "sha256": "6227fb52104fa458d52cdc2e07aa87140757cb88f70804b5d674e74fd8400b6f"
     },
+    "src/core/character_names.py": {
+      "bytes": 1253,
+      "kind": "exact-build-input",
+      "sha256": "1a1262c341984ec742957d2c89475f0dce43d31e77c4e86a6c00277d29243152"
+    },
     "src/core/client_autologin.py": {
       "bytes": 6563,
       "kind": "exact-build-input",
@@ -903,9 +918,9 @@
       "sha256": "cd5fbb391487d59ecc256d963efed12c40dcacd687fd6c40df0abb846b7f7a20"
     },
     "src/core/db.py": {
-      "bytes": 8473,
+      "bytes": 10496,
       "kind": "exact-build-input",
-      "sha256": "8657f3073fe30703f64b04006d32e0c558b33a80ae75aede03e13fecbf8c79fc"
+      "sha256": "2164344dd602cea3cb395bf1a4ae396657276144dfa52f9e301d6e724556baea"
     },
     "src/core/discovery.py": {
       "bytes": 9975,
@@ -1117,10 +1132,15 @@
       "kind": "exact-build-input",
       "sha256": "b981d1ff4ccbf20ec8ef2a2117573c3e9ed463d680ac1c40097cfd009a25740f"
     },
-    "src/core/runtime/data.py": {
-      "bytes": 26187,
+    "src/core/runtime/character_display.py": {
+      "bytes": 2533,
       "kind": "exact-build-input",
-      "sha256": "aa36e33b8ce45c0938a7d54b623df520358bf02f0ebb18582c5466b6ba733c76"
+      "sha256": "0ac9efa19e28cfb4f04b4b8b8085a5c27b262d9ebc349ffe9cf070b5cf982adb"
+    },
+    "src/core/runtime/data.py": {
+      "bytes": 28498,
+      "kind": "exact-build-input",
+      "sha256": "9e6d6bd37585173f903f5f17f95178ffcf0e3dbdf78e8efc8ff2861473515831"
     },
     "src/core/runtime/docker_character_creation.py": {
       "bytes": 22603,
@@ -1198,9 +1218,9 @@
       "sha256": "dfc2978fcadf408a5495110b93b2523ce29ba3a091509f7641bc91fbbefaeb4a"
     },
     "src/i18n.py": {
-      "bytes": 48746,
+      "bytes": 48930,
       "kind": "exact-build-input",
-      "sha256": "77f4afe711af36ca39cf8b39d8f1e95a4bd3ec5ea3fde5d665be910ed85370d0"
+      "sha256": "cbe3ddb565168e305e731a8b1ba6f86dc353e64ef9487c294d132007f22e9aab"
     },
     "src/pages/__init__.py": {
       "bytes": 0,
@@ -1208,9 +1228,9 @@
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "src/pages/characters_page.py": {
-      "bytes": 56525,
+      "bytes": 57135,
       "kind": "exact-build-input",
-      "sha256": "1cccd20b47a97549159207174ae220722c033e5a038b65bfcaad3abe0e02b67a"
+      "sha256": "81e6dd075c586f087c93818844e2be74fb92e5a24f1843aa3d652759cb5956ee"
     },
     "src/pages/home_page.py": {
       "bytes": 44542,
@@ -1236,6 +1256,11 @@
       "bytes": 34754,
       "kind": "exact-build-input",
       "sha256": "e3a22cdb7b923af0a74ced2a22552455c4870115b4ac248e4d8ebdfad4f83edc"
+    },
+    "src/translations_character_details.py": {
+      "bytes": 2121,
+      "kind": "exact-build-input",
+      "sha256": "5162d50d37da09c75659be846886408277241dc92fad6ae88415844b2c1b036a"
     },
     "src/translations_eu.py": {
       "bytes": 241883,
@@ -1393,9 +1418,9 @@
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "src/widgets/character_card.py": {
-      "bytes": 22833,
+      "bytes": 24000,
       "kind": "exact-build-input",
-      "sha256": "6a73e6a71b0452926a7865b405b9352f944d4d7a910c6061636ded5b385713a5"
+      "sha256": "6c1225cbd3873c1fd0aad782b0397f894b2f9613996fd6a2a858ce8209bb1795"
     },
     "src/widgets/character_groups_dialog.py": {
       "bytes": 34224,
@@ -1413,9 +1438,9 @@
       "sha256": "27b4fb5092ef4d1aff75304092a3c16108db6d4925a8cc220beb64dad398710d"
     },
     "src/widgets/detail_panel.py": {
-      "bytes": 14794,
+      "bytes": 15661,
       "kind": "exact-build-input",
-      "sha256": "1d18c2943d5ee70e36748a68d8ebf1baf802b7e7c0c72dbbd0f835f595eb9260"
+      "sha256": "7b5721109a9ae893e85ea93c50160b5e5485d2903f7a8be0d7104da2d41cfac9"
     },
     "src/widgets/docking_traffic_overlay.py": {
       "bytes": 14577,
@@ -1628,22 +1653,23 @@
       "sha256": "0c921cb94f7d08af67ccb61ade22a5337f0e6b06473c7768f81957dee81d220c"
     }
   },
-  "license": "GPL-3.0; preserve individual dependency notices",
+  "license": "GPL-3.0; preserve individual dependency and CCP data notices",
   "limits": [
-    "Source inputs match the identified binary; no byte-identical rebuild claim.",
-    "Historical voice reference inputs and model/tool binaries are not included.",
-    "Static packaging proof is not manual acceptance or publication authorization."
+    "Matching build inputs; not a byte-identical rebuild claim.",
+    "Historical voice reference inputs and model/tool binaries are not included."
   ],
-  "packagedDataInputCount": 160,
+  "packagedDataInputCount": 161,
   "project": "EveJS Launcher",
   "schemaVersion": 1,
+  "scope": "Files inside EveJS-Launcher-1.0.60-source.tar.gz; repository release prose may be newer.",
   "sourceOnlyExtras": [
     "BUILDING.md",
     "requirements-build.txt",
     "scripts/celestial_transit_synthesis.py",
     "scripts/generate_celestial_transit.py",
     "scripts/generate_lyra_voice_catalog.py",
-    "scripts/process_lyra_voice_catalog.py"
+    "scripts/process_lyra_voice_catalog.py",
+    "scripts/build_character_names.py"
   ],
-  "version": "1.0.57"
+  "version": "1.0.60"
 }

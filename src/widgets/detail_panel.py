@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.constants import COLORS as C, SEMANTIC_COLORS as S, Status
+from src.i18n import translate, translate_ui_phrase
 from src.widgets.ui_translation import (
     set_translatable_accessible_description,
     set_translatable_accessible_name,
@@ -180,7 +181,9 @@ class DetailPanel(QFrame):
             ("ISK", "SP", "Ship", "Location", "Sec Status")
         ):
             label = QLabel()
-            set_translatable_text(label, label_text.upper())
+            # Owned here so keyed translations are refreshed alongside the
+            # existing phrase translations without changing semantic row keys.
+            label.setProperty("i18nIgnore", True)
             label.setStyleSheet(
                 f"color: {S['text_muted']}; font-size: 13px;"
             )
@@ -196,6 +199,7 @@ class DetailPanel(QFrame):
             stats_layout.addWidget(label, row_index, 0)
             stats_layout.addWidget(value, row_index, 1)
         stats_layout.setColumnStretch(1, 1)
+        self._retranslate_stats()
         pop_layout.addWidget(stats_widget, 3)
 
         actions = QWidget()
@@ -368,6 +372,7 @@ class DetailPanel(QFrame):
 
     def retranslate_ui(self) -> None:
         """Refresh retained launch state and selected-character framing."""
+        self._retranslate_stats()
         self._apply_launch_button_state()
         if self._stack.currentIndex() == 0 or not self._char_name:
             set_translatable_accessible_name(self, "Character details")
@@ -388,3 +393,17 @@ class DetailPanel(QFrame):
             f"Selected character on account {self._username}.",
             allow_templates=True,
         )
+
+    def _retranslate_stats(self) -> None:
+        for key, (label, _value) in self._stat_rows.items():
+            if key == "ISK":
+                text = translate("character.balance")
+            elif key == "SP":
+                text = translate("character.skill_points")
+            else:
+                text = translate_ui_phrase(key.upper())
+            label.setText(text.upper())
+            if key == "Sec Status":
+                label.setToolTip(translate("character.security_hint"))
+            elif key == "Location":
+                label.setToolTip(translate("character.location_hint"))
