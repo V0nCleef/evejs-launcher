@@ -2,6 +2,11 @@
 
 ## Changelog
 
+## v1.0.62 - 2026-09-19
+
+- Expanded the in-game window guide with explicit login-handshake delivery instructions, readiness and cleanup steps, and a bundled integration walkthrough.
+- Updated all eight offline guide languages, the downloadable examples and the AI handoff. No mod runtime or updater behavior changed.
+
 ## v1.0.61 — 2026-09-19
 
 - Added opt-in client-mod preparation so compatible updates can automatically restore a needed fallback when switching server installations or backends.

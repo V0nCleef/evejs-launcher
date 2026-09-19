@@ -269,7 +269,8 @@
     "examples/ingame-settings/README.md",
     "examples/ingame-settings/window.py",
     "examples/ingame-settings/settings-handlers.js",
-    "examples/login-delivery/AI-HANDOFF.md"
+    "examples/login-delivery/AI-HANDOFF.md",
+    "examples/ingame-settings/LOGIN-HANDSHAKE.md"
   ],
   "references": [
     {

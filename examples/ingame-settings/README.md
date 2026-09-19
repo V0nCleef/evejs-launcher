@@ -6,6 +6,21 @@ window tested with client build 3396210, but this smaller example has not itself
 been tested in a live client. Python 3 mocks check its logic; the intended client
 syntax is Python 2.7-compatible. Review APIs against your supported build.
 
+## Required delivery: login handshake
+
+**Load this window through your supported EveJS login handshake. Do not patch
+the client's script archive or shared command classes to install it.**
+Keep the Python sources in your mod; the server delivers them at login. Wait for
+the authenticated character, install the controller once, acknowledge readiness,
+then open it from your own command. Loading the code does not automatically open
+the window.
+
+Follow [Load your window through the login handshake](LOGIN-HANDSHAKE.md) for
+the server integration, bootstrap sequence, code sketch and cleanup steps.
+If the required integration is unavailable, document the unsupported build
+instead of inventing an API or silently adding a client-file patch. Existing
+mods may retain a documented fallback while migrating safely.
+
 ## Wire it into your mod
 
 - Register your own service named `exampleModSettings` using your reviewed EveJS

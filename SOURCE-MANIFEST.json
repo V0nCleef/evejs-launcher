@@ -1,21 +1,20 @@
 {
   "schemaVersion": 1,
   "project": "EveJS Launcher",
-  "version": "1.0.61",
-  "scope": "Isolated release candidate source/build inputs; unpublished",
+  "version": "1.0.62",
+  "scope": "Source/build inputs for the documentation-only 1.0.62 release",
   "binary": {
     "file": "EveJS-Launcher-V1.exe",
-    "sha256": "e96b7aeeddfdb619b62140dd7a2a5c151ed40edc0176aaee35c66ba3685acf1a",
-    "bytes": 5211983
+    "sha256": "aa53079135ba0a7b0fc5bd55abec4041e74dbf4b304d6a2802764a6a3062724d"
   },
   "files": {
     "BUILDING.md": {
-      "sha256": "413a5fcc83e13df9dec9cc875c41b1a2e7826b2719401408027c580c85c3d86d",
-      "bytes": 924
+      "sha256": "982b241422b9f81b5eb8f7b00561ba384e553e378afe501e04a29378093b9840",
+      "bytes": 640
     },
     "CHANGELOG.md": {
-      "sha256": "cd1f782f4d0effe47b0364aea6d08750670e1f315f89509c5356cc21b1046dd4",
-      "bytes": 75839
+      "sha256": "a24803c2aa02d1d622782e8f564b75bcec10d912d1c7b4e691cb7f50491ba5b7",
+      "bytes": 76162
     },
     "LICENSE": {
       "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
@@ -25,13 +24,17 @@
       "sha256": "5a42599a71a1eaa0e6eddf42a3b085712bcdd1bba1a4dca9cb2b31f155f8b622",
       "bytes": 14856
     },
+    "RELEASE-VALIDATION.md": {
+      "sha256": "c09eb86f8f097063fda6b0beb0bdd100b8a89bcfa78a7392726303cabc07c575",
+      "bytes": 774
+    },
     "THIRD_PARTY_NOTICES.md": {
       "sha256": "f6b245290423d78f0d88df8dc53129464e8a3938c081bb28da85d08df485ea1b",
       "bytes": 4672
     },
     "VERSION": {
-      "sha256": "773eba583c31f6e4851a4d609e3532113283539dbeca3ef706d7f8a902cde68e",
-      "bytes": 7
+      "sha256": "b52b86a73fe506d86a57f5dfe52b4e98292e1d3b8f45b4ec24edd1b9aec415a8",
+      "bytes": 8
     },
     "assets/audio/music/celestial_transit.wav": {
       "sha256": "451978321c360315010e8871945cdb99a92e05bee2d81148deb0600e64d66fc9",
@@ -238,12 +241,12 @@
       "bytes": 1279
     },
     "docs/how-to-make-a-mod/16-ingame-settings.md": {
-      "sha256": "104027485e61b5f1b8c7701be134c609486c117a7d868eaf4915efaf5288d316",
-      "bytes": 3862
+      "sha256": "5af80bf6dddea0310c3ff268be013366b60bf7acb7506df4a9aa88dc84f01254",
+      "bytes": 5894
     },
     "docs/how-to-make-a-mod/guide-content.json": {
-      "sha256": "eaba55dae099b9dfacb4c98006bb64c0cb859e0c1d489861f58759f984b4d586",
-      "bytes": 285434
+      "sha256": "0d1ddec2a42eff9940d00c1e76bceb5dfc2bbad51c50f91a62db637f9bc451ae",
+      "bytes": 302646
     },
     "docs/how-to-make-a-mod/images/advanced-hidden.png": {
       "sha256": "6cdc59cfba025adb05c641aef4522a812055afd66f7736296f65b16526da846c",
@@ -482,8 +485,8 @@
       "bytes": 64797
     },
     "docs/how-to-make-a-mod/navigation.json": {
-      "sha256": "af5142198a0a7e71cea61369cd44d7c23a40155061903df1f41737e8f4801bca",
-      "bytes": 15582
+      "sha256": "33a4ba766968c42c89ca30d2cabe76c8cc80d8ed509caa2d2847b90a8581e649",
+      "bytes": 15633
     },
     "docs/how-to-make-a-mod/reference/examples.md": {
       "sha256": "33b92494ef70069318beef07f2561945fe2b7d5552862545e4292d6f8ec7f13a",
@@ -530,12 +533,16 @@
       "bytes": 14030
     },
     "examples/ingame-settings/AI-HANDOFF.md": {
-      "sha256": "3fef1568db2ea445590917677e3d9f107748a77e02c0afdd6d88c3fd71116160",
-      "bytes": 2208
+      "sha256": "e4acff5eef33a8467a27c62c728659a90b48602bf8881ff966587c05e5a7dabd",
+      "bytes": 3053
+    },
+    "examples/ingame-settings/LOGIN-HANDSHAKE.md": {
+      "sha256": "4ab217a3e4b32dd66fea7d3300202066d70dbada67ddcf19e9787db7b7f835df",
+      "bytes": 5789
     },
     "examples/ingame-settings/README.md": {
-      "sha256": "cd6cb7906251d581d271d200692a576bf42419d964c694b6c4820adb4c289dc4",
-      "bytes": 3404
+      "sha256": "320e09ca299c7ca98bd2f48e41594abdff5f6d19ca414759d30b54baf404b9e6",
+      "bytes": 4216
     },
     "examples/ingame-settings/settings-handlers.js": {
       "sha256": "49b0be5b0d390b5bcdfc124fe91899a96424dfd302c5ebf54f25be4fe3707e77",

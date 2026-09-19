@@ -2,6 +2,20 @@
 
 [Start here](00-start-here.md)
 
+## Important: deliver this window through the login handshake
+
+**Use login-handshake delivery for this window/HUD. Do not install it by modifying the client's script archive or shared command classes.** Keep your authored code in your mod; the server delivers it when the player connects. The Launcher does not inject the window for you.
+
+### From login to an open window
+
+- **Prepare the server.** Register your settings service and persistent store. Identify the reviewed EveJS login payload builder for your supported build; there is no universal Launcher handshake API.
+- **Deliver your code at login.** Compose your bootstrap and `window.py` with the existing login payload. Preserve normal login behavior and its return value; run your code in a private namespace. Do not copy it into the client archive.
+- **Wait for the character.** The handshake happens before the character may be ready. Use bounded cooperative retries, validate the current session and mod version, then call `install_window(sm, session, is_ready)`. Retain the controller and acknowledge readiness to your server only after installation succeeds.
+- **Open on request.** Your own command sends `OnExampleModSettingsOpen` only to a ready session. Loading the code at login does not mean automatically opening the window. Apply and Reload use your settings service.
+- **Clean up and reconnect.** Cancel old readiness tasks, invalidate readiness and dispose the controller on disconnect, character change or replacement. Reconnect must install a single fresh controller, without duplicate handlers.
+
+Follow the `LOGIN-HANDSHAKE.md` for the integration sketch, an authored implementation to study and the checks to run. It is included in the example ZIP and AI handoff. If your build lacks a supported handshake path, document the gap instead of silently adding a new client-file patch. Existing mods may retain a documented fallback during [migration](12-client-files.md).
+
 ## Start with an example
 
 Give players a small settings window inside the game: a checkbox, interval field, Apply, Reload and status text. Reuse the included pattern and change the labels and values for your mod. The Launcher’s [Configure form](03-configure.md) is a separate option; it does not create this in-game window.
@@ -40,7 +54,7 @@ Use **Hand off to your AI** on this page. It copies a task-specific prompt, the 
 
 ## Code examples
 
-[AI handoff + example files](../../examples/ingame-settings/AI-HANDOFF.md) · [README](../../examples/ingame-settings/README.md) · [window.py](../../examples/ingame-settings/window.py) · [settings-handlers.js](../../examples/ingame-settings/settings-handlers.js)
+[AI handoff + example files](../../examples/ingame-settings/AI-HANDOFF.md) · [README](../../examples/ingame-settings/README.md) · [window.py](../../examples/ingame-settings/window.py) · [settings-handlers.js](../../examples/ingame-settings/settings-handlers.js) · [Login-handshake walkthrough](../../examples/ingame-settings/LOGIN-HANDSHAKE.md)
 
 ```javascript
 // YourService and yourCharacterSettingsStore are YOUR integration points.

@@ -2,7 +2,8 @@
 
 Adapt the attached `window.py` and `settings-handlers.js` to my EveJS mod. Reuse
 the pattern instead of writing a second UI framework. Read the example README
-and the guide's in-game settings chapter before editing.
+and the guide's in-game settings chapter before editing. Read LOGIN-HANDSHAKE.md
+and implement its delivery/readiness/cleanup sequence as part of this task.
 
 First identify my mod's existing loader, registered services, settings store,
 supported EveJS/client versions, client delivery method and open-window command.
@@ -19,7 +20,18 @@ writes. Connect saved values to the real feature; a checkbox alone is not an
 implementation. If the mod also has Launcher settings, define one owner for each
 setting and explicit synchronization so the two screens cannot overwrite each other.
 
-Prefer the mod's reviewed login-handshake delivery. Wait for character readiness
+Use the mod's reviewed login-handshake delivery for this new window. Do not
+implement the tutorial by patching the physical client's archive or shared
+command classes. Package the authored window and bootstrap in the mod, extend
+the reviewed server login path without replacing normal behavior, execute in a
+private namespace, and use bounded cooperative readiness attempts. The bootstrap
+must install the controller once and acknowledge readiness to the authenticated
+server session before the open-window command is enabled. Cancel stale attempts
+and invalidate readiness when the connection, character or payload owner changes.
+If no supported handshake integration exists, explain the gap instead of silently
+adding a direct client patch. Do not just provide a UI with delivery left unwired.
+
+Wait for character readiness
 before exposing the window, preserve existing login behavior, and dispose old
 event handlers/windows on replacement or disconnect. Do not patch shared client
 command classes. Keep existing supported delivery methods working; this tutorial
