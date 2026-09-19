@@ -99,6 +99,64 @@ _PHRASES.update({
     ),
 })
 
+_PHRASES.update({
+    'Third-party mod update': (
+        '第三方模组更新', 'サードパーティ製MODの更新', '타사 모드 업데이트',
+        'Mise à jour d’un mod tiers', 'Update eines Drittanbieter-Mods',
+        'Modupdate van een derde partij', 'Обновление стороннего мода',
+    ),
+    'THIRD-PARTY SOFTWARE': (
+        '第三方软件', 'サードパーティ製ソフトウェア', '타사 소프트웨어',
+        'LOGICIEL TIERS', 'DRITTANBIETER-SOFTWARE', 'SOFTWARE VAN DERDEN', 'СТОРОННЕЕ ПО',
+    ),
+    'Review before updating': (
+        '更新前请确认', '更新前にご確認ください', '업데이트 전에 확인하세요',
+        'À vérifier avant la mise à jour', 'Vor dem Update prüfen',
+        'Controleer voordat je bijwerkt', 'Проверьте перед обновлением',
+    ),
+    'GitHub source': (
+        'GitHub 来源', 'GitHubの配布元', 'GitHub 출처',
+        'Source GitHub', 'GitHub-Quelle', 'GitHub-bron', 'Источник на GitHub',
+    ),
+    'Third-party code can be harmful': (
+        '第三方代码可能有害', 'サードパーティ製のコードには危険が伴います', '타사 코드는 해로울 수 있습니다',
+        'Le code tiers peut être dangereux', 'Drittanbieter-Code kann schädlich sein',
+        'Code van derden kan schadelijk zijn', 'Сторонний код может быть опасен',
+    ),
+    'This will download and install a third-party mod update from the author’s GitHub repository, not a launcher update.': (
+        '此操作将从作者的 GitHub 仓库下载并安装第三方模组更新，而非启动器更新。',
+        '作者のGitHubリポジトリからサードパーティ製MODの更新をダウンロードしてインストールします。ランチャーの更新ではありません。',
+        '제작자의 GitHub 저장소에서 타사 모드 업데이트를 다운로드하고 설치합니다. 런처 업데이트가 아닙니다.',
+        'Cette action téléchargera et installera une mise à jour de mod tiers depuis le dépôt GitHub de son auteur, et non une mise à jour du lanceur.',
+        'Hiermit wird ein Mod-Update aus dem GitHub-Repository des Drittanbieters heruntergeladen und installiert, kein Launcher-Update.',
+        'Hiermee download en installeer je een modupdate van een derde partij uit de GitHub-repository van de maker. Dit is geen launcherupdate.',
+        'Будет загружено и установлено обновление стороннего мода из репозитория автора на GitHub, а не обновление лаунчера.',
+    ),
+    'This launcher does not check mods for malicious code. A new release can contain harmful code, even if an earlier version was safe.': (
+        '此启动器不会检查模组中是否包含恶意代码。即使旧版本是安全的，新版本也可能包含有害代码。',
+        'このランチャーはMODに悪意のあるコードが含まれていないかを検査しません。以前のバージョンが安全でも、新しいリリースに有害なコードが含まれる可能性があります。',
+        '이 런처는 모드에 악성 코드가 있는지 검사하지 않습니다. 이전 버전이 안전했더라도 새 릴리스에는 유해한 코드가 포함될 수 있습니다.',
+        'Ce lanceur ne recherche pas de code malveillant dans les mods. Une nouvelle version peut contenir du code malveillant, même si une version précédente était sûre.',
+        'Dieser Launcher prüft Mods nicht auf Schadcode. Eine neue Version kann schädlichen Code enthalten, auch wenn eine frühere Version sicher war.',
+        'Deze launcher controleert mods niet op schadelijke code. Een nieuwe versie kan schadelijke code bevatten, ook als een eerdere versie veilig was.',
+        'Этот лаунчер не проверяет моды на наличие вредоносного кода. Новый выпуск может содержать вредоносный код, даже если предыдущая версия была безопасной.',
+    ),
+    'Only continue if you trust the author and this release. No update starts until you confirm.': (
+        '仅在您信任作者及此版本时继续。确认之前不会开始更新。',
+        '作者とこのリリースを信頼できる場合のみ続行してください。確認するまで更新は始まりません。',
+        '제작자와 이 릴리스를 신뢰하는 경우에만 계속하세요. 확인하기 전에는 업데이트가 시작되지 않습니다.',
+        'Ne continuez que si vous faites confiance à l’auteur et à cette version. La mise à jour ne démarrera qu’après votre confirmation.',
+        'Fahre nur fort, wenn du dem Autor und dieser Version vertraust. Das Update startet erst nach deiner Bestätigung.',
+        'Ga alleen verder als je de maker en deze release vertrouwt. De update begint pas nadat je bevestigt.',
+        'Продолжайте, только если доверяете автору и этому выпуску. Обновление начнётся лишь после вашего подтверждения.',
+    ),
+    'I understand — update mod': (
+        '我已了解 — 更新模组', '理解した上でMODを更新', '이해했습니다 — 모드 업데이트',
+        'Je comprends — mettre à jour', 'Verstanden — Mod aktualisieren',
+        'Ik begrijp het — mod bijwerken', 'Понятно — обновить мод',
+    ),
+})
+
 SOURCE_PHRASES = tuple(_PHRASES)
 UI_PHRASES_BY_LANGUAGE = {
     language: {source: values[index] for source, values in _PHRASES.items()}

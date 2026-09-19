@@ -135,12 +135,21 @@ class UpdateChecker(QThread):
             self.up_to_date.emit()
             return
 
-        # Try to locate the first .zip asset (onedir build).
+        # Releases may also contain source ZIPs. Only the named onedir
+        # package contains the executable and runtime required by the updater.
+        package_name = "EveJS-Launcher-V1.zip"
         download_url = ""
         for asset in release.get("assets", []):
-            if asset.get("name", "").lower().endswith(".zip"):
+            if asset.get("name", "").casefold() == package_name.casefold():
                 download_url = asset.get("browser_download_url", "")
                 break
+
+        if not download_url:
+            self.check_failed.emit(
+                f"The release does not contain a downloadable {package_name}. "
+                "Please try again after the release package has been uploaded."
+            )
+            return
 
         self.update_available.emit(
             tag,

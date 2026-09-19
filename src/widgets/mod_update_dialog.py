@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButt
 from src.i18n import translate_ui_phrase as tr
 from src.constants import SEMANTIC_COLORS as S
 from src.widgets.update_button import UpdateButton
+from src.widgets.mod_update_warning import ModUpdateWarningDialog
 
 
 class ModUpdateDialog(QDialog):
@@ -13,6 +14,8 @@ class ModUpdateDialog(QDialog):
 
     def __init__(self, mod, release, parent=None):
         super().__init__(parent)
+        self._mod = mod
+        self._release = release
         self.running = False
         self.progress_received.connect(self.show_progress, Qt.ConnectionType.QueuedConnection)
         self.setObjectName('modUpdateDialog')
@@ -55,7 +58,7 @@ class ModUpdateDialog(QDialog):
         self.update_btn.set_update_available(release.version)
         self.update_btn.setText(tr('Update mod'))
         self.update_btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.update_btn.clicked.connect(self.start_requested.emit)
+        self.update_btn.clicked.connect(self._confirm_update)
         buttons.addWidget(self.update_btn)
         layout.addLayout(buttons)
         self.setStyleSheet(f'''
@@ -65,6 +68,16 @@ class ModUpdateDialog(QDialog):
             QPlainTextEdit {{ background: {S['surface']}; color: {S['text_primary']};
                 border: 1px solid {S['border']}; border-radius: 8px; padding: 12px; }}
         ''')
+
+    def _confirm_update(self):
+        if self.running:
+            return
+        warning = ModUpdateWarningDialog(self._mod, self._release, self)
+        try:
+            if warning.exec() == QDialog.DialogCode.Accepted:
+                self.start_requested.emit()
+        finally:
+            warning.deleteLater()
 
     def begin(self):
         self.running = True
