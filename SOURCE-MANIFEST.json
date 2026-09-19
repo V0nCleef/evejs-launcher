@@ -1,20 +1,20 @@
 {
   "schemaVersion": 1,
   "project": "EveJS Launcher",
-  "version": "1.0.62",
-  "scope": "Source/build inputs for the documentation-only 1.0.62 release",
+  "version": "1.0.63",
+  "scope": "Source/build inputs for the 1.0.63 updater and mod confirmation release",
   "binary": {
     "file": "EveJS-Launcher-V1.exe",
-    "sha256": "aa53079135ba0a7b0fc5bd55abec4041e74dbf4b304d6a2802764a6a3062724d"
+    "sha256": "abb3cad09ada8f716f8303fe34d6a2b487b4c93f1defbe2b7ad24fe3235fd298"
   },
   "files": {
     "BUILDING.md": {
-      "sha256": "982b241422b9f81b5eb8f7b00561ba384e553e378afe501e04a29378093b9840",
-      "bytes": 640
+      "sha256": "2d7de309e83e49e5081500d0bad08f52d6c8b834bba7e7d953a9e3c1dec8236b",
+      "bytes": 625
     },
     "CHANGELOG.md": {
-      "sha256": "a24803c2aa02d1d622782e8f564b75bcec10d912d1c7b4e691cb7f50491ba5b7",
-      "bytes": 76162
+      "sha256": "34a5bce632681832e31fd4ce181a3592742cc7afe2550489f4eafd7510ee1695",
+      "bytes": 76699
     },
     "LICENSE": {
       "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
@@ -25,16 +25,16 @@
       "bytes": 14856
     },
     "RELEASE-VALIDATION.md": {
-      "sha256": "c09eb86f8f097063fda6b0beb0bdd100b8a89bcfa78a7392726303cabc07c575",
-      "bytes": 774
+      "sha256": "bdccbc4c032dd6c28d356ddbe6b202b80206df960eb0feeee207b9f9b6e51717",
+      "bytes": 1180
     },
     "THIRD_PARTY_NOTICES.md": {
       "sha256": "f6b245290423d78f0d88df8dc53129464e8a3938c081bb28da85d08df485ea1b",
       "bytes": 4672
     },
     "VERSION": {
-      "sha256": "b52b86a73fe506d86a57f5dfe52b4e98292e1d3b8f45b4ec24edd1b9aec415a8",
-      "bytes": 8
+      "sha256": "3200db7ea4de6602e4b919d498f27e0368a6b20d7f97467cdb50d2ff92cdc108",
+      "bytes": 7
     },
     "assets/audio/music/celestial_transit.wav": {
       "sha256": "451978321c360315010e8871945cdb99a92e05bee2d81148deb0600e64d66fc9",
@@ -1089,8 +1089,8 @@
       "bytes": 40230
     },
     "src/translations_mod_updates.py": {
-      "sha256": "a06b42b0d58654277db1311c4f01ebdb42135bc1d9f1c3de9627736af8aa7fe7",
-      "bytes": 9790
+      "sha256": "276b2e6f426449d52e00aabc1f579b1f65c6961b67ee17652a2ac1d14b3eaea7",
+      "bytes": 15447
     },
     "src/translations_ru.py": {
       "sha256": "61a1c2b25271cb4d679961a1396e523bec5ab56aad634d0320ff053533b80e8a",
@@ -1149,8 +1149,8 @@
       "bytes": 611
     },
     "src/updater/checker.py": {
-      "sha256": "a2098c76bb76a3e2f8f59267f9d1a240699ec61d26662c2e1f5639d0bdfe30f6",
-      "bytes": 6293
+      "sha256": "4e95ed0f6648604f10198dbe5c19bbc1f0e15a2df81098b7a8f50c92680a9438",
+      "bytes": 6701
     },
     "src/updater/dialog.py": {
       "sha256": "dade1510c05e10f8a7773f4206f10f93f8cd279cccc4ea3264f999e7cb1b1ef2",
@@ -1237,8 +1237,12 @@
       "bytes": 18356
     },
     "src/widgets/mod_update_dialog.py": {
-      "sha256": "f538ef2c8390f951e5b9129c24ccc2bb14e83d48b084b3454c5f0ff7d530dfde",
-      "bytes": 4715
+      "sha256": "9475c228d71d08aa732f3b7ac274aa0660a5db6f3c7d92c5460ab6647cbbe729",
+      "bytes": 5151
+    },
+    "src/widgets/mod_update_warning.py": {
+      "sha256": "31a45944db94f3155cb73173df121e7cbde7b1d8e25d9dff099734b948631d26",
+      "bytes": 5343
     },
     "src/widgets/nav_panel.py": {
       "sha256": "b38cb761907bcd9e7b648fd956ef06aec809462c0845ecdd1154b4e706f281f3",
@@ -1376,6 +1380,10 @@
       "sha256": "0c921cb94f7d08af67ccb61ade22a5337f0e6b06473c7768f81957dee81d220c",
       "bytes": 22547
     },
+    "tests/conftest.py": {
+      "sha256": "36dcd45a7b3c86d28b781ca98d57ccfa99d655f7bfd0919b8a17fb0c23b3d602",
+      "bytes": 885
+    },
     "tests/ingame-settings-example.test.js": {
       "sha256": "9bd8fb7ebcb5ca754e843d5db0743dbd152fcc7d0b33c1a5ad365f5210821056",
       "bytes": 2444
@@ -1395,6 +1403,26 @@
     "tests/test_mod_client_preparation.py": {
       "sha256": "68bcd85f0be0155437f992654e267769ad485582730a4511d022d3011fad8656",
       "bytes": 6125
+    },
+    "tests/test_mod_update_interface.py": {
+      "sha256": "9f21d165f18f8ff49ddf9614369edf95e8984fc2b2b79605e6b869e8a91aa316",
+      "bytes": 7790
+    },
+    "tests/test_mod_update_warning.py": {
+      "sha256": "aef26fa28ea10abffa52acc079fdcd023e7dba83a6c812c0af2c7faf0041ccbf",
+      "bytes": 2985
+    },
+    "tests/test_update_asset_selection.py": {
+      "sha256": "eefe5ec63555498ce5e893cf42a95e95c7e55e47a6734aa1e2c30ddd69afbb4f",
+      "bytes": 1896
+    },
+    "tests/test_update_flow.py": {
+      "sha256": "d4c95230b836aaf9a5bd8f0f714413ea96af507d308c0c1e26c96254108c6627",
+      "bytes": 38114
+    },
+    "tests/test_updater_deep_signal_ui.py": {
+      "sha256": "02369525c31249e206dfb7025eeff7a6bd02a36105d949b54420e3e2a64268a3",
+      "bytes": 14262
     }
   }
 }

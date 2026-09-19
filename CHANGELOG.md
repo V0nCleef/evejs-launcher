@@ -2,6 +2,12 @@
 
 ## Changelog
 
+## v1.0.63 - 2026-09-19
+
+- Fixed launcher updates selecting the source-code archive instead of the Windows launcher package.
+- Added a confirmation before third-party mod updates, showing the GitHub source, version change and a clear warning that the launcher does not check mods for malicious code. Translated into all eight supported languages. Thanks to Zag for the suggestion. 🫡
+- Existing launchers can update normally: the Windows launcher is the only ZIP attached to this release; source code is supplied as a tar.gz archive.
+
 ## v1.0.62 - 2026-09-19
 
 - Expanded the in-game window guide with explicit login-handshake delivery instructions, readiness and cleanup steps, and a bundled integration walkthrough.
