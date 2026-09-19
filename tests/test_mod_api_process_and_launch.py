@@ -77,6 +77,10 @@ def test_public_dlss_folder_routes_once_and_preparation_finishes_before_client_s
         return runtime.PreparedClientMods(MappingProxyType({"TRINITYPLATFORM": "dx12"}), ("/fixture:enabled",), ())
     monkeypatch.setattr(launcher, "prepare_public_client_mods", prepare)
     def spawn(exe, environment, cwd, *, arguments):
+        from src.core.mod_lifecycle_lock import acquire_mod_lifecycle_lock, ModLifecycleBusyError
+        with pytest.raises(ModLifecycleBusyError):
+            with acquire_mod_lifecycle_lock(client):
+                pytest.fail('Physical client lease must survive through spawn')
         events.append("spawn")
         assert environment["TRINITYPLATFORM"] == "dx12"
         assert arguments == ("/port:26000", "/fixture:enabled")

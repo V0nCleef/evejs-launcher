@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from .client_autologin import AutoLoginLaunch, require_auto_login_arguments
 from .dlss5 import ensure_dlss5_client_mod, prepare_dlss5_profile_environment
 from .mod_api_runtime import prepare_public_client_mods, public_package_owns_legacy_folder
+from .mod_lifecycle_lock import acquire_mod_lifecycle_lock
 from .mod_client_notifications import start_client_notifications
 from .mod_manifest import scan_mods
 from .overview_state import OverviewBridgeLaunch
@@ -430,7 +431,7 @@ def launch_client(
     resfiles = _resolve_client_resource_cache(profile_tq_path, client_path)
     selected_client_path = client_path or str(profile_tq_path.resolve())
 
-    with serialize_evejs_client_trust_and_spawn():
+    with serialize_evejs_client_trust_and_spawn(), acquire_mod_lifecycle_lock(selected_client_path):
         mods = scan_mods(evejs_root)
         # The cross-process client-launch mutex also serializes the DLSS5
         # manager. Initial install/update may mutate the copied client; the
@@ -474,7 +475,7 @@ def launch_client(
         public_mods = prepare_public_client_mods(
             evejs_root, selected_client_path, profile_tq_path,
             backend="docker" if effective_context.target_identity is not None else "native",
-            protected_environment=dlss5_environment, protected_arguments=arguments, mods=mods,
+            protected_environment=dlss5_environment, protected_arguments=arguments, mods=mods, client_lock_held=True,
         )
         env.update(public_mods.environment)
         arguments += public_mods.arguments

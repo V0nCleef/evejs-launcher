@@ -226,7 +226,7 @@ class ModAuthoringGuide(QDialog):
         self._current = path
         page = self._content.get(path)
         self.copy_ai.setText(self._text('copyAI'))
-        self.export_examples.setVisible(page['id'] == 'example-files')
+        self.export_examples.setVisible(page['id'] in {'example-files', 'ingame-settings', 'client-files'})
         self.reference_note.setVisible(page is None)
         text = render_page(self._source, page, self._language)
         # Resolve local images on the first render, not only after revisiting.

@@ -2,6 +2,12 @@
 
 ## Changelog
 
+## v1.0.61 — 2026-09-19
+
+- Added opt-in client-mod preparation so compatible updates can automatically restore a needed fallback when switching server installations or backends.
+- Added a non-blocking legacy client-script notice with a link explaining migration to login delivery.
+- Expanded the mod guide with in-game settings-window examples, screenshots and dedicated AI handoffs for windows and delivery migration.
+
 ## v1.0.60 — 2026-09-18
 
 - Fixed stale ISK by reading the current personal wallet balance.

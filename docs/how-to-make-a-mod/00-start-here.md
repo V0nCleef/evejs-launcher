@@ -41,8 +41,12 @@ The examples use manifest schema **3**, settings schema **1** and helper API **1
 
 15. [Example files](15-example-files.md)
 
+16. [Add an in-game settings window](16-ingame-settings.md)
+
 ## How to use this guide
 
 Choose a feature from the list on the left. Each page shows what it does and how to check it. All screenshots use clearly labelled examples. Open an image to enlarge it. Code examples are at the bottom of each relevant page, below a dividing line.
 
 [14. Publish a mod update](14-publish-update.md) explains the release files. [15. Example files](15-example-files.md) lets you save the working examples.
+
+16. [Add an in-game settings window](16-ingame-settings.md)

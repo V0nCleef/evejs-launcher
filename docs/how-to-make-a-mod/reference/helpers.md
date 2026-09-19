@@ -190,3 +190,146 @@ An argument is one complete switch, such as `/example:enabled`, not separate opt
 ## Binary receipts
 
 A ready global client-package action requires a [bound receipt](ownership.md): active for install, restored for disable/remove. Verify and recovery may confirm either active or restored state; recoverable is never a completed result. Before launching an enabled client package, verification must prove active state. Profile preparation may reference a receipt too. The host checks the binding; the mod checks real build compatibility, payloads, backups and binary state.
+
+## Prefer client delivery through a reviewed EveJS login integration
+
+For new client companions, prefer a reviewed EveJS login integration when the
+server supports it. This avoids persistent archive modification. Existing
+server-only mods and client-file mods keep their existing contracts; migration
+must preserve compatibility rather than force every author to rewrite at once.
+There is no Launcher capability called `login_delivery`, no automatic conversion
+of client patches, and no general-purpose mod login API promised by this guide.
+AutoMining's unreleased 1.0.7 candidate is one mod-specific implementation, with
+local gameplay verification on a reviewed native EveJS build. It is not evidence
+that every backend, shared-client combination or future server version works.
+
+The Launcher invokes declared update, cleanup, installation, verification and
+profile actions. The author implements payload delivery, compatibility checks,
+failure handling and recovery within those existing actions. A process-start
+notification is not proof that a character logged in or that the companion works.
+
+For a login-delivered companion:
+
+- Preserve the existing login function's execution and result, including other
+  built-in handlers. Bound payload size and reject unreviewed server versions.
+- Defer character RPCs and UI work until a character session exists. Validate the
+  server/version readiness response and normalize only supported wire text forms.
+- Keep handlers scoped to the current session, unregister on replacement, close
+  stale windows and prevent duplicate handling by legacy and login companions.
+- Verify real UI and gameplay after login, reconnect and character changes. A
+  capability acknowledgement alone is not a gameplay test.
+
+Migration must restore only owned data from verified backups, retain recovery
+records outside the replaceable package, preserve unrelated archive entries and
+settings, and roll back failed updates. Use installation/cleanup actions for
+shared physical-client changes; `prepare_profile` is not permission to change
+shared binaries or silently patch an archive during launch.
+
+Test migration in both directions, enabled and disabled updates, interrupted
+swaps, failed-update rollback, and switching between supported delivery methods.
+Also test old and new installations sharing the same physical client. Restoring
+an entry for one installation can remove a companion still required by another.
+An older helper cannot be assumed to understand a newer delivery method.
+
+**Automatic fallback must be demonstrated, not inferred.** An archive-delivery
+fallback that works when already installed does not prove that a clean, migrated
+client can switch to it automatically. If switching backend/build or selecting
+an older installation requires an extra Install/Update action, the transition
+does not meet a no-manual-migration promise. Resolve shared-client ownership and
+transition handling before advertising that guarantee; do not add a hidden
+archive repair to profile preparation to work around it.
+
+### Reporting the selected client script delivery method
+
+A Launcher implementing `client-script-delivery-v1` advertises that token in the
+helper-process environment variable `EVEJS_LAUNCHER_HELPER_FEATURES` (comma-separated).
+The request JSON and manifest schema remain unchanged. Only when that token is
+present may a helper include this optional field in its usual successful reply:
+
+```json
+"clientScriptDelivery": "client-script-patch"
+```
+
+Allowed values are `login-handshake`, `client-script-patch`, and `none`. Report the
+method actually selected for the supplied client and backend, not every method
+the package supports. `none` means there is no client-script companion/patch (for
+example, a graphics-only or server-only mod). Omission means unknown, not legacy.
+On older Launchers, omit the field: their strict reply parser rejects unknown
+fields. Existing helpers need no changes to keep working; reporting is opt-in.
+
+For example, wrap the ordinary reply in an authored Node helper:
+
+```javascript
+const features = String(process.env.EVEJS_LAUNCHER_HELPER_FEATURES || "").split(",");
+if (features.includes("client-script-delivery-v1") && result.success) {
+  result.clientScriptDelivery = selectedMethod;
+}
+```
+
+The Launcher records a report only after successful lifecycle or launch-preparation
+commit. Its Mods row shows a non-blocking “Legacy client script patch — still
+supported” notice only for an enabled mod reporting `client-script-patch`.
+Reports are scoped to the mod folder, server installation, physical client and
+backend, and invalidated by manifest identity or helper size/mtime changes.
+A subsequent report replaces the previous method; successful cleanup or a
+successful action omitting metadata clears it. The tooltip explicitly describes
+the last report, not an inspection of client code or proof of current gameplay.
+
+This is advisory metadata. It neither enables login delivery nor migrates files,
+changes activation, runs a helper during discovery, or makes a mod unsupported.
+Graphics/DLL mods are not labelled merely because they modify client files.
+The feature is staged for an upcoming Launcher release; do not assume installed
+1.0.60 hosts advertise it. Unknown/unreporting older mods are not guessed from names.
+
+## Optional automatic client preparation (Launcher 1.0.61)
+
+This is a separate lifecycle feature, not an effect of `clientScriptDelivery`.
+Set `minLauncherVersion` to `1.0.61` when your migration depends on it. Older
+Launchers reject that update before disabling the working package.
+
+After a successful explicit `install` or `recover`, a helper may return:
+
+```json
+"clientPreparation": {
+  "mode": "verify-install",
+  "legacyVersions": ["1.0.6"]
+}
+```
+
+Only include this field when `EVEJS_LAUNCHER_HELPER_FEATURES`, split on commas,
+contains `client-preparation-v1`. The example version is illustrative: list only
+exact releases whose helper behavior you have tested. The helper must declare
+`install`, `verify` and `prepare_profile`, and the mod must have a stable GitHub
+update source. The current version is enrolled automatically; no wildcard or
+version-range matching is supported.
+
+The host persists enrollment separately from the advisory notice cache. It is
+scoped to the physical client, mod ID and update source (repository, asset pattern
+and tag prefix). It applies across server folders and backends only to explicitly
+enrolled versions. Cleanup retains this compatibility record because another
+older server installation may still use the same client. It does not enable a
+disabled mod or run a helper while discovering mods.
+
+For an enabled enrolled release, before profile preparation the host runs its
+own `verify`. If verification reports pending/failure, the host checks that EVE
+clients are closed, calls its existing `install` with `profile: null`, commits
+valid contributions and runs `verify` again. Only a ready recheck permits profile
+preparation and launch. Malformed replies, process errors, changed manifests and
+conflicting files do not silently become installation permission. There is one
+repair attempt, not a retry loop. A healthy second client launch does not install
+again. The physical client lease remains held through process creation.
+
+Opting in is an author contract: `verify` must be read-only; `install` must be
+idempotent, preserve unrelated edits, use verified backups/receipts, and limit
+automatic repairs to client preparation. It must not need a server/Launcher
+restart or mutate the running server. Preserve an already compatible fallback
+when another client is running. Profile preparation must still not write shared
+archives. An older release listed in the policy must satisfy the same install
+and verification contract; it need not understand the new reply field itself.
+
+Enrollment failures abort the lifecycle operation so the normal update rollback
+can restore the old package. A corrupt coordination record fails closed; it is
+not treated as permission to reinstall. Keep the known legacy path until the
+normal upgrade, rollback, backend switch and shared-client checks pass. This does
+not provide a general server login-payload API, and it does not retrofit automatic
+repair into an unchanged older Launcher or an external manual server launcher.

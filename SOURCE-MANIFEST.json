@@ -1,1675 +1,1393 @@
 {
-  "applicationModuleCount": 159,
+  "schemaVersion": 1,
+  "project": "EveJS Launcher",
+  "version": "1.0.61",
+  "scope": "Isolated release candidate source/build inputs; unpublished",
   "binary": {
-    "bytes": 5199247,
     "file": "EveJS-Launcher-V1.exe",
-    "sha256": "33d8789a4f7a62e323c76c2d1509019a283cc0d82e3f09585815d4fc251d08d5"
+    "sha256": "e96b7aeeddfdb619b62140dd7a2a5c151ed40edc0176aaee35c66ba3685acf1a",
+    "bytes": 5211983
   },
-  "buildInputCount": 322,
   "files": {
     "BUILDING.md": {
-      "bytes": 5499,
-      "kind": "source-only-extra",
-      "sha256": "bdf9b1a39d2bcfd4f9c6bac417399ea831c8f822a342d1b401f4153d0f56152c"
+      "sha256": "413a5fcc83e13df9dec9cc875c41b1a2e7826b2719401408027c580c85c3d86d",
+      "bytes": 924
     },
     "CHANGELOG.md": {
-      "bytes": 74737,
-      "kind": "exact-build-input",
-      "sha256": "1dea238169ae498afb86967c649d758691efb6d16c7193e79499c8d3c54d9008"
+      "sha256": "cd1f782f4d0effe47b0364aea6d08750670e1f315f89509c5356cc21b1046dd4",
+      "bytes": 75839
     },
     "LICENSE": {
-      "bytes": 35147,
-      "kind": "exact-build-input",
-      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+      "bytes": 35147
     },
     "README.md": {
-      "bytes": 15043,
-      "kind": "exact-build-input",
-      "sha256": "4476ae438e08472d21e21b82dba5ca9cc5f3e8b856cb8ca9ca6bcf33cb545c62"
+      "sha256": "5a42599a71a1eaa0e6eddf42a3b085712bcdd1bba1a4dca9cb2b31f155f8b622",
+      "bytes": 14856
     },
     "THIRD_PARTY_NOTICES.md": {
-      "bytes": 4672,
-      "kind": "exact-build-input",
-      "sha256": "f6b245290423d78f0d88df8dc53129464e8a3938c081bb28da85d08df485ea1b"
+      "sha256": "f6b245290423d78f0d88df8dc53129464e8a3938c081bb28da85d08df485ea1b",
+      "bytes": 4672
     },
     "VERSION": {
-      "bytes": 7,
-      "kind": "exact-build-input",
-      "sha256": "ec046849c5fdce6e4600cf10c6f09097d12fe2b5a10fae338dc454733ac4f195"
+      "sha256": "773eba583c31f6e4851a4d609e3532113283539dbeca3ef706d7f8a902cde68e",
+      "bytes": 7
     },
     "assets/audio/music/celestial_transit.wav": {
-      "bytes": 9676844,
-      "kind": "exact-build-input",
-      "sha256": "451978321c360315010e8871945cdb99a92e05bee2d81148deb0600e64d66fc9"
+      "sha256": "451978321c360315010e8871945cdb99a92e05bee2d81148deb0600e64d66fc9",
+      "bytes": 9676844
     },
     "assets/audio/voice/lyra/character_launch_failed.wav": {
-      "bytes": 82464,
-      "kind": "exact-build-input",
-      "sha256": "96c77bc0216531edfb1f4564cb2c2145e1a3dd51c70d25c0ce2728a44c950975"
+      "sha256": "96c77bc0216531edfb1f4564cb2c2145e1a3dd51c70d25c0ce2728a44c950975",
+      "bytes": 82464
     },
     "assets/audio/voice/lyra/character_launching.wav": {
-      "bytes": 89958,
-      "kind": "exact-build-input",
-      "sha256": "b3e078861225d5ef1c8a29433328ffade3af53c872f718fa614b9db6741b1011"
+      "sha256": "b3e078861225d5ef1c8a29433328ffade3af53c872f718fa614b9db6741b1011",
+      "bytes": 89958
     },
     "assets/audio/voice/lyra/clients_terminated.wav": {
-      "bytes": 91206,
-      "kind": "exact-build-input",
-      "sha256": "03ee12aeb3851ce9a5fe2ab341fb0b19f774d04553268943ed93cbbf5bf9f383"
+      "sha256": "03ee12aeb3851ce9a5fe2ab341fb0b19f774d04553268943ed93cbbf5bf9f383",
+      "bytes": 91206
     },
     "assets/audio/voice/lyra/clients_terminating.wav": {
-      "bytes": 94954,
-      "kind": "exact-build-input",
-      "sha256": "4bb06bfbf3fcc57dce4c4757cc1495cd6e7df9448e80bc2aa07ff4b4378b4734"
+      "sha256": "4bb06bfbf3fcc57dce4c4757cc1495cd6e7df9448e80bc2aa07ff4b4378b4734",
+      "bytes": 94954
     },
     "assets/audio/voice/lyra/game_server_launch_failed.wav": {
-      "bytes": 92456,
-      "kind": "exact-build-input",
-      "sha256": "de9e0a1cc3b32863192ba6b9c78d85d8f7ceb66f367ef923b45753c6766f794d"
+      "sha256": "de9e0a1cc3b32863192ba6b9c78d85d8f7ceb66f367ef923b45753c6766f794d",
+      "bytes": 92456
     },
     "assets/audio/voice/lyra/game_server_launching.wav": {
-      "bytes": 80438,
-      "kind": "exact-build-input",
-      "sha256": "9050623457a04ae53da3ee88572534a0b0f5bf2786746399b8fda5db144d8f14"
+      "sha256": "9050623457a04ae53da3ee88572534a0b0f5bf2786746399b8fda5db144d8f14",
+      "bytes": 80438
     },
     "assets/audio/voice/lyra/game_server_offline.wav": {
-      "bytes": 76222,
-      "kind": "exact-build-input",
-      "sha256": "f7d3dce9ce185fab1807456a0ab21619a9ea206e139a16b1ab87f000ee426225"
+      "sha256": "f7d3dce9ce185fab1807456a0ab21619a9ea206e139a16b1ab87f000ee426225",
+      "bytes": 76222
     },
     "assets/audio/voice/lyra/game_server_online.wav": {
-      "bytes": 67480,
-      "kind": "exact-build-input",
-      "sha256": "6e94dbfc823494927fb92a6a789b6e0d1c872029da057ffbc7d1e997fe8aa980"
+      "sha256": "6e94dbfc823494927fb92a6a789b6e0d1c872029da057ffbc7d1e997fe8aa980",
+      "bytes": 67480
     },
     "assets/audio/voice/lyra/game_server_stopping.wav": {
-      "bytes": 78094,
-      "kind": "exact-build-input",
-      "sha256": "a15c61c463c0309db740debad62c504bd8862dfb0bb69f96e8355ae9736adf25"
+      "sha256": "a15c61c463c0309db740debad62c504bd8862dfb0bb69f96e8355ae9736adf25",
+      "bytes": 78094
     },
     "assets/audio/voice/lyra/group_launching.wav": {
-      "bytes": 83714,
-      "kind": "exact-build-input",
-      "sha256": "6379728120ba3ac707639c7a0c7e56885cf577d3731018cc7da4bb7ad7fe5354"
+      "sha256": "6379728120ba3ac707639c7a0c7e56885cf577d3731018cc7da4bb7ad7fe5354",
+      "bytes": 83714
     },
     "assets/audio/voice/lyra/launch_sequence_cancelled.wav": {
-      "bytes": 79344,
-      "kind": "exact-build-input",
-      "sha256": "43bbbb17194fba2ecb22a925a51ebded4f42bd845b6a674e5b3e3e03133b6915"
+      "sha256": "43bbbb17194fba2ecb22a925a51ebded4f42bd845b6a674e5b3e3e03133b6915",
+      "bytes": 79344
     },
     "assets/audio/voice/lyra/launch_sequence_complete.wav": {
-      "bytes": 88028,
-      "kind": "exact-build-input",
-      "sha256": "58a8f122b31e15c6c32d7262a0f64c85373de0e174a3a579c6b8c83d6a917bcb"
+      "sha256": "58a8f122b31e15c6c32d7262a0f64c85373de0e174a3a579c6b8c83d6a917bcb",
+      "bytes": 88028
     },
     "assets/audio/voice/lyra/launch_sequence_partial.wav": {
-      "bytes": 150524,
-      "kind": "exact-build-input",
-      "sha256": "b34d1aba3de37652c93362a71cc9e20533b83ba241cb72c8046c61ba03e1806a"
+      "sha256": "b34d1aba3de37652c93362a71cc9e20533b83ba241cb72c8046c61ba03e1806a",
+      "bytes": 150524
     },
     "assets/audio/voice/lyra/manifest.json": {
-      "bytes": 17998,
-      "kind": "exact-build-input",
-      "sha256": "dc982c052c0f276fdfaa8e4b721a0d3bd88949a41da5646a079dd0d486d74617"
+      "sha256": "dc982c052c0f276fdfaa8e4b721a0d3bd88949a41da5646a079dd0d486d74617",
+      "bytes": 17998
     },
     "assets/audio/voice/lyra/market_server_launch_failed.wav": {
-      "bytes": 96202,
-      "kind": "exact-build-input",
-      "sha256": "c14faae4a19a9e10433972b5b6c48f6b7010a3e2df4bc4656f7d4abf740b5825"
+      "sha256": "c14faae4a19a9e10433972b5b6c48f6b7010a3e2df4bc4656f7d4abf740b5825",
+      "bytes": 96202
     },
     "assets/audio/voice/lyra/market_server_launching.wav": {
-      "bytes": 83090,
-      "kind": "exact-build-input",
-      "sha256": "b4f1cbcd91caf2ad3f7f0292364f518e5c5c661053033ae1a79c6e095e14ec30"
+      "sha256": "b4f1cbcd91caf2ad3f7f0292364f518e5c5c661053033ae1a79c6e095e14ec30",
+      "bytes": 83090
     },
     "assets/audio/voice/lyra/market_server_offline.wav": {
-      "bytes": 86836,
-      "kind": "exact-build-input",
-      "sha256": "9b82bb942e232f8565ff3267340a472bdf2eea233d68400b14d75256c14fa9ac"
+      "sha256": "9b82bb942e232f8565ff3267340a472bdf2eea233d68400b14d75256c14fa9ac",
+      "bytes": 86836
     },
     "assets/audio/voice/lyra/market_server_online.wav": {
-      "bytes": 90580,
-      "kind": "exact-build-input",
-      "sha256": "a7cea81592aed25b38108498290bd8212736b9b628e0944da01af9eec457d9f1"
+      "sha256": "a7cea81592aed25b38108498290bd8212736b9b628e0944da01af9eec457d9f1",
+      "bytes": 90580
     },
     "assets/audio/voice/lyra/market_server_stopping.wav": {
-      "bytes": 80592,
-      "kind": "exact-build-input",
-      "sha256": "68471c4988892e448f4a733a9bdc5cd91d6155123ae7e2e157646b2d8fc3b20d"
+      "sha256": "68471c4988892e448f4a733a9bdc5cd91d6155123ae7e2e157646b2d8fc3b20d",
+      "bytes": 80592
     },
     "assets/audio/voice/lyra/preview.wav": {
-      "bytes": 145960,
-      "kind": "exact-build-input",
-      "sha256": "437b813f2a34df74959d8e915fd2a3e7717d02319726c40840256f5986a2483d"
+      "sha256": "437b813f2a34df74959d8e915fd2a3e7717d02319726c40840256f5986a2483d",
+      "bytes": 145960
     },
     "assets/audio/voice/lyra/server_stack_failed.wav": {
-      "bytes": 95578,
-      "kind": "exact-build-input",
-      "sha256": "8073e9678b10802bc58a050f82be1bfcc43f49687e062293c7f52068b0df35a0"
+      "sha256": "8073e9678b10802bc58a050f82be1bfcc43f49687e062293c7f52068b0df35a0",
+      "bytes": 95578
     },
     "assets/audio/voice/lyra/server_stack_launching.wav": {
-      "bytes": 75598,
-      "kind": "exact-build-input",
-      "sha256": "5887d7a6938d15fe4488fea7f9561065a0cb3d65e54e88af7374183bde16559f"
+      "sha256": "5887d7a6938d15fe4488fea7f9561065a0cb3d65e54e88af7374183bde16559f",
+      "bytes": 75598
     },
     "assets/audio/voice/lyra/server_stack_offline.wav": {
-      "bytes": 73724,
-      "kind": "exact-build-input",
-      "sha256": "27d9ea1b62c18c688084f35be723c9398ecf63901af5fa2eaf7d41b5ff98b4b4"
+      "sha256": "27d9ea1b62c18c688084f35be723c9398ecf63901af5fa2eaf7d41b5ff98b4b4",
+      "bytes": 73724
     },
     "assets/audio/voice/lyra/server_stack_online.wav": {
-      "bytes": 85586,
-      "kind": "exact-build-input",
-      "sha256": "2065f6bd647c5344ba480d58bac2202293ac6a0dafb896fc825f5f81d1ed67e1"
+      "sha256": "2065f6bd647c5344ba480d58bac2202293ac6a0dafb896fc825f5f81d1ed67e1",
+      "bytes": 85586
     },
     "assets/audio/voice/lyra/server_stack_stopping.wav": {
-      "bytes": 79966,
-      "kind": "exact-build-input",
-      "sha256": "94ff36129e6c2533dd80e4d25511e9ad47851cca38aefd2e6a4662b9f5c78982"
+      "sha256": "94ff36129e6c2533dd80e4d25511e9ad47851cca38aefd2e6a4662b9f5c78982",
+      "bytes": 79966
     },
     "assets/audio/voice/lyra/service_stop_failed.wav": {
-      "bytes": 97448,
-      "kind": "exact-build-input",
-      "sha256": "342714a55a89b3030fd8f96d8e46259867035fba95cfc3a4da290ad453c85325"
+      "sha256": "342714a55a89b3030fd8f96d8e46259867035fba95cfc3a4da290ad453c85325",
+      "bytes": 97448
     },
     "assets/data/character_names.json": {
-      "bytes": 1077816,
-      "kind": "exact-build-input",
-      "sha256": "b032a66bdfbcdd9f6d1af8ca4d99736ad48816388ea642c670d9c79802a60f6a"
+      "sha256": "b032a66bdfbcdd9f6d1af8ca4d99736ad48816388ea642c670d9c79802a60f6a",
+      "bytes": 1077816
     },
     "assets/deep_signal/operations_orbital.png": {
-      "bytes": 1648056,
-      "kind": "exact-build-input",
-      "sha256": "c9e4d0f59306684402b1e7b73a7d54a57e36f5f283438b64060f66b4c0384d36"
+      "sha256": "c9e4d0f59306684402b1e7b73a7d54a57e36f5f283438b64060f66b4c0384d36",
+      "bytes": 1648056
     },
     "assets/deep_signal/operations_scene.json": {
-      "bytes": 3553,
-      "kind": "exact-build-input",
-      "sha256": "84a8eb6e8aba26fcec3ef322089385a9a0bd3d1081735476b7f4776dc7912462"
+      "sha256": "84a8eb6e8aba26fcec3ef322089385a9a0bd3d1081735476b7f4776dc7912462",
+      "bytes": 3553
     },
     "assets/hero/hero_nebula.png": {
-      "bytes": 267591,
-      "kind": "exact-build-input",
-      "sha256": "c9b5661f1c8a29e5f84922ca5efda868074a0250c34aad2f955c660d935ce539"
+      "sha256": "c9b5661f1c8a29e5f84922ca5efda868074a0250c34aad2f955c660d935ce539",
+      "bytes": 267591
     },
     "assets/logo.ico": {
-      "bytes": 5519,
-      "kind": "exact-build-input",
-      "sha256": "f26e608843976019f1676b839332c543d9b7675d7fc62192a9dc0a61db46e0a5"
+      "sha256": "f26e608843976019f1676b839332c543d9b7675d7fc62192a9dc0a61db46e0a5",
+      "bytes": 5519
     },
     "assets/logo.png": {
-      "bytes": 3096,
-      "kind": "exact-build-input",
-      "sha256": "99a2f98a52e101e046aa547f3d20e746493fc9cbb18bed01d5427a27ef847434"
+      "sha256": "99a2f98a52e101e046aa547f3d20e746493fc9cbb18bed01d5427a27ef847434",
+      "bytes": 3096
     },
     "build.spec": {
-      "bytes": 10146,
-      "kind": "exact-build-input",
-      "sha256": "3e7c9d98dba483fdc891de758404ad7fd43dbfe86e31daa42008bb2afb866e78"
+      "sha256": "3e7c9d98dba483fdc891de758404ad7fd43dbfe86e31daa42008bb2afb866e78",
+      "bytes": 10146
     },
     "build_support.py": {
-      "bytes": 2577,
-      "kind": "exact-build-input",
-      "sha256": "977477605178b866b47c08fb08c7b6c4a4bb8a70c32430581c263c877b5eb47c"
+      "sha256": "977477605178b866b47c08fb08c7b6c4a4bb8a70c32430581c263c877b5eb47c",
+      "bytes": 2577
     },
     "docs/how-to-make-a-mod/00-start-here.md": {
-      "bytes": 2020,
-      "kind": "exact-build-input",
-      "sha256": "9278ccb372fbb1da54cc79b40051f4c4284f9888d8098b147ae5cfd9d497d0ba"
+      "sha256": "1c9fb3f5b476ff8a7ae442449cf99786ec67c9530a94815da28b9029da3f6828",
+      "bytes": 2142
     },
     "docs/how-to-make-a-mod/01-first-mod.md": {
-      "bytes": 2350,
-      "kind": "exact-build-input",
-      "sha256": "4aa8874a45721e2302e318fd795e8a2626a0a176dad267bcb90c58448d75d6d0"
+      "sha256": "4aa8874a45721e2302e318fd795e8a2626a0a176dad267bcb90c58448d75d6d0",
+      "bytes": 2350
     },
     "docs/how-to-make-a-mod/02-activation.md": {
-      "bytes": 1674,
-      "kind": "exact-build-input",
-      "sha256": "b396323476f2b71dc15beead3aa614346186a9ab0001df433bd7c45fe06102d6"
+      "sha256": "b396323476f2b71dc15beead3aa614346186a9ab0001df433bd7c45fe06102d6",
+      "bytes": 1674
     },
     "docs/how-to-make-a-mod/03-configure.md": {
-      "bytes": 3616,
-      "kind": "exact-build-input",
-      "sha256": "9aaca012f81837f770d2384df1673b5136e64885f69d4748bab7897aab08654b"
+      "sha256": "9aaca012f81837f770d2384df1673b5136e64885f69d4748bab7897aab08654b",
+      "bytes": 3616
     },
     "docs/how-to-make-a-mod/04-controls.md": {
-      "bytes": 2709,
-      "kind": "exact-build-input",
-      "sha256": "336b54b4a37bc5adda4152cd3a0191da58443354dc20bb2074f9b1bfb8e93eb8"
+      "sha256": "336b54b4a37bc5adda4152cd3a0191da58443354dc20bb2074f9b1bfb8e93eb8",
+      "bytes": 2709
     },
     "docs/how-to-make-a-mod/05-profiles.md": {
-      "bytes": 1935,
-      "kind": "exact-build-input",
-      "sha256": "0e9634cfca1834e368438b1c2e368f33c8a7c232f57a4ce430a2a84a48231b28"
+      "sha256": "0e9634cfca1834e368438b1c2e368f33c8a7c232f57a4ce430a2a84a48231b28",
+      "bytes": 1935
     },
     "docs/how-to-make-a-mod/06-languages.md": {
-      "bytes": 2037,
-      "kind": "exact-build-input",
-      "sha256": "b388340021453d277e8e42b2d0b78bf2734ce7d252db10f78e3e3d23b2c82dbf"
+      "sha256": "b388340021453d277e8e42b2d0b78bf2734ce7d252db10f78e3e3d23b2c82dbf",
+      "bytes": 2037
     },
     "docs/how-to-make-a-mod/07-mod-updates.md": {
-      "bytes": 1912,
-      "kind": "exact-build-input",
-      "sha256": "6dcbb88d43deaf42e6a9cd7a1514fc093bf38e672aa8edbfd6172d9f3323578e"
+      "sha256": "6dcbb88d43deaf42e6a9cd7a1514fc093bf38e672aa8edbfd6172d9f3323578e",
+      "bytes": 1912
     },
     "docs/how-to-make-a-mod/08-helper-intro.md": {
-      "bytes": 2196,
-      "kind": "exact-build-input",
-      "sha256": "1ce6758c4c703216157be05ef1f7affcb1778190be4f3fe384a01724d92107f6"
+      "sha256": "1ce6758c4c703216157be05ef1f7affcb1778190be4f3fe384a01724d92107f6",
+      "bytes": 2196
     },
     "docs/how-to-make-a-mod/09-removal.md": {
-      "bytes": 2640,
-      "kind": "exact-build-input",
-      "sha256": "a3e4dbea5a14ee40b4eeef471f9090f805ea5e769831ac8334c2b61efccca537"
+      "sha256": "a3e4dbea5a14ee40b4eeef471f9090f805ea5e769831ac8334c2b61efccca537",
+      "bytes": 2640
     },
     "docs/how-to-make-a-mod/10-dependencies.md": {
-      "bytes": 1445,
-      "kind": "exact-build-input",
-      "sha256": "a3c0e48870b17f6ad42a083b0309fb5a4586201f531da34b281cfb0b0dfbabb5"
+      "sha256": "a3c0e48870b17f6ad42a083b0309fb5a4586201f531da34b281cfb0b0dfbabb5",
+      "bytes": 1445
     },
     "docs/how-to-make-a-mod/11-source-integration.md": {
-      "bytes": 1205,
-      "kind": "exact-build-input",
-      "sha256": "eef47aba222749ce980de2538be73c167aea7c014ba0d229f3ffe047281575e8"
+      "sha256": "eef47aba222749ce980de2538be73c167aea7c014ba0d229f3ffe047281575e8",
+      "bytes": 1205
     },
     "docs/how-to-make-a-mod/12-client-files.md": {
-      "bytes": 1285,
-      "kind": "exact-build-input",
-      "sha256": "0d3bc09294cd9a2727d5b9e16c0327d8a7f47a9726e25f7c4af2fea0b3aa2167"
+      "sha256": "88b3c423447bcbe602f6137a58224450de5080f007b68f42b83b6f4e25e3e62e",
+      "bytes": 6792
     },
     "docs/how-to-make-a-mod/13-client-events.md": {
-      "bytes": 1631,
-      "kind": "exact-build-input",
-      "sha256": "bc36850aa8daebe4e256866499f8686eecbdc9155823acfc1a71488b2d010f1c"
+      "sha256": "bc36850aa8daebe4e256866499f8686eecbdc9155823acfc1a71488b2d010f1c",
+      "bytes": 1631
     },
     "docs/how-to-make-a-mod/14-publish-update.md": {
-      "bytes": 2388,
-      "kind": "exact-build-input",
-      "sha256": "e297b6ab9d7f35441dab35e3f218c65143ea55888810d6f3c9f6b9ec6e15e3f6"
+      "sha256": "e297b6ab9d7f35441dab35e3f218c65143ea55888810d6f3c9f6b9ec6e15e3f6",
+      "bytes": 2388
     },
     "docs/how-to-make-a-mod/15-example-files.md": {
-      "bytes": 1279,
-      "kind": "exact-build-input",
-      "sha256": "48b6d34476bc95735a0de3871c38512b6e395399e6b539930a34601c3536edd4"
+      "sha256": "48b6d34476bc95735a0de3871c38512b6e395399e6b539930a34601c3536edd4",
+      "bytes": 1279
+    },
+    "docs/how-to-make-a-mod/16-ingame-settings.md": {
+      "sha256": "104027485e61b5f1b8c7701be134c609486c117a7d868eaf4915efaf5288d316",
+      "bytes": 3862
     },
     "docs/how-to-make-a-mod/guide-content.json": {
-      "bytes": 204351,
-      "kind": "exact-build-input",
-      "sha256": "fbc71b7313eb4d73c1517e82c642630202b45f27aec8b35cf5a41bb1858990ef"
+      "sha256": "eaba55dae099b9dfacb4c98006bb64c0cb859e0c1d489861f58759f984b4d586",
+      "bytes": 285434
     },
     "docs/how-to-make-a-mod/images/advanced-hidden.png": {
-      "bytes": 54006,
-      "kind": "exact-build-input",
-      "sha256": "6cdc59cfba025adb05c641aef4522a812055afd66f7736296f65b16526da846c"
+      "sha256": "6cdc59cfba025adb05c641aef4522a812055afd66f7736296f65b16526da846c",
+      "bytes": 54006
     },
     "docs/how-to-make-a-mod/images/advanced-search.png": {
-      "bytes": 54271,
-      "kind": "exact-build-input",
-      "sha256": "d1871db4bd64fbc2fc4eb676f5c22fb89f950ae014292c868c818440010b722f"
+      "sha256": "d1871db4bd64fbc2fc4eb676f5c22fb89f950ae014292c868c818440010b722f",
+      "bytes": 54271
     },
     "docs/how-to-make-a-mod/images/advanced-shown.png": {
-      "bytes": 67730,
-      "kind": "exact-build-input",
-      "sha256": "42c024ed0740cfe2e07658ded09ed1fc65499143dbcc4e88f39c23cd0e61ee61"
+      "sha256": "42c024ed0740cfe2e07658ded09ed1fc65499143dbcc4e88f39c23cd0e61ee61",
+      "bytes": 67730
+    },
+    "docs/how-to-make-a-mod/images/ai-handoff-toolbar.png": {
+      "sha256": "12cc8bfd78739c90e7e16b15f60ea8a3d2c897e212329c2ed3ef87af49015303",
+      "bytes": 12015
     },
     "docs/how-to-make-a-mod/images/apply-restart.png": {
-      "bytes": 30768,
-      "kind": "exact-build-input",
-      "sha256": "690b05ff165cb912c89e853cce84347d5558f965d1acd8d68dea7eb95c4d464a"
+      "sha256": "690b05ff165cb912c89e853cce84347d5558f965d1acd8d68dea7eb95c4d464a",
+      "bytes": 30768
     },
     "docs/how-to-make-a-mod/images/client-actions.png": {
-      "bytes": 19535,
-      "kind": "exact-build-input",
-      "sha256": "f1d7dde18d37c7dbb79400a110809583d662adf13981663db5ba9b480e47d12b"
+      "sha256": "f1d7dde18d37c7dbb79400a110809583d662adf13981663db5ba9b480e47d12b",
+      "bytes": 19535
     },
     "docs/how-to-make-a-mod/images/client-receipt.png": {
-      "bytes": 56537,
-      "kind": "exact-build-input",
-      "sha256": "530557848a793447e32202012dd8431d5000297140989d5ea2cddf06621a8ef9"
+      "sha256": "530557848a793447e32202012dd8431d5000297140989d5ea2cddf06621a8ef9",
+      "bytes": 56537
     },
     "docs/how-to-make-a-mod/images/client-row.png": {
-      "bytes": 37062,
-      "kind": "exact-build-input",
-      "sha256": "f4ad95450482a8efd3eec5ca423966f7843959ee6d44face78fca404f4c02408"
+      "sha256": "f4ad95450482a8efd3eec5ca423966f7843959ee6d44face78fca404f4c02408",
+      "bytes": 37062
     },
     "docs/how-to-make-a-mod/images/configure-default.png": {
-      "bytes": 48460,
-      "kind": "exact-build-input",
-      "sha256": "25572aa5e133da534ecc177f447913c3945f8584360d2962574cf0ad4475ab6d"
+      "sha256": "25572aa5e133da534ecc177f447913c3945f8584360d2962574cf0ad4475ab6d",
+      "bytes": 48460
     },
     "docs/how-to-make-a-mod/images/configure-dialog.png": {
-      "bytes": 50069,
-      "kind": "exact-build-input",
-      "sha256": "b2f68c4d01b7dd9b202d22111cc24c6485341f92cf888d29d6d8879cbcaf46d4"
+      "sha256": "b2f68c4d01b7dd9b202d22111cc24c6485341f92cf888d29d6d8879cbcaf46d4",
+      "bytes": 50069
     },
     "docs/how-to-make-a-mod/images/configure-reopened.png": {
-      "bytes": 49839,
-      "kind": "exact-build-input",
-      "sha256": "855d9203d18252cec8d695171b95c9605513aa1386bd02d5863e00f179c8ace7"
+      "sha256": "855d9203d18252cec8d695171b95c9605513aa1386bd02d5863e00f179c8ace7",
+      "bytes": 49839
     },
     "docs/how-to-make-a-mod/images/configure-row.png": {
-      "bytes": 36974,
-      "kind": "exact-build-input",
-      "sha256": "d11a43b3d799fd501ff1a7e2b091a8ec797330a9dba908d8d667944d64697c17"
+      "sha256": "d11a43b3d799fd501ff1a7e2b091a8ec797330a9dba908d8d667944d64697c17",
+      "bytes": 36974
     },
     "docs/how-to-make-a-mod/images/console-disabled.png": {
-      "bytes": 37681,
-      "kind": "exact-build-input",
-      "sha256": "30acc31344f6ec10dbe338671da19b1ab3d37227379a47f4e571845126571eb3"
+      "sha256": "30acc31344f6ec10dbe338671da19b1ab3d37227379a47f4e571845126571eb3",
+      "bytes": 37681
     },
     "docs/how-to-make-a-mod/images/console-loaded.png": {
-      "bytes": 33273,
-      "kind": "exact-build-input",
-      "sha256": "f97b3b35b5aeeb714991127513eb4e95ab63441291186ce62afb0d0b9c289acd"
+      "sha256": "f97b3b35b5aeeb714991127513eb4e95ab63441291186ce62afb0d0b9c289acd",
+      "bytes": 33273
     },
     "docs/how-to-make-a-mod/images/control-boolean.png": {
-      "bytes": 37211,
-      "kind": "exact-build-input",
-      "sha256": "6f207cd876cd202e3e32875b68b3f0f68e708f61f1fbf831d079547e7bd2d99e"
+      "sha256": "6f207cd876cd202e3e32875b68b3f0f68e708f61f1fbf831d079547e7bd2d99e",
+      "bytes": 37211
     },
     "docs/how-to-make-a-mod/images/control-choice.png": {
-      "bytes": 37032,
-      "kind": "exact-build-input",
-      "sha256": "7ae7354bcb45b0c34297a8ccd38741985328f12c15b79d7af826d8e9dbbb8111"
+      "sha256": "7ae7354bcb45b0c34297a8ccd38741985328f12c15b79d7af826d8e9dbbb8111",
+      "bytes": 37032
     },
     "docs/how-to-make-a-mod/images/control-integer.png": {
-      "bytes": 38496,
-      "kind": "exact-build-input",
-      "sha256": "ecb1da24aa32d2e0c6dff30d7ec4ced2883b4e83cf3d2d13d1b1b0c2223139a7"
+      "sha256": "ecb1da24aa32d2e0c6dff30d7ec4ced2883b4e83cf3d2d13d1b1b0c2223139a7",
+      "bytes": 38496
     },
     "docs/how-to-make-a-mod/images/control-number.png": {
-      "bytes": 37876,
-      "kind": "exact-build-input",
-      "sha256": "8074b0e636b52c0bd1cf0ff0898b94d60a9bd136c259b9660fe207f7169858f9"
+      "sha256": "8074b0e636b52c0bd1cf0ff0898b94d60a9bd136c259b9660fe207f7169858f9",
+      "bytes": 37876
     },
     "docs/how-to-make-a-mod/images/control-string.png": {
-      "bytes": 37770,
-      "kind": "exact-build-input",
-      "sha256": "ac6c2304ca39d1e2ca7c5d525d5119d392e370475a84cd8023ba953412a4debc"
+      "sha256": "ac6c2304ca39d1e2ca7c5d525d5119d392e370475a84cd8023ba953412a4debc",
+      "bytes": 37770
     },
     "docs/how-to-make-a-mod/images/controls.png": {
-      "bytes": 57803,
-      "kind": "exact-build-input",
-      "sha256": "13832e6266a8403059c3510cb451344a76205cfef0cecd38527c0bffd9bdca92"
+      "sha256": "13832e6266a8403059c3510cb451344a76205cfef0cecd38527c0bffd9bdca92",
+      "bytes": 57803
     },
     "docs/how-to-make-a-mod/images/dependency-missing.png": {
-      "bytes": 31004,
-      "kind": "exact-build-input",
-      "sha256": "b84912a5884eadb1d6405c16c621c23646715da1801730496b8e6a0c66eb3c31"
+      "sha256": "b84912a5884eadb1d6405c16c621c23646715da1801730496b8e6a0c66eb3c31",
+      "bytes": 31004
     },
     "docs/how-to-make-a-mod/images/dependency-order.png": {
-      "bytes": 32651,
-      "kind": "exact-build-input",
-      "sha256": "791166b484684282735cf6cce1fdf149117445e5665bb561d7884dda76bc8ed4"
+      "sha256": "791166b484684282735cf6cce1fdf149117445e5665bb561d7884dda76bc8ed4",
+      "bytes": 32651
     },
     "docs/how-to-make-a-mod/images/event-exited.png": {
-      "bytes": 43462,
-      "kind": "exact-build-input",
-      "sha256": "ab968c04326c1f4e7dda8ab606ba7993fb3be522b66596d6a31b978e20f8cc10"
+      "sha256": "ab968c04326c1f4e7dda8ab606ba7993fb3be522b66596d6a31b978e20f8cc10",
+      "bytes": 43462
     },
     "docs/how-to-make-a-mod/images/event-failed.png": {
-      "bytes": 45137,
-      "kind": "exact-build-input",
-      "sha256": "3c3f4dcab69d6b24a7bc0da6d0931e96fb101b3c0f9fa20969ff17ee26d9f37c"
+      "sha256": "3c3f4dcab69d6b24a7bc0da6d0931e96fb101b3c0f9fa20969ff17ee26d9f37c",
+      "bytes": 45137
     },
     "docs/how-to-make-a-mod/images/event-started.png": {
-      "bytes": 43232,
-      "kind": "exact-build-input",
-      "sha256": "a2ffbde118b98bdf08650e34ba9c20afbc7661e7ead413cb7b0e7465649b705c"
+      "sha256": "a2ffbde118b98bdf08650e34ba9c20afbc7661e7ead413cb7b0e7465649b705c",
+      "bytes": 43232
     },
     "docs/how-to-make-a-mod/images/helper-failure.png": {
-      "bytes": 28252,
-      "kind": "exact-build-input",
-      "sha256": "ce91a609c3a8c75c4f90168a897944c4fd5ac1d95a5081b1bde0da0624ed3c41"
+      "sha256": "ce91a609c3a8c75c4f90168a897944c4fd5ac1d95a5081b1bde0da0624ed3c41",
+      "bytes": 28252
     },
     "docs/how-to-make-a-mod/images/helper-launch.png": {
-      "bytes": 38224,
-      "kind": "exact-build-input",
-      "sha256": "0bc4692af9ad15b8a910fcf2bdbd1601c43e1731473daa265f2fc9e44a6858d8"
+      "sha256": "0bc4692af9ad15b8a910fcf2bdbd1601c43e1731473daa265f2fc9e44a6858d8",
+      "bytes": 38224
     },
     "docs/how-to-make-a-mod/images/helper-reply.png": {
-      "bytes": 46483,
-      "kind": "exact-build-input",
-      "sha256": "86a99ecd82649a8ccef3436d81ab180a522af232037ba16d039bf7cdd36538c7"
+      "sha256": "86a99ecd82649a8ccef3436d81ab180a522af232037ba16d039bf7cdd36538c7",
+      "bytes": 46483
     },
     "docs/how-to-make-a-mod/images/helper-request.png": {
-      "bytes": 38800,
-      "kind": "exact-build-input",
-      "sha256": "81bf50353f2f8368dfe09bddd8f7375366f84af99dd09e20b9ec765d2f8c4c19"
+      "sha256": "81bf50353f2f8368dfe09bddd8f7375366f84af99dd09e20b9ec765d2f8c4c19",
+      "bytes": 38800
     },
     "docs/how-to-make-a-mod/images/helper-result.png": {
-      "bytes": 26051,
-      "kind": "exact-build-input",
-      "sha256": "e6fd025b36cd2ca2b57c8925549ff280c366d968efb89f8cd32c55aa188297d2"
+      "sha256": "e6fd025b36cd2ca2b57c8925549ff280c366d968efb89f8cd32c55aa188297d2",
+      "bytes": 26051
     },
     "docs/how-to-make-a-mod/images/import-folder.png": {
-      "bytes": 90097,
-      "kind": "exact-build-input",
-      "sha256": "376cce254bb40616f0b5c5819db906947b888c91ddb636d40fa4fad7370410ac"
+      "sha256": "376cce254bb40616f0b5c5819db906947b888c91ddb636d40fa4fad7370410ac",
+      "bytes": 90097
+    },
+    "docs/how-to-make-a-mod/images/ingame-settings.png": {
+      "sha256": "03096bbfa72cc6928f8552e20f8856ed8d9548fef622d7604429d9e2909627e5",
+      "bytes": 137924
     },
     "docs/how-to-make-a-mod/images/language-en.png": {
-      "bytes": 37925,
-      "kind": "exact-build-input",
-      "sha256": "fe54b5fbd7444c77c489a1b41bc08ae7bd8107074f4f0cecf7b15a2e946e1d3a"
+      "sha256": "fe54b5fbd7444c77c489a1b41bc08ae7bd8107074f4f0cecf7b15a2e946e1d3a",
+      "bytes": 37925
     },
     "docs/how-to-make-a-mod/images/language-nl.png": {
-      "bytes": 38276,
-      "kind": "exact-build-input",
-      "sha256": "f2d6c3bb3527f102dc30312d8a020bf6f629869113686ac913ccb417510ec4ec"
+      "sha256": "f2d6c3bb3527f102dc30312d8a020bf6f629869113686ac913ccb417510ec4ec",
+      "bytes": 38276
     },
     "docs/how-to-make-a-mod/images/language-value.png": {
-      "bytes": 19868,
-      "kind": "exact-build-input",
-      "sha256": "1225da3a380dd8334489592785811632aadf01d68ce544b85020ad7a6fdc5c84"
+      "sha256": "1225da3a380dd8334489592785811632aadf01d68ce544b85020ad7a6fdc5c84",
+      "bytes": 19868
+    },
+    "docs/how-to-make-a-mod/images/legacy-delivery-notice.png": {
+      "sha256": "e25d40e0f605d587fbede71685eec8d777f914740f666e9c21be89387c7d47ed",
+      "bytes": 40796
     },
     "docs/how-to-make-a-mod/images/loader-disabled.png": {
-      "bytes": 29751,
-      "kind": "exact-build-input",
-      "sha256": "886583a14a5c2f938d501755f5a78f856a6547ae6950ee1a297278c6bd740be9"
+      "sha256": "886583a14a5c2f938d501755f5a78f856a6547ae6950ee1a297278c6bd740be9",
+      "bytes": 29751
     },
     "docs/how-to-make-a-mod/images/loader-enabled.png": {
-      "bytes": 29657,
-      "kind": "exact-build-input",
-      "sha256": "9f6c24b7d55ce9e822c9d2112007f28532965c3991ffe4eeda121397038e304d"
+      "sha256": "9f6c24b7d55ce9e822c9d2112007f28532965c3991ffe4eeda121397038e304d",
+      "bytes": 29657
     },
     "docs/how-to-make-a-mod/images/loader-imported.png": {
-      "bytes": 28380,
-      "kind": "exact-build-input",
-      "sha256": "1c3f4653320468bd5a72c11ba15844c0dad81a7e4756784fd3efc2217f58473b"
+      "sha256": "1c3f4653320468bd5a72c11ba15844c0dad81a7e4756784fd3efc2217f58473b",
+      "bytes": 28380
     },
     "docs/how-to-make-a-mod/images/mods-overview.png": {
-      "bytes": 201654,
-      "kind": "exact-build-input",
-      "sha256": "4ac51aec42ce1c15362eb863803ea4fc14a9346ab82a07a25346bc1bdfc72e87"
+      "sha256": "4ac51aec42ce1c15362eb863803ea4fc14a9346ab82a07a25346bc1bdfc72e87",
+      "bytes": 201654
     },
     "docs/how-to-make-a-mod/images/owned-settings.png": {
-      "bytes": 52352,
-      "kind": "exact-build-input",
-      "sha256": "b1ed02add4e1df72b6de1f0bf42e942ca9229ef6ab10c802b59fb8f0e1c9d04d"
+      "sha256": "b1ed02add4e1df72b6de1f0bf42e942ca9229ef6ab10c802b59fb8f0e1c9d04d",
+      "bytes": 52352
     },
     "docs/how-to-make-a-mod/images/package-files.png": {
-      "bytes": 35885,
-      "kind": "exact-build-input",
-      "sha256": "1cb26ddc1b3e03471948874337b7ad3adfff21ee2d8a8a2b6461c63b1c6fb40c"
+      "sha256": "1cb26ddc1b3e03471948874337b7ad3adfff21ee2d8a8a2b6461c63b1c6fb40c",
+      "bytes": 35885
     },
     "docs/how-to-make-a-mod/images/profile-a.png": {
-      "bytes": 39332,
-      "kind": "exact-build-input",
-      "sha256": "f99fbeebcf76445b717d194706c1db16b25b3b6050fb3652fe5fe1c2af89c0d5"
+      "sha256": "f99fbeebcf76445b717d194706c1db16b25b3b6050fb3652fe5fe1c2af89c0d5",
+      "bytes": 39332
     },
     "docs/how-to-make-a-mod/images/profile-b.png": {
-      "bytes": 38972,
-      "kind": "exact-build-input",
-      "sha256": "74ad4b9e49454a6e647ed0af5ed9a96d9d74c7b57cbed7d516d330bdce306ae1"
+      "sha256": "74ad4b9e49454a6e647ed0af5ed9a96d9d74c7b57cbed7d516d330bdce306ae1",
+      "bytes": 38972
     },
     "docs/how-to-make-a-mod/images/profile-picker.png": {
-      "bytes": 18377,
-      "kind": "exact-build-input",
-      "sha256": "bebf1087b3239177545f9802787eaf6c14fb53d56a3dc986e5c8e1a678694a89"
+      "sha256": "bebf1087b3239177545f9802787eaf6c14fb53d56a3dc986e5c8e1a678694a89",
+      "bytes": 18377
     },
     "docs/how-to-make-a-mod/images/release-files.png": {
-      "bytes": 41331,
-      "kind": "exact-build-input",
-      "sha256": "fd18dd6f32dc62f86aa906addafc9e431b02522b9b67dad7a3e78a093ece4c62"
+      "sha256": "fd18dd6f32dc62f86aa906addafc9e431b02522b9b67dad7a3e78a093ece4c62",
+      "bytes": 41331
     },
     "docs/how-to-make-a-mod/images/release-information.png": {
-      "bytes": 35855,
-      "kind": "exact-build-input",
-      "sha256": "3f04a4ca3409c4edf8936437eb992c01e45f409761f68aaaa74035037e604b4b"
+      "sha256": "3f04a4ca3409c4edf8936437eb992c01e45f409761f68aaaa74035037e604b4b",
+      "bytes": 35855
     },
     "docs/how-to-make-a-mod/images/release-zip.png": {
-      "bytes": 41428,
-      "kind": "exact-build-input",
-      "sha256": "50c8e574428ac58e161aab6b28f0520dfff088cdfbe5620cbab12e02e9e0e6de"
+      "sha256": "50c8e574428ac58e161aab6b28f0520dfff088cdfbe5620cbab12e02e9e0e6de",
+      "bytes": 41428
     },
     "docs/how-to-make-a-mod/images/remove-confirm.png": {
-      "bytes": 51674,
-      "kind": "exact-build-input",
-      "sha256": "6252803715cbd453e0403d31878044b7b63af601382eea4a93195b5647a455a5"
+      "sha256": "6252803715cbd453e0403d31878044b7b63af601382eea4a93195b5647a455a5",
+      "bytes": 51674
     },
     "docs/how-to-make-a-mod/images/restored-mod.png": {
-      "bytes": 38178,
-      "kind": "exact-build-input",
-      "sha256": "371ed109be4e57c0fb7e3c9ee8591131996099fe20139636a0529f499c1a68a1"
+      "sha256": "371ed109be4e57c0fb7e3c9ee8591131996099fe20139636a0529f499c1a68a1",
+      "bytes": 38178
     },
     "docs/how-to-make-a-mod/images/saved-preferences.png": {
-      "bytes": 18973,
-      "kind": "exact-build-input",
-      "sha256": "00f910f0c61c4f4b5ec2b8c21136159184d46dabd700ad0f5f06ce45930055ed"
+      "sha256": "00f910f0c61c4f4b5ec2b8c21136159184d46dabd700ad0f5f06ce45930055ed",
+      "bytes": 18973
     },
     "docs/how-to-make-a-mod/images/settings-enabled.png": {
-      "bytes": 38237,
-      "kind": "exact-build-input",
-      "sha256": "87c6100f99d24b3cc74a8c4c4f7c8e2c9da503e5588ac87bfcfc868616b979fe"
+      "sha256": "87c6100f99d24b3cc74a8c4c4f7c8e2c9da503e5588ac87bfcfc868616b979fe",
+      "bytes": 38237
     },
     "docs/how-to-make-a-mod/images/source-files.png": {
-      "bytes": 46960,
-      "kind": "exact-build-input",
-      "sha256": "9ae6475697162ea59fed0c37664ec4c9b36ecfda9dd9bcc1cfd7523868d85a0e"
+      "sha256": "9ae6475697162ea59fed0c37664ec4c9b36ecfda9dd9bcc1cfd7523868d85a0e",
+      "bytes": 46960
     },
     "docs/how-to-make-a-mod/images/source-options.png": {
-      "bytes": 52221,
-      "kind": "exact-build-input",
-      "sha256": "0aa0c9b16af4b3de09e96ab84c9121552df476f907e88cbbc02ae18fd7197598"
+      "sha256": "0aa0c9b16af4b3de09e96ab84c9121552df476f907e88cbbc02ae18fd7197598",
+      "bytes": 52221
     },
     "docs/how-to-make-a-mod/images/source-row.png": {
-      "bytes": 39558,
-      "kind": "exact-build-input",
-      "sha256": "4b4eb931043e922066199f90335144bd44d5b8b443d00031d56a7c294d80911f"
+      "sha256": "4b4eb931043e922066199f90335144bd44d5b8b443d00031d56a7c294d80911f",
+      "bytes": 39558
     },
     "docs/how-to-make-a-mod/images/storage-locations.png": {
-      "bytes": 65556,
-      "kind": "exact-build-input",
-      "sha256": "2d317d8e77fdc5413934383579c78e01210c90b6cfcbc963d330dc1c5267f015"
+      "sha256": "2d317d8e77fdc5413934383579c78e01210c90b6cfcbc963d330dc1c5267f015",
+      "bytes": 65556
     },
     "docs/how-to-make-a-mod/images/undo-removal.png": {
-      "bytes": 21413,
-      "kind": "exact-build-input",
-      "sha256": "d93db0e4b7d1b1b2fb2a63f6dd0a4edfc29098ea73a7c004c0f535034f1745ba"
+      "sha256": "d93db0e4b7d1b1b2fb2a63f6dd0a4edfc29098ea73a7c004c0f535034f1745ba",
+      "bytes": 21413
     },
     "docs/how-to-make-a-mod/images/update-available.png": {
-      "bytes": 42995,
-      "kind": "exact-build-input",
-      "sha256": "88a57427156e3844cb627d9a124de8dfa5cbdaf3f6802549761d66724dd3ff42"
+      "sha256": "88a57427156e3844cb627d9a124de8dfa5cbdaf3f6802549761d66724dd3ff42",
+      "bytes": 42995
     },
     "docs/how-to-make-a-mod/images/update-review.png": {
-      "bytes": 64797,
-      "kind": "exact-build-input",
-      "sha256": "19249b1bedb947211b2fd9857a250448df94f9da4ef8707c3a09de71c2062114"
+      "sha256": "19249b1bedb947211b2fd9857a250448df94f9da4ef8707c3a09de71c2062114",
+      "bytes": 64797
     },
     "docs/how-to-make-a-mod/navigation.json": {
-      "bytes": 14551,
-      "kind": "exact-build-input",
-      "sha256": "09d82da0e1d92eb6c52a6dda7800364d86fe481d4481068f39e26f71fb44ec5d"
+      "sha256": "af5142198a0a7e71cea61369cd44d7c23a40155061903df1f41737e8f4801bca",
+      "bytes": 15582
     },
     "docs/how-to-make-a-mod/reference/examples.md": {
-      "bytes": 2700,
-      "kind": "exact-build-input",
-      "sha256": "33b92494ef70069318beef07f2561945fe2b7d5552862545e4292d6f8ec7f13a"
+      "sha256": "33b92494ef70069318beef07f2561945fe2b7d5552862545e4292d6f8ec7f13a",
+      "bytes": 2700
     },
     "docs/how-to-make-a-mod/reference/helpers.md": {
-      "bytes": 12074,
-      "kind": "exact-build-input",
-      "sha256": "c9c5614dff4570ac8226b6fc2635cb54a37254de653f79676165af26a3944697"
+      "sha256": "6780f52bc38eb11387abb3189853ee73afea1ef9a70fff29368797fc159a7ea0",
+      "bytes": 20390
     },
     "docs/how-to-make-a-mod/reference/legacy-removal.md": {
-      "bytes": 9031,
-      "kind": "exact-build-input",
-      "sha256": "5328a0643997116171fb7f7bb8ae0896b45677afc7f1257d1ab3b8a382276a30"
+      "sha256": "5328a0643997116171fb7f7bb8ae0896b45677afc7f1257d1ab3b8a382276a30",
+      "bytes": 9031
     },
     "docs/how-to-make-a-mod/reference/legacy.md": {
-      "bytes": 10511,
-      "kind": "exact-build-input",
-      "sha256": "418ed3c91875a478290139634fb53d311ab11c5002e88e9f19e2798367aca190"
+      "sha256": "418ed3c91875a478290139634fb53d311ab11c5002e88e9f19e2798367aca190",
+      "bytes": 10511
     },
     "docs/how-to-make-a-mod/reference/manifest.md": {
-      "bytes": 7043,
-      "kind": "exact-build-input",
-      "sha256": "1629006dec31d2fb4fb26ceb52ec7ca4860193e44abfebae89397a895060be88"
+      "sha256": "1629006dec31d2fb4fb26ceb52ec7ca4860193e44abfebae89397a895060be88",
+      "bytes": 7043
     },
     "docs/how-to-make-a-mod/reference/ownership.md": {
-      "bytes": 6051,
-      "kind": "exact-build-input",
-      "sha256": "9a694486dbed1068a9b280357f060a68753fd5c56dba62f04c6abe93f959d8c3"
+      "sha256": "9a694486dbed1068a9b280357f060a68753fd5c56dba62f04c6abe93f959d8c3",
+      "bytes": 6051
     },
     "docs/how-to-make-a-mod/reference/recipes.md": {
-      "bytes": 4270,
-      "kind": "exact-build-input",
-      "sha256": "88eb92a6075dcf899e6430813244e03d1eb513cf7133088194e11186a67b03bf"
+      "sha256": "88eb92a6075dcf899e6430813244e03d1eb513cf7133088194e11186a67b03bf",
+      "bytes": 4270
     },
     "docs/how-to-make-a-mod/reference/reference.md": {
-      "bytes": 985,
-      "kind": "exact-build-input",
-      "sha256": "a735be0020839e3013558abec735f14b4f93685e4c922e22e8c486062a9ece5a"
+      "sha256": "a735be0020839e3013558abec735f14b4f93685e4c922e22e8c486062a9ece5a",
+      "bytes": 985
     },
     "docs/how-to-make-a-mod/reference/settings-reference.md": {
-      "bytes": 6223,
-      "kind": "exact-build-input",
-      "sha256": "3096aa5a83dc5a25539f071fed65118ebd53d0917974ef202f8237afe4ce2d12"
+      "sha256": "3096aa5a83dc5a25539f071fed65118ebd53d0917974ef202f8237afe4ce2d12",
+      "bytes": 6223
     },
     "docs/how-to-make-a-mod/reference/settings.md": {
-      "bytes": 909,
-      "kind": "exact-build-input",
-      "sha256": "137203dde2e3cd37824f796e054a5f2d16bf096645f134a057731ed49e6cae4d"
+      "sha256": "137203dde2e3cd37824f796e054a5f2d16bf096645f134a057731ed49e6cae4d",
+      "bytes": 909
     },
     "docs/how-to-make-a-mod/reference/updates.md": {
-      "bytes": 14030,
-      "kind": "exact-build-input",
-      "sha256": "1aaee8131eadd4ccc32498f13577377141cac3526805e1b82664d0df7f7127f2"
+      "sha256": "1aaee8131eadd4ccc32498f13577377141cac3526805e1b82664d0df7f7127f2",
+      "bytes": 14030
+    },
+    "examples/ingame-settings/AI-HANDOFF.md": {
+      "sha256": "3fef1568db2ea445590917677e3d9f107748a77e02c0afdd6d88c3fd71116160",
+      "bytes": 2208
+    },
+    "examples/ingame-settings/README.md": {
+      "sha256": "cd6cb7906251d581d271d200692a576bf42419d964c694b6c4820adb4c289dc4",
+      "bytes": 3404
+    },
+    "examples/ingame-settings/settings-handlers.js": {
+      "sha256": "49b0be5b0d390b5bcdfc124fe91899a96424dfd302c5ebf54f25be4fe3707e77",
+      "bytes": 2575
+    },
+    "examples/ingame-settings/window.py": {
+      "sha256": "e87085971303c045188255d0205a0fbc5488c1d9514e96df013c29b011b3720c",
+      "bytes": 5375
+    },
+    "examples/login-delivery/AI-HANDOFF.md": {
+      "sha256": "c285ca7c501ecf3ab7bff9785634c4e2ac64979396e6f3547b939bcfe2adcc6d",
+      "bytes": 3237
     },
     "examples/mods/cleanup-demo/README.md": {
-      "bytes": 1804,
-      "kind": "exact-build-input",
-      "sha256": "b9e395da1d3a12ee56527939a7d52539c06c9caf9225170210bd7dd0712f4239"
+      "sha256": "b9e395da1d3a12ee56527939a7d52539c06c9caf9225170210bd7dd0712f4239",
+      "bytes": 1804
     },
     "examples/mods/cleanup-demo/evejs-launcher.mod.json": {
-      "bytes": 406,
-      "kind": "exact-build-input",
-      "sha256": "3c76c3be878a34bb4a036735174c0781bc1b3b83a3c88d8d55a64f633062e403"
+      "sha256": "3c76c3be878a34bb4a036735174c0781bc1b3b83a3c88d8d55a64f633062e403",
+      "bytes": 406
     },
     "examples/mods/cleanup-demo/helper.js": {
-      "bytes": 3476,
-      "kind": "exact-build-input",
-      "sha256": "ff05a895819e71160ac8b0f0d4c720b569cdc9d8218774b7a131429b347ae839"
+      "sha256": "ff05a895819e71160ac8b0f0d4c720b569cdc9d8218774b7a131429b347ae839",
+      "bytes": 3476
     },
     "examples/mods/client-receipt-demo/README.md": {
-      "bytes": 1321,
-      "kind": "exact-build-input",
-      "sha256": "d3fd50d48d28c416b13046f06bbc9cdcc8e6ba2b18f36aa9af02dd962d1a69db"
+      "sha256": "d3fd50d48d28c416b13046f06bbc9cdcc8e6ba2b18f36aa9af02dd962d1a69db",
+      "bytes": 1321
     },
     "examples/mods/client-receipt-demo/evejs-launcher.mod.json": {
-      "bytes": 601,
-      "kind": "exact-build-input",
-      "sha256": "9f4d5a589838769b9608dbed765c5b6c249dc2b7ede6b05feef38a687f81af1a"
+      "sha256": "9f4d5a589838769b9608dbed765c5b6c249dc2b7ede6b05feef38a687f81af1a",
+      "bytes": 601
     },
     "examples/mods/client-receipt-demo/helper.ps1": {
-      "bytes": 4436,
-      "kind": "exact-build-input",
-      "sha256": "47ca792ce22e8b474412e4c5ead9aa67f93f71da1e367bbb6ece04d0a770b9b4"
+      "sha256": "47ca792ce22e8b474412e4c5ead9aa67f93f71da1e367bbb6ece04d0a770b9b4",
+      "bytes": 4436
     },
     "examples/mods/configure-demo/README.md": {
-      "bytes": 843,
-      "kind": "exact-build-input",
-      "sha256": "c2f40f17e735d25a6e0ce55557a7fd10e8bbe0de29332f9d5ff74a3d9760d40e"
+      "sha256": "c2f40f17e735d25a6e0ce55557a7fd10e8bbe0de29332f9d5ff74a3d9760d40e",
+      "bytes": 843
     },
     "examples/mods/configure-demo/evejs-launcher.mod.json": {
-      "bytes": 930,
-      "kind": "exact-build-input",
-      "sha256": "6d9d30819f6971c6f416f90ebe8b0a513252a496be6b3575049e6d09e4747f0e"
+      "sha256": "6d9d30819f6971c6f416f90ebe8b0a513252a496be6b3575049e6d09e4747f0e",
+      "bytes": 930
     },
     "examples/mods/github-update-demo/README.md": {
-      "bytes": 4079,
-      "kind": "exact-build-input",
-      "sha256": "bc828774f40610b77bebf9350d25df018dc825172c4ed3d02c5847529cc6bc1d"
+      "sha256": "bc828774f40610b77bebf9350d25df018dc825172c4ed3d02c5847529cc6bc1d",
+      "bytes": 4079
     },
     "examples/mods/github-update-demo/evejs-launcher.mod.json": {
-      "bytes": 612,
-      "kind": "exact-build-input",
-      "sha256": "20ce82e1066f609c70258caa1bed78dfdd95e791278bfe6459da64a43fb9faa9"
+      "sha256": "20ce82e1066f609c70258caa1bed78dfdd95e791278bfe6459da64a43fb9faa9",
+      "bytes": 612
     },
     "examples/mods/github-update-demo/loader.js.disabled": {
-      "bytes": 216,
-      "kind": "exact-build-input",
-      "sha256": "52513f0d4254f44df9473f69370e75099c15cd90d594ab177d883fcb9b790a6d"
+      "sha256": "52513f0d4254f44df9473f69370e75099c15cd90d594ab177d883fcb9b790a6d",
+      "bytes": 216
     },
     "examples/mods/hello-loader/README.md": {
-      "bytes": 912,
-      "kind": "exact-build-input",
-      "sha256": "48978c9adb23a4c36ed26ab73967412da1f93f4ecf8c06037aadb7ba1420581b"
+      "sha256": "48978c9adb23a4c36ed26ab73967412da1f93f4ecf8c06037aadb7ba1420581b",
+      "bytes": 912
     },
     "examples/mods/hello-loader/evejs-launcher.mod.json": {
-      "bytes": 325,
-      "kind": "exact-build-input",
-      "sha256": "a7f0fa6c4edbe2cc5e10e4aac87c23df649a75d728689264bfc40a5a3633afff"
+      "sha256": "a7f0fa6c4edbe2cc5e10e4aac87c23df649a75d728689264bfc40a5a3633afff",
+      "bytes": 325
     },
     "examples/mods/hello-loader/loader.js.disabled": {
-      "bytes": 242,
-      "kind": "exact-build-input",
-      "sha256": "992a35b73e46cae67854bbe14aee48f4efb12cfedfcd63cf565c37583760bb5f"
+      "sha256": "992a35b73e46cae67854bbe14aee48f4efb12cfedfcd63cf565c37583760bb5f",
+      "bytes": 242
     },
     "examples/mods/profile-options/README.md": {
-      "bytes": 1762,
-      "kind": "exact-build-input",
-      "sha256": "696b38b212460e29e9b1505894e867158ccabc25ed7561fc1fae241fef28c166"
+      "sha256": "696b38b212460e29e9b1505894e867158ccabc25ed7561fc1fae241fef28c166",
+      "bytes": 1762
     },
     "examples/mods/profile-options/evejs-launcher.mod.json": {
-      "bytes": 1765,
-      "kind": "exact-build-input",
-      "sha256": "2498864baa83019c485bb34d33b150ee98ed65e1ad72e0640774414a1b088cc9"
+      "sha256": "2498864baa83019c485bb34d33b150ee98ed65e1ad72e0640774414a1b088cc9",
+      "bytes": 1765
     },
     "examples/mods/profile-options/helper.js": {
-      "bytes": 2158,
-      "kind": "exact-build-input",
-      "sha256": "72cedd86bcad11da512a8402acd667a6c0fcc32cd95e27d96aeb42eb7dbf7f8a"
+      "sha256": "72cedd86bcad11da512a8402acd667a6c0fcc32cd95e27d96aeb42eb7dbf7f8a",
+      "bytes": 2158
     },
     "examples/mods/shared-profile-companion/README.md": {
-      "bytes": 2127,
-      "kind": "exact-build-input",
-      "sha256": "ce3a3951fda9fa93b045377eba23b18c42f90e94a269dfaec93a3c7fdd4ebb00"
+      "sha256": "ce3a3951fda9fa93b045377eba23b18c42f90e94a269dfaec93a3c7fdd4ebb00",
+      "bytes": 2127
     },
     "examples/mods/shared-profile-companion/evejs-launcher.mod.json": {
-      "bytes": 884,
-      "kind": "exact-build-input",
-      "sha256": "fe2b92065e0c631cb776ce8f5aaea4286a79393917b356f3ee07517c639f163f"
+      "sha256": "fe2b92065e0c631cb776ce8f5aaea4286a79393917b356f3ee07517c639f163f",
+      "bytes": 884
     },
     "examples/mods/source-overlay-demo/README.md": {
-      "bytes": 1460,
-      "kind": "exact-build-input",
-      "sha256": "0231ca6391005e06f5cee141aa5850b1af652f0d0ccfc2f7e915a119de2db3c0"
+      "sha256": "0231ca6391005e06f5cee141aa5850b1af652f0d0ccfc2f7e915a119de2db3c0",
+      "bytes": 1460
     },
     "examples/mods/source-overlay-demo/evejs-launcher.mod.json": {
-      "bytes": 929,
-      "kind": "exact-build-input",
-      "sha256": "4c2b559bd625de323a9f44c0ba644a5cb445cfb4299d7dc08c21dc1473c61dbc"
+      "sha256": "4c2b559bd625de323a9f44c0ba644a5cb445cfb4299d7dc08c21dc1473c61dbc",
+      "bytes": 929
     },
     "examples/mods/source-overlay-demo/example-source.js": {
-      "bytes": 179,
-      "kind": "exact-build-input",
-      "sha256": "2e5af686d8c5f08261a48f1920c6b847d77f78a648827116c995eb279d0eefda"
+      "sha256": "2e5af686d8c5f08261a48f1920c6b847d77f78a648827116c995eb279d0eefda",
+      "bytes": 179
     },
     "examples/mods/source-overlay-demo/helper.js": {
-      "bytes": 1640,
-      "kind": "exact-build-input",
-      "sha256": "7fb83e743ec4a825defad25656c52c52e1ea14edd85072d9a08abd6c893ad326"
+      "sha256": "7fb83e743ec4a825defad25656c52c52e1ea14edd85072d9a08abd6c893ad326",
+      "bytes": 1640
     },
     "examples/tools/build_mod_update_metadata.py": {
-      "bytes": 1819,
-      "kind": "exact-build-input",
-      "sha256": "3d076c58c74644303813632e05ca01033d16531e15fd60f219909607a9e6b0ab"
+      "sha256": "3d076c58c74644303813632e05ca01033d16531e15fd60f219909607a9e6b0ab",
+      "bytes": 1819
     },
     "licenses/PYINSTALLER.txt": {
-      "bytes": 32135,
-      "kind": "exact-build-input",
-      "sha256": "571f650c741ae1f6d8b689ef639b02c93297b84cef32db7c5211674d7b6fc094"
+      "sha256": "571f650c741ae1f6d8b689ef639b02c93297b84cef32db7c5211674d7b6fc094",
+      "bytes": 32135
     },
     "licenses/PYQT6-SIP-BSD-2-CLAUSE.txt": {
-      "bytes": 1312,
-      "kind": "exact-build-input",
-      "sha256": "76bd80985bd865231822d0e87840217cf9cb6a1ae3a29b4f75b89b702bf6c9e8"
+      "sha256": "76bd80985bd865231822d0e87840217cf9cb6a1ae3a29b4f75b89b702bf6c9e8",
+      "bytes": 1312
     },
     "licenses/PYTHON-3.11.txt": {
-      "bytes": 24918,
-      "kind": "exact-build-input",
-      "sha256": "900b46b56a68337104dff265cb312a69e5c7e0e8f62c4a40acfa40ed05118e79"
+      "sha256": "900b46b56a68337104dff265cb312a69e5c7e0e8f62c4a40acfa40ed05118e79",
+      "bytes": 24918
     },
     "licenses/QT-LGPL-3.0.txt": {
-      "bytes": 7761,
-      "kind": "exact-build-input",
-      "sha256": "2a85364fd07782fa2fe78028e66f9235317218925ca469f65c738fb4e5b0e2d3"
+      "sha256": "2a85364fd07782fa2fe78028e66f9235317218925ca469f65c738fb4e5b0e2d3",
+      "bytes": 7761
     },
     "licenses/SPARK-PARSER-MIT.txt": {
-      "bytes": 1204,
-      "kind": "exact-build-input",
-      "sha256": "1017766e84b6e5cc675aaac7138b3b1cb7f9cc3e6527d5c45145887f8da2e141"
+      "sha256": "1017766e84b6e5cc675aaac7138b3b1cb7f9cc3e6527d5c45145887f8da2e141",
+      "bytes": 1204
     },
     "licenses/XDIS-GPL-2.0.txt": {
-      "bytes": 18046,
-      "kind": "exact-build-input",
-      "sha256": "db296f2f7f35bca3a174efb0eb392b3b17bd94b341851429a3dff411b1c2fc73"
+      "sha256": "db296f2f7f35bca3a174efb0eb392b3b17bd94b341851429a3dff411b1c2fc73",
+      "bytes": 18046
     },
     "main.py": {
-      "bytes": 6881,
-      "kind": "exact-build-input",
-      "sha256": "03c61a475a987c64cab018f725993321b146f58c015610d650f056310ce9b997"
+      "sha256": "03c61a475a987c64cab018f725993321b146f58c015610d650f056310ce9b997",
+      "bytes": 6881
     },
     "requirements-build.txt": {
-      "bytes": 434,
-      "kind": "source-only-extra",
-      "sha256": "5290b82b6ed5106ea37193ba91d8eb33a012ecc52b93c5f8cb9c26789405af46"
+      "sha256": "5290b82b6ed5106ea37193ba91d8eb33a012ecc52b93c5f8cb9c26789405af46",
+      "bytes": 434
     },
     "scripts/build_character_names.py": {
-      "bytes": 1770,
-      "kind": "source-only-extra",
-      "sha256": "a1cc4af99d2fb25bf8916d96f41d9d7846f8dafe173c7d7375aa2af82f18233c"
+      "sha256": "a1cc4af99d2fb25bf8916d96f41d9d7846f8dafe173c7d7375aa2af82f18233c",
+      "bytes": 1770
     },
     "scripts/celestial_transit_synthesis.py": {
-      "bytes": 11302,
-      "kind": "source-only-extra",
-      "sha256": "2168713c0cd6109fcf23d893308862e3800d106dde8f61b962b9110dd3db436e"
+      "sha256": "2168713c0cd6109fcf23d893308862e3800d106dde8f61b962b9110dd3db436e",
+      "bytes": 11302
     },
     "scripts/generate_celestial_transit.py": {
-      "bytes": 1615,
-      "kind": "source-only-extra",
-      "sha256": "95944341bc6ffae48d5639caf5642232a349c372b5c4838395f3d8f04d401c0e"
+      "sha256": "95944341bc6ffae48d5639caf5642232a349c372b5c4838395f3d8f04d401c0e",
+      "bytes": 1615
     },
     "scripts/generate_lyra_voice_catalog.py": {
-      "bytes": 8932,
-      "kind": "source-only-extra",
-      "sha256": "37492fe600703b850b2d7a6a4142db3a337f895bd315ace51ef3727d888a1d4e"
+      "sha256": "37492fe600703b850b2d7a6a4142db3a337f895bd315ace51ef3727d888a1d4e",
+      "bytes": 8932
     },
     "scripts/process_lyra_voice_catalog.py": {
-      "bytes": 20113,
-      "kind": "source-only-extra",
-      "sha256": "6c9913a5c1343d13f38249e9fe1db3687ee5a763acdfda57e5b8f3d5119a4c07"
+      "sha256": "6c9913a5c1343d13f38249e9fe1db3687ee5a763acdfda57e5b8f3d5119a4c07",
+      "bytes": 20113
     },
     "src/__init__.py": {
-      "bytes": 0,
-      "kind": "exact-build-input",
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
     },
     "src/app.py": {
-      "bytes": 373460,
-      "kind": "exact-build-input",
-      "sha256": "ae096901e41839c0807490666ca7cc13d26069b84f1ec58e2ebfe2800db7f14f"
+      "sha256": "ae096901e41839c0807490666ca7cc13d26069b84f1ec58e2ebfe2800db7f14f",
+      "bytes": 373460
     },
     "src/audio/__init__.py": {
-      "bytes": 506,
-      "kind": "exact-build-input",
-      "sha256": "6e64b6324c6823559d6952b216b092cca040ec13797e1892a25998b3c4732010"
+      "sha256": "6e64b6324c6823559d6952b216b092cca040ec13797e1892a25998b3c4732010",
+      "bytes": 506
     },
     "src/audio/assets.py": {
-      "bytes": 3810,
-      "kind": "exact-build-input",
-      "sha256": "6bac50acefb7e4ccae34537ce17cd87a8cd9c73f871dc7961781c67f89cde0ba"
+      "sha256": "6bac50acefb7e4ccae34537ce17cd87a8cd9c73f871dc7961781c67f89cde0ba",
+      "bytes": 3810
     },
     "src/audio/backends.py": {
-      "bytes": 29676,
-      "kind": "exact-build-input",
-      "sha256": "4c4422be9cd3be12c027a21faa04149d8328dab5047efac0812c633eb9722ea9"
+      "sha256": "4c4422be9cd3be12c027a21faa04149d8328dab5047efac0812c633eb9722ea9",
+      "bytes": 29676
     },
     "src/audio/controller.py": {
-      "bytes": 39637,
-      "kind": "exact-build-input",
-      "sha256": "86cca67d84cdc7605e90bfd79768eafb1abb77adaa67d6f02f2a631f89121e0b"
+      "sha256": "86cca67d84cdc7605e90bfd79768eafb1abb77adaa67d6f02f2a631f89121e0b",
+      "bytes": 39637
     },
     "src/audio/events.py": {
-      "bytes": 11772,
-      "kind": "exact-build-input",
-      "sha256": "7672e9faeb1f7864b81ae4b825fae3994659bfb8f6c8e9f5c3a4eda171ee6da3"
+      "sha256": "7672e9faeb1f7864b81ae4b825fae3994659bfb8f6c8e9f5c3a4eda171ee6da3",
+      "bytes": 11772
     },
     "src/audio/music_catalog.py": {
-      "bytes": 5620,
-      "kind": "exact-build-input",
-      "sha256": "c9da4a6083f2ef7c9e97eb8c6075fc7c7b9e2586f6a27b9f76b52562e0097ef8"
+      "sha256": "c9da4a6083f2ef7c9e97eb8c6075fc7c7b9e2586f6a27b9f76b52562e0097ef8",
+      "bytes": 5620
     },
     "src/audio/settings.py": {
-      "bytes": 2974,
-      "kind": "exact-build-input",
-      "sha256": "f4fd6486cd153b079c09b3f5d0b60093c7a27be5a4aa955651fa1b0087279870"
+      "sha256": "f4fd6486cd153b079c09b3f5d0b60093c7a27be5a4aa955651fa1b0087279870",
+      "bytes": 2974
     },
     "src/config.py": {
-      "bytes": 16406,
-      "kind": "exact-build-input",
-      "sha256": "d10451a49b27a3492836bc98de068c4604c9c74fa324c244d50a182a25fe58c5"
+      "sha256": "d10451a49b27a3492836bc98de068c4604c9c74fa324c244d50a182a25fe58c5",
+      "bytes": 16406
     },
     "src/constants.py": {
-      "bytes": 5209,
-      "kind": "exact-build-input",
-      "sha256": "86e141a5098e30af18d2885c84b7bbff572b0f1bce40dc9958efbb19f0fb4b39"
+      "sha256": "86e141a5098e30af18d2885c84b7bbff572b0f1bce40dc9958efbb19f0fb4b39",
+      "bytes": 5209
     },
     "src/core/__init__.py": {
-      "bytes": 0,
-      "kind": "exact-build-input",
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
     },
     "src/core/application_operations.py": {
-      "bytes": 1676,
-      "kind": "exact-build-input",
-      "sha256": "9e5a8c89cebd953d01a28764b490660d3d0fceb372802014d9f35fd3cde5a600"
+      "sha256": "9e5a8c89cebd953d01a28764b490660d3d0fceb372802014d9f35fd3cde5a600",
+      "bytes": 1676
     },
     "src/core/character_creation.py": {
-      "bytes": 16168,
-      "kind": "exact-build-input",
-      "sha256": "7f3ac0e70e66efa4a38e5bdd2a4545af3cdd9ed41d2ccf652a90ef18e81075cf"
+      "sha256": "7f3ac0e70e66efa4a38e5bdd2a4545af3cdd9ed41d2ccf652a90ef18e81075cf",
+      "bytes": 16168
     },
     "src/core/character_deletion.py": {
-      "bytes": 22657,
-      "kind": "exact-build-input",
-      "sha256": "6227fb52104fa458d52cdc2e07aa87140757cb88f70804b5d674e74fd8400b6f"
+      "sha256": "6227fb52104fa458d52cdc2e07aa87140757cb88f70804b5d674e74fd8400b6f",
+      "bytes": 22657
     },
     "src/core/character_names.py": {
-      "bytes": 1253,
-      "kind": "exact-build-input",
-      "sha256": "1a1262c341984ec742957d2c89475f0dce43d31e77c4e86a6c00277d29243152"
+      "sha256": "1a1262c341984ec742957d2c89475f0dce43d31e77c4e86a6c00277d29243152",
+      "bytes": 1253
     },
     "src/core/client_autologin.py": {
-      "bytes": 6563,
-      "kind": "exact-build-input",
-      "sha256": "00566058bd05c707d6d6808deeb3bdfc0f23eaef9fddbcb6b54db74773f0592d"
+      "sha256": "00566058bd05c707d6d6808deeb3bdfc0f23eaef9fddbcb6b54db74773f0592d",
+      "bytes": 6563
     },
     "src/core/client_launch_queue.py": {
-      "bytes": 9662,
-      "kind": "exact-build-input",
-      "sha256": "bf4bffad7954c0257b290a6267697c85efbad90720d66c6b6fc3dd3606a538c0"
+      "sha256": "bf4bffad7954c0257b290a6267697c85efbad90720d66c6b6fc3dd3606a538c0",
+      "bytes": 9662
     },
     "src/core/dashboard.py": {
-      "bytes": 993,
-      "kind": "exact-build-input",
-      "sha256": "cd5fbb391487d59ecc256d963efed12c40dcacd687fd6c40df0abb846b7f7a20"
+      "sha256": "cd5fbb391487d59ecc256d963efed12c40dcacd687fd6c40df0abb846b7f7a20",
+      "bytes": 993
     },
     "src/core/db.py": {
-      "bytes": 10496,
-      "kind": "exact-build-input",
-      "sha256": "2164344dd602cea3cb395bf1a4ae396657276144dfa52f9e301d6e724556baea"
+      "sha256": "2164344dd602cea3cb395bf1a4ae396657276144dfa52f9e301d6e724556baea",
+      "bytes": 10496
     },
     "src/core/discovery.py": {
-      "bytes": 9975,
-      "kind": "exact-build-input",
-      "sha256": "6b4cbc229ab2cb0aca1879d763ac9749345e35c90874102baae2c311516e7725"
+      "sha256": "6b4cbc229ab2cb0aca1879d763ac9749345e35c90874102baae2c311516e7725",
+      "bytes": 9975
     },
     "src/core/dlss5.py": {
-      "bytes": 50617,
-      "kind": "exact-build-input",
-      "sha256": "4027d473a763d77cac5de536d992d2c10fc415329b6b04e0287a1f129846b695"
+      "sha256": "4027d473a763d77cac5de536d992d2c10fc415329b6b04e0287a1f129846b695",
+      "bytes": 50617
     },
     "src/core/dlss5_uninstall.py": {
-      "bytes": 19573,
-      "kind": "exact-build-input",
-      "sha256": "c37ec2468e24d3cad4081e0e1b57e9e7246c8ddb4e7cdfe1c00c4392c777dae1"
+      "sha256": "c37ec2468e24d3cad4081e0e1b57e9e7246c8ddb4e7cdfe1c00c4392c777dae1",
+      "bytes": 19573
     },
     "src/core/groups.py": {
-      "bytes": 18694,
-      "kind": "exact-build-input",
-      "sha256": "764198371e069f873add39535afe39933b423198b250e7df19dc129d03022b41"
+      "sha256": "764198371e069f873add39535afe39933b423198b250e7df19dc129d03022b41",
+      "bytes": 18694
     },
     "src/core/helpers/create_character.js": {
-      "bytes": 4596,
-      "kind": "exact-build-input",
-      "sha256": "54361e752ba60fe72420d9429f21efddaf5589254364a4b703df982f89a139fb"
+      "sha256": "54361e752ba60fe72420d9429f21efddaf5589254364a4b703df982f89a139fb",
+      "bytes": 4596
     },
     "src/core/helpers/delete_character.js": {
-      "bytes": 5843,
-      "kind": "exact-build-input",
-      "sha256": "c55e6aa146cc58413b5dc5503fb17b8b86e3202292c808bed1d2b28b8658e333"
+      "sha256": "c55e6aa146cc58413b5dc5503fb17b8b86e3202292c808bed1d2b28b8658e333",
+      "bytes": 5843
     },
     "src/core/helpers/docker_create_character.js": {
-      "bytes": 80706,
-      "kind": "exact-build-input",
-      "sha256": "d5a32bd491c93c81023a67f1ab18b331112759fd753ba6f0ba72f6145e832964"
+      "sha256": "d5a32bd491c93c81023a67f1ab18b331112759fd753ba6f0ba72f6145e832964",
+      "bytes": 80706
     },
     "src/core/helpers/game_store_maintenance.js": {
-      "bytes": 9246,
-      "kind": "exact-build-input",
-      "sha256": "2e30e4b02ac265032ebc00632af460e6979c2f88b360b511c36af286ff5b6671"
+      "sha256": "2e30e4b02ac265032ebc00632af460e6979c2f88b360b511c36af286ff5b6671",
+      "bytes": 9246
     },
     "src/core/helpers/maintenance_lease_guard.js": {
-      "bytes": 2188,
-      "kind": "exact-build-input",
-      "sha256": "2ffb436f3f3c41b7347c02c0eb45df0b0d8784583165b6efd4d6b5ef0fc57732"
+      "sha256": "2ffb436f3f3c41b7347c02c0eb45df0b0d8784583165b6efd4d6b5ef0fc57732",
+      "bytes": 2188
     },
     "src/core/helpers/terminal_result.js": {
-      "bytes": 1852,
-      "kind": "exact-build-input",
-      "sha256": "2a096ff3bea9c0c9d9b95354f14aacc266cbfe83cc8b51940e1016fdbecc3273"
+      "sha256": "2a096ff3bea9c0c9d9b95354f14aacc266cbfe83cc8b51940e1016fdbecc3273",
+      "bytes": 1852
     },
     "src/core/launcher.py": {
-      "bytes": 20232,
-      "kind": "exact-build-input",
-      "sha256": "6d4b8c2444fb3d26c6b8bffcc5571634646622031cd25026080b8ebcb876397b"
+      "sha256": "32f986d808ccdab54145378cab4f738cc03704567d210765d9b5914855fc911e",
+      "bytes": 20364
     },
     "src/core/local_mod_packages.py": {
-      "bytes": 47384,
-      "kind": "exact-build-input",
-      "sha256": "f72a878316869f012da0872d75b3923bbbbc2dbde5821fe027a9073b54a56420"
+      "sha256": "f72a878316869f012da0872d75b3923bbbbc2dbde5821fe027a9073b54a56420",
+      "bytes": 47384
     },
     "src/core/mod_activation_service.py": {
-      "bytes": 3712,
-      "kind": "exact-build-input",
-      "sha256": "fa131fe5340e2b2c3d6439dc3c4f4b9c950bb775a43fb647ac66c707c23ed8e4"
+      "sha256": "fa131fe5340e2b2c3d6439dc3c4f4b9c950bb775a43fb647ac66c707c23ed8e4",
+      "bytes": 3712
     },
     "src/core/mod_activation_state.py": {
-      "bytes": 40354,
-      "kind": "exact-build-input",
-      "sha256": "d4540e572336717760db77e72ce30ed08f93f28eaccbff740e85f9b683309f91"
+      "sha256": "d4540e572336717760db77e72ce30ed08f93f28eaccbff740e85f9b683309f91",
+      "bytes": 40354
     },
     "src/core/mod_api_manifest.py": {
-      "bytes": 13394,
-      "kind": "exact-build-input",
-      "sha256": "d719e3a5746f1903ab36b79ce181ab36ffbe7877404adecc1ea075c67a1c2c53"
+      "sha256": "d719e3a5746f1903ab36b79ce181ab36ffbe7877404adecc1ea075c67a1c2c53",
+      "bytes": 13394
     },
     "src/core/mod_api_runtime.py": {
-      "bytes": 38074,
-      "kind": "exact-build-input",
-      "sha256": "09cd5878452c88d0e7d31d5a004413f3d6adf26c8c5f952416f1c4b4c11c672f"
+      "sha256": "7482911f6a02d13bd173145a64c1660598390c1d38dccbb4558b237d52bd03d4",
+      "bytes": 41618
+    },
+    "src/core/mod_client_delivery.py": {
+      "sha256": "d496175894032273ea38f7ad81e8bab5cd2a97b7017891a0ad1c4287b2c6a718",
+      "bytes": 3890
     },
     "src/core/mod_client_notifications.py": {
-      "bytes": 2403,
-      "kind": "exact-build-input",
-      "sha256": "ab8ec0b479beab8ee781bee44646a76a3401d89f6692cb8021502596ca07048b"
+      "sha256": "ab8ec0b479beab8ee781bee44646a76a3401d89f6692cb8021502596ca07048b",
+      "bytes": 2403
+    },
+    "src/core/mod_client_preparation.py": {
+      "sha256": "14a5d476df8bd476c282dbba8092c11a00f2e0fed3f3ea40611444ed1931053e",
+      "bytes": 3629
     },
     "src/core/mod_config_documents.py": {
-      "bytes": 21892,
-      "kind": "exact-build-input",
-      "sha256": "eb3d840d72c4ec7bd02cfce88b897db297acea7f7e350f3ec93a9e1fa26d1a0a"
+      "sha256": "eb3d840d72c4ec7bd02cfce88b897db297acea7f7e350f3ec93a9e1fa26d1a0a",
+      "bytes": 21892
     },
     "src/core/mod_contributions.py": {
-      "bytes": 39709,
-      "kind": "exact-build-input",
-      "sha256": "d4f43b25d2fa1b9aefdf02ba89c336ab009997c223f70fd9349dcf62b78b7d53"
+      "sha256": "d4f43b25d2fa1b9aefdf02ba89c336ab009997c223f70fd9349dcf62b78b7d53",
+      "bytes": 39709
     },
     "src/core/mod_evejs_compatibility.py": {
-      "bytes": 1970,
-      "kind": "exact-build-input",
-      "sha256": "760e906107346dcffcb35cf371ad4e7e3af9b0f5bd76837cdd52af30f5f50db7"
+      "sha256": "760e906107346dcffcb35cf371ad4e7e3af9b0f5bd76837cdd52af30f5f50db7",
+      "bytes": 1970
     },
     "src/core/mod_guide.py": {
-      "bytes": 3046,
-      "kind": "exact-build-input",
-      "sha256": "50d6dac5b87a3780fbe3704a1cb08fd86da59b5a39659c583ac32544fc214db3"
+      "sha256": "50d6dac5b87a3780fbe3704a1cb08fd86da59b5a39659c583ac32544fc214db3",
+      "bytes": 3046
     },
     "src/core/mod_inventory.py": {
-      "bytes": 4015,
-      "kind": "exact-build-input",
-      "sha256": "49c5b24b095cd7ef4734075ebcf2a57abce11aa464d41e36fed5ac4769e7936a"
+      "sha256": "49c5b24b095cd7ef4734075ebcf2a57abce11aa464d41e36fed5ac4769e7936a",
+      "bytes": 4015
     },
     "src/core/mod_lifecycle_lock.py": {
-      "bytes": 6704,
-      "kind": "exact-build-input",
-      "sha256": "ffef279c0965c53663cf9b002ed9d6d3302be1cbcfede57233172b241870248c"
+      "sha256": "ffef279c0965c53663cf9b002ed9d6d3302be1cbcfede57233172b241870248c",
+      "bytes": 6704
     },
     "src/core/mod_loader_state.py": {
-      "bytes": 2498,
-      "kind": "exact-build-input",
-      "sha256": "9cd0dec9c0ca7bb301e23652dd23c89be9bef3c441cc25f374fa5251d6dabdae"
+      "sha256": "9cd0dec9c0ca7bb301e23652dd23c89be9bef3c441cc25f374fa5251d6dabdae",
+      "bytes": 2498
     },
     "src/core/mod_management.py": {
-      "bytes": 60084,
-      "kind": "exact-build-input",
-      "sha256": "1db83cf010c041dcd47140fac7b6982307946eb107343767421e54c1d0751ccc"
+      "sha256": "1db83cf010c041dcd47140fac7b6982307946eb107343767421e54c1d0751ccc",
+      "bytes": 60084
     },
     "src/core/mod_manager.py": {
-      "bytes": 962,
-      "kind": "exact-build-input",
-      "sha256": "b7df0ceadc022dbcb0b20e19ebbdfc2745ebed7381171def3d2007eb214224f3"
+      "sha256": "b7df0ceadc022dbcb0b20e19ebbdfc2745ebed7381171def3d2007eb214224f3",
+      "bytes": 962
     },
     "src/core/mod_manifest.py": {
-      "bytes": 42869,
-      "kind": "exact-build-input",
-      "sha256": "89b12dc5720bf629ab7b041d052b26e2e7dd1a3acd22b80fa52a9d3b519e340b"
+      "sha256": "89b12dc5720bf629ab7b041d052b26e2e7dd1a3acd22b80fa52a9d3b519e340b",
+      "bytes": 42869
     },
     "src/core/mod_operations.py": {
-      "bytes": 8266,
-      "kind": "exact-build-input",
-      "sha256": "e55e2cf8863bb574cc1cf56498ecc47337373ea9d0619e3c4cc2f7a631a1e87b"
+      "sha256": "f3c3f1d91a088231ad2614a0abb55ec8fbf044275ed29fee41e75e59dad1104f",
+      "bytes": 8828
     },
     "src/core/mod_relationships.py": {
-      "bytes": 5070,
-      "kind": "exact-build-input",
-      "sha256": "612d33fa4f06caaecb966967cf05924c39c39f92d8af0d3b1f6dd06d3c16fa83"
+      "sha256": "612d33fa4f06caaecb966967cf05924c39c39f92d8af0d3b1f6dd06d3c16fa83",
+      "bytes": 5070
     },
     "src/core/mod_runtime_state.py": {
-      "bytes": 83612,
-      "kind": "exact-build-input",
-      "sha256": "71c71c002b3ee2b2dbbcadb2b28cb53499016ad41beb3ac630774ec623dec011"
+      "sha256": "71c71c002b3ee2b2dbbcadb2b28cb53499016ad41beb3ac630774ec623dec011",
+      "bytes": 83612
     },
     "src/core/mod_settings.py": {
-      "bytes": 13772,
-      "kind": "exact-build-input",
-      "sha256": "3a6eb6b6fdd59db812046e7be5e44b1006a5ef11016b98fb402480393c463ed1"
+      "sha256": "3a6eb6b6fdd59db812046e7be5e44b1006a5ef11016b98fb402480393c463ed1",
+      "bytes": 13772
     },
     "src/core/mod_settings_schema.py": {
-      "bytes": 13346,
-      "kind": "exact-build-input",
-      "sha256": "57c2f5963cf948ec4517a136a7e906305532d54f9c2271bd7f8c67f036ba235d"
+      "sha256": "57c2f5963cf948ec4517a136a7e906305532d54f9c2271bd7f8c67f036ba235d",
+      "bytes": 13346
     },
     "src/core/mod_update_source.py": {
-      "bytes": 12808,
-      "kind": "exact-build-input",
-      "sha256": "f8e53dcdd3c2f77dae27c92c8efd2fa4b8d3947ff7997b4ff67bbf331a673788"
+      "sha256": "f8e53dcdd3c2f77dae27c92c8efd2fa4b8d3947ff7997b4ff67bbf331a673788",
+      "bytes": 12808
     },
     "src/core/mod_updates.py": {
-      "bytes": 13523,
-      "kind": "exact-build-input",
-      "sha256": "5b850b790a9b3cd7df32f209d8fec2e9f795f3a1db3bc3a55585b40505c30813"
+      "sha256": "5b850b790a9b3cd7df32f209d8fec2e9f795f3a1db3bc3a55585b40505c30813",
+      "bytes": 13523
     },
     "src/core/native_maintenance.py": {
-      "bytes": 18114,
-      "kind": "exact-build-input",
-      "sha256": "5b87cc169e2142766f789635ac19979319dfb43a240ec9921b5e082d3b3d23e3"
+      "sha256": "5b87cc169e2142766f789635ac19979319dfb43a240ec9921b5e082d3b3d23e3",
+      "bytes": 18114
     },
     "src/core/overview_patch.py": {
-      "bytes": 29576,
-      "kind": "exact-build-input",
-      "sha256": "522799553d2a803125c9bb51d5b5ff0362c9734ef5119e784f14e7ab694e4ebc"
+      "sha256": "522799553d2a803125c9bb51d5b5ff0362c9734ef5119e784f14e7ab694e4ebc",
+      "bytes": 29576
     },
     "src/core/overview_state.py": {
-      "bytes": 8523,
-      "kind": "exact-build-input",
-      "sha256": "289513ce7fc1e82b558f6c42bd0a7c573b4bd8cfc802d89571fdf0021cd74614"
+      "sha256": "289513ce7fc1e82b558f6c42bd0a7c573b4bd8cfc802d89571fdf0021cd74614",
+      "bytes": 8523
     },
     "src/core/platform.py": {
-      "bytes": 2174,
-      "kind": "exact-build-input",
-      "sha256": "64195661c7f53451b4a2e410d79e344b2ae7cad850a4281c21d7a7958b2a12da"
+      "sha256": "64195661c7f53451b4a2e410d79e344b2ae7cad850a4281c21d7a7958b2a12da",
+      "bytes": 2174
     },
     "src/core/platform_win.py": {
-      "bytes": 45695,
-      "kind": "exact-build-input",
-      "sha256": "9ec850e8c2f3a9ca69485f0e9e99ecf51a53de0d68a99ff07531b5c05e98bf30"
+      "sha256": "9ec850e8c2f3a9ca69485f0e9e99ecf51a53de0d68a99ff07531b5c05e98bf30",
+      "bytes": 45695
     },
     "src/core/process_tracker.py": {
-      "bytes": 7086,
-      "kind": "exact-build-input",
-      "sha256": "4ef837895dab8bfebd7b65807fc2bd40b8f3720de6d2dad3b58fc8d9f018217d"
+      "sha256": "4ef837895dab8bfebd7b65807fc2bd40b8f3720de6d2dad3b58fc8d9f018217d",
+      "bytes": 7086
     },
     "src/core/profiles.py": {
-      "bytes": 22851,
-      "kind": "exact-build-input",
-      "sha256": "9b15ad0b522ec24c0b502b4bb9b95694c4a6c48bef1c51894e1cfaab3374c150"
+      "sha256": "9b15ad0b522ec24c0b502b4bb9b95694c4a6c48bef1c51894e1cfaab3374c150",
+      "bytes": 22851
     },
     "src/core/runtime/__init__.py": {
-      "bytes": 265,
-      "kind": "exact-build-input",
-      "sha256": "b981d1ff4ccbf20ec8ef2a2117573c3e9ed463d680ac1c40097cfd009a25740f"
+      "sha256": "b981d1ff4ccbf20ec8ef2a2117573c3e9ed463d680ac1c40097cfd009a25740f",
+      "bytes": 265
     },
     "src/core/runtime/character_display.py": {
-      "bytes": 2533,
-      "kind": "exact-build-input",
-      "sha256": "0ac9efa19e28cfb4f04b4b8b8085a5c27b262d9ebc349ffe9cf070b5cf982adb"
+      "sha256": "0ac9efa19e28cfb4f04b4b8b8085a5c27b262d9ebc349ffe9cf070b5cf982adb",
+      "bytes": 2533
     },
     "src/core/runtime/data.py": {
-      "bytes": 28498,
-      "kind": "exact-build-input",
-      "sha256": "9e6d6bd37585173f903f5f17f95178ffcf0e3dbdf78e8efc8ff2861473515831"
+      "sha256": "9e6d6bd37585173f903f5f17f95178ffcf0e3dbdf78e8efc8ff2861473515831",
+      "bytes": 28498
     },
     "src/core/runtime/docker_character_creation.py": {
-      "bytes": 22603,
-      "kind": "exact-build-input",
-      "sha256": "f90b7ee22ad621013acf585b2a9644d79f9ca602878dcf92ce20ef65a5eed800"
+      "sha256": "f90b7ee22ad621013acf585b2a9644d79f9ca602878dcf92ce20ef65a5eed800",
+      "bytes": 22603
     },
     "src/core/runtime/docker_cli.py": {
-      "bytes": 16080,
-      "kind": "exact-build-input",
-      "sha256": "11d5529417f04527cbbd875ffbd0d1572fdbe765ea57017aff268e61b6dd3f3f"
+      "sha256": "11d5529417f04527cbbd875ffbd0d1572fdbe765ea57017aff268e61b6dd3f3f",
+      "bytes": 16080
     },
     "src/core/runtime/docker_compose.py": {
-      "bytes": 30228,
-      "kind": "exact-build-input",
-      "sha256": "5b254091057d49824253a6fa471b065e847e9a4683031efc546fb173731c3f55"
+      "sha256": "5b254091057d49824253a6fa471b065e847e9a4683031efc546fb173731c3f55",
+      "bytes": 30228
     },
     "src/core/runtime/docker_controller.py": {
-      "bytes": 14867,
-      "kind": "exact-build-input",
-      "sha256": "26e8a1572cfce6268cfaab77d9da5a248dae12a6ff7fbb9bc36dd9fbf02af850"
+      "sha256": "26e8a1572cfce6268cfaab77d9da5a248dae12a6ff7fbb9bc36dd9fbf02af850",
+      "bytes": 14867
     },
     "src/core/runtime/docker_mods.py": {
-      "bytes": 35495,
-      "kind": "exact-build-input",
-      "sha256": "45171cc2e9b23a3af6f0c6e6972a7ba6e3e9919f5c679c70a543c02a0f00d9c2"
+      "sha256": "45171cc2e9b23a3af6f0c6e6972a7ba6e3e9919f5c679c70a543c02a0f00d9c2",
+      "bytes": 35495
     },
     "src/core/runtime/docker_setup.py": {
-      "bytes": 3307,
-      "kind": "exact-build-input",
-      "sha256": "4b735921d8142eb9ad6b15f00a53cb26f55ae4525273d206c8e2aa4aeb83b422"
+      "sha256": "4b735921d8142eb9ad6b15f00a53cb26f55ae4525273d206c8e2aa4aeb83b422",
+      "bytes": 3307
     },
     "src/core/runtime/docker_tools.py": {
-      "bytes": 9240,
-      "kind": "exact-build-input",
-      "sha256": "ee20339a515134388467c8e0a016bfbdebe1ccc211e3b83ecb90c1232a6c192e"
+      "sha256": "ee20339a515134388467c8e0a016bfbdebe1ccc211e3b83ecb90c1232a6c192e",
+      "bytes": 9240
     },
     "src/core/runtime/endpoints.py": {
-      "bytes": 2712,
-      "kind": "exact-build-input",
-      "sha256": "3b137a1d100378fa93cfe1d85dbc73463d99947536bcee923ba211c1ed5ff971"
+      "sha256": "3b137a1d100378fa93cfe1d85dbc73463d99947536bcee923ba211c1ed5ff971",
+      "bytes": 2712
     },
     "src/core/runtime/portraits.py": {
-      "bytes": 16852,
-      "kind": "exact-build-input",
-      "sha256": "7612c4c5ffe4ff04252712533f1a20c4f03b60b16c5e1b48cfffd243da325424"
+      "sha256": "7612c4c5ffe4ff04252712533f1a20c4f03b60b16c5e1b48cfffd243da325424",
+      "bytes": 16852
     },
     "src/core/server_launcher.py": {
-      "bytes": 36503,
-      "kind": "exact-build-input",
-      "sha256": "46f8b0f7944077404377b1612d91f46f2f6d52a3a5a3af5d35f9cef0678480b4"
+      "sha256": "46f8b0f7944077404377b1612d91f46f2f6d52a3a5a3af5d35f9cef0678480b4",
+      "bytes": 36503
     },
     "src/core/server_selection.py": {
-      "bytes": 1987,
-      "kind": "exact-build-input",
-      "sha256": "4d2580fc132f17ca2d27312d941ff392b19af888519a3db541e3c1361a7f53cd"
+      "sha256": "4d2580fc132f17ca2d27312d941ff392b19af888519a3db541e3c1361a7f53cd",
+      "bytes": 1987
     },
     "src/core/service_status.py": {
-      "bytes": 3611,
-      "kind": "exact-build-input",
-      "sha256": "69823d95d22b94b6628ce301391b1255e013c52dd248ba00c95a2c8af77a52c4"
+      "sha256": "69823d95d22b94b6628ce301391b1255e013c52dd248ba00c95a2c8af77a52c4",
+      "bytes": 3611
     },
     "src/core/template_settings/core_public__.yaml": {
-      "bytes": 2143,
-      "kind": "exact-build-input",
-      "sha256": "2004a65cb7bbfed91843d1b9a3d6a1647519b7a58ec69be0e924cdc263140f99"
+      "sha256": "2004a65cb7bbfed91843d1b9a3d6a1647519b7a58ec69be0e924cdc263140f99",
+      "bytes": 2143
     },
     "src/core/template_settings/prefs.ini": {
-      "bytes": 180,
-      "kind": "exact-build-input",
-      "sha256": "a43859da26e00d140b50e099143c4477a856e30f7754a072279f5274ed10fd86"
+      "sha256": "a43859da26e00d140b50e099143c4477a856e30f7754a072279f5274ed10fd86",
+      "bytes": 180
     },
     "src/core/tool_catalog.py": {
-      "bytes": 23246,
-      "kind": "exact-build-input",
-      "sha256": "dfc2978fcadf408a5495110b93b2523ce29ba3a091509f7641bc91fbbefaeb4a"
+      "sha256": "dfc2978fcadf408a5495110b93b2523ce29ba3a091509f7641bc91fbbefaeb4a",
+      "bytes": 23246
     },
     "src/i18n.py": {
-      "bytes": 48930,
-      "kind": "exact-build-input",
-      "sha256": "cbe3ddb565168e305e731a8b1ba6f86dc353e64ef9487c294d132007f22e9aab"
+      "sha256": "cbe3ddb565168e305e731a8b1ba6f86dc353e64ef9487c294d132007f22e9aab",
+      "bytes": 48930
     },
     "src/pages/__init__.py": {
-      "bytes": 0,
-      "kind": "exact-build-input",
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
     },
     "src/pages/characters_page.py": {
-      "bytes": 57135,
-      "kind": "exact-build-input",
-      "sha256": "81e6dd075c586f087c93818844e2be74fb92e5a24f1843aa3d652759cb5956ee"
+      "sha256": "81e6dd075c586f087c93818844e2be74fb92e5a24f1843aa3d652759cb5956ee",
+      "bytes": 57135
     },
     "src/pages/home_page.py": {
-      "bytes": 44542,
-      "kind": "exact-build-input",
-      "sha256": "ef4ee988ccf65ee851444ec8d7d9dce883b639b5acd2c99bd27eee0637598b27"
+      "sha256": "ef4ee988ccf65ee851444ec8d7d9dce883b639b5acd2c99bd27eee0637598b27",
+      "bytes": 44542
     },
     "src/pages/mods_page.py": {
-      "bytes": 62309,
-      "kind": "exact-build-input",
-      "sha256": "bdc96c4a5d352ef5ecd9215f39f3a48b8157700b60eae17dfbd34a0086c772d3"
+      "sha256": "1d01521ce7d14eca410b267c145c1c36dcdcce1469cad907f7b0dda45c2a108a",
+      "bytes": 64216
     },
     "src/pages/settings_page.py": {
-      "bytes": 73949,
-      "kind": "exact-build-input",
-      "sha256": "e6c3ddc0440b1e1eea1c0f1ff776bd3f24fddad92842825dfcb67f26c9a8167c"
+      "sha256": "e6c3ddc0440b1e1eea1c0f1ff776bd3f24fddad92842825dfcb67f26c9a8167c",
+      "bytes": 73949
     },
     "src/pages/tools_page.py": {
-      "bytes": 30170,
-      "kind": "exact-build-input",
-      "sha256": "7709bc3ad3c54cc16634940db72314ffc67a787d5b7b2f0c0c2d62ca71764971"
+      "sha256": "7709bc3ad3c54cc16634940db72314ffc67a787d5b7b2f0c0c2d62ca71764971",
+      "bytes": 30170
     },
     "src/theme.py": {
-      "bytes": 34754,
-      "kind": "exact-build-input",
-      "sha256": "e3a22cdb7b923af0a74ced2a22552455c4870115b4ac248e4d8ebdfad4f83edc"
+      "sha256": "b99fd00272f1fcdc6b4ee7a19e9e8f0108d8dabad048580db44712b2ac550182",
+      "bytes": 35138
     },
     "src/translations_character_details.py": {
-      "bytes": 2121,
-      "kind": "exact-build-input",
-      "sha256": "5162d50d37da09c75659be846886408277241dc92fad6ae88415844b2c1b036a"
+      "sha256": "5162d50d37da09c75659be846886408277241dc92fad6ae88415844b2c1b036a",
+      "bytes": 2121
     },
     "src/translations_eu.py": {
-      "bytes": 241883,
-      "kind": "exact-build-input",
-      "sha256": "276ae4f04c386dd9e0d42b19fed10cced43a98c984ca8c96f0cf6d6495735ec3"
+      "sha256": "276ae4f04c386dd9e0d42b19fed10cced43a98c984ca8c96f0cf6d6495735ec3",
+      "bytes": 241883
     },
     "src/translations_ja_additional_modals.py": {
-      "bytes": 31794,
-      "kind": "exact-build-input",
-      "sha256": "f1ac262418dd7822b48d571bc39bae6ba8b81a3e2b132dba982f703d9fc0f508"
+      "sha256": "f1ac262418dd7822b48d571bc39bae6ba8b81a3e2b132dba982f703d9fc0f508",
+      "bytes": 31794
     },
     "src/translations_ja_additional_ui.py": {
-      "bytes": 88094,
-      "kind": "exact-build-input",
-      "sha256": "9488f8490c5b1cb59323256592c01e3548913afea3e4d51b72a98d07f8e54d8d"
+      "sha256": "9488f8490c5b1cb59323256592c01e3548913afea3e4d51b72a98d07f8e54d8d",
+      "bytes": 88094
     },
     "src/translations_ja_ko.py": {
-      "bytes": 15100,
-      "kind": "exact-build-input",
-      "sha256": "08d0f1d05d2502cb3117145d2d8f18cae53ef885c8673ad82b10ac7d88275bcd"
+      "sha256": "08d0f1d05d2502cb3117145d2d8f18cae53ef885c8673ad82b10ac7d88275bcd",
+      "bytes": 15100
     },
     "src/translations_ko_full.py": {
-      "bytes": 113767,
-      "kind": "exact-build-input",
-      "sha256": "22b8516c0dd67326e47198df83b627acbca701df6f81b8ab11fb46a77f3e72b8"
+      "sha256": "22b8516c0dd67326e47198df83b627acbca701df6f81b8ab11fb46a77f3e72b8",
+      "bytes": 113767
     },
     "src/translations_mod_settings.py": {
-      "bytes": 40230,
-      "kind": "exact-build-input",
-      "sha256": "0d6bef8726094522bb551efb7a847c41ebaffded281dd3ec3c7a2612f48320b9"
+      "sha256": "0d6bef8726094522bb551efb7a847c41ebaffded281dd3ec3c7a2612f48320b9",
+      "bytes": 40230
     },
     "src/translations_mod_updates.py": {
-      "bytes": 6131,
-      "kind": "exact-build-input",
-      "sha256": "4ad236d345b4fae8f2591e3b5fa1fd2b738e149049f0af8b6b66c683fd4da6db"
+      "sha256": "a06b42b0d58654277db1311c4f01ebdb42135bc1d9f1c3de9627736af8aa7fe7",
+      "bytes": 9790
     },
     "src/translations_ru.py": {
-      "bytes": 101930,
-      "kind": "exact-build-input",
-      "sha256": "61a1c2b25271cb4d679961a1396e523bec5ab56aad634d0320ff053533b80e8a"
+      "sha256": "61a1c2b25271cb4d679961a1396e523bec5ab56aad634d0320ff053533b80e8a",
+      "bytes": 101930
     },
     "src/translations_source.py": {
-      "bytes": 53041,
-      "kind": "exact-build-input",
-      "sha256": "aeb166a51bacde00e18b333b4a0e287cab02d9bec241887ca1d94fb5d89e1b89"
+      "sha256": "aeb166a51bacde00e18b333b4a0e287cab02d9bec241887ca1d94fb5d89e1b89",
+      "bytes": 53041
     },
     "src/translations_zh_cn.py": {
-      "bytes": 6784,
-      "kind": "exact-build-input",
-      "sha256": "60b4f1feb3f49703a20074adb34346908954525246f2908dc7c38959f39c50a3"
+      "sha256": "60b4f1feb3f49703a20074adb34346908954525246f2908dc7c38959f39c50a3",
+      "bytes": 6784
     },
     "src/translations_zh_cn_additional.py": {
-      "bytes": 93456,
-      "kind": "exact-build-input",
-      "sha256": "36e030a41131b52ac3f14ed7642ffb66dc1b6b1d5bd0f1e544f137b7b56d5fdc"
+      "sha256": "36e030a41131b52ac3f14ed7642ffb66dc1b6b1d5bd0f1e544f137b7b56d5fdc",
+      "bytes": 93456
     },
     "src/ui/__init__.py": {
-      "bytes": 181,
-      "kind": "exact-build-input",
-      "sha256": "4b5af70de043588d015145f4da4a7a94bda6ab31f3b40881fa94bd685400590e"
+      "sha256": "4b5af70de043588d015145f4da4a7a94bda6ab31f3b40881fa94bd685400590e",
+      "bytes": 181
     },
     "src/ui/mod_coordinator.py": {
-      "bytes": 19784,
-      "kind": "exact-build-input",
-      "sha256": "301a21f5cb6ee939ccf112236b29fa62921a313e201708f46ff4fda0273e61b1"
+      "sha256": "301a21f5cb6ee939ccf112236b29fa62921a313e201708f46ff4fda0273e61b1",
+      "bytes": 19784
     },
     "src/ui/mod_update_controller.py": {
-      "bytes": 7366,
-      "kind": "exact-build-input",
-      "sha256": "f41fc29b8af3b29c107acb6ff33e6369fe7c1f1fb4b1590eac8324677cfc2439"
+      "sha256": "f41fc29b8af3b29c107acb6ff33e6369fe7c1f1fb4b1590eac8324677cfc2439",
+      "bytes": 7366
     },
     "src/ui/motion.py": {
-      "bytes": 5095,
-      "kind": "exact-build-input",
-      "sha256": "20f7e4dc6c76d0c2f364821869fb6c4e0c0addeef92f6a2f54674401889a62d4"
+      "sha256": "20f7e4dc6c76d0c2f364821869fb6c4e0c0addeef92f6a2f54674401889a62d4",
+      "bytes": 5095
     },
     "src/ui/page_reveal.py": {
-      "bytes": 1642,
-      "kind": "exact-build-input",
-      "sha256": "c35ff9d9915ac16f8a1f786e5573e1446567be0d8ab792e8e405c1275de311a3"
+      "sha256": "c35ff9d9915ac16f8a1f786e5573e1446567be0d8ab792e8e405c1275de311a3",
+      "bytes": 1642
     },
     "src/ui/scene_geometry.py": {
-      "bytes": 1333,
-      "kind": "exact-build-input",
-      "sha256": "64b033c52a44397670fb8bf1ebf3ab6ab4f27f876d4fa370b9934a4dc4ea6384"
+      "sha256": "64b033c52a44397670fb8bf1ebf3ab6ab4f27f876d4fa370b9934a4dc4ea6384",
+      "bytes": 1333
     },
     "src/ui/scene_timeline.py": {
-      "bytes": 5745,
-      "kind": "exact-build-input",
-      "sha256": "7d0851a7c19c3f92a46faf4c984f9d6e54d841b0163a437686936625b077c8d0"
+      "sha256": "7d0851a7c19c3f92a46faf4c984f9d6e54d841b0163a437686936625b077c8d0",
+      "bytes": 5745
     },
     "src/ui/update_coordinator.py": {
-      "bytes": 8966,
-      "kind": "exact-build-input",
-      "sha256": "7179f8c39ecba8665ace4e88b54e96887e0e5df553d89cb3824ee8aa0f2cbfb5"
+      "sha256": "7179f8c39ecba8665ace4e88b54e96887e0e5df553d89cb3824ee8aa0f2cbfb5",
+      "bytes": 8966
     },
     "src/ui/visible_motion.py": {
-      "bytes": 2301,
-      "kind": "exact-build-input",
-      "sha256": "0f64b498a6b82e4b55154660350ef45cd15e8c851044606503a2721ecee48f68"
+      "sha256": "0f64b498a6b82e4b55154660350ef45cd15e8c851044606503a2721ecee48f68",
+      "bytes": 2301
     },
     "src/updater/__init__.py": {
-      "bytes": 611,
-      "kind": "exact-build-input",
-      "sha256": "59ab9788c244a3088f1445298a9ef0bbe74a226a7c6382104d24c502a3436280"
+      "sha256": "59ab9788c244a3088f1445298a9ef0bbe74a226a7c6382104d24c502a3436280",
+      "bytes": 611
     },
     "src/updater/checker.py": {
-      "bytes": 6293,
-      "kind": "exact-build-input",
-      "sha256": "a2098c76bb76a3e2f8f59267f9d1a240699ec61d26662c2e1f5639d0bdfe30f6"
+      "sha256": "a2098c76bb76a3e2f8f59267f9d1a240699ec61d26662c2e1f5639d0bdfe30f6",
+      "bytes": 6293
     },
     "src/updater/dialog.py": {
-      "bytes": 20414,
-      "kind": "exact-build-input",
-      "sha256": "dade1510c05e10f8a7773f4206f10f93f8cd279cccc4ea3264f999e7cb1b1ef2"
+      "sha256": "dade1510c05e10f8a7773f4206f10f93f8cd279cccc4ea3264f999e7cb1b1ef2",
+      "bytes": 20414
     },
     "src/updater/github.py": {
-      "bytes": 5855,
-      "kind": "exact-build-input",
-      "sha256": "2e71fddbeb297b1070907514d9732bc1f4de904f1fc4ceaa5f3f702494f349a2"
+      "sha256": "2e71fddbeb297b1070907514d9732bc1f4de904f1fc4ceaa5f3f702494f349a2",
+      "bytes": 5855
     },
     "src/updater/handoff.py": {
-      "bytes": 27283,
-      "kind": "exact-build-input",
-      "sha256": "7201783290111628645f8c2075795ff1c677f90dfc1507014311f8c7692886fb"
+      "sha256": "7201783290111628645f8c2075795ff1c677f90dfc1507014311f8c7692886fb",
+      "bytes": 27283
     },
     "src/updater/installer.py": {
-      "bytes": 2635,
-      "kind": "exact-build-input",
-      "sha256": "12a81c6e71279a6ebb8a20da620a226f4329a1f71e3c0f175a6f71d734b46414"
+      "sha256": "12a81c6e71279a6ebb8a20da620a226f4329a1f71e3c0f175a6f71d734b46414",
+      "bytes": 2635
     },
     "src/updater/progress_dialog.py": {
-      "bytes": 23344,
-      "kind": "exact-build-input",
-      "sha256": "86c093a24505c3e5f8096d0ac156b64471db3700e7d67da0967009d73d5a8e7c"
+      "sha256": "86c093a24505c3e5f8096d0ac156b64471db3700e7d67da0967009d73d5a8e7c",
+      "bytes": 23344
     },
     "src/utils/__init__.py": {
-      "bytes": 0,
-      "kind": "exact-build-input",
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
     },
     "src/utils/cache.py": {
-      "bytes": 1644,
-      "kind": "exact-build-input",
-      "sha256": "13e4eb135b6450d19a2c993d3495e77a6d7b24d64733dcc52ce795386a6b7c6f"
+      "sha256": "13e4eb135b6450d19a2c993d3495e77a6d7b24d64733dcc52ce795386a6b7c6f",
+      "bytes": 1644
     },
     "src/utils/logger.py": {
-      "bytes": 1408,
-      "kind": "exact-build-input",
-      "sha256": "c0b6bace078252754975bcfff85b1c27219bba0adcc20aa3bed8e79a86315ab6"
+      "sha256": "c0b6bace078252754975bcfff85b1c27219bba0adcc20aa3bed8e79a86315ab6",
+      "bytes": 1408
     },
     "src/widgets/__init__.py": {
-      "bytes": 0,
-      "kind": "exact-build-input",
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
     },
     "src/widgets/character_card.py": {
-      "bytes": 24000,
-      "kind": "exact-build-input",
-      "sha256": "6c1225cbd3873c1fd0aad782b0397f894b2f9613996fd6a2a858ce8209bb1795"
+      "sha256": "6c1225cbd3873c1fd0aad782b0397f894b2f9613996fd6a2a858ce8209bb1795",
+      "bytes": 24000
     },
     "src/widgets/character_groups_dialog.py": {
-      "bytes": 34224,
-      "kind": "exact-build-input",
-      "sha256": "bcfab87da75fd2738368d9a23fd50103d057674fc175ea41f734762827cf3ec1"
+      "sha256": "bcfab87da75fd2738368d9a23fd50103d057674fc175ea41f734762827cf3ec1",
+      "bytes": 34224
     },
     "src/widgets/console_panel.py": {
-      "bytes": 19339,
-      "kind": "exact-build-input",
-      "sha256": "bc734e003ca0e267588b4ab20eca81947b9d74a20ec0aba664a8954e2998a4ef"
+      "sha256": "bc734e003ca0e267588b4ab20eca81947b9d74a20ec0aba664a8954e2998a4ef",
+      "bytes": 19339
     },
     "src/widgets/deep_signal_background.py": {
-      "bytes": 10152,
-      "kind": "exact-build-input",
-      "sha256": "27b4fb5092ef4d1aff75304092a3c16108db6d4925a8cc220beb64dad398710d"
+      "sha256": "27b4fb5092ef4d1aff75304092a3c16108db6d4925a8cc220beb64dad398710d",
+      "bytes": 10152
     },
     "src/widgets/detail_panel.py": {
-      "bytes": 15661,
-      "kind": "exact-build-input",
-      "sha256": "7b5721109a9ae893e85ea93c50160b5e5485d2903f7a8be0d7104da2d41cfac9"
+      "sha256": "7b5721109a9ae893e85ea93c50160b5e5485d2903f7a8be0d7104da2d41cfac9",
+      "bytes": 15661
     },
     "src/widgets/docking_traffic_overlay.py": {
-      "bytes": 14577,
-      "kind": "exact-build-input",
-      "sha256": "0a94122fe6634a59cf7863e08772387d02edab31ab6372bab87172a04f11fa85"
+      "sha256": "0a94122fe6634a59cf7863e08772387d02edab31ab6372bab87172a04f11fa85",
+      "bytes": 14577
     },
     "src/widgets/glass_panel.py": {
-      "bytes": 3927,
-      "kind": "exact-build-input",
-      "sha256": "d6589910769242d0aca1004241bd9e9b00085b71adb9b72c71505f8ae5cb8b30"
+      "sha256": "d6589910769242d0aca1004241bd9e9b00085b71adb9b72c71505f8ae5cb8b30",
+      "bytes": 3927
     },
     "src/widgets/legacy_mod_removal_dialog.py": {
-      "bytes": 3280,
-      "kind": "exact-build-input",
-      "sha256": "1497e23b8fece577c18a13c997c4c7caa7f50767cd4988f30faabf304d08c44c"
+      "sha256": "1497e23b8fece577c18a13c997c4c7caa7f50767cd4988f30faabf304d08c44c",
+      "bytes": 3280
     },
     "src/widgets/localized_dialogs.py": {
-      "bytes": 10098,
-      "kind": "exact-build-input",
-      "sha256": "8fce6acdd34021829fcc652de200bccabbec9acff6475f024247917275d844d1"
+      "sha256": "8fce6acdd34021829fcc652de200bccabbec9acff6475f024247917275d844d1",
+      "bytes": 10098
     },
     "src/widgets/mod_authoring_guide.py": {
-      "bytes": 20304,
-      "kind": "exact-build-input",
-      "sha256": "16a242cf43953e16f2c9115a9c12c1be894c7796244da25d16284847de924fa9"
+      "sha256": "7d2cc668a217dd3fc319eabf2b2b52fe7e15517140e7a3eea34053091bd6420a",
+      "bytes": 20341
     },
     "src/widgets/mod_conflict_dialog.py": {
-      "bytes": 4785,
-      "kind": "exact-build-input",
-      "sha256": "8b4a8a54b4fa041a683cedc6035661d2558d9715e9a2295bf41468cfaa349894"
+      "sha256": "8b4a8a54b4fa041a683cedc6035661d2558d9715e9a2295bf41468cfaa349894",
+      "bytes": 4785
     },
     "src/widgets/mod_settings_dialog.py": {
-      "bytes": 18356,
-      "kind": "exact-build-input",
-      "sha256": "240101420553aee12b10de3350a66a21e6d5a7b34b4788150a4e766af1a1d07e"
+      "sha256": "240101420553aee12b10de3350a66a21e6d5a7b34b4788150a4e766af1a1d07e",
+      "bytes": 18356
     },
     "src/widgets/mod_update_dialog.py": {
-      "bytes": 4715,
-      "kind": "exact-build-input",
-      "sha256": "f538ef2c8390f951e5b9129c24ccc2bb14e83d48b084b3454c5f0ff7d530dfde"
+      "sha256": "f538ef2c8390f951e5b9129c24ccc2bb14e83d48b084b3454c5f0ff7d530dfde",
+      "bytes": 4715
     },
     "src/widgets/nav_panel.py": {
-      "bytes": 22776,
-      "kind": "exact-build-input",
-      "sha256": "b38cb761907bcd9e7b648fd956ef06aec809462c0845ecdd1154b4e706f281f3"
+      "sha256": "b38cb761907bcd9e7b648fd956ef06aec809462c0845ecdd1154b4e706f281f3",
+      "bytes": 22776
     },
     "src/widgets/new_character_card.py": {
-      "bytes": 10162,
-      "kind": "exact-build-input",
-      "sha256": "ae07cf347c248ac932f8c692fdbf7434c2ca35e521a5f1f097366783283ad9fa"
+      "sha256": "ae07cf347c248ac932f8c692fdbf7434c2ca35e521a5f1f097366783283ad9fa",
+      "bytes": 10162
     },
     "src/widgets/new_character_dialog.py": {
-      "bytes": 18404,
-      "kind": "exact-build-input",
-      "sha256": "d337d685865cd2a03ed5b8a6e84fed7d44e278823a315527ec9d54cbf5821ece"
+      "sha256": "d337d685865cd2a03ed5b8a6e84fed7d44e278823a315527ec9d54cbf5821ece",
+      "bytes": 18404
     },
     "src/widgets/page_header.py": {
-      "bytes": 2782,
-      "kind": "exact-build-input",
-      "sha256": "ba84491309ebef8b40837a850b709e13dd76f5efa779c219f70464d519120988"
+      "sha256": "ba84491309ebef8b40837a850b709e13dd76f5efa779c219f70464d519120988",
+      "bytes": 2782
     },
     "src/widgets/scroll_safe_controls.py": {
-      "bytes": 2382,
-      "kind": "exact-build-input",
-      "sha256": "3aaee34460b5d9ae1871488811ded8160b54d1292f8baaee3f6effc2d29db80d"
+      "sha256": "3aaee34460b5d9ae1871488811ded8160b54d1292f8baaee3f6effc2d29db80d",
+      "bytes": 2382
     },
     "src/widgets/shipboard_caption.py": {
-      "bytes": 4407,
-      "kind": "exact-build-input",
-      "sha256": "a44c82efe3ae7c88f20f55c4aa50aa48bbff5a2258de77e8d757032291d94438"
+      "sha256": "a44c82efe3ae7c88f20f55c4aa50aa48bbff5a2258de77e8d757032291d94438",
+      "bytes": 4407
     },
     "src/widgets/signal_button.py": {
-      "bytes": 3515,
-      "kind": "exact-build-input",
-      "sha256": "0e789f85b88e6befc4ae61b634159fd1d328902d55dac4a94d0db594f1a0065a"
+      "sha256": "0e789f85b88e6befc4ae61b634159fd1d328902d55dac4a94d0db594f1a0065a",
+      "bytes": 3515
     },
     "src/widgets/skeleton_card.py": {
-      "bytes": 4407,
-      "kind": "exact-build-input",
-      "sha256": "6ee6e8de19ca894443aa9b715d230d6e0284182752b78b0c6f18214da20bdff9"
+      "sha256": "6ee6e8de19ca894443aa9b715d230d6e0284182752b78b0c6f18214da20bdff9",
+      "bytes": 4407
     },
     "src/widgets/station_lights.py": {
-      "bytes": 2799,
-      "kind": "exact-build-input",
-      "sha256": "af676be4c9a1782215086b08de3db860abc4c4bd9fb2b442082cfa6da4ad118b"
+      "sha256": "af676be4c9a1782215086b08de3db860abc4c4bd9fb2b442082cfa6da4ad118b",
+      "bytes": 2799
     },
     "src/widgets/status_bar.py": {
-      "bytes": 23289,
-      "kind": "exact-build-input",
-      "sha256": "e72d4ca7b85f0472a7a220d6bf215945564acc72ec59c5e167296d680748f4d7"
+      "sha256": "e72d4ca7b85f0472a7a220d6bf215945564acc72ec59c5e167296d680748f4d7",
+      "bytes": 23289
     },
     "src/widgets/status_ring.py": {
-      "bytes": 11321,
-      "kind": "exact-build-input",
-      "sha256": "c5f4737dda55d0c323e974cbd8a6ff9e23a5c49b3c23ca77fffeb1af76cd060d"
+      "sha256": "c5f4737dda55d0c323e974cbd8a6ff9e23a5c49b3c23ca77fffeb1af76cd060d",
+      "bytes": 11321
     },
     "src/widgets/title_bar.py": {
-      "bytes": 35206,
-      "kind": "exact-build-input",
-      "sha256": "086e2d9fb89e92a177acffe245ae8a50df5e921334434b20541cb762c204321b"
+      "sha256": "086e2d9fb89e92a177acffe245ae8a50df5e921334434b20541cb762c204321b",
+      "bytes": 35206
     },
     "src/widgets/toggle_switch.py": {
-      "bytes": 4338,
-      "kind": "exact-build-input",
-      "sha256": "4a81ff3b2b73afc6a20fab5b999812788b8f5b8736b40f0b3f3417aee092f39b"
+      "sha256": "4a81ff3b2b73afc6a20fab5b999812788b8f5b8736b40f0b3f3417aee092f39b",
+      "bytes": 4338
     },
     "src/widgets/ui_translation.py": {
-      "bytes": 17331,
-      "kind": "exact-build-input",
-      "sha256": "3750a5557abc667d58a44bb3b84bdb178974271e32ab2545044f7c726045a4e8"
+      "sha256": "3750a5557abc667d58a44bb3b84bdb178974271e32ab2545044f7c726045a4e8",
+      "bytes": 17331
     },
     "src/widgets/update_button.py": {
-      "bytes": 5302,
-      "kind": "exact-build-input",
-      "sha256": "85c516119c63f5cb8981fb847d76cf3f15723e21e14d4de8b5c5420b7ca18e0f"
+      "sha256": "85c516119c63f5cb8981fb847d76cf3f15723e21e14d4de8b5c5420b7ca18e0f",
+      "bytes": 5302
     },
     "src/widgets/window_behavior.py": {
-      "bytes": 852,
-      "kind": "exact-build-input",
-      "sha256": "fd15aaef4ab0976fbb85cead138626b4c24dfb9347787d8710cc99fcc6ed972c"
+      "sha256": "fd15aaef4ab0976fbb85cead138626b4c24dfb9347787d8710cc99fcc6ed972c",
+      "bytes": 852
     },
     "src/wizard.py": {
-      "bytes": 52322,
-      "kind": "exact-build-input",
-      "sha256": "afaa2a58d3e0ff45b9e3b081122867010a25b5ddc81e478f2da4bf7a4f4e9a4c"
+      "sha256": "afaa2a58d3e0ff45b9e3b081122867010a25b5ddc81e478f2da4bf7a4f4e9a4c",
+      "bytes": 52322
     },
     "src/workers/__init__.py": {
-      "bytes": 349,
-      "kind": "exact-build-input",
-      "sha256": "ecbf7d5c187a78fdf74f0c8c2519e7d98cd509494e88638168634158d90e39cb"
+      "sha256": "ecbf7d5c187a78fdf74f0c8c2519e7d98cd509494e88638168634158d90e39cb",
+      "bytes": 349
     },
     "src/workers/character_creation_worker.py": {
-      "bytes": 1670,
-      "kind": "exact-build-input",
-      "sha256": "26bb0d8af160670d3debfcda5b9223f783ceec8febe4d0662bd4a69b3bdf931e"
+      "sha256": "26bb0d8af160670d3debfcda5b9223f783ceec8febe4d0662bd4a69b3bdf931e",
+      "bytes": 1670
     },
     "src/workers/character_deletion_worker.py": {
-      "bytes": 1692,
-      "kind": "exact-build-input",
-      "sha256": "57ada89e390dc8283cba01b929c57fe996a82ded1771404516aff3b9913f17ce"
+      "sha256": "57ada89e390dc8283cba01b929c57fe996a82ded1771404516aff3b9913f17ce",
+      "bytes": 1692
     },
     "src/workers/client_launch_worker.py": {
-      "bytes": 2728,
-      "kind": "exact-build-input",
-      "sha256": "6f4922048bf6c4ca22874ea3110e88cc3d197ec264f935d2609b86888e1640da"
+      "sha256": "6f4922048bf6c4ca22874ea3110e88cc3d197ec264f935d2609b86888e1640da",
+      "bytes": 2728
     },
     "src/workers/db_worker.py": {
-      "bytes": 4374,
-      "kind": "exact-build-input",
-      "sha256": "a1a4e498d13e5bf4844860f159f5eb0085a310c39a00cb5d5f02aa65c9bbad61"
+      "sha256": "a1a4e498d13e5bf4844860f159f5eb0085a310c39a00cb5d5f02aa65c9bbad61",
+      "bytes": 4374
     },
     "src/workers/dlss5_uninstall_worker.py": {
-      "bytes": 1404,
-      "kind": "exact-build-input",
-      "sha256": "6c964cd84615dc446d7f2c620ed4a7881251c88df84531d06974045cbf057e6c"
+      "sha256": "6c964cd84615dc446d7f2c620ed4a7881251c88df84531d06974045cbf057e6c",
+      "bytes": 1404
     },
     "src/workers/docker_character_creation_worker.py": {
-      "bytes": 3179,
-      "kind": "exact-build-input",
-      "sha256": "13c16aa5ff66b3aa68e37c39e67ac2eb242d819759e121b0445c57e8d988058c"
+      "sha256": "13c16aa5ff66b3aa68e37c39e67ac2eb242d819759e121b0445c57e8d988058c",
+      "bytes": 3179
     },
     "src/workers/docker_lifecycle_worker.py": {
-      "bytes": 2605,
-      "kind": "exact-build-input",
-      "sha256": "2662c64a87cea3302ff651ece50348b23b26a133865d28cf4b4172f58c3c183f"
+      "sha256": "2662c64a87cea3302ff651ece50348b23b26a133865d28cf4b4172f58c3c183f",
+      "bytes": 2605
     },
     "src/workers/docker_log_worker.py": {
-      "bytes": 11349,
-      "kind": "exact-build-input",
-      "sha256": "6a1256a600de3613d06f7e78e0e615a1968c34cfcb1a2924960d2c149b3ea33c"
+      "sha256": "6a1256a600de3613d06f7e78e0e615a1968c34cfcb1a2924960d2c149b3ea33c",
+      "bytes": 11349
     },
     "src/workers/docker_monitor.py": {
-      "bytes": 13426,
-      "kind": "exact-build-input",
-      "sha256": "397be8427da357cf7ba1f3166f306af173f10cb84059fddf6f93e12d9851c026"
+      "sha256": "397be8427da357cf7ba1f3166f306af173f10cb84059fddf6f93e12d9851c026",
+      "bytes": 13426
     },
     "src/workers/docker_preflight_worker.py": {
-      "bytes": 2470,
-      "kind": "exact-build-input",
-      "sha256": "696a2597e05c612d99a7b8dd11948d423053ff62103cd8a0991da6e96aa34901"
+      "sha256": "696a2597e05c612d99a7b8dd11948d423053ff62103cd8a0991da6e96aa34901",
+      "bytes": 2470
     },
     "src/workers/docker_tool_worker.py": {
-      "bytes": 3039,
-      "kind": "exact-build-input",
-      "sha256": "d505320c2f2f483334db45bf5380e78843b7f38f73834b61b52a27195d4c2285"
+      "sha256": "d505320c2f2f483334db45bf5380e78843b7f38f73834b61b52a27195d4c2285",
+      "bytes": 3039
     },
     "src/workers/mod_management_worker.py": {
-      "bytes": 1687,
-      "kind": "exact-build-input",
-      "sha256": "f385479ce7b9ea8d90765c5df2719953ac982b676f85a754a31bbcfaf3baaa83"
+      "sha256": "f385479ce7b9ea8d90765c5df2719953ac982b676f85a754a31bbcfaf3baaa83",
+      "bytes": 1687
     },
     "src/workers/mod_operation_worker.py": {
-      "bytes": 1143,
-      "kind": "exact-build-input",
-      "sha256": "f8574ff1e472c3eb8d8889aa4b6b7ece40f7bec0cf4fb9100d80cbaa3b4db835"
+      "sha256": "f8574ff1e472c3eb8d8889aa4b6b7ece40f7bec0cf4fb9100d80cbaa3b4db835",
+      "bytes": 1143
     },
     "src/workers/overview_patch_worker.py": {
-      "bytes": 2055,
-      "kind": "exact-build-input",
-      "sha256": "42086fef2c4bb2b4476b5a6230b0fba325bae1655d2ac07310ce1f3b7831b8ab"
+      "sha256": "42086fef2c4bb2b4476b5a6230b0fba325bae1655d2ac07310ce1f3b7831b8ab",
+      "bytes": 2055
     },
     "src/workers/portrait_worker.py": {
-      "bytes": 2576,
-      "kind": "exact-build-input",
-      "sha256": "93c0c8e5b0cd8a5e25326f8927405cea954e8480cb6546cba74fa013d8da1297"
+      "sha256": "93c0c8e5b0cd8a5e25326f8927405cea954e8480cb6546cba74fa013d8da1297",
+      "bytes": 2576
     },
     "src/workers/server_worker.py": {
-      "bytes": 22547,
-      "kind": "exact-build-input",
-      "sha256": "0c921cb94f7d08af67ccb61ade22a5337f0e6b06473c7768f81957dee81d220c"
+      "sha256": "0c921cb94f7d08af67ccb61ade22a5337f0e6b06473c7768f81957dee81d220c",
+      "bytes": 22547
+    },
+    "tests/ingame-settings-example.test.js": {
+      "sha256": "9bd8fb7ebcb5ca754e843d5db0743dbd152fcc7d0b33c1a5ad365f5210821056",
+      "bytes": 2444
+    },
+    "tests/test_ingame_settings_example.py": {
+      "sha256": "0f7d84ed5b540e1fc5c7dcb5444c53d03bdaeb865b0b4b663169932524ac16a7",
+      "bytes": 7344
+    },
+    "tests/test_mod_api_process_and_launch.py": {
+      "sha256": "a656f48002bd6d22821e0c96f752b76cc61ae758d91721d81c09b25d045d5e40",
+      "bytes": 7226
+    },
+    "tests/test_mod_client_delivery.py": {
+      "sha256": "ab7542b8645ef480a4bd6e7812b1c3ed865897c2416adbbf2f01ba9940f77783",
+      "bytes": 6917
+    },
+    "tests/test_mod_client_preparation.py": {
+      "sha256": "68bcd85f0be0155437f992654e267769ad485582730a4511d022d3011fad8656",
+      "bytes": 6125
     }
-  },
-  "license": "GPL-3.0; preserve individual dependency and CCP data notices",
-  "limits": [
-    "Matching build inputs; not a byte-identical rebuild claim.",
-    "Historical voice reference inputs and model/tool binaries are not included."
-  ],
-  "packagedDataInputCount": 161,
-  "project": "EveJS Launcher",
-  "schemaVersion": 1,
-  "scope": "Files inside EveJS-Launcher-1.0.60-source.tar.gz; repository release prose may be newer.",
-  "sourceOnlyExtras": [
-    "BUILDING.md",
-    "requirements-build.txt",
-    "scripts/celestial_transit_synthesis.py",
-    "scripts/generate_celestial_transit.py",
-    "scripts/generate_lyra_voice_catalog.py",
-    "scripts/process_lyra_voice_catalog.py",
-    "scripts/build_character_names.py"
-  ],
-  "version": "1.0.60"
+  }
 }

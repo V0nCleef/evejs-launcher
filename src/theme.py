@@ -663,6 +663,22 @@ QLabel[class="modPath"] {{
     font-family: '{mono}';
     font-size: 13px;
 }}
+QLabel[class="modDeliveryNotice"] {{
+    color: {s['warning']};
+    font-size: 13px;
+}}
+QPushButton[class="modDeliveryHelp"] {{
+    color: {s['warning']};
+    background: transparent;
+    border: none;
+    padding: 0;
+    text-align: left;
+    font-size: 13px;
+    text-decoration: underline;
+}}
+QPushButton[class="modDeliveryHelp"]:focus {{
+    border: 1px dotted {s['warning']};
+}}
 QLabel[class="modState"] {{
     background-color: rgba(143, 158, 173, 14);
     border: 1px solid {s['border']};

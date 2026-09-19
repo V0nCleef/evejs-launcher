@@ -9,6 +9,7 @@ already committed by the host. Executable mods are not an OS security sandbox.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from contextlib import nullcontext
 import base64
 import hashlib
 import json
@@ -33,7 +34,10 @@ from .mod_contributions import (
     ContributionStore, FileChange, FileTarget, KeyEdit, RemovalReviewRequired, read_target,
 )
 from .mod_lifecycle_lock import acquire_mod_lifecycle_lock
+from .mod_client_delivery import FEATURE_ENV, FEATURE, METHODS, record_delivery
+from .mod_client_preparation import FEATURE as PREPARATION_FEATURE, enrolled, record_preparation, validate_policy
 from .mod_manifest import Mod, scan_mods
+from .overview_patch import is_eve_client_running
 from .mod_settings import ModSettingsContext, ModSettingsSession, profile_identity
 from .mod_settings_schema import SettingsFile, parse_settings_schema
 
@@ -50,6 +54,7 @@ _BASES = {"mod", "evejs", "profile", "profile_settings", "client"}
 _ENVIRONMENT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
 _ARGUMENT = re.compile(r"(?:/|--?)([A-Za-z][A-Za-z0-9_-]{0,63})(?:[:=](.*))?\Z")
 _RESERVED_ENVIRONMENT = {
+    FEATURE_ENV,
     "COMPUTERNAME", "HOSTNAME", "USERNAME", "USERDOMAIN", "USERDOMAIN_ROAMINGPROFILE",
     "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "PATH", "PATHEXT",
     "SYSTEMROOT", "WINDIR", "COMSPEC", "HOMEDRIVE", "HOMEPATH", "PSMODULEPATH",
@@ -94,6 +99,8 @@ class ModHelperResult:
     arguments: tuple[str, ...]
     receipt: ModHelperReceipt | None
     request_path: Path
+    client_script_delivery: str | None = None
+    client_preparation: tuple[str, ...] | None = None
 
     def require_ready(self) -> "ModHelperResult":
         if not self.success or self.state != "ready":
@@ -211,6 +218,7 @@ def _settings_values(descriptor: ModApiDescriptor, context: ModSettingsContext) 
 def _command(descriptor: ModApiDescriptor, request: Path, result: Path) -> tuple[list[str], dict[str, str]]:
     helper = descriptor.launcher_api.helper
     environment = dict(os.environ)
+    environment[FEATURE_ENV] = FEATURE + ',' + PREPARATION_FEATURE
     if helper.runtime == "powershell":
         windows = environment.get("SystemRoot") or environment.get("WINDIR")
         if not windows:
@@ -414,7 +422,7 @@ def _receipt(row: object, descriptor: ModApiDescriptor, context: ModSettingsCont
 
 def validate_helper_result(payload: dict, descriptor: ModApiDescriptor, context: ModSettingsContext, action: str, request_id: str, request_path: Path) -> ModHelperResult:
     required = {"protocol", "requestId", "success", "state", "message", "restartRequired", "contributions", "environment", "arguments"}
-    if not isinstance(payload, dict) or not required <= payload.keys() or payload.keys() - required - {"receipt"}:
+    if not isinstance(payload, dict) or not required <= payload.keys() or payload.keys() - required - {"receipt", "clientScriptDelivery", "clientPreparation"}:
         raise ModApiRuntimeError("The helper reply has missing or unsupported fields.")
     if payload["protocol"] != PROTOCOL or payload["requestId"] != request_id:
         raise ModApiRuntimeError("The helper reply does not match this request and protocol.")
@@ -437,9 +445,22 @@ def validate_helper_result(payload: dict, descriptor: ModApiDescriptor, context:
                     else {"active", "restored"} if action in {"verify", "recover"} else {"active"})
         if receipt.state not in expected:
             raise ModApiRuntimeError("The receipt does not prove the requested binary state.")
+    delivery = payload.get("clientScriptDelivery")
+    if "clientScriptDelivery" in payload and (not isinstance(delivery, str) or delivery not in METHODS):
+        raise ModApiRuntimeError("The helper returned an unsupported client script delivery method.")
+    preparation = None
+    if 'clientPreparation' in payload:
+        try:
+            preparation = validate_policy(payload['clientPreparation'])
+        except ValueError as exc:
+            raise ModApiRuntimeError(str(exc)) from exc
+        if (action not in {'install', 'recover'} or not success or state != 'ready'
+                or descriptor.updates is None or context.client_root is None
+                or not {'install', 'verify', 'prepare_profile'}.issubset(descriptor.launcher_api.capabilities)):
+            raise ModApiRuntimeError('Client preparation enrollment requires a completed install and declared lifecycle capabilities.')
     return ModHelperResult(descriptor, context, action, request_id, success, state,
         _plain(payload["message"], "Helper message", 4096, empty=True), tuple(restarts), edits, files,
-        _environment(payload["environment"]), _arguments(payload["arguments"]), receipt, request_path)
+        _environment(payload["environment"]), _arguments(payload["arguments"]), receipt, request_path, delivery, preparation)
 
 
 def run_mod_helper(descriptor: ModApiDescriptor, action: str, context: ModSettingsContext, *, backend: str = "native", timeout: float | None = None, runner: Callable | None = None, event: dict | None = None) -> ModHelperResult:
@@ -593,7 +614,7 @@ def public_package_owns_legacy_folder(evejs_root: str | Path, relative_folder: s
                and mod.api_descriptor.kind == "client-package" for mod in (scan_mods(root) if mods is None else mods))
 
 
-def prepare_public_client_mods(evejs_root: str | Path, client_root: str | Path, profile_tq_path: Path, *, backend: str = "native", protected_environment: Mapping[str, str] | None = None, protected_arguments: Iterable[str] = (), runner: Callable | None = None, mods: Iterable[Mod] | None = None) -> PreparedClientMods:
+def prepare_public_client_mods(evejs_root: str | Path, client_root: str | Path, profile_tq_path: Path, *, backend: str = "native", protected_environment: Mapping[str, str] | None = None, protected_arguments: Iterable[str] = (), runner: Callable | None = None, mods: Iterable[Mod] | None = None, client_lock_held: bool = False) -> PreparedClientMods:
     mods = public_client_mods(evejs_root, backend=backend, mods=mods)
     if not mods:
         return PreparedClientMods(MappingProxyType({}), (), ())
@@ -603,12 +624,34 @@ def prepare_public_client_mods(evejs_root: str | Path, client_root: str | Path, 
     settings = platform_api.get_eve_settings_path(str(profile_tq_path))
     local_appdata = Path(os.environ["LOCALAPPDATA"]).resolve(strict=True)
     results, notifications = [], []
-    with acquire_mod_lifecycle_lock(client):
+    # launch_client retains this same lease through process creation. Direct
+    # callers still acquire it here. Installation never runs as prepare_profile.
+    with nullcontext() if client_lock_held else acquire_mod_lifecycle_lock(client):
         for mod in mods:
             descriptor = mod.api_descriptor
             context = ModSettingsContext(Path(evejs_root), descriptor.folder, client, profile_id, profile, settings,
                 profile_settings_storage_root=local_appdata)
             capabilities = descriptor.launcher_api.capabilities if descriptor.launcher_api is not None else ()
+            if enrolled(descriptor, client):
+                if not {'install', 'verify', 'prepare_profile'}.issubset(capabilities):
+                    raise ModApiRuntimeError('An enrolled mod no longer declares client preparation capabilities.')
+                verified = run_mod_helper_locked(descriptor, 'verify', context, backend=backend, runner=runner)
+                if verified.contributions or verified.environment or verified.arguments:
+                    raise ModApiRuntimeError('Client verification must not request mutations or launch options.')
+                if not verified.success or verified.state != 'ready':
+                    if is_eve_client_running():
+                        raise ModApiRuntimeError('Close EVE clients before changing shared client mod files. Retry launch afterward; installation is automatic.')
+                    installed = run_mod_helper_locked(descriptor, 'install', context, backend=backend, runner=runner).require_ready()
+                    # A pre-client install may not require restarting its server.
+                    if set(installed.restart_required) - {'client', 'none'}:
+                        raise ModApiRuntimeError('Client preparation requires a server or launcher restart.')
+                    commit_helper_contributions_locked(installed)
+                    record_preparation(installed)
+                    record_delivery(installed, backend)
+                    verified = run_mod_helper_locked(descriptor, 'verify', context, backend=backend, runner=runner).require_ready()
+                    if verified.contributions or verified.environment or verified.arguments:
+                        raise ModApiRuntimeError('Client verification must not request mutations or launch options.')
+                verified.require_ready()
             if NOTIFICATION_ACTIONS.intersection(capabilities):
                 notifications.append((descriptor, context))
             if descriptor.kind == "client-package" and "verify" in capabilities:
@@ -629,4 +672,6 @@ def prepare_public_client_mods(evejs_root: str | Path, client_root: str | Path, 
         store = ContributionStore(client, allowed_roots=roots)
         plan = store.plan_batch_locked((result.context.owner, result.contributions) for result in results if result.contributions)
         store.commit_locked(plan)
+        for result in results:
+            record_delivery(result, backend)
     return PreparedClientMods(MappingProxyType(environment), arguments, tuple(results), tuple(notifications))

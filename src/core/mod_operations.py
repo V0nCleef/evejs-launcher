@@ -13,6 +13,8 @@ from .mod_api_runtime import (
 )
 from .mod_contributions import ContributionOwner, ContributionStore, RemovalEditConflict, RemovalReviewRequired
 from .mod_lifecycle_lock import acquire_mod_lifecycle_lock
+from .mod_client_delivery import record_delivery
+from .mod_client_preparation import record_preparation
 from .mod_manifest import ActivationKind, Mod, scan_mods, set_mod_active_locked
 from .mod_settings import ModSettingsContext
 from .profiles import PROFILES_ROOT
@@ -51,13 +53,19 @@ def _helper_locked(mod: Mod, action: str, operation: ModOperationContext):
     if descriptor is None:
         raise RuntimeError("This mod has no public lifecycle helper.")
     root = helper_coordination_root(descriptor, context, action)
+    # Loader helpers can also own a client companion. Serialize their explicit
+    # installation/cleanup against other roots preparing or spawning that client.
+    lock_root = context.client_root if (context.client_root is not None and
+        descriptor.launcher_api is not None and 'prepare_profile' in descriptor.launcher_api.capabilities) else root
     # The outer EveJS lease prevents package replacement. Client helpers also
     # serialize against every launch/settings save using that physical client.
-    lease = nullcontext() if root == context.evejs_root else acquire_mod_lifecycle_lock(root)
+    lease = nullcontext() if lock_root == context.evejs_root else acquire_mod_lifecycle_lock(lock_root)
     with lease:
         result = run_mod_helper_locked(descriptor, action, context, backend=operation.backend)
         if result.success and result.state == "ready":
             commit_helper_contributions_locked(result)
+            record_preparation(result)
+            record_delivery(result, operation.backend)
         return result
 
 

@@ -53,6 +53,7 @@ from src.core.mod_management import (
 from src.core.mod_runtime_state import ModRuntimeSnapshot
 from src.core.mod_runtime_state import mod_state_key
 from src.core.mod_inventory import ModInventory, folder_key, load_mod_inventory
+from src.core.mod_client_delivery import LEGACY_GUIDE_URL, reported_delivery
 from src.core.service_status import DockerControlPolicy, RuntimeBackend
 from src.widgets.page_header import PageHeader
 from src.widgets.localized_dialogs import LocalizedMessageBox as QMessageBox
@@ -196,6 +197,7 @@ class ModRow(QFrame):
         can_move_up: bool = False,
         can_move_down: bool = False,
         cleanup: dict | None = None,
+        client_script_delivery: str | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -211,6 +213,7 @@ class ModRow(QFrame):
         self._local_removable = local_removable
         self._delegated_activation = delegated_activation
         self._cleanup = cleanup
+        self._client_script_delivery = client_script_delivery
         self._can_show_repair = management is None and bool(management_error)
         self._operation_error = ""
         self._lifecycle_busy = False
@@ -322,6 +325,23 @@ class ModRow(QFrame):
             if mod.version else str(troubleshooting_path)
         )
         text_col.addWidget(self.path_label)
+
+        self.delivery_notice = QLabel("Legacy client script patch — still supported")
+        self.delivery_notice.setTextFormat(Qt.TextFormat.PlainText)
+        self.delivery_notice.setProperty("class", "modDeliveryNotice")
+        self.delivery_notice.setWordWrap(True)
+        set_translatable_tooltip(self.delivery_notice,
+            "This mod last reported directly modifying client scripts for this client and backend. "
+            "It remains supported, but authors should migrate to login-handshake delivery where possible.")
+        self.delivery_notice.setVisible(mod.active and client_script_delivery == "client-script-patch")
+        text_col.addWidget(self.delivery_notice)
+        self.delivery_help = QPushButton("What does this mean?")
+        self.delivery_help.setProperty("class", "modDeliveryHelp")
+        self.delivery_help.setCursor(Qt.CursorShape.PointingHandCursor)
+        set_translatable_tooltip(self.delivery_help,
+            "Open the explanation and migration steps in How to make a mod on GitHub.")
+        self.delivery_help.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(LEGACY_GUIDE_URL)))
+        text_col.addWidget(self.delivery_help, alignment=Qt.AlignmentFlag.AlignLeft)
 
         layout.addLayout(text_col, stretch=1)
 
@@ -473,6 +493,9 @@ class ModRow(QFrame):
         register_translatable_widget_tree(self)
 
     def _update_state_presentation(self) -> None:
+        self.delivery_notice.setVisible(self.mod.valid and self.mod.active
+                                        and self._client_script_delivery == "client-script-patch")
+        self.delivery_help.setVisible(not self.delivery_notice.isHidden())
         if not self.mod.valid:
             text, state = "INVALID", "error"
         elif self._operation_error:
@@ -1363,6 +1386,8 @@ class ModsPage(QWidget):
                         )
                 row = ModRow(
                     mod,
+                    client_script_delivery=reported_delivery(mod, config.get_setting("client_path") or None,
+                                                             "native" if self._runtime_backend is RuntimeBackend.NATIVE else "docker"),
                     projection=projection,
                     projection_resolver=self._resolve_projection,
                     can_toggle=can_toggle,

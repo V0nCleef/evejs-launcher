@@ -224,6 +224,20 @@
         "ko": "15. 예제 파일"
       },
       "path": "docs/how-to-make-a-mod/15-example-files.md"
+    },
+    {
+      "title": "16. Add an in-game settings window",
+      "titles": {
+        "en": "16. Add an in-game settings window",
+        "nl": "16. Een instellingenvenster in het spel",
+        "fr": "16. Ajouter une fenêtre de réglages en jeu",
+        "de": "16. Ein Einstellungsfenster im Spiel",
+        "ru": "16. Окно настроек внутри игры",
+        "zh_CN": "16. 添加游戏内设置窗口",
+        "ja": "16. ゲーム内の設定ウィンドウを追加する",
+        "ko": "16. 게임 내 설정 창 추가"
+      },
+      "path": "docs/how-to-make-a-mod/16-ingame-settings.md"
     }
   ],
   "examples": [
@@ -250,7 +264,12 @@
     "examples/mods/source-overlay-demo/helper.js",
     "examples/mods/source-overlay-demo/example-source.js",
     "examples/mods/configure-demo/README.md",
-    "examples/mods/configure-demo/evejs-launcher.mod.json"
+    "examples/mods/configure-demo/evejs-launcher.mod.json",
+    "examples/ingame-settings/AI-HANDOFF.md",
+    "examples/ingame-settings/README.md",
+    "examples/ingame-settings/window.py",
+    "examples/ingame-settings/settings-handlers.js",
+    "examples/login-delivery/AI-HANDOFF.md"
   ],
   "references": [
     {
@@ -354,6 +373,9 @@
     "docs/how-to-make-a-mod/images/undo-removal.png",
     "docs/how-to-make-a-mod/images/update-review.png",
     "docs/how-to-make-a-mod/images/release-zip.png",
-    "docs/how-to-make-a-mod/images/release-information.png"
+    "docs/how-to-make-a-mod/images/release-information.png",
+    "docs/how-to-make-a-mod/images/ingame-settings.png",
+    "docs/how-to-make-a-mod/images/ai-handoff-toolbar.png",
+    "docs/how-to-make-a-mod/images/legacy-delivery-notice.png"
   ]
 }
