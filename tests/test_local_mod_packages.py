@@ -1,4 +1,5 @@
 from dataclasses import replace
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -165,6 +166,7 @@ def test_adoption_keeps_legacy_files_states_and_current_order(root):
     expected = {mod.id: snapshot(mod.path) for mod in current}
     service.adopt(current[1], effective_order=current)
     assert [mod.id for mod in service.sort_mods(reversed(current))] == ["Zulu", "Alpha"]
+    assert [mod.id for mod in service.sort_mods_for_runtime(reversed(current))] == ["Zulu", "Alpha"]
     assert {mod.id: snapshot(mod.path) for mod in current} == expected
     renamed = [replace(current[1], name="AAA"), replace(current[0], name="ZZZ")]
     assert [mod.id for mod in service.sort_mods(renamed)] == ["Zulu", "Alpha"]
@@ -516,3 +518,202 @@ def test_can_manage_rejects_corrupt_local_registry_without_replacing_it(root):
     service.registry_path.write_bytes(b'{"schemaVersion":')
     assert not service.can_manage(mod)
     assert service.registry_path.read_bytes() == b'{"schemaVersion":'
+
+
+def _copy_valid_registry_with_disabled_mods(root: Path, tmp_path: Path) -> LocalModPackages:
+    original = tmp_path / "OriginalEveJS"
+    (original / "mods").mkdir(parents=True)
+    original_mods = {}
+    for name in ("Alpha", "Beta", "Quarantined"):
+        folder(original / "mods", name, active=False)
+        original_mods[name] = one(original, name)
+
+    source = LocalModPackages(original)
+    source.adopt(
+        original_mods["Alpha"],
+        effective_order=[original_mods["Alpha"], original_mods["Beta"], original_mods["Quarantined"]],
+    )
+    source.adopt(original_mods["Beta"])
+    source.remove(original_mods["Quarantined"])
+
+    for name in ("Alpha", "Beta"):
+        folder(root / "mods", name, active=False)
+    target = LocalModPackages(root)
+    target.registry_path.parent.mkdir(parents=True, exist_ok=True)
+    target.registry_path.write_bytes(source.registry_path.read_bytes())
+    return target
+
+
+def test_runtime_order_preserves_valid_foreign_order_for_disabled_copy(root, tmp_path):
+    service = _copy_valid_registry_with_disabled_mods(root, tmp_path)
+    original_registry = service.registry_path.read_bytes()
+    mods = [one(root, "Beta"), one(root, "Alpha")]
+
+    assert [mod.id for mod in service.sort_mods_for_runtime(mods)] == ["Alpha", "Beta"]
+    assert service.registry_path.read_bytes() == original_registry
+    assert {record["status"] for record in json.loads(original_registry)["records"].values()} == {
+        "installed", "quarantined",
+    }
+    with pytest.raises(LocalModPackageError, match="another EveJS root"):
+        service.records()
+    with pytest.raises(LocalModPackageError, match="another EveJS root"):
+        service.remember_order(mods)
+    assert service.registry_path.read_bytes() == original_registry
+
+
+def test_runtime_order_preserves_valid_foreign_order_for_active_mods(root, tmp_path):
+    service = _copy_valid_registry_with_disabled_mods(root, tmp_path)
+    original_registry = service.registry_path.read_bytes()
+    for name in ("Alpha", "Beta"):
+        disabled_loader = root / f"mods/{name}/loader.js.off"
+        disabled_loader.rename(disabled_loader.with_name("loader.js"))
+    mods = [one(root, "Beta"), one(root, "Alpha")]
+
+    assert all(mod.active for mod in mods)
+    assert [mod.id for mod in service.sort_mods_for_runtime(mods)] == ["Alpha", "Beta"]
+    assert service.registry_path.read_bytes() == original_registry
+
+
+def test_runtime_order_rejects_mod_from_another_physical_root(root, tmp_path):
+    service = _copy_valid_registry_with_disabled_mods(root, tmp_path)
+    other_root = tmp_path / "OtherEveJS"
+    (other_root / "mods").mkdir(parents=True)
+    folder(other_root / "mods", "External", active=True)
+    original_registry = service.registry_path.read_bytes()
+
+    with pytest.raises(LocalModPackageError, match="different EveJS root"):
+        service.sort_mods_for_runtime([one(other_root, "External")])
+    assert service.registry_path.read_bytes() == original_registry
+
+
+@pytest.mark.parametrize("damage", ["schema", "record", "transaction", "malformed-transaction"])
+def test_runtime_order_rejects_corrupt_or_pending_foreign_registry(root, tmp_path, damage):
+    service = _copy_valid_registry_with_disabled_mods(root, tmp_path)
+    value = json.loads(service.registry_path.read_text(encoding="utf-8"))
+    record_id = next(
+        key for key, row in value["records"].items() if row["status"] == "installed"
+    )
+    if damage == "schema":
+        value["schemaVersion"] = 2
+    elif damage == "record":
+        value["records"][record_id]["package_kind"] = "unknown-package-kind"
+    elif damage == "transaction":
+        record = value["records"][record_id]
+        record["transaction"] = {
+            "action": "import",
+            "source": f"_local/launcher-mods/staging/{record_id}",
+            "destination": record["relative_path"],
+            "status": "installed",
+            "fingerprint": record["fingerprint"],
+        }
+    else:
+        value["records"][record_id]["transaction"] = {"action": "import"}
+    service.registry_path.write_text(json.dumps(value), encoding="utf-8")
+    original_registry = service.registry_path.read_bytes()
+
+    with pytest.raises(LocalModPackageError):
+        service.sort_mods_for_runtime(scan_mods(root))
+    assert service.registry_path.read_bytes() == original_registry
+
+
+def test_registry_relocation_preview_is_read_only_and_describes_exact_registry(root, tmp_path):
+    service = _copy_valid_registry_with_disabled_mods(root, tmp_path)
+    original = service.registry_path.read_bytes()
+    original_root = json.loads(original)["root"]
+    original_mods = snapshot(root / "mods")
+
+    preview = service.relocation_preview()
+
+    assert preview.saved_root == original_root
+    assert preview.current_root == str(root.resolve())
+    assert preview.registry_sha256 == hashlib.sha256(original).hexdigest()
+    assert preview.record_count == 3
+    assert service.registry_path.read_bytes() == original
+    assert snapshot(root / "mods") == original_mods
+
+
+def test_registry_relocation_backs_up_exact_bytes_and_changes_only_root(root, tmp_path):
+    service = _copy_valid_registry_with_disabled_mods(root, tmp_path)
+    original = service.registry_path.read_bytes()
+    original_document = json.loads(original)
+    original_mods = snapshot(root / "mods")
+    preview = service.relocation_preview()
+
+    backup = service.relocate_registry(preview.registry_sha256)
+
+    assert backup.parent == service.registry_path.parent
+    assert backup.read_bytes() == original
+    updated = json.loads(service.registry_path.read_text(encoding="utf-8"))
+    assert updated == {**original_document, "root": str(root.resolve())}
+    assert snapshot(root / "mods") == original_mods
+    assert {record.status for record in service.records()} == {"installed", "quarantined"}
+
+
+def test_registry_relocation_rejects_a_stale_preview_without_writing(root, tmp_path):
+    service = _copy_valid_registry_with_disabled_mods(root, tmp_path)
+    preview = service.relocation_preview()
+    changed = json.loads(service.registry_path.read_text(encoding="utf-8"))
+    changed["order"].reverse()
+    service.registry_path.write_text(json.dumps(changed), encoding="utf-8")
+    current = service.registry_path.read_bytes()
+
+    with pytest.raises(LocalModPackageError, match="changed after preview"):
+        service.relocate_registry(preview.registry_sha256)
+
+    assert service.registry_path.read_bytes() == current
+    assert not list(service.registry_path.parent.glob("registry.before-relocation-*.json"))
+
+
+@pytest.mark.parametrize("damage", ["pending-package", "pending-update", "corrupt-record", "outside-path"])
+def test_registry_relocation_rejects_pending_corrupt_or_outside_metadata(root, tmp_path, damage):
+    service = _copy_valid_registry_with_disabled_mods(root, tmp_path)
+    value = json.loads(service.registry_path.read_text(encoding="utf-8"))
+    record_id = next(
+        key for key, row in value["records"].items() if row["status"] == "installed"
+    )
+    if damage == "pending-package":
+        record = value["records"][record_id]
+        record["transaction"] = {
+            "action": "import",
+            "source": f"_local/launcher-mods/staging/{record_id}",
+            "destination": record["relative_path"],
+            "status": "installed",
+            "fingerprint": record["fingerprint"],
+        }
+    elif damage == "corrupt-record":
+        value["records"][record_id]["package_kind"] = "unknown-package-kind"
+    elif damage == "outside-path":
+        value["records"][record_id]["relative_path"] = "../outside"
+    service.registry_path.write_text(json.dumps(value), encoding="utf-8")
+    original = service.registry_path.read_bytes()
+    if damage == "pending-update":
+        update = root / "_local/launcher-mod-updates" / ("a" * 32)
+        update.mkdir(parents=True)
+        (update / "update.json").write_text(
+            json.dumps({"schemaVersion": 1, "phase": "prepared"}), encoding="utf-8"
+        )
+
+    with pytest.raises(LocalModPackageError):
+        service.relocation_preview()
+
+    assert service.registry_path.read_bytes() == original
+    assert not list(service.registry_path.parent.glob("registry.before-relocation-*.json"))
+
+
+def test_registry_relocation_rejects_reparse_record_paths(root, tmp_path):
+    service = _copy_valid_registry_with_disabled_mods(root, tmp_path)
+    package = root / "mods/Alpha"
+    held = root / "mods/Alpha-held"
+    package.rename(held)
+    try:
+        package.symlink_to(held, target_is_directory=True)
+    except OSError:
+        held.rename(package)
+        pytest.skip("This Windows account cannot create directory symbolic links.")
+
+    try:
+        with pytest.raises(LocalModPackageError, match="Linked/reparse"):
+            service.relocation_preview()
+    finally:
+        package.unlink()
+        held.rename(package)

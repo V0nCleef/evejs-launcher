@@ -3,9 +3,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+import time
 
 import pytest
+from PyQt6.QtCore import QEvent
 from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtTest import QTest
 
 from src import app as app_module
 from src import config
@@ -27,11 +30,37 @@ def _window_config(root: Path) -> dict:
         {
             "evejs_root": str(root),
             "client_path": "",
+            "audio_music_enabled": False,
+            "audio_voice_enabled": False,
             "update_auto_check": False,
             "update_check_interval_hours": 0,
         }
     )
     return cfg
+
+
+def _settle_mod_startup(qapp: QApplication, window: MainWindow) -> None:
+    """Drain the initial inventory and its queued update check before a test."""
+    coordinator = window._mod_coordinator
+    coordinator._updates.poll_timer.stop()
+    deadline = time.monotonic() + 3.0
+    quiet_cycles = 0
+    while time.monotonic() < deadline:
+        qapp.processEvents()
+        active = (
+            coordinator._token is not None
+            or coordinator._thread is not None
+            or getattr(window, "_mod_operation_request", None) is not None
+            or getattr(window, "_mod_operation_thread", None) is not None
+        )
+        if active:
+            quiet_cycles = 0
+        else:
+            quiet_cycles += 1
+            if quiet_cycles >= 3:
+                return
+        QTest.qWait(5)
+    pytest.fail("Initial Mods inventory did not release its operation slot")
 
 
 @pytest.fixture
@@ -55,8 +84,12 @@ def tools_window(
     window = MainWindow()
     window._status_timer.stop()
     window._prune_timer.stop()
-    yield window
-    window.deleteLater()
+    _settle_mod_startup(qapp, window)
+    try:
+        yield window
+    finally:
+        window.deleteLater()
+        qapp.sendPostedEvents(window, QEvent.Type.DeferredDelete)
 
 
 def test_main_window_stack_and_navigation_follow_page_enum_order(

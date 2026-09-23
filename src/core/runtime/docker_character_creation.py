@@ -30,6 +30,8 @@ _HELPER_MOUNT = "/run/evejs-launcher/helpers"
 _HELPER_PATH = f"{_HELPER_MOUNT}/{_HELPER_NAME}"
 _BACKUP_MOUNT = "/run/evejs-launcher/backup"
 _GAME_STORE_TARGET = "/var/lib/evejs/gameStore"
+_DATA_ROOT_LOGS_TARGET = "/var/lib/evejs/logs"
+_LEGACY_LOGS_TARGET = "/app/server/logs"
 _COMMAND_TIMEOUT = 300.0
 _MAX_INPUT_BYTES = 4 * 1024
 _MAX_OUTPUT_BYTES = 16 * 1024
@@ -236,7 +238,7 @@ class ManagedDockerCharacterCreationController:
         try:
             argv = self._target.compose_args(
                 self._runner.executable,
-                *self._command(),
+                *self._command(final_config),
             )
             command_result = self._runner.run_with_input(
                 argv,
@@ -349,6 +351,12 @@ class ManagedDockerCharacterCreationController:
                 server_service.mounts,
                 _GAME_STORE_TARGET,
             )
+            # Reject an ambiguous effective log target before backup-directory
+            # preparation, just as we do for the selected GameStore mount.
+            resolve_mount(
+                server_service.mounts,
+                _DATA_ROOT_LOGS_TARGET,
+            )
         except (ComposeValidationError, TypeError, ValueError):
             return False
         if (
@@ -406,7 +414,26 @@ class ManagedDockerCharacterCreationController:
         self._backup_directory = resolved
         return True
 
-    def _command(self) -> tuple[str, ...]:
+    def _command(self, config: ComposeConfig) -> tuple[str, ...]:
+        server_service = config.services["server"]
+        isolated_log_targets = [_LEGACY_LOGS_TARGET]
+        # 0.12.9 moved the persistent Compose log volume under EVEJS_DATA_ROOT.
+        # Keep the historical anonymous mount, and mask the new persistent target
+        # only when it is present in this freshly validated effective Compose file.
+        data_root_logs_mount = resolve_mount(
+            server_service.mounts,
+            _DATA_ROOT_LOGS_TARGET,
+        )
+        if (
+            data_root_logs_mount is not None
+            and data_root_logs_mount.target == _DATA_ROOT_LOGS_TARGET
+        ):
+            isolated_log_targets.append(_DATA_ROOT_LOGS_TARGET)
+        log_volume_args = tuple(
+            argument
+            for target in isolated_log_targets
+            for argument in ("--volume", target)
+        )
         return (
             "run",
             "--pull",
@@ -416,8 +443,7 @@ class ManagedDockerCharacterCreationController:
             "-T",
             "--user",
             "node",
-            "--volume",
-            "/app/server/logs",
+            *log_volume_args,
             "--volume",
             f"{self._helper_directory}:{_HELPER_MOUNT}:ro",
             "--volume",

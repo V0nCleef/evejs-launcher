@@ -600,6 +600,43 @@ QFrame[class="modsActionRail"] {{
     border: 1px solid {s['border_bright']};
     border-radius: 9px;
 }}
+QFrame[class="modsRegistryBanner"] {{
+    background-color: rgba(82, 59, 16, 224);
+    border: 1px solid {s['warning']};
+    border-radius: 10px;
+}}
+QLabel[class="modsRegistryTitle"] {{
+    color: {s['warning']};
+    font-family: '{header}';
+    font-size: 18px;
+    font-weight: 700;
+}}
+QLabel[class="modsRegistryDescription"] {{
+    color: {s['text_primary']};
+    font-size: 13px;
+}}
+QPushButton[class="modsRegistryAction"] {{
+    background-color: {s['warning']};
+    border: 1px solid {s['warning']};
+    border-radius: 7px;
+    color: {c['void_black']};
+    padding: 11px 20px;
+    font-family: '{header}';
+    font-size: 14px;
+    font-weight: 700;
+}}
+QPushButton[class="modsRegistryAction"]:hover {{
+    background-color: {s['text_primary']};
+    border-color: {s['text_primary']};
+}}
+QPushButton[class="modsRegistryAction"]:focus {{
+    border: 2px solid {s['text_primary']};
+}}
+QPushButton[class="modsRegistryAction"]:disabled {{
+    background-color: {s['surface']};
+    border-color: {s['surface_elevated']};
+    color: {s['text_muted']};
+}}
 QFrame[class="modsRuntimePanel"],
 QFrame[class="modsFolderPanel"] {{
     background-color: rgba(8, 24, 36, 222);

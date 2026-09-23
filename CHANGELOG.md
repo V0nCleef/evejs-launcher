@@ -2,6 +2,16 @@
 
 ## Changelog
 
+## v1.0.64 - 2026-09-23
+
+- Added support for the tested EveJS 0.12.9 beta while retaining support for 0.12.8 and older supported installations, including the updated log locations and certificate installer.
+- Fixed a launcher crash when starting Game from a copied EveJS installation. Vanilla and modded startup now handle validated copied mod records correctly.
+- Before startup, list enabled mods whose declared compatibility does not include the selected EveJS version. Choose Run anyway (unsupported), Disable affected mods, or Cancel. Running anyway applies only to that start; the launcher does not fix mod code or change compatibility declarations.
+- Added a prominent Register mods here banner for copied or moved installations. Registration keeps an exact backup and preserves existing mod files, settings, and enabled states.
+- Add ZIP and Add Folder now guide users through registration when needed, then continue with the selected package. Newly imported mods remain disabled until enabled by the user.
+- Added clearer messages for incomplete Native setup and invalid 0.12.9 configuration before Game startup or save migration.
+- Tested on EveJS 0.12.8 and 0.12.9, including mod handling.
+
 ## v1.0.63 - 2026-09-19
 
 - Fixed launcher updates selecting the source-code archive instead of the Windows launcher package.

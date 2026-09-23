@@ -356,6 +356,11 @@ def prepare_evejs_client_certificate_trust(
         )
     if timeout_seconds <= 0:
         raise ValueError("Certificate preparation timeout must be positive.")
+    from .evejs_compatibility import inspect_evejs_runtime
+
+    certificate_check_only_supported = inspect_evejs_runtime(
+        root
+    ).certificate_check_only_supported
     client_bundles_are_current = _selected_ca_is_in_client_bundles(root, client)
 
     # The bundle belongs to the shared copied client, not to one account
@@ -397,9 +402,15 @@ def prepare_evejs_client_certificate_trust(
         "-ClientPath",
         str(client),
     ]
-    if client_bundles_are_current:
+    check_only = certificate_check_only_supported and client_bundles_are_current
+    if check_only:
+        # The beta script's check is read-only and covers Windows trust plus
+        # every client bundle. A successful result needs no installer repair.
+        command.append("-CheckOnly")
+    elif client_bundles_are_current and not certificate_check_only_supported:
         # The official script still verifies and repairs CurrentUser trust, but
-        # must not rediscover or rewrite already-verified client bundles.
+        # the legacy script must not rediscover or rewrite already-verified
+        # client bundles. The beta removed this switch and uses CheckOnly.
         command.append("-SkipClientBundles")
     try:
         completed = subprocess.run(
@@ -415,15 +426,34 @@ def prepare_evejs_client_certificate_trust(
             **get_hidden_process_flags(),
         )
     except subprocess.TimeoutExpired as exc:
+        if check_only:
+            raise RuntimeError(
+                "Timed out while EveJS checked the selected installation's "
+                "chat certificate trust. No automatic repair was attempted. "
+                "Close every EVE client before running the official certificate "
+                "setup or recovery."
+            ) from exc
         raise RuntimeError(
             "Timed out while EveJS prepared the selected installation's "
             "chat certificates. Close every EVE client and try again."
         ) from exc
     except OSError as exc:
+        if check_only:
+            raise RuntimeError(
+                "Could not start EveJS's certificate check. No automatic "
+                "repair was attempted. Close every EVE client before running "
+                "the official certificate setup or recovery. "
+                f"Windows reported: {exc}"
+            ) from exc
         raise RuntimeError(
             "Could not start EveJS's certificate preparation. "
             f"Windows reported: {exc}"
         ) from exc
+
+    if check_only and completed.returncode == 0:
+        # CheckOnly validated the selected CA, Windows trust, and client
+        # bundles without changing any of them.
+        return True
 
     if completed.returncode != 0:
         output = "\n".join(
@@ -434,6 +464,14 @@ def prepare_evejs_client_certificate_trust(
         if len(output) > 2_000:
             output = output[-2_000:]
         detail = output or f"PowerShell exited with code {completed.returncode}."
+        if check_only:
+            raise RuntimeError(
+                "EveJS could not verify certificate trust for the selected "
+                "installation. No automatic repair or CA rotation was "
+                "attempted. Close every EVE client before running the official "
+                "certificate setup or recovery.\n\n"
+                f"{detail}"
+            )
         raise RuntimeError(
             "EveJS could not prepare chat certificate trust for the selected "
             f"installation.\n\n{detail}"

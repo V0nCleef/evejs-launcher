@@ -29,6 +29,11 @@ from .mod_runtime_state import (
     native_mod_preload_paths,
     validate_mod_runtime_plan,
 )
+from .evejs_compatibility import inspect_evejs_runtime
+from .native_config_preflight import (
+    NativeConfigPreflightError,
+    validate_native_server_config,
+)
 from .platform import (
     get_graceful_server_process_flags,
     get_hidden_process_flags,
@@ -64,9 +69,16 @@ class NativeModRuntimeLaunchReceipt:
     status_log_path: Path
 
 
-def get_server_log_path(evejs_root: str) -> Path:
-    """Return path to the server's own log file (written by EveJS internally)."""
-    return Path(evejs_root) / "server" / "logs" / "server.log"
+def get_server_log_path(evejs_root: str | Path) -> Path:
+    """Return the selected runtime's own server log path."""
+    root = Path(evejs_root)
+    try:
+        layout = inspect_evejs_runtime(root)
+    except (OSError, RuntimeError, TypeError, ValueError):
+        # Preserve the historical path result for a missing or not-yet-installed
+        # selection, where there is no metadata to resolve capabilities from.
+        return root / "server" / "logs" / "server.log"
+    return layout.log_directory / "server.log"
 
 
 def get_server_console_log() -> Path:
@@ -324,11 +336,17 @@ def build_game_server_command(
     """Build the direct-Node game-server command for an explicit mode."""
     if mode not in {"vanilla", "modded"}:
         raise ValueError(f"Unsupported server mode: {mode}")
+    layout = inspect_evejs_runtime(evejs_root)
+    report_directory = (
+        str(layout.node_report_directory)
+        if layout.uses_data_root_logs
+        else "./logs/node-reports"
+    )
     command = [
         "node",
         "--report-on-fatalerror",
         "--report-uncaught-exception",
-        "--report-dir=./logs/node-reports",
+        f"--report-dir={report_directory}",
         "--max-old-space-size=8192",
     ]
     if mod_runtime_plan is None:
@@ -765,22 +783,47 @@ def start_game_server(
     Stdout and stderr write directly to a temp log file so the launcher's
     console panel can tail the server without owning its output lifecycle.
     """
-    server_dir = Path(evejs_root) / "server"
+    runtime_root = Path(evejs_root)
+    server_dir = runtime_root / "server"
     index_js = server_dir / "index.js"
     if not index_js.exists():
         raise FileNotFoundError(f"Server entry point not found: {index_js}")
+    layout = inspect_evejs_runtime(runtime_root)
 
     # Node cannot write fatal reports into a missing directory. Dependency
     # checks and repairs execute here inside ServiceStartWorker's QThread, so a
     # first-run npm install/rebuild does not block the Qt GUI thread.
-    (server_dir / "logs" / "node-reports").mkdir(parents=True, exist_ok=True)
+    layout.node_report_directory.mkdir(parents=True, exist_ok=True)
     SERVER_CONSOLE_LOG.parent.mkdir(parents=True, exist_ok=True)
     SERVER_CONSOLE_LOG.write_text("", encoding="utf-8")
     ensure_native_game_dependencies(server_dir)
 
     env = os.environ.copy()
     env["EVEJS_PROXY_LOCAL_INTERCEPT"] = "1"
-    _prepare_native_game_store_environment(Path(evejs_root), server_dir, env)
+    # Never let an inherited data-root selection route this install's writes
+    # into another EveJS root. The layout resolved above uses EveJS's default
+    # root/_local data root when its logger supports that contract.
+    env.pop("EVEJS_DATA_ROOT", None)
+    if layout.config_preflight_supported:
+        try:
+            config_result = validate_native_server_config(runtime_root, env=env)
+        except NativeConfigPreflightError as exc:
+            _append_game_console(f"Native EveJS config preflight failed: {exc.message}")
+            raise
+        if config_result.supported and config_result.valid is not True:
+            message = config_result.message or (
+                "The selected EveJS config could not be validated. No config files were changed."
+            )
+            _append_game_console(f"Native EveJS config preflight failed: {message}")
+            raise NativeConfigPreflightError(message, valid=config_result.valid)
+        if config_result.supported:
+            _append_game_console(config_result.message)
+        else:
+            _append_game_console(config_result.message)
+    else:
+        _append_game_console("Native EveJS config preflight is unavailable; continuing with the legacy startup check.")
+
+    _prepare_native_game_store_environment(runtime_root, server_dir, env)
 
     if mod_runtime_plan is None:
         cmd = build_game_server_command(evejs_root, mode)

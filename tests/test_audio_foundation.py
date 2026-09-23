@@ -1344,6 +1344,7 @@ def test_close_stops_optional_audio_before_other_lifecycle_checks() -> None:
         _docker_log_thread=None,
         _tracker=SimpleNamespace(running_count=0),
         _close_after_lifecycle=False,
+        _wait_for_client_exit=lambda _event: False,
         _server_proc=None,
         _market_proc=None,
         _close_in_progress=False,

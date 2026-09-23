@@ -286,11 +286,12 @@ def test_lifecycle_error_scope_is_exact(action, scope) -> None:
     assert MainWindow._docker_lifecycle_scope(action) == scope
 
 
-def test_docker_controller_factory_shares_one_runner_and_is_deferred(qapp, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_docker_controller_factory_shares_one_runner_and_is_deferred(qapp, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     window = MainWindow.__new__(MainWindow)
+    QMainWindow.__init__(window)
     window._cfg = {
         "runtime_backend": "docker_compose", "docker_control_policy": "managed",
-        "evejs_root": "C:/EveJS", "docker_compose_file": "C:/EveJS/compose.yaml",
+        "evejs_root": str(tmp_path), "docker_compose_file": str(tmp_path / "compose.yaml"),
         "docker_project_name": "eve",
     }
     window._lifecycle_thread = None
@@ -298,6 +299,8 @@ def test_docker_controller_factory_shares_one_runner_and_is_deferred(qapp, monke
     window._docker_mod_quarantined_targets = {}
     window._runtime_snapshot = RuntimeSnapshot(ServiceState.OFFLINE, ServiceState.OFFLINE, 0)
     window._tracker = type("Tracker", (), {"running_count": 0})()
+    window._applicable_runtime_mods = lambda *_args, **_kwargs: ()
+    window._prepare_mod_start_compatibility = lambda *_args, **_kwargs: ("ready", None)
     window._apply_runtime_snapshot = lambda _snapshot: None
     captured: dict[str, object] = {}
     window._begin_lifecycle_worker = lambda worker, _handler: captured.setdefault("worker", worker)
@@ -323,6 +326,8 @@ def test_docker_close_kill_clients_rechecks_stop_on_exit_policy(qapp, monkeypatc
         def kill_all(self):
             self.running_count = 0
             return 1
+        def prune_dead(self):
+            return 0
     class Event:
         accepted = False
         ignored = False

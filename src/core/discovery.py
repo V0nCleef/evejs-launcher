@@ -5,6 +5,7 @@ import os
 import re
 from pathlib import Path
 
+from .evejs_compatibility import inspect_evejs_runtime
 from .server_selection import discover_server_scripts
 
 
@@ -27,7 +28,7 @@ def validate_evejs_root(path: str) -> tuple[bool, str]:
 
     for rel_path, desc in required:
         if not (p / rel_path).exists():
-            return False, f"Missing {desc}: {rel_path}"
+            return False, f"Missing {desc}: {rel_path}{_native_setup_hint(p)}"
 
     # ── Server start script: accept any StartServer*.bat ─────────────────
     server_bats = discover_server_scripts(p)
@@ -53,10 +54,27 @@ def validate_evejs_root(path: str) -> tuple[bool, str]:
         return False, (
             "Missing game store: expected _local/gameStore/gamestore.sqlite "
             "or _local/gameStore/manifest.json with populated "
-            "_local/gameStore/data"
+            f"_local/gameStore/data{_native_setup_hint(p)}"
         )
 
     return True, ""
+
+
+def _native_setup_hint(root: Path) -> str:
+    """Explain first-time Native setup for the verified 0.12.9 root only."""
+    setup_script = root / "SetupEveJS.bat"
+    if not setup_script.is_file():
+        return ""
+    try:
+        supported = inspect_evejs_runtime(root).config_preflight_supported
+    except (OSError, RuntimeError, TypeError, ValueError):
+        supported = False
+    if not supported:
+        return ""
+    return (
+        " Native setup for this selected EveJS root is incomplete. Run "
+        f'"{setup_script}" -Mode native, then select this root again.'
+    )
 
 
 def validate_docker_evejs_root(

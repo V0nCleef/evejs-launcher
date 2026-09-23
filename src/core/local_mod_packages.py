@@ -85,6 +85,14 @@ class LocalModRecord:
 
 
 @dataclass(frozen=True)
+class RegistryRelocationPreview:
+    saved_root: str
+    current_root: str
+    registry_sha256: str
+    record_count: int
+
+
+@dataclass(frozen=True)
 class CleanupRequest:
     root: Path
     action: str
@@ -270,19 +278,26 @@ class LocalModPackages:
             raise LocalModPackageError("The path escapes the selected EveJS root.") from exc
         return path
 
-    def _load(self) -> dict:
+    def _read_registry(self, *, allow_foreign_root: bool) -> tuple[dict, bool, bytes | None]:
         path = self._path(REGISTRY_DIRECTORY / "registry.json")
         if not path.exists():
-            return {"schemaVersion": REGISTRY_VERSION, "root": str(self.root), "order": [], "records": {}}
+            return ({"schemaVersion": REGISTRY_VERSION, "root": str(self.root), "order": [], "records": {}}, True, None)
         _ordinary(path, directory=False)
         if path.stat().st_size > 8 * 1024 ** 2:
             raise LocalModPackageError("The local mod registry is too large.")
-        value = _json(path.read_bytes())
+        content = path.read_bytes()
+        if len(content) > 8 * 1024 ** 2:
+            raise LocalModPackageError("The local mod registry is too large.")
+        value = _json(content)
         if (set(value) != {"schemaVersion", "root", "order", "records"}
                 or type(value["schemaVersion"]) is not int or value["schemaVersion"] != REGISTRY_VERSION
-                or os.path.normcase(str(value["root"])) != os.path.normcase(str(self.root))
+                or not isinstance(value["root"], str) or not value["root"]
+                or not Path(value["root"]).is_absolute()
                 or not isinstance(value["order"], list) or not isinstance(value["records"], dict)):
-            raise LocalModPackageError("The local mod registry has an unsupported schema or belongs to another EveJS root.")
+            raise LocalModPackageError("The local mod registry has an unsupported schema or invalid root metadata.")
+        owns_root = os.path.normcase(value["root"]) == os.path.normcase(str(self.root))
+        if not owns_root and not allow_foreign_root:
+            raise LocalModPackageError("The local mod registry belongs to another EveJS root.")
         if any(not isinstance(key, str) for key in value["order"]) or len(set(value["order"])) != len(value["order"]):
             raise LocalModPackageError("The saved mod order is invalid.")
         installed = set()
@@ -293,7 +308,11 @@ class LocalModPackages:
                 if identity in installed:
                     raise LocalModPackageError("More than one record claims the same installed folder.")
                 installed.add(identity)
-        return value
+        return value, owns_root, content
+
+    def _load(self) -> dict:
+        """Load registry metadata only when it belongs to this exact root."""
+        return self._read_registry(allow_foreign_root=False)[0]
 
     def _record(self, key: str, row: dict) -> LocalModRecord:
         try:
@@ -336,7 +355,7 @@ class LocalModPackages:
         except (TypeError, ValueError, KeyError) as exc:
             raise LocalModPackageError("A local mod record is invalid; keep it for recovery.") from exc
 
-    def _save(self, registry: dict) -> None:
+    def _save(self, registry: dict, *, expected_content: bytes | None = None) -> None:
         path = self._path(REGISTRY_DIRECTORY / "registry.json")
         path.parent.mkdir(parents=True, exist_ok=True)
         self._path(REGISTRY_DIRECTORY / "registry.json")
@@ -346,6 +365,12 @@ class LocalModPackages:
                 stream.write((json.dumps(registry, indent=2, ensure_ascii=True) + "\n").encode("utf-8"))
                 stream.flush()
                 os.fsync(stream.fileno())
+            if expected_content is not None:
+                _ordinary(path, directory=False)
+                if path.read_bytes() != expected_content:
+                    raise LocalModPackageError(
+                        "The copied mod registry changed before registration; the reviewed bytes were not replaced."
+                    )
             os.replace(temporary, path)
         finally:
             temporary.unlink(missing_ok=True)
@@ -388,6 +413,118 @@ class LocalModPackages:
     def sort_mods(self, mods: Iterable[Mod]) -> list[Mod]:
         """Preserve input order for an unregistered root and newly seen mods."""
         return self._ordered(mods, self._load())
+
+    def sort_mods_for_runtime(self, mods: Iterable[Mod]) -> list[Mod]:
+        """Read runtime ordering from a valid registry without granting ownership.
+
+        A copied registry can supply package order after its metadata and
+        pending-transaction state are validated. Mod keys remain bound to this
+        physical root, while management and mutation keep using strict ``_load``.
+        """
+        mods = list(mods)
+        registry, _owns_root, _content = self._read_registry(allow_foreign_root=True)
+        self._no_pending(registry)
+        return self._ordered(mods, registry)
+
+    def _relocation_snapshot(self) -> tuple[dict, bytes]:
+        registry, owns_root, content = self._read_registry(allow_foreign_root=True)
+        if content is None:
+            raise LocalModPackageError("This EveJS folder has no saved launcher mod registry to register.")
+        if owns_root:
+            raise LocalModPackageError("The launcher mod registry already belongs to this EveJS folder.")
+        self._no_pending(registry)
+        for key, row in registry["records"].items():
+            record = self._record(key, row)
+            package = self._path(record.relative_path)
+            if package.exists():
+                _ordinary(package, directory=True)
+            if record.archive_path:
+                archive = self._path(record.archive_path)
+                if archive.exists():
+                    _ordinary(archive, directory=True)
+        try:
+            from .mod_updates import pending_updates
+            if pending_updates(self.root):
+                raise LocalModPackageError(
+                    "Recover pending mod updates before registering this copied mod registry."
+                )
+        except LocalModPackageError:
+            raise
+        except Exception as exc:
+            raise LocalModPackageError(
+                "Could not verify mod update recovery state; the copied registry was left unchanged."
+            ) from exc
+        return registry, content
+
+    def relocation_preview(self) -> RegistryRelocationPreview:
+        """Describe a safe, explicit registration of copied records to this root."""
+        registry, content = self._relocation_snapshot()
+        return RegistryRelocationPreview(
+            saved_root=registry["root"],
+            current_root=str(self.root),
+            registry_sha256=hashlib.sha256(content).hexdigest(),
+            record_count=len(registry["records"]),
+        )
+
+    def _backup_registry(self, content: bytes) -> Path:
+        directory = self._path(REGISTRY_DIRECTORY)
+        _ordinary(directory, directory=True)
+        for _ in range(8):
+            suffix = uuid.uuid4().hex
+            backup = self._path(REGISTRY_DIRECTORY / f"registry.before-relocation-{suffix}.json")
+            temporary = self._path(REGISTRY_DIRECTORY / f".registry-backup-{suffix}.tmp")
+            created_temporary = False
+            try:
+                with temporary.open("xb") as stream:
+                    created_temporary = True
+                    stream.write(content)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                # A same-directory hard link publishes only a complete backup
+                # and fails rather than replacing any pre-existing path.
+                os.link(temporary, backup)
+                return backup
+            except FileExistsError:
+                continue
+            except OSError as exc:
+                raise LocalModPackageError(
+                    "Could not create an atomic backup of the copied mod registry; it was not registered."
+                ) from exc
+            finally:
+                if created_temporary:
+                    temporary.unlink(missing_ok=True)
+        raise LocalModPackageError("Could not allocate a unique backup path; the copied registry was not registered.")
+
+    def relocate_registry(self, expected_sha256: str) -> Path:
+        """Register a reviewed copied registry to this root, retaining its exact prior bytes."""
+        if (not isinstance(expected_sha256, str) or len(expected_sha256) != 64
+                or any(char not in "0123456789abcdef" for char in expected_sha256)):
+            raise LocalModPackageError("Refresh the copied registry preview before registering it.")
+        with acquire_mod_lifecycle_lock(self.root):
+            registry, content = self._relocation_snapshot()
+            if hashlib.sha256(content).hexdigest() != expected_sha256:
+                raise LocalModPackageError(
+                    "The copied mod registry changed after preview. Refresh the Mods page and review it again."
+                )
+            backup = self._backup_registry(content)
+            current_registry, current_content = self._relocation_snapshot()
+            if current_content != content or current_registry != registry:
+                raise LocalModPackageError(
+                    f"The copied mod registry changed during registration. Its original bytes were backed up at {backup}."
+                )
+            relocated = {**current_registry, "root": str(self.root)}
+            try:
+                self._save(relocated, expected_content=content)
+                verified = self._load()
+            except Exception as exc:
+                raise LocalModPackageError(
+                    f"Could not verify registry registration. The original registry backup is at {backup}."
+                ) from exc
+            if verified != relocated:
+                raise LocalModPackageError(
+                    f"Registry registration did not preserve its metadata. The original registry backup is at {backup}."
+                )
+            return backup.resolve(strict=True)
 
     def _remember(self, registry: dict, mods: Iterable[Mod]) -> list[Mod]:
         result = self._ordered(mods, registry)

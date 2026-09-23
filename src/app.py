@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+import os
 import secrets
 import subprocess
 import sys
@@ -294,6 +295,12 @@ from .workers.server_worker import (
     ServiceStopWorker,
 )
 from .ui import update_coordinator as update_coordination
+from .ui.mod_start_compatibility import (
+    ModCompatibilityConsent,
+    ModStartCompatibilityChoice,
+    ModStartCompatibilityDialog,
+    affected_mods as compatibility_affected_mods,
+)
 from .updater.checker import UpdateChecker
 from .updater.dialog import UpdateDialog
 from .updater.installer import UpdateInstallWorker
@@ -318,6 +325,14 @@ class _DataRequestToken:
     target_identity: str | None = None
     username: str | None = None
     character_id: int | None = None
+
+
+@dataclass(frozen=True)
+class _ModDisableBatchResult:
+    """Exact outcome of one requested compatibility cleanup batch."""
+
+    disabled: tuple[str, ...]
+    failures: tuple[tuple[str, str], ...]
 
 
 def _restore_eve_window(process: LaunchedProcess, timeout: int = 60) -> None:
@@ -1440,6 +1455,7 @@ class MainWindow(QMainWindow):
         on_complete: Callable[[bool], None] | None = None,
         suppress_failure_dialog: bool = False,
         docker_mod_apply_result: DockerModApplyResult | None = None,
+        mod_compatibility_consent: ModCompatibilityConsent | None = None,
     ) -> bool:
         if not self._docker_managed():
             self._docker_unavailable(self._docker_control_reason())
@@ -1475,6 +1491,133 @@ class MainWindow(QMainWindow):
                 "or reapply Mods before starting another lifecycle action."
             )
             return False
+        compatibility_consent = mod_compatibility_consent
+        compatibility_root: str | None = None
+        if action in {
+            DockerLifecycleAction.START_GAME,
+            DockerLifecycleAction.START_STACK,
+            DockerLifecycleAction.RESTART_GAME,
+        }:
+            evejs_root = str(self._cfg.get("evejs_root", ""))
+            compatibility_root = evejs_root
+            if not evejs_root:
+                self._docker_unavailable("Set up an EveJS root before starting Game.")
+                return False
+            try:
+                start_mods = self._applicable_runtime_mods(
+                    evejs_root,
+                    backend=DOCKER_BACKEND,
+                )
+                def continue_after_disable() -> object:
+                    completion_sent = False
+
+                    def complete_once(succeeded: bool) -> None:
+                        nonlocal completion_sent
+                        if completion_sent:
+                            return
+                        completion_sent = True
+                        if on_complete is not None:
+                            on_complete(succeeded)
+
+                    def after_recreate(succeeded: bool) -> None:
+                        if not succeeded:
+                            complete_once(False)
+                            return
+                        if action is not DockerLifecycleAction.START_STACK:
+                            complete_once(True)
+                            return
+                        observed = self._docker_cached_snapshot()
+                        if observed.market is ServiceState.ONLINE:
+                            complete_once(True)
+                            return
+                        started = self._begin_docker_lifecycle(
+                            DockerLifecycleAction.START_MARKET,
+                            expected_target_identity=expected_target_identity,
+                            on_complete=complete_once,
+                            suppress_failure_dialog=suppress_failure_dialog,
+                        )
+                        if not started:
+                            complete_once(False)
+
+                    started = self._on_mods_apply_restart(
+                        _confirmed=True,
+                        _on_complete=after_recreate,
+                        _expected_target_identity=expected_target_identity,
+                        _suppress_failure_dialog=suppress_failure_dialog,
+                    )
+                    if not started:
+                        complete_once(False)
+                    return started
+
+                if compatibility_consent is None:
+                    outcome, compatibility_consent = self._prepare_mod_start_compatibility(
+                        evejs_root,
+                        DOCKER_BACKEND,
+                        start_mods,
+                        continuation=continue_after_disable,
+                        error_title="Docker Game Start",
+                        docker_target_identity=self._docker_target_identity(),
+                        expected_observed_target=expected_target_identity,
+                    )
+                    if outcome == "queued":
+                        return True
+                    if outcome != "ready":
+                        return False
+                elif compatibility_consent is not None:
+                    from .core.mod_evejs_compatibility import installed_evejs_version
+
+                    if not compatibility_consent.matches(
+                        evejs_root,
+                        DOCKER_BACKEND,
+                        installed_evejs_version(evejs_root),
+                        start_mods,
+                    ):
+                        self._show_mod_compatibility_message(
+                            "Docker Game Start",
+                            "The mod set or EveJS version changed after the "
+                            "one-start compatibility choice. Retry the start "
+                            "to review the current mods.",
+                        )
+                        return False
+            except (ModManagerError, ModRuntimeStateError, OSError, TypeError, ValueError) as exc:
+                self._show_mod_compatibility_message(
+                    "Docker Game Start",
+                    "The installed mod state could not be checked before Game "
+                    "startup. No Docker lifecycle worker was started.\n\n"
+                    + str(exc),
+                )
+                return False
+        if action not in {
+            DockerLifecycleAction.START_GAME,
+            DockerLifecycleAction.START_STACK,
+            DockerLifecycleAction.RESTART_GAME,
+        } and compatibility_consent is not None:
+            compatibility_root = str(self._cfg.get("evejs_root", ""))
+            try:
+                current_mods = self._applicable_runtime_mods(
+                    compatibility_root,
+                    backend=DOCKER_BACKEND,
+                )
+                from .core.mod_evejs_compatibility import installed_evejs_version
+
+                if not compatibility_consent.matches(
+                    compatibility_root,
+                    DOCKER_BACKEND,
+                    installed_evejs_version(compatibility_root),
+                    current_mods,
+                ):
+                    raise ModRuntimeStateError(
+                        "The mod set or EveJS version changed after the "
+                        "one-start compatibility choice."
+                    )
+            except (ModManagerError, ModRuntimeStateError, OSError, TypeError, ValueError) as exc:
+                self._show_mod_compatibility_message(
+                    "Docker Game Start",
+                    "The installed mod state could not be checked before Game "
+                    "startup. No Docker lifecycle worker was started.\n\n"
+                    + str(exc),
+                )
+                return False
         previous_mod_runtime = self.__dict__.get("_current_mod_runtime_snapshot")
         previous_attested_target = self.__dict__.get(
             "_attested_docker_target_identity"
@@ -1509,6 +1652,32 @@ class MainWindow(QMainWindow):
             target_factory = self._docker_lifecycle_target_factory(
                 docker_mod_apply_result=docker_mod_apply_result,
             )
+        if compatibility_consent is not None:
+            captured_target_factory = target_factory
+            captured_root = compatibility_root
+
+            def target_factory() -> ComposeTarget:
+                from .core.mod_evejs_compatibility import installed_evejs_version
+
+                if not captured_root:
+                    raise ModRuntimeStateError(
+                        "The EveJS root was lost after the compatibility choice."
+                    )
+                current_mods = self._applicable_runtime_mods(
+                    captured_root,
+                    backend=DOCKER_BACKEND,
+                )
+                if not compatibility_consent.matches(
+                    captured_root,
+                    DOCKER_BACKEND,
+                    installed_evejs_version(captured_root),
+                    current_mods,
+                ):
+                    raise ModRuntimeStateError(
+                        "The mod set or EveJS version changed after the "
+                        "one-start compatibility choice. Docker was not started."
+                    )
+                return captured_target_factory()
         worker = DockerLifecycleWorker(
             target_factory,
             controller_factory,
@@ -2135,6 +2304,326 @@ class MainWindow(QMainWindow):
         self._release_mod_lease_after_lifecycle = False
         return True
 
+    def _show_mod_compatibility_message(
+        self,
+        title: str,
+        message: str,
+    ) -> None:
+        """Show package-derived text as plain text, never as rich markup."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Critical)
+        box.setWindowTitle(title)
+        box.setTextFormat(Qt.TextFormat.PlainText)
+        box.setText(message)
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        box.exec()
+
+    def _choose_mod_start_compatibility(
+        self,
+        compatibility: tuple[object, ...],
+        installed_version: str,
+        *,
+        docker_mode: bool = False,
+    ) -> ModStartCompatibilityChoice:
+        """Dialog seam kept small so start-flow decisions remain testable."""
+        dialog = ModStartCompatibilityDialog(
+            compatibility,
+            installed_version,
+            self,
+            docker_mode=docker_mode,
+        )
+        try:
+            dialog.exec()
+            return dialog.choice
+        finally:
+            dialog.deleteLater()
+
+    def _mod_start_selection_matches(
+        self,
+        evejs_root: str,
+        backend: str,
+        docker_target_identity: tuple[object, ...] | None = None,
+    ) -> bool:
+        try:
+            selected_root = str(
+                Path(str(self._cfg.get("evejs_root", ""))).resolve(strict=True)
+            )
+            expected_root = str(Path(evejs_root).resolve(strict=True))
+        except (OSError, TypeError, ValueError):
+            return False
+        expected_backend = (
+            "docker" if backend in {"docker", DOCKER_BACKEND} else "native"
+        )
+        selected_backend = "docker" if self._docker_mode() else "native"
+        return (
+            os.path.normcase(selected_root) == os.path.normcase(expected_root)
+            and selected_backend == expected_backend
+            and (
+                docker_target_identity is None
+                or docker_target_identity == self._docker_target_identity()
+            )
+        )
+
+    def _queue_compatibility_mod_disable(
+        self,
+        evejs_root: str,
+        backend: str,
+        mods: tuple[Mod, ...],
+        *,
+        continuation: Callable[[], object],
+        error_title: str,
+        docker_target_identity: tuple[object, ...] | None = None,
+        expected_observed_target: str | None = None,
+    ) -> bool:
+        """Disable only the captured packages, then resume after thread teardown."""
+        coordinator = getattr(self, "_mod_coordinator", None)
+        if coordinator is None:
+            self._show_mod_compatibility_message(
+                error_title,
+                "The mod operation coordinator is unavailable. No mods or "
+                "services were changed.",
+            )
+            return False
+
+        try:
+            captured_root = str(Path(evejs_root).resolve(strict=True))
+            captured_backend = "docker" if backend in {"docker", DOCKER_BACKEND} else "native"
+            operations = tuple(
+                (mod, coordinator._context(mod))
+                for mod in reversed(mods)
+            )
+            if not operations:
+                raise RuntimeError("The affected mod list is empty.")
+        except Exception as exc:
+            self._show_mod_compatibility_message(
+                error_title,
+                "The affected mods could not be prepared for safe disable. "
+                "No mods or services were changed.\n\n"
+                + (str(exc) or type(exc).__name__),
+            )
+            return False
+
+        self._release_unbound_mod_lifecycle_lease()
+
+        def disable_captured_mods() -> _ModDisableBatchResult:
+            from .core.mod_operations import change_mod_state
+
+            disabled: list[str] = []
+            failures: list[tuple[str, str]] = []
+            for mod, context in operations:
+                try:
+                    changed = change_mod_state(mod, False, context)
+                    if changed is False:
+                        disabled.append(mod.name)
+                    else:
+                        failures.append((mod.name, "The mod did not confirm its disabled state."))
+                except Exception as exc:
+                    failures.append((mod.name, str(exc) or type(exc).__name__))
+            return _ModDisableBatchResult(tuple(disabled), tuple(failures))
+
+        def operation_finished(result: object) -> None:
+            coordinator._refresh_pending = True
+
+            def resume_after_teardown() -> None:
+                if getattr(self, "_close_in_progress", False):
+                    return
+                current_root = str(self._cfg.get("evejs_root", ""))
+                try:
+                    current_root = str(Path(current_root).resolve(strict=True))
+                except OSError:
+                    current_root = ""
+                current_backend = "docker" if self._docker_mode() else "native"
+                target_changed = (
+                    captured_backend != current_backend
+                    or os.path.normcase(captured_root)
+                    != os.path.normcase(current_root)
+                    or (
+                        docker_target_identity is not None
+                        and docker_target_identity != self._docker_target_identity()
+                    )
+                    or (
+                        expected_observed_target is not None
+                        and expected_observed_target
+                        != self._current_observed_docker_target_identity()
+                    )
+                )
+                value = getattr(result, "value", None)
+                disabled = value.disabled if isinstance(value, _ModDisableBatchResult) else ()
+                failures = list(value.failures) if isinstance(value, _ModDisableBatchResult) else []
+                if not getattr(result, "success", False):
+                    failures.append(("Mod operation", getattr(result, "error", "The worker failed.")))
+                if target_changed:
+                    details = []
+                    if disabled:
+                        details.append("Disabled: " + ", ".join(disabled))
+                    details.append(
+                        "The selected EveJS root or backend changed while the mod "
+                        "operation was running. Startup was aborted."
+                    )
+                    if failures:
+                        details.extend(f"{name}: {reason}" for name, reason in failures)
+                    self._show_mod_compatibility_message(error_title, "\n".join(details))
+                    return
+                if failures:
+                    details = []
+                    if disabled:
+                        details.append("Disabled: " + ", ".join(disabled))
+                    details.extend(f"Could not disable {name}: {reason}" for name, reason in failures)
+                    details.append("Startup was aborted. Review the mod state before retrying.")
+                    self._show_mod_compatibility_message(error_title, "\n".join(details))
+                    return
+                continuation()
+
+            # ModCoordinator invokes the result callback before clearing its
+            # reservation. A queued turn runs only after that teardown finishes.
+            QTimer.singleShot(0, resume_after_teardown)
+
+        if not coordinator.run(disable_captured_mods, operation_finished):
+            self._show_mod_compatibility_message(
+                error_title,
+                "Another mod, client launch, or service operation is active. "
+                "The affected mods were not disabled and startup was not started.",
+            )
+            return False
+        return True
+
+    def _prepare_mod_start_compatibility(
+        self,
+        evejs_root: str,
+        backend: str,
+        mods: tuple[Mod, ...],
+        *,
+        continuation: Callable[[], object],
+        error_title: str,
+        docker_target_identity: tuple[object, ...] | None = None,
+        expected_observed_target: str | None = None,
+    ) -> tuple[str, ModCompatibilityConsent | None]:
+        """Resolve the actual-start choice for the exact current runtime modset."""
+        from .core.mod_evejs_compatibility import (
+            EvejsModCompatibilityStatus,
+            assess_active_runtime_mods,
+            installed_evejs_version,
+        )
+        from .ui.mod_start_compatibility import ModCompatibilityConsent
+
+        if not self._mod_start_selection_matches(
+            evejs_root,
+            backend,
+            docker_target_identity,
+        ):
+            self._show_mod_compatibility_message(
+                error_title,
+                "The selected EveJS root or backend changed before the "
+                "compatibility choice. Startup was cancelled.",
+            )
+            return "cancelled", None
+
+        installed_version = installed_evejs_version(evejs_root)
+        compatibility = assess_active_runtime_mods(mods, installed_version)
+        unknown = tuple(
+            item for item in compatibility
+            if item.status is EvejsModCompatibilityStatus.UNKNOWN_INSTALLED_VERSION
+        )
+        if unknown:
+            self._show_mod_compatibility_message(
+                error_title,
+                "The selected EveJS installation version could not be determined, "
+                "so declared mod support cannot be checked. This choice cannot be "
+                "overridden. Check package.json and config/version.json, or disable "
+                "the affected mods before starting Game.\n\n"
+                + "\n".join(item.message for item in unknown),
+            )
+            return "blocked", None
+
+        unsupported = tuple(
+            item for item in compatibility
+            if item.status is EvejsModCompatibilityStatus.UNSUPPORTED
+        )
+        if not unsupported:
+            return "ready", None
+
+        if installed_version is None:
+            # Defensive: the assessment above should classify these as unknown.
+            self._show_mod_compatibility_message(
+                error_title,
+                "The selected EveJS installation version is unknown. Startup is blocked.",
+            )
+            return "blocked", None
+
+        consent = ModCompatibilityConsent.capture(
+            evejs_root,
+            backend,
+            installed_version,
+            mods,
+            compatibility,
+        )
+        choice = self._choose_mod_start_compatibility(
+            compatibility,
+            installed_version,
+            docker_mode=(backend == DOCKER_BACKEND),
+        )
+        if choice is ModStartCompatibilityChoice.CANCEL:
+            return "cancelled", None
+        if not self._mod_start_selection_matches(
+            evejs_root,
+            backend,
+            docker_target_identity,
+        ):
+            self._show_mod_compatibility_message(
+                error_title,
+                "The selected EveJS root or backend changed while the "
+                "compatibility choice was open. No mods or processes were changed.",
+            )
+            return "cancelled", None
+        try:
+            current_mods = self._applicable_runtime_mods(
+                evejs_root,
+                backend=backend,
+            )
+            current_version = installed_evejs_version(evejs_root)
+        except (ModManagerError, ModRuntimeStateError, OSError, TypeError, ValueError) as exc:
+            self._show_mod_compatibility_message(
+                error_title,
+                "The mod set changed while the compatibility choice was open. "
+                "No mods or processes were changed.\n\n"
+                + str(exc),
+            )
+            return "cancelled", None
+        if not consent.matches(
+            evejs_root,
+            backend,
+            current_version,
+            current_mods,
+        ):
+            self._show_mod_compatibility_message(
+                error_title,
+                "The mod set or EveJS version changed while the compatibility "
+                "choice was open. Retry startup to review the current state.",
+            )
+            return "cancelled", None
+        if choice is ModStartCompatibilityChoice.RUN_ANYWAY:
+            return "ready", consent
+        if choice is ModStartCompatibilityChoice.DISABLE_AFFECTED:
+            current_compatibility = assess_active_runtime_mods(
+                current_mods,
+                current_version,
+            )
+            affected = compatibility_affected_mods(
+                current_mods,
+                current_compatibility,
+            )
+            queued = self._queue_compatibility_mod_disable(
+                evejs_root,
+                backend,
+                affected,
+                continuation=continuation,
+                error_title=error_title,
+                docker_target_identity=docker_target_identity,
+                expected_observed_target=expected_observed_target,
+            )
+            return ("queued" if queued else "cancelled"), None
+        return "cancelled", None
+
     @staticmethod
     def _applicable_runtime_mods(
         evejs_root: str,
@@ -2144,7 +2633,7 @@ class MainWindow(QMainWindow):
         """Freeze applicable server mods without blocking on unrelated packages."""
 
         from .core.local_mod_packages import LocalModPackages
-        discovered = tuple(LocalModPackages(evejs_root).sort_mods(scan_mods(evejs_root)))
+        discovered = tuple(LocalModPackages(evejs_root).sort_mods_for_runtime(scan_mods(evejs_root)))
         support_name = "docker" if backend == DOCKER_BACKEND else "native"
         from .core.mod_relationships import plan_mod_order
         order_plan = plan_mod_order(discovered, backend=support_name)
@@ -2257,6 +2746,7 @@ class MainWindow(QMainWindow):
         self,
         plan: ModRuntimePlan,
         process: object,
+        compatibility_consent: ModCompatibilityConsent | None = None,
     ) -> ModRuntimeSnapshot:
         """Attest one ready Native process and commit evidence under its lease."""
 
@@ -2292,6 +2782,19 @@ class MainWindow(QMainWindow):
                     str(plan.root),
                     backend=NATIVE_BACKEND,
                 )
+                if compatibility_consent is not None:
+                    from .core.mod_evejs_compatibility import installed_evejs_version
+
+                    if not compatibility_consent.matches(
+                        plan.root,
+                        NATIVE_BACKEND,
+                        installed_evejs_version(plan.root),
+                        current_mods,
+                    ):
+                        raise ModRuntimeStateError(
+                            "The mod set or EveJS version changed after the "
+                            "one-start compatibility choice."
+                        )
                 try:
                     stdout = (
                         read_server_console_bytes(
@@ -2672,6 +3175,7 @@ class MainWindow(QMainWindow):
         on_ready: Callable[[], None] | None,
         error_title: str,
         voice_event: VoiceEvent | None = None,
+        mod_compatibility_consent: ModCompatibilityConsent | None = None,
     ) -> bool:
         """Start requested services in a worker, waiting Market → Game readiness."""
         if self._docker_mode():
@@ -2702,12 +3206,48 @@ class MainWindow(QMainWindow):
                     raise ModRuntimeStateError(
                         "Game start requires an exact vanilla or modded mode."
                     )
-                mod_plan, _planned_mods = self._build_native_mod_runtime_plan(
+                mod_plan, planned_mods = self._build_native_mod_runtime_plan(
                     evejs_root,
                     mode,
                 )
                 mode = mod_plan.mode
-            except (ModRuntimeStateError, OSError, TypeError, ValueError) as exc:
+                if mod_compatibility_consent is not None:
+                    from .core.mod_evejs_compatibility import installed_evejs_version
+
+                    if not mod_compatibility_consent.matches(
+                        evejs_root,
+                        NATIVE_BACKEND,
+                        installed_evejs_version(evejs_root),
+                        planned_mods,
+                    ):
+                        raise ModRuntimeStateError(
+                            "The mod set or EveJS version changed after the "
+                            "one-start compatibility choice. Retry Game startup "
+                            "to review the current mods."
+                        )
+                else:
+                    outcome, mod_compatibility_consent = (
+                        self._prepare_mod_start_compatibility(
+                            evejs_root,
+                            NATIVE_BACKEND,
+                            planned_mods,
+                            continuation=lambda: self._start_service_sequence(
+                                start_market=start_market,
+                                start_game=start_game,
+                                mode=mode,
+                                on_ready=on_ready,
+                                error_title=error_title,
+                                voice_event=voice_event,
+                            ),
+                            error_title=error_title,
+                        )
+                    )
+                    if outcome == "queued":
+                        return True
+                    if outcome != "ready":
+                        self._release_mod_lifecycle_lease()
+                        return False
+            except (ModManagerError, ModRuntimeStateError, OSError, TypeError, ValueError) as exc:
                 self._native_mod_runtime_plan = None
                 self._release_mod_lifecycle_lease()
                 self._server_error = str(exc)
@@ -2753,7 +3293,25 @@ class MainWindow(QMainWindow):
                     *,
                     mode: str,
                     frozen_plan: ModRuntimePlan = plan,
+                    consent: ModCompatibilityConsent | None = mod_compatibility_consent,
                 ) -> object:
+                    if consent is not None:
+                        from .core.mod_evejs_compatibility import installed_evejs_version
+
+                        current_mods = self._applicable_runtime_mods(
+                            root,
+                            backend=NATIVE_BACKEND,
+                        )
+                        if not consent.matches(
+                            root,
+                            NATIVE_BACKEND,
+                            installed_evejs_version(root),
+                            current_mods,
+                        ):
+                            raise ModRuntimeStateError(
+                                "The mod set or EveJS version changed after the "
+                                "one-start compatibility choice. Game was not started."
+                            )
                     return start_game_server(
                         root,
                         mode,
@@ -2763,10 +3321,17 @@ class MainWindow(QMainWindow):
                 def validate_planned_game(
                     process: object,
                     frozen_plan: ModRuntimePlan = plan,
+                    consent: ModCompatibilityConsent | None = mod_compatibility_consent,
                 ) -> ModRuntimeSnapshot:
+                    if consent is None:
+                        return self._verify_native_mod_runtime(
+                            frozen_plan,
+                            process,
+                        )
                     return self._verify_native_mod_runtime(
                         frozen_plan,
                         process,
+                        consent,
                     )
             else:
                 start_planned_game = start_game_server
@@ -3567,7 +4132,14 @@ class MainWindow(QMainWindow):
             self._mod_result_presenting = False
             self._finish_lifecycle_if_complete()
 
-    def _on_mods_apply_restart(self) -> None:
+    def _on_mods_apply_restart(
+        self,
+        *,
+        _confirmed: bool = False,
+        _on_complete: Callable[[bool], None] | None = None,
+        _expected_target_identity: str | None = None,
+        _suppress_failure_dialog: bool = True,
+    ) -> bool:
         """Apply the selected backend's truthful mod activation contract."""
         if not self._docker_mode():
             if self._lifecycle_active():
@@ -3576,43 +4148,56 @@ class MainWindow(QMainWindow):
                     "Mod Restart Busy",
                     "Another service operation is still running. Try again when it finishes.",
                 )
-                return
+                return False
             self._restart_server(
                 allow_force_game_kill=False,
                 on_ready=None,
                 continuous_mod_lifecycle=True,
                 # Mode is derived again from the frozen active loader set.
             )
-            return
+            return True
         if not self._docker_managed():
             self._docker_unavailable(
                 "Connect-only Docker mode cannot change mod or Compose state."
             )
-            return
+            return False
         if self._lifecycle_active():
             self._docker_unavailable(
                 "Another service or Docker tool operation is already running."
             )
-            return
+            return False
 
-        reply = QMessageBox.question(
-            self,
-            "Apply Docker Mods",
-            "Apply the selected mod preload chain and recreate the server "
-            "container?\n\nConnected clients will be disconnected.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
+        if _expected_target_identity is not None and (
+            _expected_target_identity
+            != self._current_observed_docker_target_identity()
+        ):
+            self._show_mod_compatibility_message(
+                "Docker Mods Failed",
+                "The selected Docker target changed before the mod restart. "
+                "No override was changed.",
+            )
+            return False
+
+        if not _confirmed:
+            reply = QMessageBox.question(
+                self,
+                "Apply Docker Mods",
+                "Apply the selected mod preload chain and recreate the server "
+                "container?\n\nConnected clients will be disconnected.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return False
 
         evejs_root = str(self._cfg.get("evejs_root", ""))
         if not evejs_root or not self._acquire_game_mod_lifecycle_lease(
             evejs_root,
             error_title="Docker Mods Failed",
         ):
-            return
+            return False
         mods: tuple[Mod, ...] = ()
+        compatibility_consent: ModCompatibilityConsent | None = None
         result = None
         rollback_failure = ""
         try:
@@ -3636,6 +4221,39 @@ class MainWindow(QMainWindow):
                 docker_override_material=desired_override,
             )
             validate_mod_runtime_plan(candidate_plan, backend=DOCKER_BACKEND)
+            outcome, compatibility_consent = self._prepare_mod_start_compatibility(
+                evejs_root,
+                DOCKER_BACKEND,
+                mods,
+                continuation=lambda: self._on_mods_apply_restart(
+                    _confirmed=True,
+                    _on_complete=_on_complete,
+                    _expected_target_identity=_expected_target_identity,
+                    _suppress_failure_dialog=_suppress_failure_dialog,
+                ),
+                error_title="Docker Mods Failed",
+                docker_target_identity=self._docker_target_identity(),
+                expected_observed_target=_expected_target_identity,
+            )
+            if outcome == "queued":
+                return True
+            if outcome != "ready":
+                self._release_mod_lifecycle_lease()
+                return False
+            if compatibility_consent is not None:
+                from .core.mod_evejs_compatibility import installed_evejs_version
+
+                if not compatibility_consent.matches(
+                    evejs_root,
+                    DOCKER_BACKEND,
+                    installed_evejs_version(evejs_root),
+                    mods,
+                ):
+                    raise ModRuntimeStateError(
+                        "The mod set or EveJS version changed after the "
+                        "one-start compatibility choice. Retry Docker mod "
+                        "application to review the current state."
+                    )
             result = apply_docker_mod_override(
                 evejs_root,
                 selected,
@@ -3656,6 +4274,7 @@ class MainWindow(QMainWindow):
                 )
         except (
             DockerModBridgeError,
+            ModManagerError,
             ModRuntimeStateError,
             OSError,
             TypeError,
@@ -3689,7 +4308,9 @@ class MainWindow(QMainWindow):
                 + str(exc)
                 + rollback_failure,
             )
-            return
+            if _on_complete is not None:
+                _on_complete(False)
+            return False
 
         self._pending_docker_mod_plan = plan
         self._pending_docker_mod_apply_result = result
@@ -3708,8 +4329,14 @@ class MainWindow(QMainWindow):
         try:
             lifecycle_started = self._begin_docker_lifecycle(
                 DockerLifecycleAction.RECREATE_GAME,
-                on_complete=self._on_docker_mod_recreate_completed,
-                suppress_failure_dialog=True,
+                expected_target_identity=_expected_target_identity,
+                on_complete=lambda succeeded, consent=compatibility_consent, callback=_on_complete: self._on_docker_mod_recreate_completed(
+                    succeeded,
+                    consent,
+                    callback,
+                ),
+                suppress_failure_dialog=_suppress_failure_dialog,
+                mod_compatibility_consent=compatibility_consent,
                 docker_mod_apply_result=result,
             )
         except Exception as exc:
@@ -3717,7 +4344,7 @@ class MainWindow(QMainWindow):
             lifecycle_started = False
             lifecycle_error = str(exc) or "Unknown lifecycle startup error."
         if lifecycle_started:
-            return
+            return True
         rollback_succeeded = True
         if result.changed:
             try:
@@ -3754,8 +4381,16 @@ class MainWindow(QMainWindow):
             + ("\n\n" + lifecycle_error if lifecycle_error else "")
             + rollback_failure,
         )
+        if _on_complete is not None:
+            _on_complete(False)
+        return False
 
-    def _on_docker_mod_recreate_completed(self, succeeded: bool) -> None:
+    def _on_docker_mod_recreate_completed(
+        self,
+        succeeded: bool,
+        compatibility_consent: ModCompatibilityConsent | None = None,
+        continuation: Callable[[bool], None] | None = None,
+    ) -> None:
         """Commit displayed mod state only after verified container recreation."""
 
         plan = getattr(self, "_pending_docker_mod_plan", None)
@@ -3763,6 +4398,14 @@ class MainWindow(QMainWindow):
         planned_mods = tuple(getattr(self, "_pending_docker_mods", ()))
         result = getattr(self, "_pending_docker_mod_lifecycle_result", None)
         failure = ""
+
+        def finish_continuation(succeeded_result: bool) -> None:
+            if continuation is not None:
+                QTimer.singleShot(
+                    0,
+                    lambda callback=continuation, value=succeeded_result: callback(value),
+                )
+
         if not succeeded:
             failure = "Docker did not recreate the Game server successfully."
         elif not isinstance(plan, ModRuntimePlan):
@@ -3800,6 +4443,19 @@ class MainWindow(QMainWindow):
                     str(plan.root),
                     backend=DOCKER_BACKEND,
                 )
+                if compatibility_consent is not None:
+                    from .core.mod_evejs_compatibility import installed_evejs_version
+
+                    if not compatibility_consent.matches(
+                        plan.root,
+                        DOCKER_BACKEND,
+                        installed_evejs_version(plan.root),
+                        current_mods,
+                    ):
+                        raise ModRuntimeStateError(
+                            "The mod set or EveJS version changed after the "
+                            "one-start compatibility choice."
+                        )
                 snapshot = build_docker_mod_runtime_snapshot(
                     plan,
                     current_mods,
@@ -3823,6 +4479,7 @@ class MainWindow(QMainWindow):
                 self._publish_mod_runtime_snapshot(snapshot)
                 self._clear_pending_docker_mod_operation()
                 self._release_mod_lifecycle_lease()
+                finish_continuation(True)
                 return
 
         if (
@@ -3873,6 +4530,7 @@ class MainWindow(QMainWindow):
                         + "\n\nNo authorized Docker command consumed the new "
                         "override. Its exact prior state was restored.",
                     )
+                    finish_continuation(False)
                     return
 
         root = str(plan.root) if isinstance(plan, ModRuntimePlan) else str(
@@ -3914,6 +4572,7 @@ class MainWindow(QMainWindow):
             corrective_started = False
             corrective_start_error = str(exc) or "Unknown worker startup error."
         if corrective_started:
+            finish_continuation(False)
             return
         self._clear_pending_docker_mod_operation()
         self._release_mod_lifecycle_lease()
@@ -3928,6 +4587,7 @@ class MainWindow(QMainWindow):
                 else ""
             ),
         )
+        finish_continuation(False)
 
     def _on_docker_mod_corrective_stop_completed(self, succeeded: bool) -> None:
         """Release the mod transaction only after the corrective stop settles."""
@@ -3971,6 +4631,7 @@ class MainWindow(QMainWindow):
         on_ready: Callable[[], None] | None = None,
         continuous_mod_lifecycle: bool = False,
         mode_override: str | None = None,
+        mod_compatibility_consent: ModCompatibilityConsent | None = None,
     ) -> None:
         """Resolve the launch mode before stopping, then restart the server."""
         if self._docker_mode():
@@ -4001,10 +4662,58 @@ class MainWindow(QMainWindow):
             )
             return
 
-        if continuous_mod_lifecycle and not self._acquire_game_mod_lifecycle_lease(
+        if not self._acquire_game_mod_lifecycle_lease(
             str(evejs_root),
             error_title="Restart Server Error",
         ):
+            return
+        try:
+            restart_mods = self._applicable_runtime_mods(
+                str(evejs_root),
+                backend=NATIVE_BACKEND,
+            )
+            if mod_compatibility_consent is None:
+                outcome, mod_compatibility_consent = (
+                    self._prepare_mod_start_compatibility(
+                        str(evejs_root),
+                        NATIVE_BACKEND,
+                        restart_mods,
+                        continuation=lambda: self._restart_server(
+                            allow_force_game_kill=allow_force_game_kill,
+                            on_ready=on_ready,
+                            continuous_mod_lifecycle=continuous_mod_lifecycle,
+                            mode_override=mode_override,
+                        ),
+                        error_title="Restart Server Error",
+                    )
+                )
+                if outcome == "queued":
+                    return
+                if outcome != "ready":
+                    self._release_mod_lifecycle_lease()
+                    return
+            else:
+                from .core.mod_evejs_compatibility import installed_evejs_version
+
+                if not mod_compatibility_consent.matches(
+                    str(evejs_root),
+                    NATIVE_BACKEND,
+                    installed_evejs_version(str(evejs_root)),
+                    restart_mods,
+                ):
+                    raise ModRuntimeStateError(
+                        "The mod set or EveJS version changed after the one-start "
+                        "compatibility choice. Retry the restart to review it."
+                    )
+        except (ModManagerError, ModRuntimeStateError, OSError, TypeError, ValueError) as exc:
+            self._release_mod_lifecycle_lease()
+            QMessageBox.critical(
+                self,
+                "Restart Server Error",
+                "The installed mod state could not be validated before the "
+                "restart. The running Game process was left alone.\n\n"
+                + str(exc),
+            )
             return
         if continuous_mod_lifecycle:
             self._mod_lifecycle_handoff = "stop_to_start"
@@ -4017,6 +4726,7 @@ class MainWindow(QMainWindow):
                     mode=mode,
                     on_ready=on_ready,
                     error_title="Restart Server Error",
+                    mod_compatibility_consent=mod_compatibility_consent,
                 )
             except Exception:
                 self._release_unbound_mod_lifecycle_lease()

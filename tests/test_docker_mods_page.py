@@ -216,7 +216,8 @@ def test_unmanaged_mod_is_explicitly_external_and_cannot_request_removal(
     assert row.remove_btn.size().height() == 32
     assert not row.remove_btn.isEnabled()
     assert row.remove_btn.cursor().shape() is Qt.CursorShape.ArrowCursor
-    assert "matching Setup" in row.remove_btn.toolTip()
+    assert "No verified launcher removal provider" in row.remove_btn.toolTip()
+    assert "Setup" not in row.remove_btn.toolTip()
     assert emitted == []
 
 
@@ -281,7 +282,7 @@ def test_invalid_management_enrollment_is_repair_only_and_fail_closed(
     row.remove_btn.click()
     assert len(warnings) == 1
     assert warnings[0][1] == "Mod Removal Needs Repair"
-    assert "Nothing was removed" in warnings[0][2]
+    assert "Nothing was changed" in warnings[0][2]
 
 
 def test_lifecycle_busy_locks_remove_and_refresh_then_restores_capability(

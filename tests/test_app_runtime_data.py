@@ -8,7 +8,7 @@ import threading
 import time
 
 import pytest
-from PyQt6.QtCore import QThread
+from PyQt6.QtCore import QEvent, QThread
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 
@@ -43,6 +43,8 @@ def _config() -> dict:
             "evejs_root": "C:/Synthetic/EveJS",
             "client_path": "",
             "hide_test_characters": False,
+            "audio_music_enabled": False,
+            "audio_voice_enabled": False,
             "update_auto_check": False,
             "update_check_interval_hours": 0,
         }
@@ -64,7 +66,35 @@ def _close_window(qapp: QApplication, window: MainWindow) -> None:
     window.close()
     _wait_until(qapp, lambda: not window._data_load_active())
     window.deleteLater()
+    qapp.sendPostedEvents(window, QEvent.Type.DeferredDelete)
     qapp.processEvents()
+
+
+def _new_window(qapp: QApplication) -> MainWindow:
+    """Wait for constructor-started Mods work before exercising data paths."""
+    window = MainWindow()
+    window._status_timer.stop()
+    window._prune_timer.stop()
+    coordinator = window._mod_coordinator
+    coordinator._updates.poll_timer.stop()
+    deadline = time.monotonic() + 3.0
+    quiet_cycles = 0
+    while time.monotonic() < deadline:
+        qapp.processEvents()
+        active = (
+            coordinator._token is not None
+            or coordinator._thread is not None
+            or getattr(window, "_mod_operation_request", None) is not None
+            or getattr(window, "_mod_operation_thread", None) is not None
+        )
+        if active:
+            quiet_cycles = 0
+        else:
+            quiet_cycles += 1
+            if quiet_cycles >= 3:
+                return window
+        QTest.qWait(5)
+    pytest.fail("Initial Mods inventory did not release its operation slot")
 
 
 def test_client_exit_refreshes_existing_card_and_selected_details(qapp, monkeypatch):
@@ -82,10 +112,8 @@ def test_client_exit_refreshes_existing_card_and_selected_details(qapp, monkeypa
     monkeypatch.setattr(app_module, "load_accounts", load)
     monkeypatch.setattr(app_module.CharactersPage, "_load_portrait_for_card", lambda *_args: None)
     monkeypatch.setattr(app_module, "is_server_running", lambda **_kwargs: False)
-    window = MainWindow()
+    window = _new_window(qapp)
     try:
-        window._status_timer.stop()
-        window._prune_timer.stop()
         _wait_until(qapp, lambda: not window._data_load_active() and bool(window._accounts))
         page = window._characters_page
         key = (account.username, 101)
@@ -172,10 +200,8 @@ def test_native_account_refresh_uses_existing_loader_seam_off_gui_thread(
     monkeypatch.setattr(app_module.CharactersPage, "_load_portrait_for_card", lambda *_args: None)
     monkeypatch.setattr(app_module, "is_server_running", lambda **_kwargs: False)
 
-    window = MainWindow()
+    window = _new_window(qapp)
     try:
-        window._status_timer.stop()
-        window._prune_timer.stop()
         _wait_until(qapp, lambda: window._accounts == [expected])
 
         assert calls == [("C:/Synthetic/EveJS", calls[0][1])]
@@ -209,10 +235,8 @@ def test_overlapping_account_refresh_is_cancelled_then_serially_replaced(
     monkeypatch.setattr(app_module.CharactersPage, "_load_portrait_for_card", lambda *_args: None)
     monkeypatch.setattr(app_module, "is_server_running", lambda **_kwargs: False)
 
-    window = MainWindow()
+    window = _new_window(qapp)
     try:
-        window._status_timer.stop()
-        window._prune_timer.stop()
         _wait_until(qapp, first_started.is_set)
 
         window._refresh_characters()
@@ -316,10 +340,8 @@ def test_selected_character_detail_is_loaded_off_thread_and_applied(
     monkeypatch.setattr(app_module.CharactersPage, "_load_portrait_for_card", lambda *_args: None)
     monkeypatch.setattr(app_module, "is_server_running", lambda **_kwargs: False)
 
-    window = MainWindow()
+    window = _new_window(qapp)
     try:
-        window._status_timer.stop()
-        window._prune_timer.stop()
         _wait_until(qapp, lambda: bool(window._characters_page._cards))
 
         window._characters_page._on_card_selected(
@@ -357,10 +379,8 @@ def test_close_cancels_data_load_without_waiting_on_gui_thread(
     monkeypatch.setattr(app_module.CharactersPage, "_load_portrait_for_card", lambda *_args: None)
     monkeypatch.setattr(app_module, "is_server_running", lambda **_kwargs: False)
 
-    window = MainWindow()
+    window = _new_window(qapp)
     try:
-        window._status_timer.stop()
-        window._prune_timer.stop()
         _wait_until(qapp, load_started.is_set)
 
         started_at = time.monotonic()

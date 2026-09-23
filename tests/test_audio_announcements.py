@@ -678,12 +678,17 @@ def test_native_noop_and_internal_maintenance_stops_are_silent(
 
 
 def _prepare_docker_stop(window: MainWindow) -> RuntimeSnapshot:
+    fixture_root = window._fixture_evejs_root
+    (fixture_root / "package.json").write_text(
+        '{"version":"0.12.9"}',
+        encoding="utf-8",
+    )
     window._cfg.update(
         {
             "runtime_backend": "docker_compose",
             "docker_control_policy": "managed",
-            "evejs_root": "C:/Fixture/EveJS",
-            "docker_compose_file": "C:/Fixture/EveJS/compose.yaml",
+            "evejs_root": str(fixture_root),
+            "docker_compose_file": str(fixture_root / "compose.yaml"),
             "docker_project_name": "fixture",
         }
     )

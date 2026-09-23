@@ -289,8 +289,42 @@ def test_exact_one_off_command_and_canonical_private_stdin(tmp_path: Path) -> No
     assert "captain_01" not in repr(result)
     assert "Capsule Pilot" not in repr(result)
     assert "/app/server/logs" in argv
+    assert "/var/lib/evejs/logs" not in argv
     assert "EVEJS_LOG_LEVEL=0" in argv
     assert "--pull" in argv and "never" in argv
+
+
+def test_data_root_logs_volume_is_anonymously_masked_for_beta_helper(
+    tmp_path: Path,
+) -> None:
+    target, helpers, backup, config, records = _fixture(tmp_path)
+    config = _with_server_mounts(
+        config,
+        Mount("volume", "evejs-data", "/var/lib/evejs"),
+        Mount("volume", "evejs-logs", "/var/lib/evejs/logs"),
+    )
+    runner = FakeRunner(_success_output())
+    controller, _inspector = _controller(
+        target, helpers, backup, config, records, runner
+    )
+
+    result = controller.execute(
+        DockerCharacterCreationRequest("captain_01", "Capsule Pilot")
+    )
+
+    assert result.succeeded
+    argv = runner.calls[0][0]
+    volumes = [
+        argv[index + 1]
+        for index, argument in enumerate(argv[:-1])
+        if argument == "--volume"
+    ]
+    assert volumes == [
+        "/app/server/logs",
+        "/var/lib/evejs/logs",
+        f"{helpers.resolve()}:/run/evejs-launcher/helpers:ro",
+        f"{backup.resolve()}:/run/evejs-launcher/backup:rw",
+    ]
 
 
 def test_changed_second_effective_preflight_blocks_before_backup_or_helper(

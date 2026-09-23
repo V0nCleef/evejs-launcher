@@ -198,6 +198,7 @@ class ModRow(QFrame):
         can_move_down: bool = False,
         cleanup: dict | None = None,
         client_script_delivery: str | None = None,
+        copied_registry_root: str | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -214,6 +215,7 @@ class ModRow(QFrame):
         self._delegated_activation = delegated_activation
         self._cleanup = cleanup
         self._client_script_delivery = client_script_delivery
+        self._copied_registry_root = copied_registry_root
         self._can_show_repair = management is None and bool(management_error)
         self._operation_error = ""
         self._lifecycle_busy = False
@@ -405,10 +407,17 @@ class ModRow(QFrame):
         else:
             self.remove_btn.setProperty("managementRole", "external")
             self.remove_btn.setText("EXTERNAL")
-            unmanaged_reason = (
-                "This mod was installed outside a launcher-compatible Setup. "
-                "Run its matching Setup once to add launcher removal support."
-            )
+            if self._copied_registry_root:
+                unmanaged_reason = (
+                    "This EveJS folder has a copied launcher mod registry from "
+                    f"{self._copied_registry_root}. Use Register mods here to "
+                    "restore launcher ownership for recorded mods. If this mod "
+                    "has no launcher record, no verified removal provider is available."
+                )
+            else:
+                unmanaged_reason = (
+                    "No verified launcher removal provider is available for this mod."
+                )
             set_translatable_accessible_description(
                 self.remove_btn,
                 unmanaged_reason,
@@ -596,10 +605,7 @@ class ModRow(QFrame):
                 QMessageBox.warning(
                     self,
                     "Mod Removal Needs Repair",
-                    self._management_error
-                    + "\n\nRun this mod's matching launcher-compatible Setup "
-                    "for the selected EveJS root, then refresh Mods. Nothing "
-                    "was removed.",
+                    self._management_error + "\n\nNothing was changed.",
                 )
             return
         if (
@@ -653,6 +659,7 @@ class ModsPage(QWidget):
     activation_requested = pyqtSignal(object, bool)
     move_requested = pyqtSignal(object, int)
     helper_requested = pyqtSignal(object, str)
+    registry_relocation_requested = pyqtSignal(object)
 
     def __init__(self, parent: QWidget | None = None, *, defer_inventory: bool = False) -> None:
         super().__init__(parent)
@@ -727,6 +734,48 @@ class ModsPage(QWidget):
         self.page_header.add_action(self.recover_update_btn)
         self.recover_update_btn.hide()
         root.addWidget(self.page_header)
+
+        self.registry_banner = QFrame(self)
+        self.registry_banner.setProperty("class", "modsRegistryBanner")
+        self.registry_banner.setVisible(False)
+        registry_banner_layout = QHBoxLayout(self.registry_banner)
+        registry_banner_layout.setContentsMargins(18, 14, 18, 14)
+        registry_banner_layout.setSpacing(SPACING["md"])
+        registry_copy = QVBoxLayout()
+        registry_copy.setSpacing(3)
+        self.registry_banner_title = QLabel("Finish setting up mods for this folder")
+        self.registry_banner_title.setProperty("class", "modsRegistryTitle")
+        mark_translatable(self.registry_banner_title)
+        registry_copy.addWidget(self.registry_banner_title)
+        self.registry_banner_description = QLabel(
+            "This EveJS folder looks like it was copied or moved. Register it here so the launcher can recognize the mods it manages. Existing mod files and enabled states stay as they are."
+        )
+        self.registry_banner_description.setProperty("class", "modsRegistryDescription")
+        self.registry_banner_description.setWordWrap(True)
+        self.registry_banner_description.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        mark_translatable(self.registry_banner_description)
+        registry_copy.addWidget(self.registry_banner_description)
+        registry_banner_layout.addLayout(registry_copy, stretch=1)
+        self.register_mods_btn = QPushButton("Register mods here")
+        self.register_mods_btn.setProperty("class", "modsRegistryAction")
+        self.register_mods_btn.setMinimumHeight(46)
+        self.register_mods_btn.setMinimumWidth(190)
+        self.register_mods_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        set_translatable_accessible_description(
+            self.register_mods_btn,
+            "Register this copied EveJS folder after confirmation. Existing mod files and enabled states stay as they are, and a backup is kept.",
+        )
+        mark_translatable(self.register_mods_btn)
+        self.register_mods_btn.clicked.connect(
+            lambda _checked=False: self.registry_relocation_requested.emit(
+                self._inventory.relocation_preview
+            )
+        )
+        registry_banner_layout.addWidget(self.register_mods_btn)
+        root.addWidget(self.registry_banner)
 
         self.runtime_panel = QFrame(self)
         self.runtime_panel.setProperty("class", "modsRuntimePanel")
@@ -1104,6 +1153,7 @@ class ModsPage(QWidget):
         self._runtime_backend = backend
         self._docker_policy = docker_policy
         self._apply_runtime_presentation()
+        self._update_summary_and_actions()
         self.refresh_mods()
 
     def set_mod_runtime_snapshot(
@@ -1397,6 +1447,11 @@ class ModsPage(QWidget):
                     management_error=management_error,
                     can_remove=can_remove,
                     local_removable=local_removable,
+                    copied_registry_root=(
+                        inventory.relocation_preview.saved_root
+                        if inventory.relocation_preview is not None
+                        else None
+                    ),
                     delegated_activation=self._refresh_handler is not None,
                     can_move_up=key in loader_keys and loader_keys.index(key) > 0,
                     can_move_down=key in loader_keys and loader_keys.index(key) < len(loader_keys) - 1,
@@ -1463,6 +1518,19 @@ class ModsPage(QWidget):
         editable = self._can_mutate() and not self._lifecycle_busy and bool(self._evejs_root)
         for button in (self.add_zip_btn, self.add_folder_btn):
             button.setEnabled(editable and not self._inventory.registry_error)
+        preview = self._inventory.relocation_preview
+        self.registry_banner.setVisible(preview is not None)
+        register_reason = (
+            "Register this folder with one confirmation. A backup is kept and existing mod files are unchanged."
+        )
+        if not self._can_mutate():
+            register_reason = self._disabled_reason()
+        elif self._lifecycle_busy:
+            register_reason = "Wait for the active server lifecycle operation to finish."
+        set_translatable_tooltip(self.register_mods_btn, register_reason)
+        self.register_mods_btn.setEnabled(
+            preview is not None and editable and not self._inventory.registry_error
+        )
         self.undo_remove_btn.setEnabled(editable and bool(self._inventory.quarantined))
         self.recover_mods_btn.setVisible(self._inventory.recovery_pending)
         self.recover_mods_btn.setEnabled(editable)
