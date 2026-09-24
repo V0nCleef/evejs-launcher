@@ -208,12 +208,18 @@ def read_managed_mod_registration(mod: Mod) -> ManagedModRegistration:
         raise ModManagementError(
             f"Cannot manage removal for '{mod.name}': it is not bound to an EveJS root."
         )
-    # Undeclared loaders use their folder name as identity. Windows registry
-    # keys are case-insensitive, whereas declared installer IDs are lowercase.
-    # A legacy folder name outside the installer grammar cannot be enrolled.
+    # Registry keys are case-insensitive and installer lookup IDs are lowercase.
+    # Schema-3 public IDs may use mixed case, like legacy folder identities.
+    # Normalize only the lookup; keep the original ID for enrollment validation.
+    # Schema-2 IDs and the installer's accepted grammar remain unchanged.
     legacy_loader = mod.manifest_path is None and mod.activation_kind is ActivationKind.LOADER_RENAME
     try:
-        registry_path = managed_mod_registry_path(mod.id.lower() if legacy_loader else mod.id)
+        registry_id = (
+            mod.id.lower()
+            if legacy_loader or (mod.api_descriptor is not None and mod.id.isascii())
+            else mod.id
+        )
+        registry_path = managed_mod_registry_path(registry_id)
     except ModManagementError:
         if legacy_loader:
             raise ModNotManagedError("This legacy loader has no installer-compatible identity.") from None

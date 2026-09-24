@@ -2,6 +2,10 @@
 
 ## Changelog
 
+## v1.0.65 - 2026-09-24
+
+- Fixed Remove rejecting schema-3 mods with mixed-case IDs after a successful import. Existing manifest IDs are preserved, and installer ownership checks remain enforced. Thanks to Delta007 for the report and detailed verification. 🫡
+
 ## v1.0.64 - 2026-09-23
 
 - Added support for the tested EveJS 0.12.9 beta while retaining support for 0.12.8 and older supported installations, including the updated log locations and certificate installer.
