@@ -7,12 +7,13 @@ import json
 import pytest
 from PyQt6.QtWidgets import QApplication, QFileDialog
 
-from src import config
+from src import config, i18n
 from src.core.client_autologin import AutoLoginCapability
 from src.core.runtime.docker_compose import PreflightFailureKind, PreflightReport
 from src.core.runtime.docker_setup import DockerPreflightResult
 from src.pages import settings_page as settings_page_module
 from src.pages.settings_page import SettingsPage
+from src.translations_auto_login import UI_PHRASES_BY_LANGUAGE as AUTO_LOGIN_TRANSLATIONS
 
 
 @pytest.fixture
@@ -154,7 +155,7 @@ def test_invalid_persisted_backend_policy_and_non_bool_keep_running_normalize_sa
     assert page.docker_keep_running_toggle.isChecked() is True
 
 
-def test_supported_auto_login_is_default_off_and_round_trips_only_when_opted_in(
+def test_supported_auto_login_is_default_on_and_round_trips(
     qapp: QApplication,
     isolated_config,
     monkeypatch: pytest.MonkeyPatch,
@@ -171,16 +172,35 @@ def test_supported_auto_login_is_default_off_and_round_trips_only_when_opted_in(
     page = SettingsPage()
 
     assert page.auto_login_toggle.isEnabled()
-    assert page.auto_login_toggle.isChecked() is False
+    assert page.auto_login_toggle.isChecked() is True
     assert "no client patch" in page.auto_login_status_label.text().casefold()
 
-    page.auto_login_toggle.setChecked(True)
     page.save_settings()
 
     assert config.load()["auto_login_enabled"] is True
 
 
-def test_unsupported_auto_login_is_disabled_and_cannot_be_persisted(
+def test_explicit_auto_login_opt_out_persists(
+    qapp: QApplication,
+    isolated_config,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        settings_page_module,
+        "inspect_auto_login_capability",
+        lambda *_args: AutoLoginCapability(True, "Supported fixture client."),
+    )
+    page = SettingsPage()
+    assert page.auto_login_toggle.isChecked() is True
+
+    page.auto_login_toggle.setChecked(False)
+    page.save_settings()
+
+    assert config.load()["auto_login_enabled"] is False
+    assert SettingsPage().auto_login_toggle.isChecked() is False
+
+
+def test_unsupported_auto_login_keeps_the_preference_enabled_and_persisted(
     qapp: QApplication,
     isolated_config,
     monkeypatch: pytest.MonkeyPatch,
@@ -195,14 +215,15 @@ def test_unsupported_auto_login_is_disabled_and_cannot_be_persisted(
     )
 
     page = SettingsPage()
-    assert page.auto_login_toggle.isEnabled() is False
+    assert page.auto_login_toggle.isEnabled() is True
+    assert page.auto_login_toggle.isChecked() is True
     assert "unsupported" in page.auto_login_status_label.text().casefold()
 
     page.save_settings()
-    assert config.load()["auto_login_enabled"] is False
+    assert config.load()["auto_login_enabled"] is True
 
 
-def test_supported_auto_login_is_disabled_when_switching_to_docker(
+def test_auto_login_stays_enabled_for_docker_and_reports_launch_time_check(
     qapp: QApplication,
     isolated_config,
     monkeypatch: pytest.MonkeyPatch,
@@ -212,16 +233,92 @@ def test_supported_auto_login_is_disabled_when_switching_to_docker(
         "inspect_auto_login_capability",
         lambda *_args: AutoLoginCapability(True, "Supported Native fixture."),
     )
+    inspected_paths: list[str] = []
+
+    def inspect_client(client_path: str) -> AutoLoginCapability:
+        inspected_paths.append(client_path)
+        return AutoLoginCapability(True, "Supported copied client.", 3396210)
+
+    monkeypatch.setattr(
+        settings_page_module,
+        "inspect_client_auto_login_capability",
+        inspect_client,
+    )
     page = SettingsPage()
-    page.auto_login_toggle.setChecked(True)
+    page.client_path_edit.setText("copied-client\\tq")
+    preflight_requests: list[object] = []
+    page.docker_preflight_requested.connect(preflight_requests.append)
 
     page.runtime_backend_combo.setCurrentIndex(
         page.runtime_backend_combo.findData("docker_compose")
     )
 
-    assert page.auto_login_toggle.isEnabled() is False
-    assert "native" in page.auto_login_status_label.text().casefold()
-    assert page._collect_settings()["auto_login_enabled"] is False
+    assert page.auto_login_toggle.isEnabled() is True
+    assert page.auto_login_toggle.isChecked() is True
+    assert "docker" in page.auto_login_status_label.text().casefold()
+    assert "compatibility" in page.auto_login_status_label.text().casefold()
+    assert "launches" in page.auto_login_status_label.text().casefold()
+    assert "native" not in page.auto_login_status_label.text().casefold()
+    assert "docker cli" not in page.auto_login_status_label.text().casefold()
+    assert inspected_paths[-1] == "copied-client\\tq"
+    assert not preflight_requests
+    assert page._collect_settings()["auto_login_enabled"] is True
+
+
+@pytest.mark.parametrize("language", ("zh_CN", "ja", "ko", "fr", "de", "nl", "ru"))
+def test_docker_auto_login_status_uses_the_reviewed_translation_in_every_language(
+    language: str,
+    qapp: QApplication,
+    isolated_config,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial = deepcopy(config.DEFAULT_CONFIG)
+    initial["runtime_backend"] = "docker_compose"
+    config.save(initial)
+    monkeypatch.setattr(
+        settings_page_module,
+        "inspect_client_auto_login_capability",
+        lambda *_args: AutoLoginCapability(True, "Supported copied client.", 3396210),
+    )
+
+    previous_language = i18n.current_language()
+    i18n.set_language(language)
+    try:
+        page = SettingsPage()
+        source = settings_page_module.DOCKER_AUTO_LOGIN_STATUS
+        expected = AUTO_LOGIN_TRANSLATIONS[language][source]
+
+        assert page.auto_login_status_label.text() == expected
+        assert expected != source
+    finally:
+        i18n.set_language(previous_language)
+
+
+def test_auto_login_preference_survives_backend_switches(
+    qapp: QApplication,
+    isolated_config,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        settings_page_module,
+        "inspect_auto_login_capability",
+        lambda *_args: AutoLoginCapability(True, "Supported Native fixture."),
+    )
+    monkeypatch.setattr(
+        settings_page_module,
+        "inspect_client_auto_login_capability",
+        lambda *_args: AutoLoginCapability(False, "Unsupported copied client."),
+    )
+    page = SettingsPage()
+    assert page.auto_login_toggle.isChecked() is True
+
+    for backend in ("docker_compose", "native", "docker_compose", "native"):
+        page.runtime_backend_combo.setCurrentIndex(
+            page.runtime_backend_combo.findData(backend)
+        )
+        assert page.auto_login_toggle.isEnabled() is True
+        assert page.auto_login_toggle.isChecked() is True
+        assert page._collect_settings()["auto_login_enabled"] is True
 
 
 def test_compose_browse_uses_yaml_filter_with_all_files_fallback(qapp: QApplication, isolated_config, monkeypatch: pytest.MonkeyPatch) -> None:

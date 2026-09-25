@@ -24,7 +24,7 @@ def test_fresh_config_uses_ask_preference(isolated_config: Path) -> None:
 
     assert loaded["server_start_preference"] == ASK_EVERY_TIME
     assert loaded["language"] == "en"
-    assert loaded["auto_login_enabled"] is False
+    assert loaded["auto_login_enabled"] is True
     assert "server_start_script" not in loaded
     assert "server_start_scripts" not in loaded
     assert "server_script_prompted" not in loaded
@@ -220,6 +220,35 @@ def test_auto_login_setting_accepts_only_a_real_boolean(
         json.dumps({"auto_login_enabled": True}),
         encoding="utf-8",
     )
+    assert config.load()["auto_login_enabled"] is True
+
+
+def test_explicit_auto_login_opt_out_survives_load_and_save(
+    isolated_config: Path,
+) -> None:
+    isolated_config.write_text(
+        json.dumps({"auto_login_enabled": False}),
+        encoding="utf-8",
+    )
+
+    loaded = config.load()
+    assert loaded["auto_login_enabled"] is False
+
+    config.save(loaded)
+
+    assert config.load()["auto_login_enabled"] is False
+
+
+@pytest.mark.parametrize("runtime_backend", ["native", "docker_compose"])
+def test_missing_auto_login_setting_defaults_on_for_each_backend(
+    isolated_config: Path,
+    runtime_backend: str,
+) -> None:
+    isolated_config.write_text(
+        json.dumps({"runtime_backend": runtime_backend}),
+        encoding="utf-8",
+    )
+
     assert config.load()["auto_login_enabled"] is True
 
 

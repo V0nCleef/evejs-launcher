@@ -2,6 +2,12 @@
 
 ## Changelog
 
+## v1.0.67 - 2026-09-25
+
+- Auto-Login Character is now on by default for new settings. An existing saved Off preference is preserved.
+- Added automatic character login for local Docker EveJS servers, with checks against the selected running container and its effective server configuration.
+- Unsupported auto-login setups fall back to manual login. The setting remains editable for both Native and Docker, with updated status text in every supported language.
+
 ## v1.0.66 - 2026-09-25
 
 - Fixed character launches being blocked when EveJS 0.12.9 successfully validates certificates stored outside the launcher's legacy bundle locations. The launcher now uses the same read-only certificate check as Play.bat, while keeping certificate preparation for older EveJS versions.

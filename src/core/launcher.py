@@ -11,7 +11,11 @@ import socket
 import time
 from urllib.parse import urlsplit
 
-from .client_autologin import AutoLoginLaunch, require_auto_login_arguments
+from .client_autologin import (
+    AutoLoginLaunch,
+    AutoLoginUnavailableError,
+    require_auto_login_arguments,
+)
 from .dlss5 import ensure_dlss5_client_mod, prepare_dlss5_profile_environment
 from .mod_api_runtime import prepare_public_client_mods, public_package_owns_legacy_folder
 from .mod_lifecycle_lock import acquire_mod_lifecycle_lock
@@ -398,6 +402,7 @@ def launch_client(
     *,
     launch_context: ClientLaunchContext | None = None,
     auto_login: AutoLoginLaunch | None = None,
+    auto_login_server_password_bypass_verified: bool = False,
     overview_bridge: OverviewBridgeLaunch | None = None,
     pre_spawn_check: Callable[[], None] | None = None,
 ) -> subprocess.Popen:
@@ -465,12 +470,23 @@ def launch_client(
 
         arguments: tuple[str, ...] = (f"/port:{effective_context.game_port}",)
         if auto_login is not None:
-            arguments += require_auto_login_arguments(
-                auto_login,
-                evejs_root=evejs_root,
-                client_path=client_path or profile_tq_path.resolve(),
-                game_host=effective_context.game_host,
-            )
+            try:
+                arguments += require_auto_login_arguments(
+                    auto_login,
+                    evejs_root=evejs_root,
+                    client_path=client_path or profile_tq_path.resolve(),
+                    game_host=effective_context.game_host,
+                    server_password_bypass_verified=(
+                        auto_login_server_password_bypass_verified
+                    ),
+                )
+            except AutoLoginUnavailableError as exc:
+                log.info(
+                    "Client auto-login is unavailable; starting in manual login "
+                    "mode (%s).",
+                    exc,
+                )
+                auto_login = None
 
         public_mods = prepare_public_client_mods(
             evejs_root, selected_client_path, profile_tq_path,

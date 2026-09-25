@@ -17,6 +17,8 @@ from src import config
 from src.app import MainWindow
 from src.core.client_launch_queue import AsyncClientLaunchQueue
 from src.core.launcher import ClientLaunchContext
+from src.core.runtime.docker_autologin import DockerAutoLoginProbe
+from src.core.runtime.docker_compose import ComposeTarget
 from src.workers.client_launch_worker import (
     ClientLaunchFailure,
     ClientLaunchRequest,
@@ -55,7 +57,52 @@ def _request(tmp_path: Path) -> ClientLaunchRequest:
     )
 
 
-def test_docker_request_ignores_stale_native_auto_login_setting() -> None:
+def test_docker_request_captures_auto_login_probe_for_observed_server(
+    tmp_path: Path,
+) -> None:
+    context = ClientLaunchContext(
+        game_host="127.0.0.1",
+        game_port=26000,
+        proxy_url="http://127.0.0.1:26002",
+        image_url="http://127.0.0.1:26003",
+        target_identity="docker-target",
+        settings_identity="docker-settings",
+        monitor_generation=1,
+    )
+    target = ComposeTarget(tmp_path / "compose.yaml", tmp_path, "fixture")
+    window = SimpleNamespace(
+        _cfg={
+            "evejs_root": "C:/Games/EveJS",
+            "client_path": "C:/Games/EVE/tq",
+            "auto_login_enabled": True,
+        },
+        _tracker=SimpleNamespace(is_account_running=lambda _username: False),
+        _pending_client_launches=set(),
+        _resolve_client_launch_context=lambda: (context, ""),
+        _resolve_configured_client_path=(
+            lambda _client_path, _evejs_root: Path("C:/Games/EVE/tq")
+        ),
+        _docker_mode=lambda: True,
+        _runtime_snapshot=SimpleNamespace(game_runtime_identity="b" * 64),
+        _docker_log_target_factory=lambda: lambda: target,
+    )
+
+    request = MainWindow._make_client_launch_request(
+        window,
+        "fixture-account",
+        "Fixture Character",
+        90000001,
+    )
+
+    assert request is not None
+    assert request.auto_login_enabled is True
+    assert request.docker_auto_login_probe == DockerAutoLoginProbe(
+        target,
+        "b" * 64,
+    )
+
+
+def test_docker_request_preserves_explicit_auto_login_off() -> None:
     context = ClientLaunchContext(
         game_host="127.0.0.1",
         game_port=26000,
@@ -69,7 +116,7 @@ def test_docker_request_ignores_stale_native_auto_login_setting() -> None:
         _cfg={
             "evejs_root": "C:/Games/EveJS",
             "client_path": "C:/Games/EVE/tq",
-            "auto_login_enabled": True,
+            "auto_login_enabled": False,
         },
         _tracker=SimpleNamespace(is_account_running=lambda _username: False),
         _pending_client_launches=set(),
@@ -89,6 +136,7 @@ def test_docker_request_ignores_stale_native_auto_login_setting() -> None:
 
     assert request is not None
     assert request.auto_login_enabled is False
+    assert request.docker_auto_login_probe is None
 
 
 def _wait_for_launch_teardown(
@@ -748,6 +796,16 @@ def test_perform_launch_forwards_exact_character_as_typed_auto_login_intent(
     monkeypatch.setattr(app_module, "wait_for_client_endpoints", lambda _context: None)
     monkeypatch.setattr(
         app_module,
+        "inspect_client_auto_login_capability",
+        lambda _client: SimpleNamespace(supported=True, reason="supported"),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "inspect_auto_login_capability",
+        lambda *_args: SimpleNamespace(supported=True, reason="supported"),
+    )
+    monkeypatch.setattr(
+        app_module,
         "require_client_endpoints_ready",
         endpoint_checks.append,
     )
@@ -777,10 +835,100 @@ def test_perform_launch_forwards_exact_character_as_typed_auto_login_intent(
     assert intent is not None
     assert intent.username == "fixture-account"
     assert intent.character_id == 90000001
+    assert captured["auto_login_server_password_bypass_verified"] is False
     pre_spawn_check = captured["pre_spawn_check"]
     assert callable(pre_spawn_check)
     pre_spawn_check()
     assert endpoint_checks == [request.launch_context]
+
+
+@pytest.mark.parametrize("bypass_enabled", [True, False])
+def test_docker_launch_uses_only_verified_bypass_and_rechecks_before_spawn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    bypass_enabled: bool,
+) -> None:
+    target = ComposeTarget(tmp_path / "compose.yaml", tmp_path, "fixture")
+    context = ClientLaunchContext(
+        game_host="127.0.0.1",
+        game_port=26000,
+        proxy_url="http://127.0.0.1:26002",
+        image_url="http://127.0.0.1:26001",
+        target_identity="docker-target",
+        settings_identity="docker-settings",
+        monitor_generation=7,
+    )
+    request = ClientLaunchRequest(
+        username="fixture-account",
+        character_name="Fixture Character",
+        evejs_root=str(tmp_path / "evejs"),
+        client_path=str(tmp_path / "client" / "tq"),
+        profiles_root=tmp_path / "profiles",
+        launch_context=context,
+        character_id=90000001,
+        auto_login_enabled=True,
+        docker_auto_login_probe=DockerAutoLoginProbe(target, "b" * 64),
+    )
+    (request.profiles_root / request.username / "tq").mkdir(parents=True)
+    captured: dict[str, object] = {}
+    identity_checks: list[tuple[DockerAutoLoginProbe, ClientLaunchContext]] = []
+    endpoint_checks: list[ClientLaunchContext] = []
+
+    monkeypatch.setattr(app_module, "wait_for_client_endpoints", lambda _context: None)
+    monkeypatch.setattr(
+        app_module,
+        "inspect_client_auto_login_capability",
+        lambda _client: SimpleNamespace(supported=True, reason="supported"),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "inspect_docker_auto_login_capability",
+        lambda _probe, _context: SimpleNamespace(
+            enabled=bypass_enabled,
+            reason="enabled" if bypass_enabled else "disabled",
+        ),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "assert_docker_auto_login_context_current",
+        lambda probe, launch_context: identity_checks.append(
+            (probe, launch_context)
+        ),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "require_client_endpoints_ready",
+        endpoint_checks.append,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "create_profile",
+        lambda _username, _client_path, _profiles_root: (
+            request.profiles_root / request.username
+        ),
+    )
+    monkeypatch.setattr(app_module, "prefill_username", lambda _username: None)
+    monkeypatch.setattr(
+        app_module,
+        "configure_profile_game_endpoint",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "launch_client",
+        lambda **kwargs: captured.update(kwargs) or _FakeProcess(),
+    )
+
+    process = app_module._perform_client_launch(request)
+
+    assert process.pid == 4242
+    assert (captured["auto_login"] is not None) is bypass_enabled
+    assert captured["auto_login_server_password_bypass_verified"] is bypass_enabled
+    pre_spawn_check = captured["pre_spawn_check"]
+    assert callable(pre_spawn_check)
+    pre_spawn_check()
+    assert endpoint_checks == [context]
+    assert identity_checks == [(request.docker_auto_login_probe, context)]
 
 
 def test_perform_launch_keeps_manual_mode_argument_free(

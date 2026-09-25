@@ -78,7 +78,11 @@ from .core.db import (
     get_character_detail,
     load_accounts,
 )
-from .core.client_autologin import AutoLoginLaunch
+from .core.client_autologin import (
+    AutoLoginLaunch,
+    inspect_auto_login_capability,
+    inspect_client_auto_login_capability,
+)
 from .core.groups import (
     GroupValidationError,
     TargetGroupState,
@@ -194,6 +198,12 @@ from .core.runtime.docker_character_creation import (
     ManagedDockerCharacterCreationController,
 )
 from .core.runtime.docker_compose import ComposeInspector, ComposeTarget
+from .core.runtime.docker_autologin import (
+    DockerAutoLoginContextError,
+    DockerAutoLoginProbe,
+    assert_docker_auto_login_context_current,
+    inspect_docker_auto_login_capability,
+)
 from .core.runtime.docker_controller import DockerLifecycleAction, ManagedComposeController
 from .core.runtime.docker_setup import (
     DockerPreflightRequest,
@@ -382,13 +392,82 @@ def _perform_client_launch(request: ClientLaunchRequest) -> LaunchedProcess:
     )
     log.info("Client launch stage=settings_ready account=%s", request.username)
     auto_login = None
+    docker_auto_login_probe = None
+    server_password_bypass_verified = False
     if request.auto_login_enabled:
         if request.character_id is None:
-            raise ValueError("A character ID is required for automatic login.")
-        auto_login = AutoLoginLaunch(
-            username=request.username,
-            character_id=request.character_id,
-        )
+            log.info(
+                "Client auto-login requested but no character ID was supplied; "
+                "starting in manual login mode."
+            )
+        else:
+            if request.launch_context.target_identity is not None:
+                docker_auto_login_probe = request.docker_auto_login_probe
+                if docker_auto_login_probe is None:
+                    raise DockerAutoLoginContextError(
+                        "The selected Docker launch target could not be verified."
+                    )
+            client_capability = inspect_client_auto_login_capability(
+                request.client_path
+            )
+            if not client_capability.supported:
+                log.info(
+                    "Client auto-login requested but the copied client is "
+                    "unsupported; starting in manual login mode (%s).",
+                    client_capability.reason,
+                )
+            elif request.launch_context.target_identity is not None:
+                probe = request.docker_auto_login_probe
+                assert probe is not None
+                check = inspect_docker_auto_login_capability(
+                    probe,
+                    request.launch_context,
+                )
+                docker_auto_login_probe = probe
+                if check.enabled:
+                    server_password_bypass_verified = True
+                    auto_login = AutoLoginLaunch(
+                        username=request.username,
+                        character_id=request.character_id,
+                    )
+                else:
+                    log.info(
+                        "Client auto-login requested but the Docker server "
+                        "setting is unavailable; starting in manual login mode "
+                        "(%s).",
+                        check.reason,
+                    )
+            else:
+                capability = inspect_auto_login_capability(
+                    request.evejs_root,
+                    request.client_path,
+                )
+                if capability.supported:
+                    auto_login = AutoLoginLaunch(
+                        username=request.username,
+                        character_id=request.character_id,
+                    )
+                else:
+                    log.info(
+                        "Client auto-login requested but the Native setup is "
+                        "unsupported; starting in manual login mode (%s).",
+                        capability.reason,
+                    )
+    log.info(
+        "Client auto-login state requested=%s candidate=%s account=%s",
+        request.auto_login_enabled,
+        auto_login is not None,
+        request.username,
+    )
+
+    def pre_spawn_check() -> None:
+        require_client_endpoints_ready(request.launch_context)
+        if docker_auto_login_probe is not None:
+            assert_docker_auto_login_context_current(
+                docker_auto_login_probe,
+                request.launch_context,
+            )
+
     log.info(
         "Client launch stage=certificate_and_spawn account=%s",
         request.username,
@@ -400,10 +479,11 @@ def _perform_client_launch(request: ClientLaunchRequest) -> LaunchedProcess:
         client_path=request.client_path,
         launch_context=request.launch_context,
         auto_login=auto_login,
-        overview_bridge=request.overview_bridge,
-        pre_spawn_check=lambda: require_client_endpoints_ready(
-            request.launch_context
+        auto_login_server_password_bypass_verified=(
+            server_password_bypass_verified
         ),
+        overview_bridge=request.overview_bridge,
+        pre_spawn_check=pre_spawn_check,
     )
 
 
@@ -6422,6 +6502,27 @@ class MainWindow(QMainWindow):
         if username in getattr(self, "_pending_client_launches", set()):
             return None
 
+        auto_login_enabled = bool(
+            self._cfg.get("auto_login_enabled", False)
+        )
+        docker_auto_login_probe = None
+        if auto_login_enabled and self._docker_mode():
+            try:
+                target_factory = self._docker_log_target_factory()
+                runtime_snapshot = getattr(self, "_runtime_snapshot", None)
+                docker_auto_login_probe = DockerAutoLoginProbe(
+                    target=target_factory(),
+                    expected_game_runtime_identity=getattr(
+                        runtime_snapshot,
+                        "game_runtime_identity",
+                        "",
+                    ),
+                )
+            except Exception:
+                # The worker reports an identity-validation failure without
+                # exposing local paths or raw Docker command details.
+                docker_auto_login_probe = None
+
         overview_bridge = None
         if character_id is not None and not self._docker_mode():
             source_id = pending_overview_source(character_id)
@@ -6465,10 +6566,8 @@ class MainWindow(QMainWindow):
             profiles_root=Path(PROFILES_ROOT),
             launch_context=launch_context,
             character_id=character_id,
-            auto_login_enabled=(
-                not self._docker_mode()
-                and bool(self._cfg.get("auto_login_enabled", False))
-            ),
+            auto_login_enabled=auto_login_enabled,
+            docker_auto_login_probe=docker_auto_login_probe,
             overview_bridge=overview_bridge,
         )
 
@@ -6492,7 +6591,7 @@ class MainWindow(QMainWindow):
             result.process,
         )
         log.info(
-            "Launched client for %s as %s (pid=%s auto_login=%s character_id=%s)",
+            "Launched client for %s as %s (pid=%s auto_login_requested=%s character_id=%s)",
             request.username,
             request.character_name,
             result.process.pid,

@@ -8,8 +8,12 @@ import re
 from .translations_eu import UI_PHRASES_BY_LANGUAGE as EU_UI_PHRASES
 from .translations_character_details import TRANSLATIONS as _CHARACTER_TRANSLATIONS
 from .translations_ja_ko import UI_PHRASES_BY_LANGUAGE as JA_KO_UI_PHRASES
+from .translations_auto_login import UI_PHRASES_BY_LANGUAGE as AUTO_LOGIN_UI_PHRASES
 from .translations_ru import UI_PHRASES as RU_UI_PHRASES
-from .translations_source import SOURCE_PHRASES, SOURCE_PHRASE_SET
+from .translations_source import (
+    AUTO_LOGIN_SOURCE_PHRASES,
+    SOURCE_PHRASES as _CANONICAL_SOURCE_PHRASES,
+)
 from .translations_zh_cn import UI_PHRASES as ZH_CN_UI_PHRASES
 
 
@@ -19,6 +23,15 @@ UI_PHRASES_BY_LANGUAGE: dict[str, dict[str, str]] = {
     **EU_UI_PHRASES,
     "ru": RU_UI_PHRASES,
 }
+for _language, _catalog in AUTO_LOGIN_UI_PHRASES.items():
+    UI_PHRASES_BY_LANGUAGE[_language].update(_catalog)
+
+# A few feature catalogs register phrases after the exact-key legacy catalogs
+# load, so those older catalogs can keep enforcing their own source parity.
+SOURCE_PHRASES = tuple(
+    sorted(set(_CANONICAL_SOURCE_PHRASES) | set(AUTO_LOGIN_SOURCE_PHRASES))
+)
+SOURCE_PHRASE_SET = frozenset(SOURCE_PHRASES)
 
 
 DEFAULT_LANGUAGE = "en"

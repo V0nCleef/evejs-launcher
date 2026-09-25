@@ -31,7 +31,7 @@ DEFAULT_CONFIG = {
     "server_mode": "modded",  # legacy fallback when no StartServer*.bat exists
     "server_start_preference": "ask",  # "ask" or a filename relative to the EveJS root
     "stagger_delay_sec": 3,
-    "auto_login_enabled": False,
+    "auto_login_enabled": True,
     "theme": "dark",
     "language": "en",
     "hidden_characters": [],  # list of character names hidden from UI
@@ -107,8 +107,15 @@ def _migrate(stored: dict) -> dict:
     migrated["docker_keep_running_on_exit"] = _bool_setting(
         migrated.get("docker_keep_running_on_exit"), default=True
     )
+    # New configs enable automatic login; malformed persisted values fail
+    # closed, while a real saved False remains an explicit opt-out.
     migrated["auto_login_enabled"] = _bool_setting(
-        migrated.get("auto_login_enabled"), default=False
+        migrated.get("auto_login_enabled"),
+        default=(
+            DEFAULT_CONFIG["auto_login_enabled"]
+            if "auto_login_enabled" not in migrated
+            else False
+        ),
     )
     migrated["deep_signal_enabled"] = _bool_setting(
         migrated.get("deep_signal_enabled"), default=True

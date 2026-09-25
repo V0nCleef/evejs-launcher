@@ -76,6 +76,8 @@ def _password_bypass_enabled(evejs_root: Path) -> bool:
         payload = json.loads(config_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return False
+    if not isinstance(payload, dict):
+        return False
     development = payload.get("development")
     return (
         isinstance(development, dict)
@@ -107,11 +109,27 @@ def inspect_auto_login_capability(
     evejs_root: str | Path,
     client_path: str | Path,
 ) -> AutoLoginCapability:
-    """Return whether the configured copied client supports safe local login."""
+    """Return whether the configured Native setup supports safe local login."""
     root = Path(evejs_root)
-    client = Path(client_path)
     if not root.is_dir():
         return _unsupported("Select a valid EveJS root.")
+
+    client_capability = inspect_client_auto_login_capability(client_path)
+    if not client_capability.supported:
+        return client_capability
+    if not _password_bypass_enabled(root):
+        return _unsupported(
+            "EveJS local password bypass is disabled or could not be verified.",
+            build=client_capability.build,
+        )
+    return client_capability
+
+
+def inspect_client_auto_login_capability(
+    client_path: str | Path,
+) -> AutoLoginCapability:
+    """Check only the copied-client files needed for automatic login."""
+    client = Path(client_path)
     if not client.is_dir():
         return _unsupported("Select the copied EVE client tq folder.")
 
@@ -131,11 +149,6 @@ def inspect_auto_login_capability(
     if not _client_supports_no_console(client / "bin64" / "exefile.exe"):
         return _unsupported(
             "The copied client does not expose the required no-console mode.",
-            build=build,
-        )
-    if not _password_bypass_enabled(root):
-        return _unsupported(
-            "EveJS local password bypass is disabled or could not be verified.",
             build=build,
         )
     return AutoLoginCapability(
@@ -188,13 +201,24 @@ def require_auto_login_arguments(
     evejs_root: str | Path,
     client_path: str | Path,
     game_host: str,
+    server_password_bypass_verified: bool = False,
 ) -> tuple[str, str, str]:
-    """Fail closed unless the exact local copied-client setup is supported."""
+    """Fail closed unless copied-client and server gates have been verified.
+
+    Docker callers may attest the server setting from the selected running
+    container. Native callers leave the argument false and use the local
+    server configuration check below.
+    """
     if not is_loopback_host(game_host):
         raise AutoLoginUnavailableError(
             "Automatic login is restricted to a local EveJS game endpoint."
         )
-    capability = inspect_auto_login_capability(evejs_root, client_path)
+    if server_password_bypass_verified is True:
+        if not Path(evejs_root).is_dir():
+            raise AutoLoginUnavailableError("Select a valid EveJS root.")
+        capability = inspect_client_auto_login_capability(client_path)
+    else:
+        capability = inspect_auto_login_capability(evejs_root, client_path)
     if not capability.supported:
         raise AutoLoginUnavailableError(capability.reason)
     return build_auto_login_arguments(intent)

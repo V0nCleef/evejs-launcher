@@ -45,7 +45,10 @@ log = logging.getLogger(__name__)
 
 from src import config
 from src.constants import COLORS, APP_VERSION
-from src.core.client_autologin import inspect_auto_login_capability
+from src.core.client_autologin import (
+    inspect_auto_login_capability,
+    inspect_client_auto_login_capability,
+)
 from src.core.discovery import resolve_client_tq_path
 
 from src.core.runtime.docker_setup import (
@@ -112,6 +115,10 @@ AUTO_LOGIN_HELP = (
     "and enter the selected character. No client files are modified and no "
     "real password is stored. The fixed dummy value can be visible in local "
     "Windows process details."
+)
+DOCKER_AUTO_LOGIN_STATUS = (
+    "Client checks passed. Docker server compatibility is checked when a "
+    "character launches."
 )
 
 
@@ -1166,7 +1173,7 @@ class SettingsPage(QWidget):
         self.stagger_delay_spin.setValue(int(cfg.get("stagger_delay_sec", 3)))
         self.auto_start_server_toggle.setChecked(bool(cfg.get("auto_start_server", False)))
         self.auto_start_market_toggle.setChecked(bool(cfg.get("auto_start_market", False)))
-        self.auto_login_toggle.setChecked(bool(cfg.get("auto_login_enabled", False)))
+        self.auto_login_toggle.setChecked(bool(cfg.get("auto_login_enabled", True)))
 
         self.music_enabled_toggle.setChecked(
             bool(cfg.get("audio_music_enabled", True))
@@ -1256,10 +1263,17 @@ class SettingsPage(QWidget):
         )
 
     def _update_auto_login_status(self) -> None:
-        """Show whether the selected copied client can use local auto-login."""
-        if self.runtime_backend_combo.currentData() != "native":
-            supported = False
-            reason = "Automatic login is available for Native EveJS runtime only."
+        """Show static client support without changing the saved preference."""
+        if self.runtime_backend_combo.currentData() == "docker_compose":
+            capability = inspect_client_auto_login_capability(
+                self.client_path_edit.text().strip(),
+            )
+            supported = capability.supported
+            reason = (
+                DOCKER_AUTO_LOGIN_STATUS
+                if supported
+                else capability.reason
+            )
         else:
             capability = inspect_auto_login_capability(
                 self.evejs_root_edit.text().strip(),
@@ -1267,7 +1281,10 @@ class SettingsPage(QWidget):
             )
             supported = capability.supported
             reason = capability.reason
-        self.auto_login_toggle.setEnabled(supported)
+        # This is a user preference, not an availability switch. Leave it
+        # editable and preserve its value when a selected setup is unsupported;
+        # launch-time validation decides whether the requested sign-in is safe.
+        self.auto_login_toggle.setEnabled(True)
         set_translatable_text(self.auto_login_status_label, reason)
         color = COLORS["green"] if supported else COLORS["gold"]
         self.auto_login_status_label.setStyleSheet(f"color: {color};")
@@ -1342,10 +1359,7 @@ class SettingsPage(QWidget):
             "stagger_delay_sec": self.stagger_delay_spin.value(),
             "auto_start_server": self.auto_start_server_toggle.isChecked(),
             "auto_start_market": self.auto_start_market_toggle.isChecked(),
-            "auto_login_enabled": (
-                self.auto_login_toggle.isEnabled()
-                and self.auto_login_toggle.isChecked()
-            ),
+            "auto_login_enabled": self.auto_login_toggle.isChecked(),
             "audio_music_enabled": self.music_enabled_toggle.isChecked(),
             "audio_music_volume": self.music_volume_slider.value(),
             "audio_voice_enabled": self.voice_enabled_toggle.isChecked(),

@@ -35,6 +35,10 @@ _CONTAINER_STARTED_AT = re.compile(r"[^\t\r\n]{1,128}\Z")
 _CONTAINER_RUNTIME_INSPECT_FORMAT = (
     "{{.Id}}\t{{.State.StartedAt}}\t{{.State.Running}}"
 )
+_AUTO_LOGIN_CONFIG_PROBE_SCRIPT = (
+    "const c=require('/app/server/src/config');"
+    "process.stdout.write(c.devSkipPasswordValidation===true?'true\\n':'false\\n')"
+)
 ParsedOutput = TypeVar("ParsedOutput")
 
 
@@ -391,6 +395,16 @@ class ComposeInspector:
     ) -> str | None:
         """Return a privacy-safe identity for one currently running container."""
 
+        details = self.container_runtime_id_and_identity(target, record)
+        return None if details is None else details[1]
+
+    def container_runtime_id_and_identity(
+        self,
+        target: ComposeTarget,
+        record: ContainerRecord,
+    ) -> tuple[str, str] | None:
+        """Return the verified full ID and privacy-safe identity for a container."""
+
         if record.raw_state != "running" or not record.exists:
             return None
         short_id = record.short_id
@@ -421,10 +435,53 @@ class ComposeInspector:
             raise ComposeValidationError(
                 "The running container inspection is malformed."
             )
-        return docker_container_runtime_identity(
+        return (
             parts[0],
-            parts[1],
-            expected_short_id=short_id,
+            docker_container_runtime_identity(
+                parts[0],
+                parts[1],
+                expected_short_id=short_id,
+            ),
+        )
+
+    def server_password_bypass_enabled(
+        self,
+        target: ComposeTarget,
+        record: ContainerRecord,
+        container_id: str,
+    ) -> bool:
+        """Read only the effective password-bypass Boolean in a pinned server.
+
+        The command has no shell, clears inherited Node preload options, and
+        returns only ``true`` or ``false``. Its exact argument shape is part of
+        the read-only Docker allowlist below.
+        """
+        if (
+            not isinstance(record, ContainerRecord)
+            or record.service != "server"
+            or not record.exists
+            or record.raw_state != "running"
+            or not isinstance(record.short_id, str)
+            or not _CONTAINER_SHORT_ID.fullmatch(record.short_id.casefold())
+            or not isinstance(container_id, str)
+            or not _CONTAINER_ID.fullmatch(container_id.casefold())
+            or not container_id.casefold().startswith(record.short_id.casefold())
+        ):
+            raise ComposeValidationError(
+                "The selected running server identity is unavailable."
+            )
+        return self._run_parsed(
+            (
+                "exec",
+                "--env",
+                "NODE_OPTIONS=",
+                container_id,
+                "node",
+                "-e",
+                _AUTO_LOGIN_CONFIG_PROBE_SCRIPT,
+            ),
+            target,
+            parser=_parse_auto_login_config_probe,
         )
 
     def _run(self, args: tuple[str, ...], target: ComposeTarget) -> DockerCommandResult:
@@ -481,7 +538,18 @@ class ComposeInspector:
             and isinstance(args[5], str)
             and bool(_CONTAINER_SHORT_ID.fullmatch(args[5].casefold()))
         )
-        if args not in allowed and not inspect_allowed:
+        auto_login_probe_allowed = (
+            len(args) == 7
+            and args[:3] == ("exec", "--env", "NODE_OPTIONS=")
+            and isinstance(args[3], str)
+            and bool(_CONTAINER_SHORT_ID.fullmatch(args[3].casefold()))
+            and args[4:] == (
+                "node",
+                "-e",
+                _AUTO_LOGIN_CONFIG_PROBE_SCRIPT,
+            )
+        )
+        if args not in allowed and not inspect_allowed and not auto_login_probe_allowed:
             raise RuntimeError("Docker command is outside the Phase 2A read-only allowlist.")
 
 
@@ -528,6 +596,18 @@ def _parse_compose_config_output(text: str) -> ComposeConfig:
             "Effective Compose config must be a JSON object."
         )
     return parse_compose_config(payload)
+
+
+def _parse_auto_login_config_probe(text: str) -> bool:
+    """Reduce the container probe output to one Boolean without retaining text."""
+    value = text.strip()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    raise ComposeValidationError(
+        "The running server automatic-login setting could not be validated."
+    )
 
 
 def _records_from_json(value: Any) -> list[Any]:

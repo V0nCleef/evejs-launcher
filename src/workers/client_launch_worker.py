@@ -11,6 +11,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
 from src.core.launcher import ClientLaunchContext
 from src.core.overview_state import OverviewBridgeLaunch
+from src.core.runtime.docker_autologin import DockerAutoLoginProbe
 
 
 log = logging.getLogger(__name__)
@@ -36,6 +37,7 @@ class ClientLaunchRequest:
     launch_context: ClientLaunchContext
     character_id: int | None = None
     auto_login_enabled: bool = False
+    docker_auto_login_probe: DockerAutoLoginProbe | None = None
     overview_bridge: OverviewBridgeLaunch | None = None
 
 

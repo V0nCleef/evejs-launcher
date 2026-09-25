@@ -15,6 +15,7 @@ from src.core.client_autologin import (
     AutoLoginUnavailableError,
     build_auto_login_arguments,
     inspect_auto_login_capability,
+    inspect_client_auto_login_capability,
     require_auto_login_arguments,
 )
 
@@ -68,6 +69,7 @@ def test_known_build_modules_and_local_password_bypass_are_supported(
     assert capability.supported is True
     assert capability.build == 3396210
     assert "no client patch" in capability.reason.casefold()
+    assert inspect_client_auto_login_capability(client).supported is True
 
 
 def test_unknown_build_and_modified_login_module_fail_closed(
@@ -104,6 +106,21 @@ def test_disabled_password_bypass_is_not_supported(
         json.dumps({"development": {"devSkipPasswordValidation": False}}),
         encoding="utf-8",
     )
+
+    capability = inspect_auto_login_capability(root, client)
+
+    assert capability.supported is False
+    assert "password bypass" in capability.reason.casefold()
+
+
+@pytest.mark.parametrize("payload", ["[]", "null", "true", "42"])
+def test_malformed_native_server_config_shape_falls_back_to_manual_login(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: str,
+) -> None:
+    root, client = _supported_fixture(tmp_path, monkeypatch)
+    (root / "config" / "server.json").write_text(payload, encoding="utf-8")
 
     capability = inspect_auto_login_capability(root, client)
 
@@ -163,6 +180,28 @@ def test_non_loopback_target_is_rejected_before_client_inspection() -> None:
             client_path="missing",
             game_host="tranquility.servers.eveonline.com",
         )
+
+
+def test_docker_attestation_skips_host_password_config_but_keeps_client_gates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, client = _supported_fixture(tmp_path, monkeypatch)
+    (root / "config" / "server.json").write_text("{}", encoding="utf-8")
+
+    arguments = require_auto_login_arguments(
+        AutoLoginLaunch("fixture-account", 90000001),
+        evejs_root=root,
+        client_path=client,
+        game_host="127.0.0.1",
+        server_password_bypass_verified=True,
+    )
+
+    assert arguments == (
+        "/noconsole",
+        "/login:fixture-account:evejs-local",
+        "/autoSelectCharacter:90000001",
+    )
 
 
 def test_windows_launch_uses_an_argument_list_without_shell_or_redirection(

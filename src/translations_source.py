@@ -15,6 +15,12 @@ from __future__ import annotations
 from .translations_zh_cn import UI_PHRASES as _LEGACY_REVIEWED_PHRASES
 from .translations_mod_settings import SOURCE_PHRASES as _MOD_SETTINGS_PHRASES
 from .translations_mod_updates import SOURCE_PHRASES as _MOD_UPDATE_PHRASES
+from .translations_auto_login import SOURCE_PHRASES as _AUTO_LOGIN_PHRASES
+
+# Runtime-registered feature wording is kept separate from the import-time
+# source schema used by exact-key legacy catalogs. ``src.i18n`` combines this
+# set after those catalogs have loaded and registers its complete translations.
+AUTO_LOGIN_SOURCE_PHRASES = _AUTO_LOGIN_PHRASES
 
 
 # Reviewed launcher-owned UI that was not part of the original 142-phrase
