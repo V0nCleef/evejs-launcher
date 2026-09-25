@@ -36,6 +36,10 @@ _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9
 _WAIT_OBJECT_0 = 0x00000000
 _WAIT_ABANDONED = 0x00000080
 _WAIT_TIMEOUT = 0x00000102
+_CERTIFICATE_CHECK_RECOVERY_HINT = (
+    "After closing every EVE client, run this installation's certificate-only "
+    "setup: SetupEveJS.bat -Only certs,client-offline."
+)
 _DIRECTORY_LINK_TIMEOUT_SECONDS = 10
 _TH32CS_SNAPPROCESS = 0x00000002
 _INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
@@ -361,20 +365,23 @@ def prepare_evejs_client_certificate_trust(
     certificate_check_only_supported = inspect_evejs_runtime(
         root
     ).certificate_check_only_supported
-    client_bundles_are_current = _selected_ca_is_in_client_bundles(root, client)
+    # v0.12.9's official read-only check validates every bundle recursively,
+    # along with the selected CA and Windows trust. Trust that authority
+    # directly: a second, bounded scan both rejects valid nonstandard bundles
+    # and adds redundant I/O for clients whose bundle trees can be large.
+    # Older installers lack CheckOnly, so preserve their bounded preflight and
+    # live-client mutation guard below.
+    client_bundles_are_current = False
+    if not certificate_check_only_supported:
+        client_bundles_are_current = _selected_ca_is_in_client_bundles(root, client)
+        if not client_bundles_are_current:
+            from .overview_patch import is_eve_client_running
 
-    # The bundle belongs to the shared copied client, not to one account
-    # profile. Never rotate it underneath a live EVE process. Multiple clients
-    # from the same selected root remain supported because the official
-    # installer is idempotent when every bundle already has the selected CA.
-    if not client_bundles_are_current:
-        from .overview_patch import is_eve_client_running
-
-        if is_eve_client_running():
-            raise RuntimeError(
-                "Close every EVE client before switching EveJS installations. "
-                "The selected installation uses a different local chat certificate."
-            )
+            if is_eve_client_running():
+                raise RuntimeError(
+                    "Close every EVE client before switching EveJS installations. "
+                    "The selected installation uses a different local chat certificate."
+                )
 
     system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
     powershell = (
@@ -402,7 +409,7 @@ def prepare_evejs_client_certificate_trust(
         "-ClientPath",
         str(client),
     ]
-    check_only = certificate_check_only_supported and client_bundles_are_current
+    check_only = certificate_check_only_supported
     if check_only:
         # The beta script's check is read-only and covers Windows trust plus
         # every client bundle. A successful result needs no installer repair.
@@ -429,9 +436,9 @@ def prepare_evejs_client_certificate_trust(
         if check_only:
             raise RuntimeError(
                 "Timed out while EveJS checked the selected installation's "
-                "chat certificate trust. No automatic repair was attempted. "
-                "Close every EVE client before running the official certificate "
-                "setup or recovery."
+                "chat certificate trust. No automatic repair was attempted.\n"
+                f"EveJS root: {root}\nEVE client: {client}\n"
+                f"{_CERTIFICATE_CHECK_RECOVERY_HINT}"
             ) from exc
         raise RuntimeError(
             "Timed out while EveJS prepared the selected installation's "
@@ -441,8 +448,9 @@ def prepare_evejs_client_certificate_trust(
         if check_only:
             raise RuntimeError(
                 "Could not start EveJS's certificate check. No automatic "
-                "repair was attempted. Close every EVE client before running "
-                "the official certificate setup or recovery. "
+                "repair was attempted.\n"
+                f"EveJS root: {root}\nEVE client: {client}\n"
+                f"{_CERTIFICATE_CHECK_RECOVERY_HINT} "
                 f"Windows reported: {exc}"
             ) from exc
         raise RuntimeError(
@@ -468,8 +476,9 @@ def prepare_evejs_client_certificate_trust(
             raise RuntimeError(
                 "EveJS could not verify certificate trust for the selected "
                 "installation. No automatic repair or CA rotation was "
-                "attempted. Close every EVE client before running the official "
-                "certificate setup or recovery.\n\n"
+                "attempted.\n"
+                f"EveJS root: {root}\nEVE client: {client}\n"
+                f"{_CERTIFICATE_CHECK_RECOVERY_HINT}\n\n"
                 f"{detail}"
             )
         raise RuntimeError(

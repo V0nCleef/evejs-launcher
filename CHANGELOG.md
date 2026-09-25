@@ -2,6 +2,11 @@
 
 ## Changelog
 
+## v1.0.66 - 2026-09-25
+
+- Fixed character launches being blocked when EveJS 0.12.9 successfully validates certificates stored outside the launcher's legacy bundle locations. The launcher now uses the same read-only certificate check as Play.bat, while keeping certificate preparation for older EveJS versions.
+- Certificate check failures now identify the selected EveJS and client folders alongside the setup script's error.
+
 ## v1.0.65 - 2026-09-24
 
 - Fixed Remove rejecting schema-3 mods with mixed-case IDs after a successful import. Existing manifest IDs are preserved, and installer ownership checks remain enforced. Thanks to Delta007 for the report and detailed verification. 🫡
