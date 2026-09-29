@@ -166,6 +166,8 @@ Settings are saved atomically. If the configuration is malformed, the launcher b
 
 ## Common questions
 
+**A mod fails to install or enable. Where is the log?** Open `%APPDATA%\EveJS-Launcher\logs` in File Explorer and attach `launcher.log` after retrying the failed action. Version 1.0.68 and newer record failures even if the mod never becomes active. Search for `Mod helper` to find the mod version, action, elapsed time and `diagnostics=` folder containing the helper's `result.json`, `stdout.log` and `stderr.log` when available. Older records rotate into `launcher.log.1` through `launcher.log.3`.
+
 **My mod is enabled, but nothing changed.** Restart Game for server-mod changes. Configure changes a mod's preferences; it does not enable the mod. Some packages apply changes when a client next starts instead. Follow the package's instructions.
 
 **A tool is unavailable.** Check that it exists in the selected EveJS installation and that its prerequisites are met, then Refresh. Runtime and control-policy restrictions can also disable an action.

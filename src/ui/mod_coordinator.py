@@ -222,17 +222,21 @@ class ModCoordinator(QObject):
             QMessageBox.information(self.window, "Mod Operation", result.value.message)
 
     def activate(self, mod, desired):
+        log.info("Mod activation requested mod=%s version=%s enabled=%s", mod.id, mod.version, desired)
         try:
             context = self._context(mod)
         except Exception as exc:
+            log.exception("Mod activation preflight failed mod=%s version=%s", mod.id, mod.version)
             QMessageBox.warning(self.window, "Mod Operation", str(exc))
             return
         self.run(lambda: change_mod_state(mod, desired, context), self._operation_result)
 
     def public_action(self, mod, action):
+        log.info("Mod action requested mod=%s version=%s action=%s", mod.id, mod.version, action)
         try:
             context = self._context(mod)
         except Exception as exc:
+            log.exception("Mod action preflight failed mod=%s version=%s action=%s", mod.id, mod.version, action)
             QMessageBox.warning(self.window, "Mod Operation", str(exc))
             return
         operation = (lambda: change_mod_state(mod, True, context)) if action == "install" else (lambda: run_public_action(mod, action, context))

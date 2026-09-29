@@ -13,6 +13,7 @@ from contextlib import nullcontext
 import base64
 import hashlib
 import json
+import logging
 import math
 import os
 from pathlib import Path, PurePosixPath
@@ -37,12 +38,14 @@ from .mod_lifecycle_lock import acquire_mod_lifecycle_lock
 from .mod_client_delivery import FEATURE_ENV, FEATURE, METHODS, record_delivery
 from .mod_client_preparation import FEATURE as PREPARATION_FEATURE, enrolled, record_preparation, validate_policy
 from .mod_manifest import Mod, scan_mods
+from .mod_evejs_compatibility import installed_evejs_version
 from .overview_patch import is_eve_client_running
 from .mod_settings import ModSettingsContext, ModSettingsSession, profile_identity
 from .mod_settings_schema import SettingsFile, parse_settings_schema
 
 
 PROTOCOL = "evejs_launcher_mod_v1"
+log = logging.getLogger(__name__)
 MAX_REPLY_BYTES = 1024 * 1024
 MAX_OUTPUT_BYTES = 256 * 1024
 MAX_HELPER_BYTES = 32 * 1024 * 1024
@@ -511,15 +514,33 @@ def run_mod_helper_locked(descriptor: ModApiDescriptor, action: str, context: Mo
     with request_path.open("xb") as stream:
         stream.write(encoded)
     command, environment = _command(descriptor, request_path, result_path)
-    completed = (runner or run_helper_process)(command, cwd=descriptor.folder, environment=environment, timeout=timeout, output_directory=folder)
-    if read_api_manifest(context.evejs_root, context.mod_folder) != descriptor or _fingerprint(helper.path) != fingerprint:
-        raise ModApiRuntimeError("The mod helper or declaration changed during the operation.")
-    content = read_target(FileTarget.capture(result_path, root, "json"))
-    if content is None:
-        raise ModApiRuntimeError(f"{descriptor.display_name} did not return a correlated helper result (exit {completed.returncode}).")
-    result = validate_helper_result(_json(content), descriptor, context, action, request_id, request_path)
-    if completed.returncode != 0 and result.success:
-        raise ModApiRuntimeError("The helper reported success after a failed process exit.")
+    started = time.monotonic()
+    try:
+        evejs_version = installed_evejs_version(context.evejs_root)
+    except (OSError, ValueError):
+        evejs_version = None
+    log.info("Mod helper started mod=%s version=%s action=%s request_id=%s backend=%s timeout_seconds=%.1f diagnostics=%s",
+             descriptor.id, descriptor.version, action, request_id, backend, timeout, folder)
+    log.info("Mod helper context request_id=%s evejs_version=%s evejs_root=%s client_root=%s",
+             request_id, evejs_version or "unknown", context.evejs_root, context.client_root)
+    try:
+        completed = (runner or run_helper_process)(command, cwd=descriptor.folder, environment=environment, timeout=timeout, output_directory=folder)
+        if read_api_manifest(context.evejs_root, context.mod_folder) != descriptor or _fingerprint(helper.path) != fingerprint:
+            raise ModApiRuntimeError("The mod helper or declaration changed during the operation.")
+        content = read_target(FileTarget.capture(result_path, root, "json"))
+        if content is None:
+            raise ModApiRuntimeError(f"{descriptor.display_name} did not return a correlated helper result (exit {completed.returncode}).")
+        result = validate_helper_result(_json(content), descriptor, context, action, request_id, request_path)
+        if completed.returncode != 0 and result.success:
+            raise ModApiRuntimeError("The helper reported success after a failed process exit.")
+    except Exception:
+        log.exception("Mod helper failed mod=%s version=%s action=%s request_id=%s elapsed_seconds=%.3f diagnostics=%s",
+                      descriptor.id, descriptor.version, action, request_id, time.monotonic() - started, folder)
+        raise
+    log.log(logging.INFO if result.success else logging.ERROR,
+            "Mod helper completed mod=%s version=%s action=%s request_id=%s elapsed_seconds=%.3f exit_code=%s success=%s state=%s diagnostics=%s message=%s",
+            descriptor.id, descriptor.version, action, request_id, time.monotonic() - started,
+            completed.returncode, result.success, result.state, folder, result.message)
     return result
 
 

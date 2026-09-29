@@ -2,6 +2,13 @@
 
 ## Changelog
 
+## v1.0.68 - 2026-09-29
+
+- Mod failures now persist in launcher.log even when activation never succeeds, including the error and traceback.
+- Added mod IDs, versions, actions, elapsed times, helper request IDs, exit status and the exact helper diagnostic folder. Helper records also identify the selected EveJS version, server folder and client folder.
+- Mod updates now log each installation phase. Launcher startup records its version and active log file path.
+- Application modules share one rotating log handler. Common passwords, tokens and authentication headers are redacted from new log records.
+
 ## v1.0.67 - 2026-09-25
 
 - Auto-Login Character is now on by default for new settings. An existing saved Off preference is preserved.

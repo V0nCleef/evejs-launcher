@@ -1,6 +1,7 @@
 """Mod update UI orchestration using the existing reserved mod worker."""
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
+import logging
 import time
 from PyQt6.QtCore import QObject, QTimer
 from PyQt6.QtWidgets import QDialog
@@ -11,6 +12,8 @@ from src.core.mod_updates import install_release, pending_updates, recover_updat
 from src.core.overview_patch import is_eve_client_running
 from src.widgets.localized_dialogs import LocalizedMessageBox as QMessageBox
 from src.widgets.mod_update_dialog import ModUpdateDialog
+
+log = logging.getLogger(__name__)
 
 
 class ModUpdateController(QObject):
@@ -136,9 +139,17 @@ class ModUpdateController(QObject):
             if dialog.running:
                 return
             dialog.begin()
+            last_phase = None
+            def progress(phase, done=0, total=0):
+                nonlocal last_phase
+                if phase != last_phase:
+                    log.info("Mod update phase mod=%s from_version=%s to_version=%s phase=%s",
+                             mod.id, mod.version, offer.version, phase)
+                    last_phase = phase
+                dialog.progress_received.emit(phase, done, total)
             launched = self.host.run(lambda: install_release(mod, offer, context,
                 guard=lambda: self.guard(client_package=bool(mod.api_descriptor and mod.api_descriptor.kind == 'client-package')),
-                progress=dialog.progress_received.emit), completed)
+                progress=progress), completed)
             if not launched:
                 dialog.running = False
                 dialog.reject()
