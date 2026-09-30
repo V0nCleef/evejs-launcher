@@ -238,6 +238,20 @@
         "ko": "16. 게임 내 설정 창 추가"
       },
       "path": "docs/how-to-make-a-mod/16-ingame-settings.md"
+    },
+    {
+      "title": "17. Share an in-game Mods menu",
+      "titles": {
+        "en": "17. Share an in-game Mods menu",
+        "nl": "17. Deel een Mods-menu in het spel",
+        "fr": "17. Partager un menu Mods en jeu",
+        "de": "17. Ein Mods-Menü im Spiel teilen",
+        "ru": "17. Общее меню модов в игре",
+        "zh_CN": "17. 共用游戏内模组菜单",
+        "ja": "17. ゲーム内の共通 MOD メニュー",
+        "ko": "17. 게임 내 공용 모드 메뉴"
+      },
+      "path": "docs/how-to-make-a-mod/17-shared-menu.md"
     }
   ],
   "examples": [
@@ -270,7 +284,18 @@
     "examples/ingame-settings/window.py",
     "examples/ingame-settings/settings-handlers.js",
     "examples/login-delivery/AI-HANDOFF.md",
-    "examples/ingame-settings/LOGIN-HANDSHAKE.md"
+    "examples/ingame-settings/LOGIN-HANDSHAKE.md",
+    "examples/shared-menu/README.md",
+    "examples/shared-menu/AI-HANDOFF.md",
+    "examples/shared-menu/evejs-launcher.mod.json",
+    "examples/shared-menu/menu.py",
+    "examples/shared-menu/loader.js.disabled",
+    "examples/mods/menu-test-calculator/evejs-launcher.mod.json",
+    "examples/mods/menu-test-calculator/loader.js",
+    "examples/mods/menu-test-calculator/client/menu.py",
+    "examples/mods/menu-test-notepad/evejs-launcher.mod.json",
+    "examples/mods/menu-test-notepad/loader.js",
+    "examples/mods/menu-test-notepad/client/menu.py"
   ],
   "references": [
     {
@@ -377,6 +402,7 @@
     "docs/how-to-make-a-mod/images/release-information.png",
     "docs/how-to-make-a-mod/images/ingame-settings.png",
     "docs/how-to-make-a-mod/images/ai-handoff-toolbar.png",
-    "docs/how-to-make-a-mod/images/legacy-delivery-notice.png"
+    "docs/how-to-make-a-mod/images/legacy-delivery-notice.png",
+    "docs/how-to-make-a-mod/images/shared-mods-neocom.png"
   ]
 }

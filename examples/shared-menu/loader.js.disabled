@@ -1,0 +1,2 @@
+"use strict";
+console.log("EXAMPLE_SHARED_MENU:LOADED");

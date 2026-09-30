@@ -22,6 +22,7 @@ from pathlib import Path
 from ..constants import Ports
 from ..config import CONFIG_DIR
 from .mod_manager import active_loader_mods, scan_mods
+from .shared_mod_menu import stage_shared_menu
 from .mod_runtime_state import (
     ModRuntimePlan,
     ModRuntimeStateError,
@@ -295,6 +296,8 @@ def _find_mod_preloads(evejs_root: str) -> list[str]:
     """Return only validated active loader paths for Node ``--require``."""
     args: list[str] = []
     for mod in active_loader_mods(scan_mods(evejs_root)):
+        if mod.api_descriptor is not None and mod.api_descriptor.client_menu is not None:
+            raise ModRuntimeStateError("Shared client menus require a frozen Launcher mod runtime plan.")
         args.extend(["--require", str(mod.path / "loader.js")])
     return args
 
@@ -833,6 +836,7 @@ def start_game_server(
             mode,
             mod_runtime_plan=mod_runtime_plan,
         )
+        stage_shared_menu(runtime_root, mod_runtime_plan.shared_menu)
 
     # Dependency checks and legacy-store migration can write arbitrary launcher
     # diagnostics to the normal Game console.  The attestation input begins

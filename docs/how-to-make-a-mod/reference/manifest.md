@@ -37,6 +37,7 @@ The package also contains exactly one recognized loader state, such as `loader.j
 | `restart` | Yes | `none`, `game_server`, `client`, `launcher` |
 | `launcherApi` | No | Helper declaration below |
 | `settings` | No | [Settings schema 1](settings.md) |
+| `clientMenu` | No | `{"apiVersion":1,"entrypoint":"client/menu.py"}` for the [shared in-game Mods menu](../17-shared-menu.md), Launcher 1.0.69 candidate/menu API 1 |
 | `updates` | No | [GitHub release source, asset naming and configuration preservation](updates.md) |
 | `compatibility` | No | `{"evejsVersions":["0.12.7.1"]}` for exact three/four-component version restrictions; omit this field or its version list when EveJS-independent; [release-sidecar rules](updates.md#declare-supported-evejs-versions) |
 

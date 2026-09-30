@@ -2,6 +2,13 @@
 
 ## Changelog
 
+## v1.0.69 - 2026-09-30
+
+- Added a shared MODS button in the in-game Neocom. Participating mods appear in one menu; the button hides when no usable entries are registered. AutoMining is not required.
+- Added a separate top-level MODS category in native Insider, retaining its existing account restrictions and menus.
+- Added menu API v1 for localized labels, opener callbacks, updates and cleanup. Native and Managed Docker deliver only entries captured in the enabled mod launch plan.
+- Added a complete mod-author example and guide chapter, with the real Neocom screenshot and explanations in all eight guide languages.
+
 ## v1.0.68 - 2026-09-29
 
 - Mod failures now persist in launcher.log even when activation never succeeds, including the error and traceback.

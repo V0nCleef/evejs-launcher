@@ -43,6 +43,9 @@ The examples use manifest schema **3**, settings schema **1** and helper API **1
 
 16. [Add an in-game settings window](16-ingame-settings.md)
 
+
+17. [Share an in-game Mods menu](17-shared-menu.md)
+
 ## How to use this guide
 
 Choose a feature from the list on the left. Each page shows what it does and how to check it. All screenshots use clearly labelled examples. Open an image to enlarge it. Code examples are at the bottom of each relevant page, below a dividing line.

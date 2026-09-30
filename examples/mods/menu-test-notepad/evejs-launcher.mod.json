@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 3,
+  "id": "launcher.menu-test.notepad",
+  "displayName": "Shared Mods menu test: Notepad",
+  "version": "1.0.0",
+  "description": "Second standalone entry for checking two mods share one icon. Opens the native Notepad.",
+  "kind": "loader",
+  "supportedBackends": ["native", "docker"],
+  "activation": {"strategy": "loader_rename"},
+  "restart": "game_server",
+  "clientMenu": {"apiVersion": 1, "entrypoint": "client/menu.py"}
+}

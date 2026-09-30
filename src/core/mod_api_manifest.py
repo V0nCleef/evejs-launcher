@@ -39,6 +39,12 @@ class LauncherApiSpec:
 
 
 @dataclass(frozen=True)
+class ClientMenuSpec:
+    api_version: int
+    entrypoint: Path
+
+
+@dataclass(frozen=True)
 class ModApiDescriptor:
     id: str
     display_name: str
@@ -63,6 +69,7 @@ class ModApiDescriptor:
     conflicts: tuple[str, ...] = ()
     updates: object | None = None
     evejs_versions: tuple[str, ...] | None = None
+    client_menu: ClientMenuSpec | None = None
 
 
 def _text(value, label: str, maximum: int = 128, *, empty: bool = False) -> str:
@@ -140,7 +147,7 @@ def read_api_manifest(root: str | Path, folder: str | Path, payload: dict | None
         raise ModApiManifestError("The public mod descriptor is unreadable or unsafe.") from exc
     payload = _keys(payload, {"schemaVersion", "id", "displayName", "version", "kind", "activation", "restart"},
                     {"description", "supportedBackends", "launcherApi", "settings",
-                     "requires", "loadBefore", "loadAfter", "conflicts", "updates", "compatibility"}, "Mod descriptor")
+                     "requires", "loadBefore", "loadAfter", "conflicts", "updates", "compatibility", "clientMenu"}, "Mod descriptor")
     if type(payload["schemaVersion"]) is not int or payload["schemaVersion"] != 3:
         raise ModApiManifestError("The public mod descriptor must use schemaVersion 3.")
     mod_id = _text(payload["id"], "Mod id")
@@ -250,6 +257,22 @@ def read_api_manifest(root: str | Path, folder: str | Path, payload: dict | None
             Version.parse(version)
         except ModUpdateError as exc:
             raise ModApiManifestError(str(exc)) from exc
+    client_menu = None
+    if "clientMenu" in payload:
+        menu = _keys(payload["clientMenu"], {"apiVersion", "entrypoint"}, set(), "clientMenu")
+        if type(menu["apiVersion"]) is not int or menu["apiVersion"] != 1:
+            raise ModApiManifestError("Unsupported shared client menu API version.")
+        if kind != "loader" or strategy != "loader_rename" or restart != "game_server":
+            raise ModApiManifestError("clientMenu v1 requires a loader mod with game_server restart.")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", mod_id):
+            raise ModApiManifestError("clientMenu needs a stable ASCII mod ID (letters, digits, dot, underscore, hyphen).")
+        relative = _relative_path(menu["entrypoint"], "clientMenu entrypoint")
+        if relative.suffix != ".py":
+            raise ModApiManifestError("clientMenu entrypoint must be a Python 2.7 .py file.")
+        entrypoint = _safe_path(folder, relative, "Client menu entrypoint", file=True)
+        if entrypoint.stat().st_size > 128 * 1024:
+            raise ModApiManifestError("Client menu entrypoint exceeds 128 KiB.")
+        client_menu = ClientMenuSpec(1, entrypoint)
     return ModApiDescriptor(mod_id, name, version, description, kind, tuple(backends), restart, strategy,
                             config_path, config_key, versions, launcher_api, settings, manifest, root, folder, identity,
-                            *relationships, updates, evejs_versions)
+                            *relationships, updates, evejs_versions, client_menu)

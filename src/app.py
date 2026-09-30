@@ -4290,7 +4290,11 @@ class MainWindow(QMainWindow):
             # transaction marker or changing the launcher-owned override.
             build_compose_target(self._docker_setup_draft())
             runtime_identity = f"docker:{secrets.token_hex(32)}"
-            desired_override = build_docker_mod_override(evejs_root, selected)
+            from .core.shared_mod_menu import capture_shared_menu
+
+            menu_material = capture_shared_menu(evejs_root, selected)
+            desired_override = build_docker_mod_override(evejs_root, selected,
+                shared_menu_digest=None if menu_material is None else menu_material.digest)
             candidate_plan = build_mod_runtime_plan(
                 evejs_root,
                 mods,
@@ -4338,6 +4342,7 @@ class MainWindow(QMainWindow):
                 evejs_root,
                 selected,
                 policy=DockerControlPolicy.MANAGED,
+                shared_menu_material=candidate_plan.shared_menu,
             )
             plan = build_mod_runtime_plan(
                 evejs_root,

@@ -2,6 +2,8 @@
 
 [Start here](00-start-here.md)
 
+For an opt-in menu entry with a small self-contained window, use the new [shared in-game Mods menu](17-shared-menu.md). It delivers the declared entrypoint for you. The existing service/HUD example below still needs its own integration.
+
 ## Important: deliver this window through the login handshake
 
 **Use login-handshake delivery for this window/HUD. Do not install it by modifying the client's script archive or shared command classes.** Keep your authored code in your mod; the server delivers it when the player connects. The Launcher does not inject the window for you.

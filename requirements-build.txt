@@ -1,4 +1,4 @@
-# Recorded Windows x64 CPython 3.11.15 launcher build environment.
+# Recorded Windows x64 CPython 3.12.14 launcher build environment.
 # Exact versions, not a claim that rebuilt PE timestamps/hashes are identical.
 altgraph==0.17.5
 click==8.4.2

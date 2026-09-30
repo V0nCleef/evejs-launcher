@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import stat
@@ -21,6 +22,12 @@ from typing import Iterable
 from src.core.runtime.docker_compose import ComposeTarget
 from src.core.service_status import DockerControlPolicy
 from src.core.mod_loader_state import LoaderStateError, resolve_loader_state
+from src.core.shared_mod_menu import (
+    SharedMenuMaterial, capture_shared_menu, container_menu_path, shared_menu_path,
+    stage_shared_menu, CONTAINER_PREFIX, MAX_DELIVERY_BYTES,
+)
+
+_AUTO_MENU = object()
 
 
 _OVERRIDE_DIRECTORY = ".evejs-launcher"
@@ -85,6 +92,8 @@ def docker_mod_transaction_path(evejs_root: str | Path) -> Path:
 def build_docker_mod_override(
     evejs_root: str | Path,
     selected_mods: Iterable[str],
+    *,
+    shared_menu_digest: str | None = None,
 ) -> DockerModOverride:
     """Render the final Compose override for an exact ordered preload chain.
 
@@ -94,11 +103,15 @@ def build_docker_mod_override(
     launcher falsely reported that every loader was disabled.
     """
     selected = _normalize_selection(selected_mods)
+    if shared_menu_digest is not None and not selected:
+        raise DockerModBridgeError("An empty mod plan cannot load shared client menus.")
 
     mods_source = (Path(evejs_root).resolve() / "mods").resolve().as_posix()
     preload_paths = tuple(
         f"{_CONTAINER_MODS_ROOT}/{name}/loader.js" for name in selected
     )
+    if shared_menu_digest is not None:
+        preload_paths = (container_menu_path(shared_menu_digest),) + preload_paths
     node_options = " ".join(
         f"--require {json.dumps(path, ensure_ascii=False)}"
         for path in preload_paths
@@ -120,6 +133,11 @@ def build_docker_mod_override(
                 "        read_only: false",
             )
         )
+    if shared_menu_digest is not None:
+        source = shared_menu_path(Path(evejs_root).resolve(), shared_menu_digest).parent.as_posix()
+        target = container_menu_path(shared_menu_digest).rsplit("/", 1)[0]
+        lines.extend(("      - type: bind", f"        source: {_yaml_scalar(source)}",
+                      f"        target: {_yaml_scalar(target)}", "        read_only: true"))
     lines.append("")
     content = "\n".join(lines)
     content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
@@ -131,6 +149,7 @@ def apply_docker_mod_override(
     selected_mods: Iterable[str],
     *,
     policy: DockerControlPolicy,
+    shared_menu_material: SharedMenuMaterial | None | object = _AUTO_MENU,
 ) -> DockerModApplyResult:
     """Atomically write/remove the owned override under managed policy only."""
     if policy is not DockerControlPolicy.MANAGED:
@@ -143,7 +162,15 @@ def apply_docker_mod_override(
     override_path = docker_mod_override_path(root)
     pending_transaction = _read_mod_transaction(root)
     _validate_active_loaders(root, selected)
-    desired = build_docker_mod_override(root, selected)
+    if shared_menu_material is _AUTO_MENU:
+        shared_menu_material = capture_shared_menu(root, selected)
+    if shared_menu_material is not None and not set(
+        item.folder for item in shared_menu_material.participants
+    ).issubset(selected):
+        raise DockerModBridgeError("Shared menu material contains an unselected loader.")
+    stage_shared_menu(root, shared_menu_material)
+    desired = build_docker_mod_override(root, selected, shared_menu_digest=(
+        None if shared_menu_material is None else shared_menu_material.digest))
     desired_bytes = desired.content.encode("utf-8")
     current_bytes = _read_owned_override(
         root,
@@ -475,6 +502,17 @@ def _read_owned_override(
     rendered = _parse_owned_override(root, content)
     if require_active_loaders:
         _validate_active_loaders(root, rendered.selected_mods)
+        digest = _menu_digest_from_node_options(rendered.node_options)
+        current_menu = capture_shared_menu(root, rendered.selected_mods)
+        expected_digest = None if current_menu is None else current_menu.digest
+        if digest != expected_digest:
+            raise DockerModBridgeError("The Docker shared menu selection drifted; Apply Mods again.")
+        if digest is not None:
+            artifact = shared_menu_path(root, digest)
+            content_bytes = _read_stable_regular_file(artifact, root,
+                maximum=MAX_DELIVERY_BYTES, label="Shared menu delivery artifact")
+            if hashlib.sha256(content_bytes).hexdigest() != digest:
+                raise DockerModBridgeError("The Docker shared menu delivery artifact was modified.")
     return content
 
 
@@ -721,7 +759,10 @@ def _parse_owned_override(root: Path, content: bytes) -> DockerModOverride:
         )
     node_options = encoded_node_options.replace("$$", "$")
     selected = _selection_from_node_options(node_options)
-    expected = build_docker_mod_override(root, selected)
+    # Re-render the artifact's captured digest, including older declarations
+    # during disable/rollback. Parsing must not discover a new enabled mod.
+    expected = build_docker_mod_override(root, selected,
+        shared_menu_digest=_menu_digest_from_node_options(node_options))
     if _normalized_terminators(content) != expected.content.encode("utf-8"):
         raise DockerModBridgeError(
             "The Docker mod override differs from the exact launcher renderer."
@@ -769,6 +810,15 @@ def _selection_from_node_options(value: str) -> tuple[str, ...]:
             raise DockerModBridgeError(
                 "The Docker mod override preload path must be text."
             )
+        if preload_path.startswith(CONTAINER_PREFIX):
+            digest = preload_path[len(CONTAINER_PREFIX):].removesuffix("/loader.cjs")
+            if cursor != len(prefix) or not re.fullmatch(r"[0-9a-f]{64}", digest) or preload_path != container_menu_path(digest):
+                raise DockerModBridgeError("Shared menu preload must be the first canonical artifact.")
+            cursor = end
+            if cursor == len(value) or value[cursor] != " ":
+                raise DockerModBridgeError("Shared menu preload needs a selected loader chain.")
+            cursor += 1
+            continue
         path_prefix = _CONTAINER_MODS_ROOT + "/"
         path_suffix = "/loader.js"
         if not (
@@ -789,6 +839,16 @@ def _selection_from_node_options(value: str) -> tuple[str, ...]:
             )
         cursor += 1
     return _normalize_selection(selected)
+
+
+def _menu_digest_from_node_options(value: str) -> str | None:
+    if not value.startswith('--require "' + CONTAINER_PREFIX):
+        return None
+    path, _ = json.JSONDecoder().raw_decode(value, len("--require "))
+    digest = path[len(CONTAINER_PREFIX):-len("/loader.cjs")]
+    if path != container_menu_path(digest):
+        raise DockerModBridgeError("Invalid shared menu preload artifact.")
+    return digest
 
 
 def _canonical_existing_root(value: str | Path) -> Path:

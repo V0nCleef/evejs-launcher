@@ -21,6 +21,7 @@ Start with the overview, then choose the features your mod needs. The numbered f
 - [14. Publish a mod update](14-publish-update.md)
 - [15. Example files](15-example-files.md)
 - [16. Add an in-game settings window](16-ingame-settings.md)
+- [17. Share an in-game Mods menu](17-shared-menu.md)
 
 Each feature page explains what players see, includes screenshots, and puts code examples below a dividing line. The launcher version adds translations, text zoom, example-file export, and a **Hand off to your AI** button.
 

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 3,
+  "id": "author.menu-demo",
+  "displayName": "Example shared menu mod",
+  "version": "1.0.0",
+  "kind": "loader",
+  "supportedBackends": ["native", "docker"],
+  "activation": {"strategy": "loader_rename"},
+  "restart": "game_server",
+  "clientMenu": {"apiVersion": 1, "entrypoint": "menu.py"}
+}

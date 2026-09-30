@@ -76,6 +76,14 @@ The launcher supports loader packages, declared source integrations, settings-on
 
 Compatible mod updates preserve declared settings files. Other mutable files must be declared by the mod author. Source integrations and client-file packages can have their own removal and recovery rules; follow the actions offered by that package.
 
+## Shared in-game MODS menu
+
+Version 1.0.69 adds one **MODS** button to the native in-game Neocom. Clicking it opens entries registered by participating enabled mods. The button stays hidden when no usable entries are registered. Mod authors opt in; existing mods do not automatically gain an entry, and AutoMining is not required.
+
+Mods register their own localized labels and window-opening callbacks with menu API v1. The same registry supplies a separate top-level **MODS** category in native Insider, which retains its account restrictions. Start a fresh modded Game and reconnect after enabling a participating mod. Native and Managed Docker use the selected profile's frozen mod launch plan.
+
+See [17. Share an in-game Mods menu](docs/how-to-make-a-mod/17-shared-menu.md) for the manifest declaration, complete registration example, cleanup, compatibility and testing.
+
 ## How to make a mod
 
 ![The illustrated launcher guide with feature navigation and the AI handoff button](screenshots/mod-guide.png)

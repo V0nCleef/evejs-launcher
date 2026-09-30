@@ -32,6 +32,8 @@ for _guide_path in _guide_paths:
     if _guide_path.is_absolute() or '..' in _guide_path.parts or _guide_path.parts[0] not in {'docs', 'examples'} or not _guide_path.is_file():
         raise ValueError(f'Unsafe or missing bundled guide file: {_guide_path}')
 _guide_data = [(str(path), str(path.parent)) for path in _guide_paths]
+_guide_data.extend((str(path), str(path.parent)) for path in (
+    Path('src/core/client/shared_menu.py'), Path('src/core/client/shared_menu_loader.cjs')))
 
 # Modules to exclude — aggressive pruning
 EXCLUDES = [

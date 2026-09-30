@@ -8,6 +8,8 @@ the target root's lifecycle lock before calling :func:`write_mod_runtime_snapsho
 """
 from __future__ import annotations
 
+from .shared_mod_menu import SharedMenuMaterial, capture_shared_menu, shared_menu_path
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -137,6 +139,7 @@ class ModRuntimePlan:
     docker_node_options: str | None
     plan_sha256: str
     schema_version: int = RUNTIME_SNAPSHOT_SCHEMA_VERSION
+    shared_menu: SharedMenuMaterial | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "root", Path(self.root))
@@ -448,11 +451,16 @@ def build_mod_runtime_plan(
         mode=normalized_mode,
         backend=normalized_backend,
     )
+    try:
+        shared_menu = capture_shared_menu(root, selected)
+    except (OSError, ValueError) as exc:
+        raise ModRuntimeStateError(str(exc)) from exc
     if normalized_backend == DOCKER_BACKEND:
         override_path, override_sha256, docker_node_options = _freeze_docker_override(
             root,
             selected,
             material=docker_override_material,
+            shared_menu_digest=None if shared_menu is None else shared_menu.digest,
         )
     else:
         if docker_override_material is not None:
@@ -492,6 +500,7 @@ def build_mod_runtime_plan(
         schema_version=(PUBLIC_RUNTIME_SNAPSHOT_SCHEMA_VERSION
             if any(mod.api_descriptor is not None for mod in normalized_mods)
             else RUNTIME_SNAPSHOT_SCHEMA_VERSION),
+        shared_menu=shared_menu,
     )
     plan = ModRuntimePlan(
         root=root,
@@ -505,6 +514,7 @@ def build_mod_runtime_plan(
         docker_node_options=docker_node_options,
         plan_sha256=_compute_plan_sha256(plan_without_hash),
         schema_version=plan_without_hash.schema_version,
+        shared_menu=shared_menu,
     )
     _validate_plan(plan)
     return plan
@@ -526,6 +536,8 @@ def native_mod_preload_paths(plan: ModRuntimePlan) -> tuple[Path, ...]:
 
     _validate_plan(plan, expected_backend=NATIVE_BACKEND)
     paths: list[Path] = []
+    if plan.shared_menu is not None:
+        paths.append(shared_menu_path(plan.root, plan.shared_menu.digest))
     for mod_id in plan.selected_loader_ids:
         path = plan.root / "mods" / mod_id / "loader.js"
         try:
@@ -733,6 +745,10 @@ def _public_mod_contract_sha256(mod: Mod) -> str:
         "manifestPath": relative_manifest,
         "manifestSha256": hashlib.sha256(content).hexdigest(),
     }
+    if descriptor.client_menu is not None:
+        menu_source = _read_stable_bounded_file(descriptor.client_menu.entrypoint, 128 * 1024,
+            label="Client menu entrypoint", error_type=ModRuntimeStateError)
+        metadata["clientMenuSha256"] = hashlib.sha256(menu_source).hexdigest()
     if mod.activation_kind is ActivationKind.JSON_BOOLEAN:
         if mod.config_path is None or not mod.config_key:
             raise ModRuntimeStateError("The public mod activation configuration is unavailable.")
@@ -1214,6 +1230,13 @@ def _validate_plan(
         raise ModRuntimeStateError(
             "Runtime plan loader selection does not match configured state."
         )
+    if plan.shared_menu is not None:
+        if not isinstance(plan.shared_menu, SharedMenuMaterial) or not plan.shared_menu.participants:
+            raise ModRuntimeStateError("Invalid frozen shared menu material.")
+        names = tuple(item.folder for item in plan.shared_menu.participants)
+        if (not set(names).issubset(selected) or len(set(names)) != len(names)
+                or mode != "modded"):
+            raise ModRuntimeStateError("Shared menu includes an unselected loader.")
     _validate_docker_override_binding(
         root=root,
         backend=backend,
@@ -1222,6 +1245,7 @@ def _validate_plan(
         override_path=plan.docker_override_path,
         override_sha256=plan.docker_override_sha256,
         docker_node_options=plan.docker_node_options,
+        shared_menu_digest=None if plan.shared_menu is None else plan.shared_menu.digest,
     )
     if _compute_plan_sha256(plan) != plan.plan_sha256:
         raise ModRuntimeStateError("Runtime plan SHA-256 does not match its contract.")
@@ -1257,6 +1281,16 @@ def _compute_plan_sha256(plan: ModRuntimePlan) -> str:
         payload["schemaVersion"] = plan.schema_version
         for raw, entry in zip(payload["mods"], plan.mods):
             raw["loaderName"] = entry.loader_name
+    if plan.shared_menu is not None:
+        payload["sharedMenu"] = {
+            "deliverySha256": plan.shared_menu.digest,
+            "handshakeSha256": plan.shared_menu.handshake_sha256,
+            "participants": [{"folder": item.folder, "id": item.mod_id,
+                "entrypoint": item.relative_entrypoint,
+                "sourceSha256": hashlib.sha256(item.source).hexdigest(),
+                "manifestSha256": item.manifest_sha256}
+                for item in plan.shared_menu.participants],
+        }
     try:
         content = json.dumps(
             payload,
@@ -1283,10 +1317,11 @@ def _freeze_docker_override(
     selected_loader_ids: tuple[str, ...],
     *,
     material: DockerModOverride | None = None,
+    shared_menu_digest: str | None = None,
 ) -> tuple[Path, str, str]:
     path = docker_mod_override_path(root)
     try:
-        expected = build_docker_mod_override(root, selected_loader_ids)
+        expected = build_docker_mod_override(root, selected_loader_ids, shared_menu_digest=shared_menu_digest)
     except (OSError, TypeError, ValueError) as exc:
         raise ModRuntimeStateError(
             "The selected Docker loaders cannot produce a safe override."
@@ -1349,6 +1384,7 @@ def _validate_docker_override_binding(
     override_sha256: str | None,
     docker_node_options: str | None,
     docker_node_options_sha256: str | None = None,
+    shared_menu_digest: str | None = None,
 ) -> None:
     if backend == NATIVE_BACKEND:
         if (
@@ -1369,10 +1405,13 @@ def _validate_docker_override_binding(
     ):
         raise ModRuntimeStateError("Docker override SHA-256 is invalid.")
     try:
-        expected_override = build_docker_mod_override(
-            root,
-            selected_loader_ids,
-        )
+        # Plans bind captured material. Snapshots read only their exact
+        # selected folders to detect drift; they cannot add another loader.
+        if docker_node_options is None and shared_menu_digest is None:
+            material = capture_shared_menu(root, selected_loader_ids)
+            shared_menu_digest = None if material is None else material.digest
+        expected_override = build_docker_mod_override(root, selected_loader_ids,
+            shared_menu_digest=shared_menu_digest)
     except (OSError, TypeError, ValueError) as exc:
         raise ModRuntimeStateError(
             "Docker override binding cannot be rendered safely."

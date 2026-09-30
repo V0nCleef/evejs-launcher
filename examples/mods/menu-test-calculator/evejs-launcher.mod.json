@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 3,
+  "id": "launcher.menu-test.calculator",
+  "displayName": "Shared Mods menu test: Calculator",
+  "version": "1.0.0",
+  "description": "Standalone Mods icon check. Opens the native Calculator. No AutoMining dependency or gameplay changes.",
+  "kind": "loader",
+  "supportedBackends": ["native", "docker"],
+  "activation": {"strategy": "loader_rename"},
+  "restart": "game_server",
+  "clientMenu": {"apiVersion": 1, "entrypoint": "client/menu.py"}
+}

@@ -1,6 +1,8 @@
 """Quick smoke-test for foundation modules."""
+import logging
 import os
 import sys
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -42,11 +44,22 @@ print(f"theme OK      | {len(qss)} chars, all tokens present")
 
 # logger
 log = setup_logger("evejs.test")
+root_logger = logging.getLogger()
+shared_handlers = [handler for handler in root_logger.handlers
+                   if getattr(handler, "_evejs_launcher_log", False)]
+assert len(shared_handlers) == 1, "expected one shared diagnostic handler"
+handler = shared_handlers[0]
+original_handlers = tuple(root_logger.handlers)
+start_offset = Path(handler.baseFilename).stat().st_size
 log.info("smoke-test log line")
 log.info("second line")
 log2 = setup_logger("evejs.test")
-assert log is log2 and len(log2.handlers) == 1, "duplicate handlers added"
-print(f"logger OK     | file={log.handlers[0].baseFilename}")
+assert log is log2 and tuple(root_logger.handlers) == original_handlers, "duplicate handlers added"
+with Path(handler.baseFilename).open("rb") as stream:
+    stream.seek(start_offset)
+    new_records = stream.read().decode("utf-8")
+assert new_records.count("smoke-test log line") == 1 and new_records.count("second line") == 1
+print(f"logger OK     | file={handler.baseFilename}")
 
 # cache
 from PyQt6.QtGui import QColor, QPixmap
