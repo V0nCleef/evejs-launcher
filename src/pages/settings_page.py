@@ -2,7 +2,8 @@
 
 Sections
 --------
-* General        — EveJS root, client path, proxy URL
+* General        — EveJS root, proxy URL
+* Client         — client path, separate/shared settings, advanced folder override
 * Launch         — stagger delay, auto-start toggles
 * Audio & Voice  — ambience, local shipboard voice, events, accessibility
 * UI             — reduced-motion preference
@@ -50,6 +51,7 @@ from src.core.client_autologin import (
     inspect_client_auto_login_capability,
 )
 from src.core.discovery import resolve_client_tq_path
+from src.core.shared_client_settings import SharedSettingsError, validate_shared_folder
 
 from src.core.runtime.docker_setup import (
     DockerPreflightRequest,
@@ -192,7 +194,10 @@ class SettingsPage(QWidget):
 
         self.client_path_edit = QLineEdit()
         self.client_path_edit.setPlaceholderText("Copied EVE client tq folder")
-        general_form.addRow(
+        client_box = QGroupBox("Client")
+        client_form = QFormLayout(client_box)
+        client_form.setSpacing(10)
+        client_form.addRow(
             "EVE Client Path:",
             self._with_browse(
                 self.client_path_edit,
@@ -211,6 +216,33 @@ class SettingsPage(QWidget):
         general_form.addRow("Proxy URL:", self.proxy_url_edit)
 
         root.addWidget(general_box)
+        self.client_settings_mode_combo = ScrollSafeComboBox()
+        self.client_settings_mode_combo.addItem("Separate settings per account (default)", "separate")
+        self.client_settings_mode_combo.addItem("Shared settings", "shared")
+        client_form.addRow("EVE Settings:", self.client_settings_mode_combo)
+        client_help = self._make_help_label(
+            "Shared mode creates one launcher-managed settings folder for all accounts. Original per-account folders are kept. "
+            "Auto-login still uses each client's own account and character."
+        )
+        client_form.addRow("", client_help)
+        self.client_advanced_toggle = QCheckBox("Show advanced client options")
+        self.client_advanced_fields = QWidget()
+        client_advanced_form = QFormLayout(self.client_advanced_fields)
+        client_advanced_form.setContentsMargins(0, 0, 0, 0)
+        client_advanced_form.setSpacing(8)
+        self.shared_settings_folder_edit = QLineEdit()
+        self.shared_settings_folder_edit.setPlaceholderText("Existing EVE settings folder or empty folder")
+        self.shared_settings_folder_row = self._with_browse(self.shared_settings_folder_edit, directory=True)
+        client_advanced_form.addRow("Custom Shared Folder:", self.shared_settings_folder_row)
+        client_advanced_form.addRow("", self._make_help_label(
+            "Leave blank to let the launcher manage shared settings automatically."
+        ))
+        self.client_advanced_fields.hide()
+        self.client_advanced_toggle.toggled.connect(self.client_advanced_fields.setVisible)
+        client_form.addRow("", self.client_advanced_toggle)
+        client_form.addRow(self.client_advanced_fields)
+        self.client_settings_mode_combo.currentIndexChanged.connect(self._sync_client_settings_controls)
+        root.addWidget(client_box)
 
         # ── Runtime ─────────────────────────────────────────────────────────
         self.runtime_box = QGroupBox("Runtime")
@@ -1155,6 +1187,11 @@ class SettingsPage(QWidget):
             target.setText(path)
 
     # ── Load / Save ──────────────────────────────────────────────────────────
+    def _sync_client_settings_controls(self) -> None:
+        self.client_advanced_fields.setEnabled(
+            self.client_settings_mode_combo.currentData() == "shared"
+        )
+
     def load_settings(self) -> None:
         """Populate the form from the persisted config."""
         cfg = config.load()
@@ -1169,6 +1206,10 @@ class SettingsPage(QWidget):
             str(resolved_client_path) if resolved_client_path else raw_client_path
         )
         self.proxy_url_edit.setText(str(cfg.get("proxy_url", "")))
+        self._set_combo_data(self.client_settings_mode_combo, cfg.get("client_settings_mode", "separate"))
+        self.shared_settings_folder_edit.setText(str(cfg.get("shared_settings_folder", "")))
+        self.client_advanced_toggle.setChecked(bool(self.shared_settings_folder_edit.text().strip()))
+        self._sync_client_settings_controls()
 
         self.stagger_delay_spin.setValue(int(cfg.get("stagger_delay_sec", 3)))
         self.auto_start_server_toggle.setChecked(bool(cfg.get("auto_start_server", False)))
@@ -1298,6 +1339,15 @@ class SettingsPage(QWidget):
         if not self._normalize_client_path_for_save():
             self.save_finished.emit(False)
             return
+        if (self.client_settings_mode_combo.currentData() == "shared"
+                and self.shared_settings_folder_edit.text().strip()):
+            try:
+                folder = validate_shared_folder(self.shared_settings_folder_edit.text())
+            except SharedSettingsError as exc:
+                self._show_save_feedback(str(exc), success=False)
+                self.save_finished.emit(False)
+                return
+            self.shared_settings_folder_edit.setText(str(folder))
         if self.runtime_backend_combo.currentData() == "docker_compose":
             draft = self._collect_docker_draft()
             draft_fingerprint = docker_draft_fingerprint(draft)
@@ -1355,6 +1405,8 @@ class SettingsPage(QWidget):
         return {
             "evejs_root": self.evejs_root_edit.text().strip(),
             "client_path": self.client_path_edit.text().strip(),
+            "client_settings_mode": self.client_settings_mode_combo.currentData() or "separate",
+            "shared_settings_folder": self.shared_settings_folder_edit.text().strip(),
             "proxy_url": self.proxy_url_edit.text().strip(),
             "stagger_delay_sec": self.stagger_delay_spin.value(),
             "auto_start_server": self.auto_start_server_toggle.isChecked(),
@@ -1396,6 +1448,13 @@ class SettingsPage(QWidget):
         if self._lifecycle_busy:
             self._reject_lifecycle_busy_save()
             return
+        if cfg.get("client_settings_mode") == "shared" and cfg.get("shared_settings_folder", "").strip():
+            try:
+                cfg["shared_settings_folder"] = str(validate_shared_folder(cfg.get("shared_settings_folder", "")))
+            except SharedSettingsError as exc:
+                self._show_save_feedback(str(exc), success=False)
+                self.save_finished.emit(False)
+                return
         validator = self._save_validator
         if validator is not None:
             try:

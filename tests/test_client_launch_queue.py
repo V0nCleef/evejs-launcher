@@ -23,14 +23,24 @@ from src.core.launcher import ClientLaunchContext
 
 
 def _wait_for_data(qapp: QApplication, window: MainWindow) -> None:
-    deadline = time.monotonic() + 2.0
+    # Startup also queues an inventory/update operation that holds the shared
+    # lifecycle slot. Wait for it rather than racing Launch All against it.
+    coordinator = window._mod_coordinator
+    coordinator._updates.poll_timer.stop()
+    deadline = time.monotonic() + 3.0
+    quiet_cycles = 0
     while time.monotonic() < deadline:
         qapp.processEvents()
-        if not window._data_load_active():
-            qapp.processEvents()
+        active = (window._data_load_active()
+                  or coordinator._token is not None
+                  or coordinator._thread is not None
+                  or getattr(window, "_mod_operation_request", None) is not None
+                  or getattr(window, "_mod_operation_thread", None) is not None)
+        quiet_cycles = 0 if active else quiet_cycles + 1
+        if quiet_cycles >= 3:
             return
         QTest.qWait(5)
-    assert not window._data_load_active()
+    pytest.fail("Initial account and Mods loading did not settle")
 
 
 def test_async_queue_waits_for_completion_before_starting_next_item(

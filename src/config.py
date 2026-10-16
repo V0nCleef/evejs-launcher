@@ -19,6 +19,8 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 DEFAULT_CONFIG = {
     "evejs_root": "",
     "client_path": "",
+    "client_settings_mode": "separate",
+    "shared_settings_folder": "",  # Blank uses the launcher-managed SharedSettings folder.
     "proxy_url": "http://127.0.0.1:26002",
     "game_port": 26000,
     "auto_start_server": False,
@@ -92,6 +94,10 @@ def _legacy_script_filename(value: object) -> str:
 def _migrate(stored: dict) -> dict:
     """Migrate known settings while retaining unrelated persisted preferences."""
     migrated = dict(stored)
+    migrated["client_settings_mode"] = (
+        "shared" if migrated.get("client_settings_mode") == "shared" else "separate"
+    )
+    migrated["shared_settings_folder"] = _string_setting(migrated.get("shared_settings_folder"))
     preference = migrated.get("server_start_preference")
     if _is_valid_server_start_preference(preference):
         normalized = str(preference).strip()

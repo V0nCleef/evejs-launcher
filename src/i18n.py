@@ -14,6 +14,10 @@ from .translations_startup_scripts import (
     UI_PHRASES_BY_LANGUAGE as STARTUP_SCRIPT_UI_PHRASES,
 )
 from .translations_ru import UI_PHRASES as RU_UI_PHRASES
+from .translations_shared_settings import (
+    SOURCE_PHRASES as SHARED_SETTINGS_SOURCE_PHRASES,
+    UI_PHRASES_BY_LANGUAGE as SHARED_SETTINGS_UI_PHRASES,
+)
 from .translations_source import (
     AUTO_LOGIN_SOURCE_PHRASES,
     SOURCE_PHRASES as _CANONICAL_SOURCE_PHRASES,
@@ -32,11 +36,13 @@ for _language, _catalog in AUTO_LOGIN_UI_PHRASES.items():
 for _language, _catalog in STARTUP_SCRIPT_UI_PHRASES.items():
     # Feature phrases must not mutate the legacy catalogs' exact-key contract.
     UI_PHRASES_BY_LANGUAGE[_language] = {**UI_PHRASES_BY_LANGUAGE[_language], **_catalog}
+for _language, _catalog in SHARED_SETTINGS_UI_PHRASES.items():
+    UI_PHRASES_BY_LANGUAGE[_language] = {**UI_PHRASES_BY_LANGUAGE[_language], **_catalog}
 
 # A few feature catalogs register phrases after the exact-key legacy catalogs
 # load, so those older catalogs can keep enforcing their own source parity.
 SOURCE_PHRASES = tuple(
-    sorted(set(_CANONICAL_SOURCE_PHRASES) | set(AUTO_LOGIN_SOURCE_PHRASES) | set(STARTUP_SCRIPT_SOURCE_PHRASES))
+    sorted(set(_CANONICAL_SOURCE_PHRASES) | set(AUTO_LOGIN_SOURCE_PHRASES) | set(STARTUP_SCRIPT_SOURCE_PHRASES) | set(SHARED_SETTINGS_SOURCE_PHRASES))
 )
 SOURCE_PHRASE_SET = frozenset(SOURCE_PHRASES)
 

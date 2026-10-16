@@ -135,6 +135,14 @@ Native actions use known wrapper files. Managed Docker offers supported Compose 
 
 Settings contains the EveJS and client paths, proxy address, runtime selection, launch delay, service auto-start, compatible auto-login, hidden characters, update checks, and local-data maintenance. Unsaved changes are tracked before you leave the page.
 
+Under **Settings → Client → EVE Settings**, **Separate settings per account (default)** keeps the existing behavior. To share settings, choose **Shared settings** and save. The launcher automatically creates and manages `%APPDATA%\EveJS-Launcher\SharedSettings` when needed. No folder selection is required.
+
+To use your own folder, expand **Show advanced client options** and set **Custom Shared Folder**. Select an existing EVE settings folder containing `prefs.ini` and/or `core_*` files, or an empty local folder. Leave this field blank to use the automatic folder again. A new empty folder starts with basic settings; the launcher does not merge settings from other folders.
+
+Shared mode sends every account to that folder while each client retains its own account and character auto-login. EVE still stores account and character settings in files named for their IDs. Common preferences are shared, so changes saved by one client can replace common preferences saved by another. Close clients before changing the folder or switching modes. Returning to separate mode uses the original per-account folders again.
+
+Shared settings support the verified Windows EVE client build 3396210 and a local IPv4 Game endpoint. The folder must be on a local drive; network shares are not supported.
+
 The language selector changes the launcher interface between eight languages. **Reduce motion** pauses optional interface motion. Version 1.0.56 increases the small text throughout the interface; the guide also has its own **A− / A+** controls.
 
 ### Docker setup

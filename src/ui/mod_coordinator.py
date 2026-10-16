@@ -722,8 +722,15 @@ class ModCoordinator(QObject):
                 if profile_root.parent != PROFILES_ROOT:
                     raise RuntimeError("The selected profile path is invalid.")
                 if any(file.base == "profile_settings" for file in schema.files):
-                    settings_root = get_eve_settings_path(str(profile_root / "tq"))
-                    settings_anchor = Path(os.environ["LOCALAPPDATA"])
+                    if self.window._cfg.get("client_settings_mode", "separate") == "shared":
+                        from src.core.shared_client_settings import resolve_shared_settings_folder
+                        settings_root = resolve_shared_settings_folder(
+                            self.window._cfg.get("shared_settings_folder", ""), profiles_root=PROFILES_ROOT, create=True,
+                        )
+                        settings_anchor = settings_root
+                    else:
+                        settings_root = get_eve_settings_path(str(profile_root / "tq"))
+                        settings_anchor = Path(os.environ["LOCALAPPDATA"])
                 scope_label = format_ui_phrase("Profile: {profile}", profile=username)
             cfg = self.window._cfg
             client_settings = any(file.base not in {"mod", "evejs"} for file in schema.files)

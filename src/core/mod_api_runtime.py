@@ -69,7 +69,7 @@ _RESERVED_ENVIRONMENT = {
 _RESERVED_ARGUMENTS = {
     "port", "server", "serverhost", "serverport", "proxy", "proxyurl", "login",
     "username", "password", "account", "character", "characterid", "autoselectcharacter",
-    "settings", "settingspath", "resfiles", "remotefilecachefolder", "noconsole",
+    "settings", "settingspath", "settingsprofile", "resfiles", "remotefilecachefolder", "noconsole",
 }
 _RESERVED_PATHS = {"con", "prn", "aux", "nul", "clock$", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
 
@@ -635,14 +635,15 @@ def public_package_owns_legacy_folder(evejs_root: str | Path, relative_folder: s
                and mod.api_descriptor.kind == "client-package" for mod in (scan_mods(root) if mods is None else mods))
 
 
-def prepare_public_client_mods(evejs_root: str | Path, client_root: str | Path, profile_tq_path: Path, *, backend: str = "native", protected_environment: Mapping[str, str] | None = None, protected_arguments: Iterable[str] = (), runner: Callable | None = None, mods: Iterable[Mod] | None = None, client_lock_held: bool = False) -> PreparedClientMods:
+def prepare_public_client_mods(evejs_root: str | Path, client_root: str | Path, profile_tq_path: Path, *, backend: str = "native", protected_environment: Mapping[str, str] | None = None, protected_arguments: Iterable[str] = (), runner: Callable | None = None, mods: Iterable[Mod] | None = None, client_lock_held: bool = False, profile_settings_root: Path | None = None) -> PreparedClientMods:
     mods = public_client_mods(evejs_root, backend=backend, mods=mods)
     if not mods:
         return PreparedClientMods(MappingProxyType({}), (), ())
     client = Path(client_root).resolve(strict=True)
     profile = profile_tq_path.parent.resolve(strict=True)
     profile_id = profile_identity(profile)
-    settings = platform_api.get_eve_settings_path(str(profile_tq_path))
+    settings = (profile_settings_root.resolve(strict=True) if profile_settings_root is not None
+                else platform_api.get_eve_settings_path(str(profile_tq_path)))
     local_appdata = Path(os.environ["LOCALAPPDATA"]).resolve(strict=True)
     results, notifications = [], []
     # launch_client retains this same lease through process creation. Direct
@@ -651,7 +652,7 @@ def prepare_public_client_mods(evejs_root: str | Path, client_root: str | Path, 
         for mod in mods:
             descriptor = mod.api_descriptor
             context = ModSettingsContext(Path(evejs_root), descriptor.folder, client, profile_id, profile, settings,
-                profile_settings_storage_root=local_appdata)
+                profile_settings_storage_root=settings if profile_settings_root is not None else local_appdata)
             capabilities = descriptor.launcher_api.capabilities if descriptor.launcher_api is not None else ()
             if enrolled(descriptor, client):
                 if not {'install', 'verify', 'prepare_profile'}.issubset(capabilities):

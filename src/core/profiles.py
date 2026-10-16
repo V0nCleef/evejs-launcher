@@ -113,6 +113,8 @@ def create_profile(
     username: str,
     real_client_path: str,
     profiles_root: Path | None = None,
+    *,
+    bootstrap_settings: bool = True,
 ) -> Path:
     """Create or rebind a junction profile for the given account.
 
@@ -136,7 +138,8 @@ def create_profile(
 
     # ── Bootstrap EVE settings from real client (or template fallback) ──
     try:
-        _bootstrap_settings(username, real_client_path)
+        if bootstrap_settings:
+            _bootstrap_settings(username, real_client_path)
     except Exception:
         pass  # non-fatal — username pre-fill will still run
 
@@ -211,7 +214,9 @@ def get_profile_settings_path(username: str) -> Path:
     return get_eve_settings_path(str(junction))
 
 
-def prefill_username(username: str) -> None:
+def prefill_username(
+    username: str, *, settings_dir: Path | None = None, update_username: bool = True,
+) -> None:
     """Write the username to the EVE client settings so it's pre-filled on
     the login screen, even for accounts that have never been launched before.
 
@@ -219,12 +224,28 @@ def prefill_username(username: str) -> None:
     ``core_public__.yaml`` with ``audio:``, ``device:``, and ``ui:`` sections
     so the EVE client renders the full login screen correctly.
     """
-    try:
-        settings_dir = get_profile_settings_path(username)
-    except FileNotFoundError:
-        return  # profile not created yet
+    if settings_dir is None:
+        try:
+            settings_dir = get_profile_settings_path(username)
+        except FileNotFoundError:
+            return  # profile not created yet
 
     settings_dir.mkdir(parents=True, exist_ok=True)
+
+    if not update_username:
+        # Existing shared preferences belong to EVE. Never repair/rewrite them
+        # while another client may be saving. The process gets explicit server,
+        # port and login arguments. Also leave old public DAT migration to EVE.
+        template_dir = Path(__file__).resolve().parent / "template_settings"
+        prefs_path = settings_dir / "prefs.ini"
+        if not prefs_path.exists() and (template_dir / "prefs.ini").is_file():
+            _atomic_write_text(prefs_path, (template_dir / "prefs.ini").read_text(encoding="utf-8"))
+        yaml_path = settings_dir / "core_public__.yaml"
+        template_yaml = template_dir / "core_public__.yaml"
+        if not yaml_path.exists() and not (settings_dir / "core_public__.dat").exists() and template_yaml.is_file():
+            initial = _patch_core_public_login(template_yaml.read_text(encoding="utf-8"), 0, '""')
+            _atomic_write_text(yaml_path, initial)
+        return
 
     # ── prefs.ini: ensure newbie=0 so the client skips the setup wizard ──
     prefs_path = settings_dir / "prefs.ini"
@@ -413,28 +434,32 @@ def configure_profile_game_endpoint(
     *,
     host: str,
     port: int,
+    settings_dir: Path | None = None,
+    write_preferences: bool = True,
 ) -> None:
     """Atomically apply one validated game endpoint immediately before launch."""
     _validate_game_endpoint(host, port)
     start_path = Path(profile_tq_path) / "start.ini"
     if not start_path.is_file():
         raise FileNotFoundError("EVE client start.ini is missing.")
-    settings_dir = get_profile_settings_path(username)
+    if settings_dir is None:
+        settings_dir = get_profile_settings_path(username)
     settings_dir.mkdir(parents=True, exist_ok=True)
     prefs_path = settings_dir / "prefs.ini"
 
     start_text = _read_preserving_newlines(start_path)
-    prefs_text = _read_preserving_newlines(prefs_path) if prefs_path.exists() else ""
     updated_start = _patch_start_ini(start_text, host=host, port=port)
-    updated_prefs = _patch_flat_key(prefs_text, "port", str(port))
 
     # Avoid touching the shared client installation on every launch when its
     # endpoint is already correct. Besides preserving timestamps, this lets a
     # correctly configured read-only install launch normally.
     if updated_start != start_text:
         _atomic_write_text(start_path, updated_start)
-    if updated_prefs != prefs_text:
-        _atomic_write_text(prefs_path, updated_prefs)
+    if write_preferences:
+        prefs_text = _read_preserving_newlines(prefs_path) if prefs_path.exists() else ""
+        updated_prefs = _patch_flat_key(prefs_text, "port", str(port))
+        if updated_prefs != prefs_text:
+            _atomic_write_text(prefs_path, updated_prefs)
 
 
 def _validate_game_endpoint(host: str, port: int) -> None:

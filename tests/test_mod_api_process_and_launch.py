@@ -90,6 +90,32 @@ def test_public_dlss_folder_routes_once_and_preparation_finishes_before_client_s
     assert events == ["profile-committed", "spawn"]
 
 
+def test_shared_settings_preserve_distinct_auto_login_arguments_and_mod_context(tmp_path, monkeypatch):
+    from src.core.client_autologin import AutoLoginLaunch
+    from src.core.shared_client_settings import SharedClientSettings, SHARED_PROFILE_ARGUMENT
+    root, profile, client, _mod = fixture_launcher(tmp_path, monkeypatch, "DLSS5")
+    folder = tmp_path / "Shared EVE settings"
+    folder.mkdir()
+    captured = []
+    def prepare(*args, **kwargs):
+        assert kwargs["profile_settings_root"] == folder
+        assert SHARED_PROFILE_ARGUMENT in kwargs["protected_arguments"]
+        return runtime.PreparedClientMods({}, (), ())
+    monkeypatch.setattr(launcher, "prepare_public_client_mods", prepare)
+    monkeypatch.setattr(launcher, "require_auto_login_arguments", lambda intent, **kwargs: (
+        "/noconsole", f"/login:{intent.username}:evejs-local", f"/autoSelectCharacter:{intent.character_id}"))
+    monkeypatch.setattr(launcher, "launch_eve_client", lambda exe, env, cwd, *, arguments: captured.append(arguments) or object())
+    for username, char_id in (("account-a", 90000001), ("account-b", 90000002)):
+        launcher.launch_client(str(root), profile, client_path=str(client),
+            auto_login=AutoLoginLaunch(username, char_id), shared_settings=SharedClientSettings(folder, tmp_path / "alias"))
+    assert "/login:account-a:evejs-local" in captured[0]
+    assert "/login:account-b:evejs-local" in captured[1]
+    assert "/autoSelectCharacter:90000001" in captured[0]
+    assert "/autoSelectCharacter:90000002" in captured[1]
+    assert all(SHARED_PROFILE_ARGUMENT in arguments for arguments in captured)
+    assert all("/server:127.0.0.1" in arguments for arguments in captured)
+
+
 @pytest.mark.parametrize("fails", [False, True])
 def test_spawn_dispatches_captured_notification_outcome(tmp_path, monkeypatch, fails):
     root, profile, client, _mod = fixture_launcher(tmp_path, monkeypatch, "DLSS5")

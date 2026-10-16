@@ -22,6 +22,7 @@ from .mod_lifecycle_lock import acquire_mod_lifecycle_lock
 from .mod_client_notifications import start_client_notifications
 from .mod_manifest import scan_mods
 from .overview_state import OverviewBridgeLaunch
+from .shared_client_settings import SharedClientSettings
 from .platform import (
     get_client_exe_path,
     launch_eve_client,
@@ -405,6 +406,7 @@ def launch_client(
     auto_login_server_password_bypass_verified: bool = False,
     overview_bridge: OverviewBridgeLaunch | None = None,
     pre_spawn_check: Callable[[], None] | None = None,
+    shared_settings: SharedClientSettings | None = None,
 ) -> subprocess.Popen:
     """Launch the EVE client executable from a profile junction.
 
@@ -469,6 +471,8 @@ def launch_client(
         env["EO_REMOTEFILECACHEFOLDER"] = str(resfiles)
 
         arguments: tuple[str, ...] = (f"/port:{effective_context.game_port}",)
+        if shared_settings is not None:
+            arguments += (shared_settings.argument, f"/server:{shared_settings.server_host}")
         if auto_login is not None:
             try:
                 arguments += require_auto_login_arguments(
@@ -492,6 +496,7 @@ def launch_client(
             evejs_root, selected_client_path, profile_tq_path,
             backend="docker" if effective_context.target_identity is not None else "native",
             protected_environment=dlss5_environment, protected_arguments=arguments, mods=mods, client_lock_held=True,
+            **({"profile_settings_root": shared_settings.folder} if shared_settings is not None else {}),
         )
         env.update(public_mods.environment)
         arguments += public_mods.arguments

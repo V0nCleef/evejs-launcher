@@ -39,6 +39,8 @@ class ClientLaunchRequest:
     auto_login_enabled: bool = False
     docker_auto_login_probe: DockerAutoLoginProbe | None = None
     overview_bridge: OverviewBridgeLaunch | None = None
+    client_settings_mode: str = "separate"
+    shared_settings_folder: str = ""
 
 
 @dataclass(frozen=True)

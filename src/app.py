@@ -258,6 +258,7 @@ from .widgets.new_character_dialog import NewCharacterDialog, NewCharacterDraft
 from .widgets.status_bar import StatusBar
 from .widgets.title_bar import TitleBar
 from .widgets.window_behavior import launcher_startup_geometry, launcher_window_flags
+from .core.shared_client_settings import prepare_shared_settings, require_shared_settings_support
 from .workers.docker_lifecycle_worker import DockerLifecycleWorker
 from .workers.docker_character_creation_worker import (
     DockerCharacterCreationWorker,
@@ -373,10 +374,27 @@ def _perform_client_launch(request: ClientLaunchRequest) -> LaunchedProcess:
     wait_for_client_endpoints(request.launch_context)
     log.info("Client launch stage=endpoints_ready account=%s", request.username)
 
+    if request.client_settings_mode == "shared":
+        from .core.platform import serialize_evejs_client_trust_and_spawn
+        # Keep shared text initialization and endpoint preparation serialized
+        # through spawn across launcher instances. The Windows mutex is reentrant.
+        with serialize_evejs_client_trust_and_spawn():
+            return _prepare_and_spawn_client(request)
+    if request.client_settings_mode != "separate":
+        raise ValueError("Invalid client settings mode.")
+    return _prepare_and_spawn_client(request)
+
+
+def _prepare_and_spawn_client(request: ClientLaunchRequest) -> LaunchedProcess:
+    shared = request.client_settings_mode == "shared"
+    if shared:
+        require_shared_settings_support(request.client_path)
+
     profile_dir = create_profile(
         request.username,
         request.client_path,
         request.profiles_root,
+        **({"bootstrap_settings": False} if shared else {}),
     )
     profile_path = profile_dir / "tq"
     if not profile_path.exists():
@@ -384,12 +402,22 @@ def _perform_client_launch(request: ClientLaunchRequest) -> LaunchedProcess:
     log.info("Client launch stage=profile_ready account=%s", request.username)
 
     # Refresh the account and endpoint settings immediately before every spawn.
-    prefill_username(request.username)
+    shared_settings = None
+    settings_options = {}
+    if shared:
+        shared_settings = prepare_shared_settings(profile_path, request.shared_settings_folder,
+                                                   host=request.launch_context.game_host)
+        settings_options = {"settings_dir": shared_settings.folder}
+        prefill_username(request.username, **settings_options, update_username=False)
+    else:
+        prefill_username(request.username)
     configure_profile_game_endpoint(
         request.username,
         profile_path,
         host=request.launch_context.game_host,
         port=request.launch_context.game_port,
+        **settings_options,
+        **({"write_preferences": False} if shared else {}),
     )
     log.info("Client launch stage=settings_ready account=%s", request.username)
     auto_login = None
@@ -485,6 +513,7 @@ def _perform_client_launch(request: ClientLaunchRequest) -> LaunchedProcess:
         ),
         overview_bridge=request.overview_bridge,
         pre_spawn_check=pre_spawn_check,
+        **({"shared_settings": shared_settings} if shared_settings is not None else {}),
     )
 
 
@@ -6600,6 +6629,8 @@ class MainWindow(QMainWindow):
             auto_login_enabled=auto_login_enabled,
             docker_auto_login_probe=docker_auto_login_probe,
             overview_bridge=overview_bridge,
+            client_settings_mode=str(self._cfg.get("client_settings_mode", "separate")),
+            shared_settings_folder=str(self._cfg.get("shared_settings_folder", "")),
         )
 
     @staticmethod
@@ -9434,6 +9465,20 @@ class MainWindow(QMainWindow):
             return "Wait for the launcher update to finish before saving settings."
         proposed = dict(self._cfg)
         proposed.update(draft)
+
+        proposed_mode = proposed.get("client_settings_mode", "separate")
+        settings_selection_changed = proposed_mode != self._cfg.get("client_settings_mode", "separate")
+        if proposed_mode == "shared" and not settings_selection_changed:
+            before = str(self._cfg.get("shared_settings_folder", "")).strip()
+            after = str(proposed.get("shared_settings_folder", "")).strip()
+            settings_selection_changed = os.path.normcase(str(Path(before).resolve())) != os.path.normcase(str(Path(after).resolve()))
+        tracker = getattr(self, "_tracker", None)
+        if settings_selection_changed and (
+            getattr(tracker, "running_count", 0)
+            or getattr(self, "_pending_client_launches", set())
+            or getattr(self, "_client_launch_thread", None) is not None
+        ):
+            return "Close EVE clients before changing the shared settings folder."
 
         if proposed.get("runtime_backend") == "native":
             try:

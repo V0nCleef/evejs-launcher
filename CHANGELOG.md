@@ -2,6 +2,13 @@
 
 ## Changelog
 
+## v1.0.71 - 2026-10-16
+
+- Added optional shared EVE settings in Settings → Client. Separate settings per account remain the default.
+- Shared mode automatically creates and manages its settings folder. An optional custom folder is available under advanced client options. Original per-account settings are preserved when switching modes.
+- Kept account and character auto-login separate for each client, including group launches. Shared mode passes the selected local server endpoint directly to each client.
+- Added shared-folder validation, owned-link recovery, and translations for every supported launcher language.
+
 ## v1.0.70 - 2026-10-16
 
 - Added Startup Scripts below the installed mods. Add any `.bat` file, choose its name and arguments, and enable automatic startup after Game is ready.
