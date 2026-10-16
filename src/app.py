@@ -24,6 +24,7 @@ from pathlib import Path
 from PyQt6.QtCore import (
     QEvent,
     QObject,
+    QSize,
     QThread,
     Qt,
     QTimer,
@@ -256,7 +257,7 @@ from .widgets.ui_translation import retranslate_widget_tree
 from .widgets.new_character_dialog import NewCharacterDialog, NewCharacterDraft
 from .widgets.status_bar import StatusBar
 from .widgets.title_bar import TitleBar
-from .widgets.window_behavior import launcher_window_flags
+from .widgets.window_behavior import launcher_startup_geometry, launcher_window_flags
 from .workers.docker_lifecycle_worker import DockerLifecycleWorker
 from .workers.docker_character_creation_worker import (
     DockerCharacterCreationWorker,
@@ -499,6 +500,7 @@ class MainWindow(QMainWindow):
     _docker_observe_requested = pyqtSignal()
     _service_monitor_stop_requested = pyqtSignal()
     shipboard_caption_requested = pyqtSignal(str)
+    _startup_scripts_requested = pyqtSignal(str, object)
 
     _MARGIN = 8  # px resize-hit border around the frame
     _VOICE_PREPARE_MAX_ATTEMPTS = 3
@@ -511,11 +513,13 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(APP_TITLE)
-        self.setMinimumSize(1000, 640)
-        self.resize(1366, 768)
 
         # Frameless window with custom title bar
         self.setWindowFlags(launcher_window_flags())
+        screen = QApplication.screenAt(QCursor.pos()) or self.screen()
+        geometry = launcher_startup_geometry(screen.availableGeometry())
+        self.setMinimumSize(QSize(1000, 640).boundedTo(geometry.size()))
+        self.setGeometry(geometry)
 
         # Window icon
         icon_path = Path(__file__).resolve().parent.parent / "assets" / "logo.png"
@@ -870,6 +874,9 @@ class MainWindow(QMainWindow):
         self._home_page = HomePage()
         self._characters_page = CharactersPage()
         self._mods_page = ModsPage(defer_inventory=True)
+        self._startup_scripts_requested.connect(
+            self._mods_page.startup_scripts.start_for_server
+        )
         self._tools_page = ToolsPage(str(self._cfg.get("evejs_root", "")))
         self._settings_page = SettingsPage()
         self._settings_page.set_save_validator(self._settings_save_rejection)
@@ -1983,6 +1990,16 @@ class MainWindow(QMainWindow):
             and result.succeeded
             and not game_runtime_observation_conflict
         )
+        if (
+            completion_succeeded
+            and not pending_mod_recreate
+            and getattr((result.records or {}).get("server"), "state", None) is ServiceState.ONLINE
+            and expected_action in {
+                DockerLifecycleAction.START_GAME, DockerLifecycleAction.START_STACK,
+                DockerLifecycleAction.RESTART_GAME, DockerLifecycleAction.RECREATE_GAME,
+            }
+        ):
+            self._start_companion_scripts_for_game()
         if (
             expected_action is DockerLifecycleAction.RECREATE_GAME
             and getattr(self, "_pending_docker_mod_plan", None) is not None
@@ -3470,6 +3487,12 @@ class MainWindow(QMainWindow):
             self._announce_shipboard(voice_event)
         return True
 
+    def _start_companion_scripts_for_game(self) -> None:
+        """Notify local script entries only after a verified managed Game start."""
+        root = str(self._cfg.get("evejs_root", ""))
+        if root and not getattr(self, "_close_in_progress", False):
+            self._startup_scripts_requested.emit(root, secrets.token_hex(16))
+
     def _on_service_start_completed_for_token(
         self,
         result: ServiceStartResult,
@@ -3598,6 +3621,8 @@ class MainWindow(QMainWindow):
             self._lifecycle_after_thread_callback = callback
         else:
             self._lifecycle_after_thread_callback = None
+        if start_game and continuation_ready and result.game_ready and not mod_attestation_failed:
+            self._start_companion_scripts_for_game()
         if result.succeeded:
             if isinstance(result.mod_runtime_snapshot, ModRuntimeSnapshot):
                 self._publish_mod_runtime_snapshot(result.mod_runtime_snapshot)
@@ -4564,6 +4589,7 @@ class MainWindow(QMainWindow):
                 self._publish_mod_runtime_snapshot(snapshot)
                 self._clear_pending_docker_mod_operation()
                 self._release_mod_lifecycle_lease()
+                self._start_companion_scripts_for_game()
                 finish_continuation(True)
                 return
 

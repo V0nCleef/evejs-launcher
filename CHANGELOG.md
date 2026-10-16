@@ -2,6 +2,14 @@
 
 ## Changelog
 
+## v1.0.70 - 2026-10-16
+
+- Added Startup Scripts below the installed mods. Add any `.bat` file, choose its name and arguments, and enable automatic startup after Game is ready.
+- Saved scripts separately for each EveJS installation, with Run now, Edit, Remove, and batch execution status. Scripts use their own console and remain independent of server shutdown.
+- Translated the new controls and messages into all supported launcher languages.
+- Increased the Native Game startup readiness timeout from one minute to two minutes for slower server starts.
+- Opened the launcher at a taller 1389 x 995 default size, centered and limited to the monitor work area.
+
 ## v1.0.69 - 2026-09-30
 
 - Added a shared MODS button in the in-game Neocom. Participating mods appear in one menu; the button hides when no usable entries are registered. AutoMining is not required.

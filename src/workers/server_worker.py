@@ -95,7 +95,7 @@ class ServiceStartWorker(QObject):
         start_market: bool,
         start_game: bool,
         game_port: int = int(Ports.GAME_TCP),
-        readiness_timeout_sec: float = 60,
+        readiness_timeout_sec: float = 120,
         market_readiness_timeout_sec: float | None = None,
         continue_game_after_market_failure: bool = False,
         poll_interval_sec: float = 0.25,

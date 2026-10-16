@@ -2,7 +2,20 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QRect, Qt
+
+
+def launcher_startup_geometry(work_area: QRect) -> QRect:
+    """Open at the roomy default size, centered inside the monitor work area.
+
+    Qt supplies logical pixels here, so display scaling and the taskbar are
+    already accounted for. Leave a little space around the window.
+    """
+    width = min(1389, max(1, work_area.width() - 48))
+    height = min(995, max(1, work_area.height() - 48))
+    geometry = QRect(0, 0, width, height)
+    geometry.moveCenter(work_area.center())
+    return geometry
 
 
 def launcher_window_flags() -> Qt.WindowType:

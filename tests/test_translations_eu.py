@@ -10,6 +10,7 @@ from src.translations_source import SOURCE_PHRASES
 
 _ALLOWED_IDENTICAL = {
     "fr": {
+        "Actions",  # The French noun is spelled identically.
         "({total})",
         "({visible} / {group_total})",
         "{group_name} ({member_count})",
@@ -44,6 +45,7 @@ _ALLOWED_IDENTICAL = {
         "Docker Compose",
     },
     "nl": {
+        "bytes",  # Standard Dutch spelling is also "bytes".
         "({total})",
         "({visible} / {group_total})",
         "{group_name} ({member_count})",

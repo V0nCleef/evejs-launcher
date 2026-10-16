@@ -517,6 +517,32 @@ def test_quarantined_target_blocks_start_until_another_target_is_authoritative(
     window.deleteLater()
 
 
+@pytest.mark.parametrize("succeeded,state,stale,expected", [
+    (True, ServiceState.ONLINE, False, 1),
+    (False, ServiceState.FAILED, False, 0),
+    (True, ServiceState.STARTING, False, 0),
+    (True, ServiceState.ONLINE, True, 0),
+])
+def test_docker_companion_scripts_wait_for_current_ready_game(qapp, tmp_path, monkeypatch, succeeded, state, stale, expected):
+    window = _bare_docker_window(tmp_path, _docker_snapshot())
+    monkeypatch.setattr(app_module.QMessageBox, "critical", lambda *_: None)
+    observed = []
+    window._startup_scripts_requested.connect(lambda root, token: observed.append((root, token)))
+    assert window._begin_docker_lifecycle(DockerLifecycleAction.START_STACK)
+    if stale:
+        window._monitor_generation += 1
+    result = DockerLifecycleResult(DockerLifecycleAction.START_STACK, succeeded, records={
+        "server": _record("server", state, raw_state="running", identity="game-id", health="healthy"),
+        "market": _record("market", ServiceState.ONLINE, raw_state="running", identity="market-id", health="healthy"),
+    })
+    window._on_docker_lifecycle_completed(result)
+    window._on_docker_lifecycle_completed(result)
+    assert len(observed) == expected
+    if expected:
+        assert observed[0][0] == str(tmp_path)
+    window.deleteLater()
+
+
 def test_record_success_renders_container_state_and_requests_one_observation(
     qapp,
     tmp_path,

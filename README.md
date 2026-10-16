@@ -35,6 +35,12 @@ You need Windows 10 or 11, an existing EveJS installation, and an EVE client pre
 
 Changing runtime does **not** move characters, market data, or server data. The launcher never silently switches runtimes.
 
+## Startup scripts
+
+On **Mods**, the **Startup Scripts** section below the mod list accepts your own `.bat` files. Choose **Add .bat file**, give the entry a name, and optionally enter command arguments. **Start with server** runs it after a successful Game start or restart through the launcher, including managed Docker starts. Market-only starts, failed Game starts, and connect-only monitoring do not trigger scripts. Use **Run now** to start an entry manually.
+
+Scripts are saved per physical EveJS installation. Their working directory is the batch file's folder, and each script opens its own console. A running batch wrapper is not launched again automatically; a completed wrapper may have left another program running, which the launcher cannot detect generically. Status refers to the batch file, not the readiness of programs it starts. Scripts and their tools remain independent when the server or launcher closes. **Remove** removes the launcher entry, leaving the original file untouched.
+
 ## Home: services and group launches
 
 Home shows separate Game, Market, and client states, recent activity, stack controls, and your selected character group. Open service consoles from the status controls to inspect output.

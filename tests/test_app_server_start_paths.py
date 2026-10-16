@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 import time
+from PyQt6.QtCore import QEvent
 from PyQt6.QtWidgets import QApplication, QMainWindow
 
 from src import app as app_module
@@ -16,6 +17,32 @@ from src.app import MainWindow
 from src.audio.events import VoiceEvent
 from src.core.db import Account, Character
 from src.workers.server_worker import ServiceStartResult, ServiceStopResult
+
+
+@pytest.mark.parametrize("scope,result,closing,expected", [
+    ((False, True), ServiceStartResult(game_ready=True), False, 1),
+    ((True, True), ServiceStartResult(game_ready=True, market_error="optional Market failed"), False, 1),
+    ((True, False), ServiceStartResult(market_ready=True), False, 0),
+    ((False, True), ServiceStartResult(game_error="timeout"), False, 0),
+    ((False, True), ServiceStartResult(game_ready=True, mod_runtime_error="unverified"), False, 0),
+    ((False, True), ServiceStartResult(game_ready=True), True, 0),
+])
+def test_companion_scripts_run_only_after_usable_game_start(bare_window, tmp_path, monkeypatch, scope, result, closing, expected):
+    root = str(tmp_path / "EveJS")
+    bare_window._cfg["evejs_root"] = root
+    bare_window._lifecycle_start_scope = scope
+    bare_window._lifecycle_ready_callback = None
+    bare_window._lifecycle_thread = None
+    bare_window._close_in_progress = closing
+    bare_window._publish_cached_runtime = lambda: None
+    monkeypatch.setattr(app_module.QMessageBox, "warning", lambda *_: None)
+    monkeypatch.setattr(app_module.QMessageBox, "critical", lambda *_: None)
+    observed = []
+    bare_window._startup_scripts_requested.connect(lambda folder, token: observed.append((folder, token)))
+    bare_window._on_service_start_completed(result)
+    assert len(observed) == expected
+    if expected:
+        assert observed[0][0] == root
 
 
 def _minimal_window_config() -> dict:
@@ -97,6 +124,7 @@ def bare_window(qapp: QApplication) -> MainWindow:
     yield window
     window._release_mod_lifecycle_lease()
     window.deleteLater()
+    qapp.sendPostedEvents(window, QEvent.Type.DeferredDelete)
 
 
 def test_main_window_constructs_without_legacy_settings_prompt(

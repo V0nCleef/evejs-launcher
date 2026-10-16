@@ -58,6 +58,7 @@ from src.core.service_status import DockerControlPolicy, RuntimeBackend
 from src.widgets.page_header import PageHeader
 from src.widgets.localized_dialogs import LocalizedMessageBox as QMessageBox
 from src.widgets.toggle_switch import ToggleSwitch
+from src.pages.startup_scripts_panel import StartupScriptsPanel
 from src.widgets.update_button import UpdateButton
 from src.widgets.ui_translation import (
     mark_translatable,
@@ -952,6 +953,9 @@ class ModsPage(QWidget):
         self._list_layout.addStretch()
         self._scroll.setWidget(self._list_container)
         manifest_layout.addWidget(self._scroll, stretch=1)
+        self.startup_scripts = StartupScriptsPanel(self.manifest_panel)
+        self.startup_scripts.set_root(self._evejs_root)
+        manifest_layout.addWidget(self.startup_scripts)
         root.addWidget(self.manifest_panel, stretch=1)
 
         self.action_rail = QFrame(self)
@@ -1135,6 +1139,7 @@ class ModsPage(QWidget):
         if evejs_root != self._evejs_root:
             self._mod_runtime_snapshot = None
         self._evejs_root = evejs_root
+        self.startup_scripts.set_root(evejs_root)
         self.refresh_mods()
 
     def set_runtime_context(
