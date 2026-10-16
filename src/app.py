@@ -258,7 +258,10 @@ from .widgets.new_character_dialog import NewCharacterDialog, NewCharacterDraft
 from .widgets.status_bar import StatusBar
 from .widgets.title_bar import TitleBar
 from .widgets.window_behavior import launcher_startup_geometry, launcher_window_flags
-from .core.shared_client_settings import prepare_shared_settings, require_shared_settings_support
+from .core.shared_client_settings import require_shared_settings_support
+from .core.shared_settings_profile import (
+    SharedSettingsSource, prepare_shared_profile_launch,
+)
 from .workers.docker_lifecycle_worker import DockerLifecycleWorker
 from .workers.docker_character_creation_worker import (
     DockerCharacterCreationWorker,
@@ -405,10 +408,12 @@ def _prepare_and_spawn_client(request: ClientLaunchRequest) -> LaunchedProcess:
     shared_settings = None
     settings_options = {}
     if shared:
-        shared_settings = prepare_shared_settings(profile_path, request.shared_settings_folder,
-                                                   host=request.launch_context.game_host)
+        shared_settings = prepare_shared_profile_launch(profile_path, request.shared_settings_source,
+            account_id=request.account_id, character_id=request.character_id, evejs_root=request.evejs_root,
+            host=request.launch_context.game_host, target_identity=request.launch_context.target_identity,
+            legacy_folder=request.shared_settings_folder)
         settings_options = {"settings_dir": shared_settings.folder}
-        prefill_username(request.username, **settings_options, update_username=False)
+        prefill_username(request.username, **settings_options, update_username=True)
     else:
         prefill_username(request.username)
     configure_profile_game_endpoint(
@@ -6631,6 +6636,9 @@ class MainWindow(QMainWindow):
             overview_bridge=overview_bridge,
             client_settings_mode=str(self._cfg.get("client_settings_mode", "separate")),
             shared_settings_folder=str(self._cfg.get("shared_settings_folder", "")),
+            account_id=next((account.account_id for account in getattr(self, "_accounts", ())
+                             if account.username == username), None),
+            shared_settings_source=SharedSettingsSource.from_config(self._cfg.get("shared_settings_source")),
         )
 
     @staticmethod
@@ -7788,6 +7796,10 @@ class MainWindow(QMainWindow):
         self._data_selection = result.selection
         self._clear_data_load_error()
         self._accounts = list(result.accounts)
+        settings_page = getattr(self, "_settings_page", None)
+        set_profiles = getattr(settings_page, "set_shared_profile_accounts", None)
+        if callable(set_profiles):
+            set_profiles(self._accounts, str(self._cfg.get("evejs_root", "")))
         self._sync_character_groups(result.selection.target_identity)
         self._refresh_character_views()
 
@@ -9468,6 +9480,8 @@ class MainWindow(QMainWindow):
 
         proposed_mode = proposed.get("client_settings_mode", "separate")
         settings_selection_changed = proposed_mode != self._cfg.get("client_settings_mode", "separate")
+        if proposed_mode == "shared" and proposed.get("shared_settings_source", {}) != self._cfg.get("shared_settings_source", {}):
+            settings_selection_changed = True
         if proposed_mode == "shared" and not settings_selection_changed:
             before = str(self._cfg.get("shared_settings_folder", "")).strip()
             after = str(proposed.get("shared_settings_folder", "")).strip()
@@ -9478,7 +9492,7 @@ class MainWindow(QMainWindow):
             or getattr(self, "_pending_client_launches", set())
             or getattr(self, "_client_launch_thread", None) is not None
         ):
-            return "Close EVE clients before changing the shared settings folder."
+            return "Close EVE clients before applying the selected shared character profile."
 
         if proposed.get("runtime_backend") == "native":
             try:

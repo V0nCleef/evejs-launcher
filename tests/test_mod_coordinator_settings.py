@@ -127,3 +127,51 @@ def test_terminal_ui_nested_loop_does_not_release_operation_early(qapp):
     assert observed == [("mod_operation",)]
     assert active_mutations(owner) == ()
     owner.deleteLater()
+
+
+@pytest.mark.parametrize("automatic", [False, True])
+@pytest.mark.parametrize("target", [None, "verified-docker-target"])
+def test_shared_mod_settings_use_the_launchers_persistent_source(qapp, tmp_path, monkeypatch, automatic, target):
+    from src.ui import mod_coordinator
+    from src.core.shared_settings_profile import (
+        SharedSettingsSource, resolve_shared_profile_source, shared_profile_main_folder,
+    )
+    profiles = tmp_path / "launcher" / "Profiles"
+    tq = profiles / "account-a" / "tq"
+    tq.mkdir(parents=True)
+    root = tmp_path / "server"
+    root.mkdir()
+    source = SharedSettingsSource("account-a", 11, 90000001, str(root))
+    monkeypatch.setattr("src.core.overview_patch.is_eve_client_running", lambda: False)
+    if automatic:
+        resolve_shared_profile_source(tq, profiles.parent / "SharedSettings", None,
+            account_id=11, character_id=90000001, evejs_root=str(root), target_identity=target)
+    owner = QMainWindow()
+    owner._cfg = {"evejs_root": str(root), "client_settings_mode": "shared",
+        "shared_settings_folder": str(tmp_path / "obsolete"),
+        "shared_settings_source": {} if automatic else source.as_dict(),
+        "runtime_backend": "docker_compose" if target else "native"}
+    owner._current_observed_docker_target_identity = lambda: target
+    owner._accounts = [SimpleNamespace(username="account-a")]
+    schema = {"schemaVersion": 1,
+        "files": [{"id": "c", "base": "profile_settings", "path": "core_public__.yaml", "format": "yaml"}],
+        "fields": [{"id": "on", "label": "Enabled", "type": "boolean", "default": False,
+            "file": "c", "key": ["value"], "restart": "client"}]}
+    mod = SimpleNamespace(name="Example", path=root / "mods/Example", evejs_root=root,
+        settings_schema=schema, manifest_path=root / "manifest.json")
+    mod.path.mkdir(parents=True)
+    expected = shared_profile_main_folder(tq, source, evejs_root=str(root), target_identity=target)
+    expected.mkdir(parents=True)
+    monkeypatch.setattr(mod_coordinator, "PROFILES_ROOT", profiles)
+    monkeypatch.setattr("src.core.overview_patch.is_eve_client_running", lambda: False)
+    monkeypatch.setattr(mod_coordinator.QInputDialog, "getItem", lambda *args: ("account-a", True))
+    errors, contexts = [], []
+    monkeypatch.setattr(mod_coordinator.QMessageBox, "warning", lambda *args: errors.append(args[-1]))
+    monkeypatch.setattr(mod_coordinator.ModSettingsSession, "open", lambda context, *args, **kwargs: contexts.append(context))
+    coordinator = ModCoordinator(owner)
+    monkeypatch.setattr(coordinator, "run", lambda operation, callback: operation())
+    coordinator.configure(mod)
+    assert not errors
+    assert contexts[0].profile_settings_root == expected
+    assert contexts[0].profile_settings_storage_root == expected
+    owner.deleteLater()

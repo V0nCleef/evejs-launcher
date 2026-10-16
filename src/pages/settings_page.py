@@ -3,7 +3,7 @@
 Sections
 --------
 * General        — EveJS root, proxy URL
-* Client         — client path, separate/shared settings, advanced folder override
+* Client         — client path, separate/shared settings, source character
 * Launch         — stagger delay, auto-start toggles
 * Audio & Voice  — ambience, local shipboard voice, events, accessibility
 * UI             — reduced-motion preference
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import logging
+import os
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -51,7 +52,6 @@ from src.core.client_autologin import (
     inspect_client_auto_login_capability,
 )
 from src.core.discovery import resolve_client_tq_path
-from src.core.shared_client_settings import SharedSettingsError, validate_shared_folder
 
 from src.core.runtime.docker_setup import (
     DockerPreflightRequest,
@@ -142,6 +142,9 @@ class SettingsPage(QWidget):
         self._lifecycle_busy = False
         self._save_validator: Callable[[dict], str | None] | None = None
         self._settings_baseline: dict[str, object] | None = None
+        self._shared_profile_choices: list[tuple[str, dict[str, object]]] = []
+        self._shared_profile_roster_root = ""
+        self._legacy_shared_settings_folder = ""
         self._voice_preview_available = False
         self._voice_preview_reason = (
             "Bundled LYRA voice pack has not been verified yet."
@@ -220,27 +223,18 @@ class SettingsPage(QWidget):
         self.client_settings_mode_combo.addItem("Separate settings per account (default)", "separate")
         self.client_settings_mode_combo.addItem("Shared settings", "shared")
         client_form.addRow("EVE Settings:", self.client_settings_mode_combo)
+        self.shared_profile_source_combo = ScrollSafeComboBox()
+        self.shared_profile_source_combo.addItem("First character launched (automatic)", {})
+        self.shared_profile_source_label = QLabel("Shared profile:")
+        client_form.addRow(self.shared_profile_source_label, self.shared_profile_source_combo)
         client_help = self._make_help_label(
-            "Shared mode creates one launcher-managed settings folder for all accounts. Original per-account folders are kept. "
-            "Auto-login still uses each client's own account and character."
+            "Choose a source character, or use the first character launched as the saved source. "
+            "Its settings and layout are copied at launch. "
+            "Only the source character's changes are shared; other characters' settings reset on their next launch. "
+            "Each client keeps its own auto-login. "
+            "Close all EVE clients before changing the shared profile."
         )
         client_form.addRow("", client_help)
-        self.client_advanced_toggle = QCheckBox("Show advanced client options")
-        self.client_advanced_fields = QWidget()
-        client_advanced_form = QFormLayout(self.client_advanced_fields)
-        client_advanced_form.setContentsMargins(0, 0, 0, 0)
-        client_advanced_form.setSpacing(8)
-        self.shared_settings_folder_edit = QLineEdit()
-        self.shared_settings_folder_edit.setPlaceholderText("Existing EVE settings folder or empty folder")
-        self.shared_settings_folder_row = self._with_browse(self.shared_settings_folder_edit, directory=True)
-        client_advanced_form.addRow("Custom Shared Folder:", self.shared_settings_folder_row)
-        client_advanced_form.addRow("", self._make_help_label(
-            "Leave blank to let the launcher manage shared settings automatically."
-        ))
-        self.client_advanced_fields.hide()
-        self.client_advanced_toggle.toggled.connect(self.client_advanced_fields.setVisible)
-        client_form.addRow("", self.client_advanced_toggle)
-        client_form.addRow(self.client_advanced_fields)
         self.client_settings_mode_combo.currentIndexChanged.connect(self._sync_client_settings_controls)
         root.addWidget(client_box)
 
@@ -1188,9 +1182,108 @@ class SettingsPage(QWidget):
 
     # ── Load / Save ──────────────────────────────────────────────────────────
     def _sync_client_settings_controls(self) -> None:
-        self.client_advanced_fields.setEnabled(
-            self.client_settings_mode_combo.currentData() == "shared"
+        shared = self.client_settings_mode_combo.currentData() == "shared"
+        self.shared_profile_source_combo.setVisible(shared)
+        self.shared_profile_source_label.setVisible(shared)
+
+    @staticmethod
+    def _normalized_shared_profile_source(value: object) -> dict[str, object]:
+        """Keep the selector's persisted identity independent of display names."""
+        source = config.normalize_shared_settings_source(value)
+        if not source:
+            return {}
+        try:
+            source["evejs_root"] = str(Path(source["evejs_root"]).resolve())
+        except (OSError, ValueError):
+            return {}
+        return source
+
+    @classmethod
+    def _shared_profile_key(cls, value: object) -> tuple | None:
+        source = cls._normalized_shared_profile_source(value)
+        if not source:
+            return None
+        return (source["username"], source["account_id"], source["character_id"],
+                os.path.normcase(str(source["evejs_root"])))
+
+    def _selected_shared_profile_source(self) -> dict[str, object]:
+        return self._normalized_shared_profile_source(
+            self.shared_profile_source_combo.currentData()
         )
+
+    def _populate_shared_profile_choices(self, selected: object) -> None:
+        selected = self._normalized_shared_profile_source(selected)
+        selected_key = self._shared_profile_key(selected)
+        combo = self.shared_profile_source_combo
+        blocked = combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.addItem("First character launched (automatic)", {})
+            register_translatable_combo_item(combo, 0)
+            chosen = 0
+            for label, source in self._shared_profile_choices:
+                combo.addItem(label, source)
+                if self._shared_profile_key(source) == selected_key:
+                    chosen = combo.count() - 1
+            if selected and chosen == 0:
+                # Keep the saved identity visible while the database is loading
+                # or if it has disappeared; never substitute another character.
+                combo.addItem("Saved character profile", selected)
+                chosen = combo.count() - 1
+                register_translatable_combo_item(combo, chosen)
+            combo.setCurrentIndex(chosen)
+        finally:
+            combo.blockSignals(blocked)
+
+    def set_shared_profile_accounts(self, accounts, evejs_root: str) -> None:
+        """Populate source choices from the current verified database roster."""
+        selected = self._selected_shared_profile_source()
+        try:
+            root_path = Path(str(evejs_root).strip())
+            root = str(root_path.resolve()) if root_path.is_absolute() else ""
+        except (OSError, ValueError):
+            root = ""
+        choices = []
+        seen = set()
+        for account in accounts:
+            for character in account.characters:
+                source = self._normalized_shared_profile_source({
+                    "username": account.username,
+                    "account_id": account.account_id,
+                    "character_id": character.char_id,
+                    "evejs_root": root,
+                })
+                key = self._shared_profile_key(source)
+                if key is not None and key not in seen:
+                    choices.append((f"{character.name} ({account.username})", source))
+                    seen.add(key)
+        self._shared_profile_choices = sorted(choices, key=lambda item: item[0].casefold())
+        self._shared_profile_roster_root = root
+        self._populate_shared_profile_choices(selected)
+
+    def _valid_shared_profile_source(self, source: object, evejs_root: str) -> bool:
+        key = self._shared_profile_key(source)
+        if key is None:
+            return False
+        try:
+            root = Path(evejs_root.strip())
+            if not root.is_absolute():
+                return False
+            root_key = os.path.normcase(str(root.resolve()))
+        except (OSError, ValueError):
+            return False
+        return (root_key == os.path.normcase(self._shared_profile_roster_root)
+                and key[-1] == root_key
+                and any(self._shared_profile_key(choice) == key
+                        for _, choice in self._shared_profile_choices))
+
+    def _valid_shared_profile_selection(
+        self, source: object, evejs_root: str,
+    ) -> bool:
+        # Automatic mode binds its first launched character persistently.
+        if source == {}:
+            return True
+        return self._valid_shared_profile_source(source, evejs_root)
 
     def load_settings(self) -> None:
         """Populate the form from the persisted config."""
@@ -1207,8 +1300,10 @@ class SettingsPage(QWidget):
         )
         self.proxy_url_edit.setText(str(cfg.get("proxy_url", "")))
         self._set_combo_data(self.client_settings_mode_combo, cfg.get("client_settings_mode", "separate"))
-        self.shared_settings_folder_edit.setText(str(cfg.get("shared_settings_folder", "")))
-        self.client_advanced_toggle.setChecked(bool(self.shared_settings_folder_edit.text().strip()))
+        self._populate_shared_profile_choices(cfg.get("shared_settings_source", {}))
+        # Retain older folder imports for migration without exposing another
+        # user decision or treating an unavailable legacy path as a save error.
+        self._legacy_shared_settings_folder = str(cfg.get("shared_settings_folder", ""))
         self._sync_client_settings_controls()
 
         self.stagger_delay_spin.setValue(int(cfg.get("stagger_delay_sec", 3)))
@@ -1340,14 +1435,11 @@ class SettingsPage(QWidget):
             self.save_finished.emit(False)
             return
         if (self.client_settings_mode_combo.currentData() == "shared"
-                and self.shared_settings_folder_edit.text().strip()):
-            try:
-                folder = validate_shared_folder(self.shared_settings_folder_edit.text())
-            except SharedSettingsError as exc:
-                self._show_save_feedback(str(exc), success=False)
-                self.save_finished.emit(False)
-                return
-            self.shared_settings_folder_edit.setText(str(folder))
+                and not self._valid_shared_profile_selection(
+                    self._selected_shared_profile_source(), self.evejs_root_edit.text())):
+            self._show_save_feedback("Choose a character profile for shared settings.", success=False)
+            self.save_finished.emit(False)
+            return
         if self.runtime_backend_combo.currentData() == "docker_compose":
             draft = self._collect_docker_draft()
             draft_fingerprint = docker_draft_fingerprint(draft)
@@ -1406,7 +1498,8 @@ class SettingsPage(QWidget):
             "evejs_root": self.evejs_root_edit.text().strip(),
             "client_path": self.client_path_edit.text().strip(),
             "client_settings_mode": self.client_settings_mode_combo.currentData() or "separate",
-            "shared_settings_folder": self.shared_settings_folder_edit.text().strip(),
+            "shared_settings_folder": self._legacy_shared_settings_folder,
+            "shared_settings_source": self._selected_shared_profile_source(),
             "proxy_url": self.proxy_url_edit.text().strip(),
             "stagger_delay_sec": self.stagger_delay_spin.value(),
             "auto_start_server": self.auto_start_server_toggle.isChecked(),
@@ -1448,13 +1541,12 @@ class SettingsPage(QWidget):
         if self._lifecycle_busy:
             self._reject_lifecycle_busy_save()
             return
-        if cfg.get("client_settings_mode") == "shared" and cfg.get("shared_settings_folder", "").strip():
-            try:
-                cfg["shared_settings_folder"] = str(validate_shared_folder(cfg.get("shared_settings_folder", "")))
-            except SharedSettingsError as exc:
-                self._show_save_feedback(str(exc), success=False)
-                self.save_finished.emit(False)
-                return
+        if (cfg.get("client_settings_mode") == "shared"
+                and not self._valid_shared_profile_selection(
+                    cfg.get("shared_settings_source", {}), str(cfg.get("evejs_root", "")))):
+            self._show_save_feedback("Choose a character profile for shared settings.", success=False)
+            self.save_finished.emit(False)
+            return
         validator = self._save_validator
         if validator is not None:
             try:

@@ -135,11 +135,13 @@ Native actions use known wrapper files. Managed Docker offers supported Compose 
 
 Settings contains the EveJS and client paths, proxy address, runtime selection, launch delay, service auto-start, compatible auto-login, hidden characters, update checks, and local-data maintenance. Unsaved changes are tracked before you leave the page.
 
-Under **Settings → Client → EVE Settings**, **Separate settings per account (default)** keeps the existing behavior. To share settings, choose **Shared settings** and save. The launcher automatically creates and manages `%APPDATA%\EveJS-Launcher\SharedSettings` when needed. No folder selection is required.
+Under **Settings → Client → EVE Settings**, **Separate settings per account (default)** keeps the existing behavior. Choose **Shared settings**, then select the character whose settings and window layout everyone should use. The launcher finds its settings automatically. Each client keeps its own account and character auto-login.
 
-To use your own folder, expand **Show advanced client options** and set **Custom Shared Folder**. Select an existing EVE settings folder containing `prefs.ini` and/or `core_*` files, or an empty local folder. Leave this field blank to use the automatic folder again. A new empty folder starts with basic settings; the launcher does not merge settings from other folders.
+Leave **Shared profile** on **First character launched (automatic)** to let the launcher choose for you. That first character becomes the saved source profile; later characters receive its settings and layout.
 
-Shared mode sends every account to that folder while each client retains its own account and character auto-login. EVE still stores account and character settings in files named for their IDs. Common preferences are shared, so changes saved by one client can replace common preferences saved by another. Close clients before changing the folder or switching modes. Returning to separate mode uses the original per-account folders again.
+Only changes saved by the selected source character update the shared profile. Changes made on other characters apply to their current session and are replaced by the source profile at their next launch. Close all EVE clients before changing the source. After all clients close, the next launch captures the source's saved changes for the next group of clients.
+
+Each client uses its own working copy so another character cannot overwrite the source, including common preferences and characters on the same account. Original separate settings are kept, and settings are backed up before replacement. Previously configured custom folders are imported automatically; there is no folder picker to configure.
 
 Shared settings support the verified Windows EVE client build 3396210 and a local IPv4 Game endpoint. The folder must be on a local drive; network shares are not supported.
 

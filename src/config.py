@@ -21,6 +21,7 @@ DEFAULT_CONFIG = {
     "client_path": "",
     "client_settings_mode": "separate",
     "shared_settings_folder": "",  # Blank uses the launcher-managed SharedSettings folder.
+    "shared_settings_source": {},  # Explicit character/account settings template.
     "proxy_url": "http://127.0.0.1:26002",
     "game_port": 26000,
     "auto_start_server": False,
@@ -91,6 +92,24 @@ def _legacy_script_filename(value: object) -> str:
     return value.strip().replace("\\", "/").rsplit("/", 1)[-1]
 
 
+def normalize_shared_settings_source(value: object) -> dict:
+    """Keep only a complete, bounded identity for the chosen settings profile."""
+    if not isinstance(value, dict):
+        return {}
+    username = value.get("username")
+    root = value.get("evejs_root")
+    account_id, character_id = value.get("account_id"), value.get("character_id")
+    if (not isinstance(username, str) or not username or len(username) > 128
+            or username in {".", ".."} or any(c in username for c in '\\/:\r\n\x00"')
+            or not isinstance(root, str) or not root or len(root) > 4096
+            or any(c in root for c in '\r\n\x00"') or not Path(root).is_absolute()
+            or any(type(identifier) is not int or not 0 < identifier < 2**63
+                   for identifier in (account_id, character_id))):
+        return {}
+    return {"username": username, "account_id": account_id,
+            "character_id": character_id, "evejs_root": root}
+
+
 def _migrate(stored: dict) -> dict:
     """Migrate known settings while retaining unrelated persisted preferences."""
     migrated = dict(stored)
@@ -98,6 +117,7 @@ def _migrate(stored: dict) -> dict:
         "shared" if migrated.get("client_settings_mode") == "shared" else "separate"
     )
     migrated["shared_settings_folder"] = _string_setting(migrated.get("shared_settings_folder"))
+    migrated["shared_settings_source"] = normalize_shared_settings_source(migrated.get("shared_settings_source"))
     preference = migrated.get("server_start_preference")
     if _is_valid_server_start_preference(preference):
         normalized = str(preference).strip()

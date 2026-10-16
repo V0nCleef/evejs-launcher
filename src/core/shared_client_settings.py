@@ -7,6 +7,7 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import re
 import zipfile
 
 from . import platform
@@ -70,10 +71,11 @@ class SharedClientSettings:
     folder: Path
     alias: Path
     server_host: str = "127.0.0.1"
+    profile_name: str = SHARED_PROFILE_NAME
 
     @property
     def argument(self) -> str:
-        return SHARED_PROFILE_ARGUMENT
+        return "/settingsprofile=" + self.profile_name
 
 
 def validate_shared_folder(value: str | Path) -> Path:
@@ -171,8 +173,10 @@ def _write_marker(marker: Path, data: dict) -> None:
     _atomic_write_text(marker, json.dumps(data, indent=2) + "\n")
 
 
-def shared_settings_alias(profile_tq: Path, host: str = "127.0.0.1") -> tuple[Path, str]:
+def shared_settings_alias(profile_tq: Path, host: str = "127.0.0.1", *, profile_name: str = SHARED_PROFILE_NAME) -> tuple[Path, str]:
     """Mirror the verified client's path formula, including its server suffix."""
+    if not re.fullmatch(r"EveJSLauncherShared(?:_[0-9a-f]{16})?", profile_name):
+        raise SharedSettingsError("The shared settings binding could not be verified.")
     host = "127.0.0.1" if host.casefold() == "localhost" else host
     try:
         if not ipaddress.IPv4Address(host).is_loopback:
@@ -184,7 +188,7 @@ def shared_settings_alias(profile_tq: Path, host: str = "127.0.0.1") -> tuple[Pa
     key = os.path.normpath(str(profile_tq).lower())
     key = key.replace("/", "_").replace("\\", "_").replace(":", "").replace(" ", "_")
     base = platform.get_eve_settings_path(str(profile_tq)).parent.parent
-    return base / (key + "_" + host) / ("settings_" + SHARED_PROFILE_NAME), host
+    return base / (key + "_" + host) / ("settings_" + profile_name), host
 
 
 def binding_marker(profile_tq: Path, alias: Path) -> Path:
@@ -193,6 +197,34 @@ def binding_marker(profile_tq: Path, alias: Path) -> Path:
 
 
 def prepare_shared_settings(profile_tq: Path, folder: str | Path = "", *, host: str = "127.0.0.1") -> SharedClientSettings:
+    """Prepare existing account bindings before the first shared client starts.
+
+    A folder selection applies to every account. Rebinding only the account
+    being launched leaves the others on the old target, where the live-client
+    guard correctly refuses to rebind them after this process has started.
+    Keep the same cross-process lease through the caller's eventual spawn.
+    """
+    from .overview_patch import is_eve_client_running
+
+    with platform.serialize_evejs_client_trust_and_spawn():
+        result = _prepare_shared_settings_binding(profile_tq, folder, host=host)
+        if is_eve_client_running():
+            return result
+        for profile in sorted(profile_tq.parent.parent.iterdir()):
+            if profile == profile_tq.parent or not profile.is_dir() or _is_directory_link(profile):
+                continue
+            peer_tq = profile / "tq"
+            if not peer_tq.is_dir():
+                continue
+            peer_alias, _ = shared_settings_alias(peer_tq, result.server_host)
+            # Only previously enrolled accounts at this endpoint are ours to
+            # reconcile. The binding helper verifies the journal and junction.
+            if binding_marker(peer_tq, peer_alias).exists():
+                _prepare_shared_settings_binding(peer_tq, result.folder, host=result.server_host)
+        return result
+
+
+def _prepare_shared_settings_binding(profile_tq: Path, folder: str | Path = "", *, host: str = "127.0.0.1", profile_name: str = SHARED_PROFILE_NAME) -> SharedClientSettings:
     """Bind only our named profile; preserve all existing default settings.
 
     The journal records both targets during a change, allowing interrupted link
@@ -201,7 +233,7 @@ def prepare_shared_settings(profile_tq: Path, folder: str | Path = "", *, host: 
     from .overview_patch import is_eve_client_running
 
     target = resolve_shared_settings_folder(folder, profiles_root=profile_tq.parent.parent, create=True)
-    alias, host = shared_settings_alias(profile_tq, host)
+    alias, host = shared_settings_alias(profile_tq, host, profile_name=profile_name)
     if target == alias or alias in target.parents or target in alias.parents:
         raise SharedSettingsError("The shared settings folder cannot point back into its launcher link.")
     marker = binding_marker(profile_tq, alias)
@@ -219,7 +251,7 @@ def prepare_shared_settings(profile_tq: Path, folder: str | Path = "", *, host: 
             if previous is None:
                 raise SharedSettingsError("The shared settings binding could not be verified.")
             if _same_path(alias, target):
-                return SharedClientSettings(target, alias, host)
+                return SharedClientSettings(target, alias, host, profile_name)
         changing = previous is not None or (data is not None and not _same_path(Path(data["target"]), target))
         if changing and is_eve_client_running():
             raise SharedSettingsError("Close EVE clients before changing the shared settings folder.")
@@ -247,4 +279,4 @@ def prepare_shared_settings(profile_tq: Path, folder: str | Path = "", *, host: 
             else:
                 marker.unlink(missing_ok=True)
             raise
-    return SharedClientSettings(target, alias, host)
+    return SharedClientSettings(target, alias, host, profile_name)

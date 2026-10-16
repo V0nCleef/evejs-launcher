@@ -723,10 +723,22 @@ class ModCoordinator(QObject):
                     raise RuntimeError("The selected profile path is invalid.")
                 if any(file.base == "profile_settings" for file in schema.files):
                     if self.window._cfg.get("client_settings_mode", "separate") == "shared":
-                        from src.core.shared_client_settings import resolve_shared_settings_folder
-                        settings_root = resolve_shared_settings_folder(
-                            self.window._cfg.get("shared_settings_folder", ""), profiles_root=PROFILES_ROOT, create=True,
+                        from src.core.shared_settings_profile import (
+                            SharedSettingsSource, resolve_shared_profile_source, shared_profile_main_folder,
                         )
+                        cfg = self.window._cfg
+                        target = (self.window._current_observed_docker_target_identity()
+                                  if cfg.get("runtime_backend") == "docker_compose" else None)
+                        if cfg.get("runtime_backend") == "docker_compose" and target is None:
+                            raise RuntimeError("Choose a character profile for the current EveJS server.")
+                        source = resolve_shared_profile_source(
+                            profile_root / "tq", PROFILES_ROOT.parent / "SharedSettings",
+                            SharedSettingsSource.from_config(cfg.get("shared_settings_source")),
+                            account_id=0, character_id=0, evejs_root=cfg["evejs_root"],
+                            target_identity=target, initialize=False,
+                        )
+                        settings_root = shared_profile_main_folder(profile_root / "tq", source,
+                            evejs_root=cfg["evejs_root"], target_identity=target)
                         settings_anchor = settings_root
                     else:
                         settings_root = get_eve_settings_path(str(profile_root / "tq"))

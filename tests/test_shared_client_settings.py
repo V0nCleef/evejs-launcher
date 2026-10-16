@@ -111,6 +111,81 @@ def test_stable_shared_link_can_be_reused_while_other_clients_run(world, monkeyp
     assert result.alias.resolve() == folder
 
 
+@pytest.mark.parametrize("automatic_first", [True, False])
+def test_switching_shared_folder_allows_six_existing_accounts_to_launch(world, monkeypatch, automatic_first):
+    root, _, custom = world
+    accounts = [account(root, f"account-{number}") for number in range(6)]
+    original_files = {}
+    for number, tq in enumerate(accounts):
+        original = shared.platform.get_eve_settings_path(str(tq))
+        original.mkdir(parents=True)
+        for name, content in (("prefs.ini", b"original=keep\n"),
+                              (f"core_char_{90000001 + number}.dat", b"original-layout")):
+            path = original / name
+            path.write_bytes(content)
+            original_files[path] = content
+    old_folder = "" if automatic_first else custom
+    for tq in accounts:
+        shared.prepare_shared_settings(tq, old_folder)
+    selected_folder = shared.platform.get_eve_settings_path(str(accounts[0])) if automatic_first else ""
+    target = shared.resolve_shared_settings_folder(selected_folder, profiles_root=root, create=True)
+    # Settings were saved with all clients closed. The first successful launch
+    # must not leave the remaining accounts needing an unsafe live rebind.
+    first = shared.prepare_shared_settings(accounts[0], selected_folder)
+    monkeypatch.setattr("src.core.overview_patch.is_eve_client_running", lambda: True)
+    results = [first] + [shared.prepare_shared_settings(tq, selected_folder) for tq in accounts[1:]]
+    assert all(result.alias.is_junction() and result.alias.resolve() == target for result in results)
+    assert all(path.read_bytes() == content for path, content in original_files.items())
+
+
+def test_first_launch_repairs_peers_even_when_its_own_binding_is_current(world, monkeypatch):
+    root, _, selected = world
+    first, second = [account(root, name) for name in ("account-a", "account-b")]
+    stale = root.parent / "Previous shared settings"
+    stale.mkdir()
+    shared._prepare_shared_settings_binding(first, selected)
+    shared._prepare_shared_settings_binding(second, stale)
+    shared.prepare_shared_settings(first, selected)
+    monkeypatch.setattr("src.core.overview_patch.is_eve_client_running", lambda: True)
+    assert shared.prepare_shared_settings(second, selected).alias.resolve() == selected
+
+
+def test_folder_switch_preserves_unowned_profiles_and_other_endpoints(world):
+    root, _, old = world
+    first, other_host, unowned = [account(root, name) for name in ("account-a", "other-host", "unowned")]
+    shared.prepare_shared_settings(first, old)
+    other = shared.prepare_shared_settings(other_host, old, host="127.0.0.2")
+    unowned_alias, _ = shared.shared_settings_alias(unowned)
+    unowned_alias.mkdir(parents=True)
+    unowned_file = unowned_alias / "core_char_90000003.dat"
+    unowned_file.write_bytes(b"leave-alone")
+    selected = root.parent / "Selected shared settings"
+    selected.mkdir()
+    shared.prepare_shared_settings(first, selected)
+    assert other.alias.resolve() == old
+    assert unowned_file.read_bytes() == b"leave-alone"
+    assert not unowned_alias.is_junction()
+
+
+def test_folder_switch_never_adopts_a_tampered_peer_binding(world):
+    root, _, old = world
+    first, peer = [account(root, name) for name in ("account-a", "account-b")]
+    shared.prepare_shared_settings(first, old)
+    result = shared.prepare_shared_settings(peer, old)
+    unexpected = root.parent / "Unowned target"
+    unexpected.mkdir()
+    sentinel = unexpected / "core_char_90000003.dat"
+    sentinel.write_bytes(b"leave-alone")
+    shared._remove_junction(result.alias)
+    shared._create_junction(unexpected, result.alias)
+    selected = root.parent / "Selected shared settings"
+    selected.mkdir()
+    with pytest.raises(shared.SharedSettingsError, match="could not be verified"):
+        shared.prepare_shared_settings(first, selected)
+    assert result.alias.resolve() == unexpected
+    assert sentinel.read_bytes() == b"leave-alone"
+
+
 def test_retarget_preserves_both_settings_folders(world):
     root, _, first = world
     tq = account(root, "account-a")

@@ -12,6 +12,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 from src.core.launcher import ClientLaunchContext
 from src.core.overview_state import OverviewBridgeLaunch
 from src.core.runtime.docker_autologin import DockerAutoLoginProbe
+from src.core.shared_settings_profile import SharedSettingsSource
 
 
 log = logging.getLogger(__name__)
@@ -41,6 +42,8 @@ class ClientLaunchRequest:
     overview_bridge: OverviewBridgeLaunch | None = None
     client_settings_mode: str = "separate"
     shared_settings_folder: str = ""
+    account_id: int | None = None
+    shared_settings_source: SharedSettingsSource | None = None
 
 
 @dataclass(frozen=True)

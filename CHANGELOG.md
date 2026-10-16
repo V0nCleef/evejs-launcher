@@ -2,6 +2,13 @@
 
 ## Changelog
 
+## v1.0.72 - 2026-10-16
+
+- Added shared character profiles: copy the selected character's settings and window layout to every character while keeping each client's own account and character auto-login.
+- Pick the source character directly under Settings > Client. The launcher finds its profile automatically; the first character launched is used when automatic selection is enabled.
+- Keep changes made by the selected source profile. Other characters use separate working copies and receive the source settings again on their next launch. Settings are backed up before replacement.
+- Fixed group launches after changing the shared profile, including accounts with previous shared settings.
+
 ## v1.0.71 - 2026-10-16
 
 - Added optional shared EVE settings in Settings → Client. Separate settings per account remain the default.
