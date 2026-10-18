@@ -254,7 +254,7 @@ class ModRow(QFrame):
         layout.setSpacing(SPACING["md"])
 
         self.kind_badge = QLabel(
-            "JS" if is_loader else ("GPU" if is_client_package else "CFG")
+            "JS" if is_loader else ("GPU" if is_client_package else "CFG"), self
         )
         self.kind_badge.setProperty("class", "modIconPlate")
         self.kind_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -277,7 +277,7 @@ class ModRow(QFrame):
         text_col = QVBoxLayout()
         text_col.setSpacing(2)
 
-        self.name_label = QLabel(mod.name)
+        self.name_label = QLabel(mod.name, self)
         self.name_label.setProperty("i18nIgnore", True)
         self.name_label.setProperty("class", "modName")
         self.name_label.setSizePolicy(
@@ -316,7 +316,7 @@ class ModRow(QFrame):
         # Package folders stay stable across updates because settings ownership
         # depends on their identity. Show the declared version, not a stale
         # version embedded in an installation folder such as AutoMining-1.0.0.
-        self.path_label = QLabel(f"v{mod.version}" if mod.version else display_path)
+        self.path_label = QLabel(f"v{mod.version}" if mod.version else display_path, self)
         self.path_label.setProperty("i18nIgnore", True)
         self.path_label.setProperty("class", "modPath")
         self.path_label.setSizePolicy(
@@ -329,7 +329,9 @@ class ModRow(QFrame):
         )
         text_col.addWidget(self.path_label)
 
-        self.delivery_notice = QLabel("Legacy client script patch — still supported")
+        # Visibility is set before nested layouts are attached. Give every row
+        # control its owner immediately so it can never become a desktop window.
+        self.delivery_notice = QLabel("Legacy client script patch — still supported", self)
         self.delivery_notice.setTextFormat(Qt.TextFormat.PlainText)
         self.delivery_notice.setProperty("class", "modDeliveryNotice")
         self.delivery_notice.setWordWrap(True)
@@ -338,7 +340,7 @@ class ModRow(QFrame):
             "It remains supported, but authors should migrate to login-handshake delivery where possible.")
         self.delivery_notice.setVisible(mod.active and client_script_delivery == "client-script-patch")
         text_col.addWidget(self.delivery_notice)
-        self.delivery_help = QPushButton("What does this mean?")
+        self.delivery_help = QPushButton("What does this mean?", self)
         self.delivery_help.setProperty("class", "modDeliveryHelp")
         self.delivery_help.setCursor(Qt.CursorShape.PointingHandCursor)
         set_translatable_tooltip(self.delivery_help,
@@ -348,14 +350,14 @@ class ModRow(QFrame):
 
         layout.addLayout(text_col, stretch=1)
 
-        self.state_label = QLabel()
+        self.state_label = QLabel(self)
         self.state_label.setProperty("class", "modState")
         self.state_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.state_label.setMinimumWidth(124)
         mark_translatable(self.state_label)
         layout.addWidget(self.state_label)
 
-        self.remove_btn = QPushButton()
+        self.remove_btn = QPushButton(self)
         self.remove_btn.setProperty("class", "modManagementAction")
         self.remove_btn.setFixedSize(94, 32)
         set_translatable_accessible_name(
@@ -430,20 +432,20 @@ class ModRow(QFrame):
         self.remove_btn.clicked.connect(self._on_remove_clicked)
         layout.addWidget(self.remove_btn)
 
-        self.configure_btn = QPushButton("Configure")
+        self.configure_btn = QPushButton("Configure", self)
         self.configure_btn.setProperty("class", "signalSecondary")
         self.configure_btn.setVisible(bool(getattr(mod, "settings_schema", None)))
         self.configure_btn.clicked.connect(lambda: self.configure_requested.emit(self.mod))
         mark_translatable(self.configure_btn)
         layout.addWidget(self.configure_btn)
 
-        self.update_btn = UpdateButton()
+        self.update_btn = UpdateButton(self)
         self.update_btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.update_btn.clicked.connect(lambda: self.update_requested.emit(self.mod))
         mark_translatable(self.update_btn)
         layout.addWidget(self.update_btn)
 
-        self.helper_btn = QPushButton("Actions")
+        self.helper_btn = QPushButton("Actions", self)
         self.helper_btn.setProperty("class", "signalSecondary")
         api = mod.api_descriptor.launcher_api if mod.api_descriptor else None
         capabilities = api.capabilities if api else ()
@@ -457,8 +459,8 @@ class ModRow(QFrame):
         mark_translatable(self.helper_btn)
         layout.addWidget(self.helper_btn)
 
-        self.move_up_btn = QPushButton()
-        self.move_down_btn = QPushButton()
+        self.move_up_btn = QPushButton(self)
+        self.move_down_btn = QPushButton(self)
         self.move_up_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowUp))
         self.move_down_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowDown))
         for button, amount, label in ((self.move_up_btn, -1, "Move mod earlier"), (self.move_down_btn, 1, "Move mod later")):

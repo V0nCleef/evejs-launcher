@@ -137,7 +137,9 @@ class ToolCard(QFrame):
         state_row.addWidget(self.status_dot)
         state_row.addWidget(self.status_label)
 
-        self.risk_label = QLabel(definition.prerequisite_label)
+        # Visibility is applied before state_row joins the card's layout. Keep
+        # the badge a child from creation so it never opens a desktop window.
+        self.risk_label = QLabel(definition.prerequisite_label, self)
         self.risk_label.setProperty("class", "toolRiskBadge")
         self.risk_label.setProperty("risk", self._badge_risk())
         self.risk_label.setVisible(bool(definition.prerequisite_label))

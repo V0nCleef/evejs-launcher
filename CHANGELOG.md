@@ -2,6 +2,11 @@
 
 ## Changelog
 
+## v1.0.73 - 2026-10-18
+
+- Fixed top-edge and corner resizing being intercepted by title-bar dragging or window buttons. Thanks to cfin3d for reporting it. 🫡
+- Removed small stray windows that briefly appeared during launcher startup and when opening or refreshing Mods and Tools.
+
 ## v1.0.72 - 2026-10-16
 
 - Added shared character profiles: copy the selected character's settings and window layout to every character while keeping each client's own account and character auto-login.

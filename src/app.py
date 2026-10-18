@@ -24,6 +24,7 @@ from pathlib import Path
 from PyQt6.QtCore import (
     QEvent,
     QObject,
+    QPoint,
     QSize,
     QThread,
     Qt,
@@ -9150,11 +9151,27 @@ class MainWindow(QMainWindow):
     # ── Event filter: resize cursors + click-outside-console ──────────
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
+        # Application filters also see widget construction/destruction events;
+        # only query the widget's window for actual mouse input.
+        own_widget = (
+            event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease, QEvent.Type.MouseMove)
+            and isinstance(obj, QWidget) and obj.window() is self
+        )
+        if own_widget:
+            if event.type() == QEvent.Type.MouseButtonPress:
+                # Child widgets (especially the title bar) accept presses before
+                # MainWindow.mousePressEvent can see them. Frame resizing owns
+                # the border even when a title-bar button sits underneath it.
+                if self._start_frame_resize(event):
+                    return True
+            elif event.type() == QEvent.Type.MouseButtonRelease:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._resizing = False
+
         if (
             event.type() == QEvent.Type.MouseButtonPress
             and self._console_panel.isVisible()
-            and isinstance(obj, QWidget)
-            and obj.window() is self
+            and own_widget
         ):
             # A header drag owns the interaction until its matching release.
             # Do not let an application-level event routing quirk turn that
@@ -9166,23 +9183,35 @@ class MainWindow(QMainWindow):
                 if not self._console_panel.rect().contains(pos):
                     self._console_panel.stop()
 
-        if event.type() == QEvent.Type.MouseMove:
-            pos = self.mapFromGlobal(QCursor.pos())
+        if own_widget and event.type() == QEvent.Type.MouseMove:
+            pos = self.mapFromGlobal(event.globalPosition().toPoint())
+            # Windows can finish its native resize loop without delivering a
+            # widget release. The next hover must restore normal cursor updates.
+            if not event.buttons() & Qt.MouseButton.LeftButton:
+                self._resizing = False
             if not self._resizing:
                 self._update_cursor_for_edge(pos)
+        elif event.type() == QEvent.Type.MouseMove and self._cursor_override_active:
+            self._update_cursor_for_edge(QPoint(-1, -1))
 
         return super().eventFilter(obj, event)
 
     # ── Frameless resize (startSystemResize + edge cursors) ───────────
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
-        if event.button() == Qt.MouseButton.LeftButton:
-            edge = self._edge_at(event.position().toPoint())
-            if edge and self.windowHandle():
-                self._resizing = True
-                self.windowHandle().startSystemResize(edge)
-                return
+        if self._start_frame_resize(event):
+            return
         super().mousePressEvent(event)
+
+    def _start_frame_resize(self, event) -> bool:
+        """Consume a frame press so failed native resizing cannot turn into moving."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            edge = self._edge_at(self.mapFromGlobal(event.globalPosition().toPoint()))
+            if edge and self.windowHandle():
+                self._resizing = bool(self.windowHandle().startSystemResize(edge))
+                event.accept()
+                return True
+        return False
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         self._resizing = False
@@ -9194,6 +9223,8 @@ class MainWindow(QMainWindow):
 
     def _edge_at(self, pos):
         """Return combined Qt.Edge flags if pos is inside the resize margin."""
+        if self.isMaximized() or self.isFullScreen() or not self.rect().contains(pos):
+            return None
         w, h = self.width(), self.height()
         x, y = pos.x(), pos.y()
 
