@@ -39,6 +39,7 @@ class ModInventory:
     update_recovery_pending: bool = False
     evejs_version: str | None = None
     relocation_preview: RegistryRelocationPreview | None = None
+    updater_warning: str = ""
 
 
 def load_mod_inventory(root: str) -> ModInventory:

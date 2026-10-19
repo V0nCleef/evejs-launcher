@@ -40,12 +40,9 @@ _CLIENT_MANAGER_REAP_SECONDS = 5
 _CLIENT_MOD_ID = "evejs-dlss5"
 _CLIENT_MOD_NAME = "EveJS DLSS5"
 _CLIENT_PROFILE = "DLSS5"
-# Schemas 1 and 2 are historical exact-version contracts. Schema 3 deliberately
-# removes this launcher allow-list from new packages: DLSS5 modifies one pinned
-# copied-client build, not EveJS server code. Keeping the legacy list separate
-# lets existing packages and receipts remain fail-closed without making every
-# future EveJS release require another launcher patch.
-_SUPPORTED_EVEJS_VERSIONS = frozenset({"0.12.6", "0.12.7", "0.12.7.1"})
+# Historical packages declare tested EveJS versions. That metadata is advisory:
+# DLSS5 modifies a pinned copied-client build, not EveJS server code. Manager,
+# payload and ownership contracts remain exact across all server versions.
 _SUPPORTED_CLIENT_BUILD = 3396210
 _SHA256_PATTERN = re.compile(r"[0-9a-fA-F]{64}\Z")
 _VERSION_PATTERN = re.compile(r"[0-9A-Za-z][0-9A-Za-z._+-]{0,63}\Z")
@@ -365,6 +362,17 @@ def _standalone_dlss5_launch_environment(
                         "copied client: " + ", ".join(known_payload)
                     )
                 return {}
+            recorded_root = receipt.get("evejsRoot")
+            if (expected_schema == 5 and receipt.get("stateScope") == "client"
+                    and receipt.get("status") == "installed"
+                    and type(recorded_root) is str and Path(recorded_root).is_absolute()
+                    and os.path.normcase(os.path.normpath(recorded_root)) != os.path.normcase(str(root))):
+                raise DLSS5ClientModError(
+                    "The receipt says DLSS5 is still installed in the shared copied client "
+                    "by another EveJS root. This root's launch marker is missing. "
+                    "Add the matching DLSS5 package through Mods and enable it to attach "
+                    "this root, or uninstall through the owning root's matching package."
+                )
             raise DLSS5ClientModError("DLSS5 installation is incomplete or its launch marker is missing.")
 
         version = receipt.get("integrationVersion")
@@ -384,11 +392,7 @@ def _standalone_dlss5_launch_environment(
         elif version in _CLIENT_SCOPED_RECEIPT_VERSIONS or "stateScope" in receipt:
             raise DLSS5ClientModError("A legacy DLSS5 receipt cannot claim client-scoped state.")
         payload_files = _STANDALONE_PAYLOADS_BY_VERSION[version]
-        actual_evejs_version = _read_evejs_version(root)
-        if expected_schema == 4 and actual_evejs_version not in _SUPPORTED_EVEJS_VERSIONS:
-            raise DLSS5ClientModError(
-                "Standalone DLSS5 requires EveJS 0.12.6, 0.12.7 or 0.12.7.1."
-            )
+        _read_evejs_version(root)
         if expected_schema == 5:
             _require_receipt_path(receipt.get("workspaceRoot"), root.parent, "workspaceRoot")
         for key, expected in (("evejsRoot", root), ("clientRoot", client), ("stateRoot", state)):
@@ -461,7 +465,7 @@ def _standalone_dlss5_launch_environment(
     except (OSError, ValueError, RuntimeError) as error:
         raise DLSS5ClientModError(
             f"Standalone DLSS5 verification failed: {error}\n"
-            "Nothing was installed or repaired. Use the matching standalone installer "
+            "Nothing was installed or repaired. Use the matching DLSS5 package or standalone installer "
             "to verify or uninstall this installation."
         ) from error
 
@@ -639,28 +643,12 @@ def _read_dlss5_client_mod(
         declared_evejs_versions = None
 
     if declared_evejs_versions is not None:
-        unsupported_versions = tuple(
-            version
-            for version in declared_evejs_versions
-            if version not in _SUPPORTED_EVEJS_VERSIONS
-        )
-        if unsupported_versions:
-            supported_versions = ", ".join(sorted(_SUPPORTED_EVEJS_VERSIONS))
-            raise DLSS5ClientModError(
-                "This launcher supports historical DLSS5 packages for EveJS "
-                f"{supported_versions}; the package also declares unsupported "
-                f"versions: {', '.join(unsupported_versions)}."
-            )
-        if actual_evejs_version not in _SUPPORTED_EVEJS_VERSIONS:
-            supported_versions = ", ".join(sorted(_SUPPORTED_EVEJS_VERSIONS))
-            raise DLSS5ClientModError(
-                f"This historical package supports DLSS5 on EveJS {supported_versions}; "
-                f"the selected root is EveJS {actual_evejs_version}."
-            )
+        if any(not _VERSION_PATTERN.fullmatch(version) for version in declared_evejs_versions):
+            raise DLSS5ClientModError("DLSS5 declared EveJS versions contain unsupported characters.")
         if actual_evejs_version not in declared_evejs_versions:
-            raise DLSS5ClientModError(
-                f"This DLSS5 package does not declare support for the selected "
-                f"EveJS {actual_evejs_version} root."
+            description = (description.rstrip() + "\nEveJS compatibility warning: this package declares "
+                f"{', '.join(declared_evejs_versions)}; the selected root is EveJS "
+                f"{actual_evejs_version}. You can enable it and decide whether it works."
             )
     if (
         type(compatibility["clientBuild"]) is not int
@@ -700,7 +688,7 @@ def _read_evejs_version(root: Path) -> str:
         maximum_bytes=_CLIENT_MANIFEST_MAX_BYTES,
         label="EveJS package manifest",
     )
-    if package.get("name") != "eve.js":
+    if package.get("name") not in ("eve.js", "evejs-repo"):
         raise DLSS5ClientModError(
             "The selected root package.json is not an EveJS installation."
         )
@@ -875,7 +863,10 @@ def _windows_powershell_environment(powershell: Path) -> dict[str, str]:
         raise DLSS5ClientModError(
             f"Windows PowerShell's built-in module directory is missing: {module_root}"
         )
-    environment = dict(os.environ)
+    # Windows environment names are case-insensitive, while this plain dict is
+    # not. os.environ commonly exposes PSMODULEPATH in uppercase; retaining it
+    # beside PSModulePath can make PowerShell import the inherited PS7 modules.
+    environment = {key: value for key, value in os.environ.items() if key.casefold() != "psmodulepath"}
     environment["PSModulePath"] = str(module_root)
     return environment
 

@@ -104,6 +104,7 @@ class ServiceStartWorker(QObject):
         market_preflight_fn: Callable[[str], server_launcher.NativeMarketDatabaseResult] | None = None,
         start_game_fn: Callable[[str], ManagedProcess] | None = None,
         game_runtime_validator: Callable[[ManagedProcess], object] | None = None,
+        prepare_server_fn: Callable[[str], None] | None = None,
         sleep_fn: Callable[[float], None] = time.sleep,
         clock_fn: Callable[[], float] = time.monotonic,
         parent: QObject | None = None,
@@ -130,6 +131,7 @@ class ServiceStartWorker(QObject):
         self._market_preflight_result: server_launcher.NativeMarketDatabaseResult | None = None
         self._start_game_fn = start_game_fn or server_launcher.start_game_server
         self._game_runtime_validator = game_runtime_validator
+        self._prepare_server_fn = prepare_server_fn
         self._sleep = sleep_fn
         self._clock = clock_fn
 
@@ -178,6 +180,18 @@ class ServiceStartWorker(QObject):
         market_error: str | None = None
         mod_runtime_snapshot: object | None = None
         mod_runtime_error: str | None = None
+
+        if self._prepare_server_fn is not None:
+            self.phase_changed.emit("market" if self._start_market else "game", "checking")
+            try:
+                self._prepare_server_fn(self._evejs_root)
+            except Exception as exc:
+                error = f"Server mod preparation failed: {exc}"
+                self.completed.emit(self._result(
+                    market_error=error if self._start_market else None,
+                    game_error=error if self._start_game else None,
+                ))
+                return
 
         if self._start_market and self._market_preflight_fn is not None:
             self.phase_changed.emit("market", "checking")

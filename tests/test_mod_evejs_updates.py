@@ -29,12 +29,12 @@ def feed(restrictions):
     return opener
 
 
-@pytest.mark.parametrize('installed,expected', [('0.12.7.1', '1.1.0'), ('0.12.8', '1.2.0'), ('0.12.6', None), (None, None)])
-def test_only_newest_compatible_mod_is_offered(installed, expected):
+@pytest.mark.parametrize('installed', ['0.12.7.1', '0.12.8', '261018.1', None])
+def test_version_declarations_do_not_hide_latest_mod_update(installed):
     source = parse_update_source(dict(provider='github', repository='Author/Example', asset='Example-{version}.zip'))
     result = check_update(source, '1.0.0', evejs_version=installed, expected_mod_id='author.example',
                           opener=feed([['0.12.7.1'], ['0.12.8']]))
-    assert (result.version if result else None) == expected
+    assert result.version == '1.2.0'
 
 
 @pytest.mark.parametrize('installed', ['0.12.7.1', '999.1.0', None])
@@ -58,13 +58,11 @@ def test_detection_does_not_guess_from_folder_name(tmp_path):
     assert installed_evejs_version(root) is None
 
 
-def test_evejs_change_after_offer_blocks_install(fixture):
+def test_evejs_change_after_offer_does_not_block_install(fixture):
     root, target, offer, downloader = fixture
     (root / 'package.json').write_text('{"version":"0.12.8"}')
-    offer = replace(offer, evejs_versions=('0.12.7.1',))
-    with pytest.raises(ModUpdateError, match='installed EveJS'):
-        install_release(scan_mods(root)[0], offer, ModOperationContext(root), guard=lambda: None, downloader=downloader)
-    assert scan_mods(root)[0].version == '1.0.0'
+    install_release(scan_mods(root)[0], offer, ModOperationContext(root), guard=lambda: None, downloader=downloader)
+    assert scan_mods(root)[0].version == '1.1.0'
 
 
 def test_zip_cannot_hide_a_restriction_missing_from_sidecar(fixture, tmp_path):

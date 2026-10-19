@@ -54,6 +54,50 @@ def test_configure_demo_saves_reopens_and_has_no_executable_helper(tmp_path):
     assert reopened.values["scanInterval"] == 20
 
 
+def test_native_startup_example_uses_public_import_activation_and_real_helper(tmp_path):
+    from src.core.mod_manifest import scan_mods
+    from src.core.mod_operations import ModOperationContext, change_mod_state
+    from src.core.mod_lifecycle_lock import acquire_mod_lifecycle_lock
+    from src.core.native_mod_preparation import capture_native_mod_preparation
+    from src.core.mod_updater_preservation import protect_updater_settings
+    descriptor, context = copy_example(tmp_path, "native-startup-demo")
+    root = context.evejs_root
+    (root / "package.json").write_text('{"version":"0.12.9"}')
+    policy = root / "tools/Updater/update-policy.json"
+    policy.parent.mkdir(parents=True)
+    policy.write_text(json.dumps({"schema": "evejs.updater-policy.v1", "keepTrees": ["_local"], "keepMine": []}))
+    def selected():
+        return next(mod for mod in scan_mods(root) if mod.id == descriptor.id)
+    assert selected().valid and not selected().active
+    assert capture_native_mod_preparation(root) is None
+    session = ModSettingsSession.open(ModSettingsContext(root, descriptor.folder), descriptor.settings)
+    session.save({"label": "Keep this value"})
+    settings = root / "config/native-startup-demo.json"
+    saved = settings.read_bytes()
+    # Disabled third-party packages get policy protection without a helper call.
+    assert protect_updater_settings(root, scan_mods(root))
+    assert "config/native-startup-demo.json" in json.loads(policy.read_bytes())["keepMine"]
+    receipt = root / "_local/native-startup-demo/prepared.json"
+    assert not receipt.exists()
+    assert change_mod_state(selected(), True, ModOperationContext(root))
+    def prepare():
+        with acquire_mod_lifecycle_lock(root):
+            capture_native_mod_preparation(root).run_locked()
+    prepare()
+    first, stamp = receipt.read_bytes(), receipt.stat().st_mtime_ns
+    prepare()
+    assert (receipt.read_bytes(), receipt.stat().st_mtime_ns) == (first, stamp)
+    (root / "package.json").write_text('{"version":"261018.1"}')
+    prepare()
+    assert receipt.read_bytes() != first and json.loads(receipt.read_bytes())["version"] == "261018.1"
+    assert settings.read_bytes() == saved
+    before = receipt.read_bytes()
+    (root / "package.json").write_text("unknown invalid upstream metadata")
+    with pytest.raises(RuntimeError):
+        prepare()
+    assert receipt.read_bytes() == before and settings.read_bytes() == saved
+
+
 def test_source_overlay_folder_and_zip_work_together_through_real_helpers(tmp_path):
     from src.core.mod_manifest import scan_mods
     from src.core.mod_operations import ModOperationContext, change_mod_state, remove_local_mod
@@ -238,7 +282,11 @@ def test_guide_catalog_contains_every_local_documentation_link_and_no_external_f
         assert path.is_file() and path.resolve().is_relative_to(SOURCE)
         if path.suffix != ".md":
             continue
-        for match in re.finditer(r"\[[^\]]+\]\(([^)]+)\)", path.read_text(encoding="utf-8")):
+        # Code samples can contain Python indexing followed by a call; those
+        # are not Markdown links and must not become catalog requirements.
+        markdown = re.sub(r"```[\s\S]*?```", "", path.read_text(encoding="utf-8"))
+        markdown = re.sub(r"`[^`\n]+`", "", markdown)
+        for match in re.finditer(r"\[[^\]]+\]\(([^)]+)\)", markdown):
             url = urlsplit(match[1])
             if url.scheme or not url.path:
                 continue

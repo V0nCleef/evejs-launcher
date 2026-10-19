@@ -2,6 +2,15 @@
 
 ## Changelog
 
+## v1.0.74 - 2026-10-19
+
+- Recognizes EveJS calendar releases such as 261018.1 and their current certificate, log and native config-validation paths.
+- Mod version declarations are advisory: Run anyway also works when the EveJS version is unknown, and newer mod updates remain available for users to try.
+- Fixed Windows PowerShell module discovery for mod helpers and clarified DLSS5 attachment recovery after moving to another EveJS folder.
+- Protects valid installed mod folders and declared server settings through the bundled EveJS updater, including third-party and disabled mods; retains legacy state protection for older AutoMining/NPC Buyers packages.
+- Adds the public prepare_server_start helper capability for Native loader and JSON-activated source mods. Compatible NPC Buyers support is prepared automatically after an EveJS update before Game or Market starts.
+- Documents upgrade integration in all eight guide languages, with a bundled runnable example for any mod author.
+
 ## v1.0.73 - 2026-10-18
 
 - Fixed top-edge and corner resizing being intercepted by title-bar dragging or window buttons. Thanks to cfin3d for reporting it. 🫡

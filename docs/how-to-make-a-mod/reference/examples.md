@@ -21,3 +21,7 @@ For an actual integration, replace the demonstration behavior, choose a unique I
 ## GitHub updates: DLSS5 + ReShade
 
 The [GitHub updates walkthrough](updates.md) shows how an existing mod adds update metadata, names its release assets, presents changelogs and preserves configuration. It uses DLSS5 + ReShade to explain the manual first upgrade from legacy 0.5.7 and subsequent in-launcher updates. Its hypothetical version numbers are documentation examples, not bundled renderer releases. The walkthrough also separates local update fixtures from actual hosted-release and rendering verification.
+
+## Native startup and updater preservation
+
+[Native Startup Example](../../../examples/mods/native-startup-demo/README.md) is a complete, disabled-by-default Node package. It demonstrates automatic checks before either service starts, read-only healthy checks, private generation records, declared config preservation and failures that prevent startup. No NPC Buyers dependency or launcher modification is required.

@@ -32,6 +32,25 @@ class ModUpdateDialog(QDialog):
             label.setTextFormat(Qt.TextFormat.PlainText)
             label.setWordWrap(True)
             layout.addWidget(label)
+        self.compatibility_notice = QLabel(self)
+        self.compatibility_notice.setObjectName('modCompatibilityNotice')
+        self.compatibility_notice.setTextFormat(Qt.TextFormat.PlainText)
+        self.compatibility_notice.setWordWrap(True)
+        from src.core.mod_evejs_compatibility import installed_evejs_version, supports_evejs
+        versions = getattr(release, 'evejs_versions', None)
+        try:
+            selected_root = getattr(mod, 'evejs_root', None)
+            selected_version = installed_evejs_version(selected_root) if selected_root else None
+        except (OSError, TypeError, ValueError):
+            selected_version = None
+        unconfirmed = not supports_evejs(versions, selected_version)
+        if unconfirmed:
+            self.compatibility_notice.setText(
+                f"{tr('Mod Compatibility')}: EveJS {selected_version or tr('Unknown')}\n"
+                + f"{tr('Declared support')}: " + ', '.join(versions or ()) + '\n'
+                + tr('Compatibility is unconfirmed. You can still try this mod.'))
+        self.compatibility_notice.setVisible(unconfirmed)
+        layout.addWidget(self.compatibility_notice)
         self.notes = QPlainTextEdit()
         self.notes.setReadOnly(True)
         self.notes.setPlainText(release.notes or tr('No release notes were provided.'))

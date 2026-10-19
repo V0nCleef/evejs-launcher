@@ -128,6 +128,19 @@ def test_installed_standalone_launches_read_only_without_mod_package(installed):
     assert _snapshot(root.parent) == before
 
 
+def test_legacy_receipt_accepts_new_server_version_but_keeps_exact_payload_checks(installed):
+    root, client, _path, _receipt = installed
+    (root / "package.json").write_text('{"name":"evejs-repo","version":"261018.1"}')
+    before = _snapshot(root.parent)
+
+    assert dlss5.ensure_dlss5_client_mod(root, client)["EVEJS_DLSS5"] == "on"
+    assert _snapshot(root.parent) == before
+    payload = client / "bin64/renodx-dlss5.addon64"
+    payload.write_bytes(b"x" * payload.stat().st_size)
+    with pytest.raises(dlss5.DLSS5ClientModError, match="reviewed bytes"):
+        dlss5.ensure_dlss5_client_mod(root, client)
+
+
 @pytest.mark.parametrize("field,value", [
     ("schemaVersion", True), ("schemaVersion", 3), ("integrationVersion", "999"),
     ("integrationVersion", None), ("integrationVersion", []), ("integrationVersion", {}),
@@ -178,6 +191,25 @@ def test_client_receipt_for_another_root_does_not_authorize_launch(installed_v05
 
     with pytest.raises(dlss5.DLSS5ClientModError, match="different installation"):
         dlss5.ensure_dlss5_client_mod(new_root, client)
+
+
+def test_unattached_shared_client_explains_matching_package_recovery(installed_v056):
+    old_root, client, _path, _receipt = installed_v056
+    new_root = old_root.parent / "EveJS - New Version"
+    new_root.mkdir()
+    (new_root / "package.json").write_text('{"name":"evejs-repo","version":"261018.1"}')
+    config = new_root / "tools/ClientSETUP/scripts/EvEJSConfig.bat"
+    config.parent.mkdir(parents=True)
+    config.write_text(f'set "EVEJS_CLIENT_PATH={client}"\n')
+    before = _snapshot(old_root.parent)
+
+    with pytest.raises(dlss5.DLSS5ClientModError) as error:
+        dlss5.ensure_dlss5_client_mod(new_root, client)
+
+    assert "still installed in the shared copied client" in str(error.value)
+    assert "Add the matching DLSS5 package through Mods and enable it" in str(error.value)
+    assert "owning root" in str(error.value)
+    assert _snapshot(old_root.parent) == before
 
 
 @pytest.mark.parametrize("mutation", ["missing", "duplicate", "traversal", "hash", "size", "flag", "kind"])

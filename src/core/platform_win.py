@@ -301,7 +301,9 @@ def _normalize_pem_text(value: str) -> str:
 
 
 def _selected_ca_is_in_client_bundles(root: Path, client: Path) -> bool:
-    ca_path = root / "server" / "certs" / "xmpp-ca-cert.pem"
+    from .discovery import get_ca_cert_path
+
+    ca_path = get_ca_cert_path(str(root))
     try:
         ca_text = _normalize_pem_text(
             ca_path.read_text(encoding="utf-8", errors="strict")
@@ -423,6 +425,9 @@ def prepare_evejs_client_certificate_trust(
         completed = subprocess.run(
             command,
             cwd=str(root),
+            # Match native server launch: an inherited data-root selection must
+            # never validate or install certificates from a different instance.
+            env={key: value for key, value in os.environ.items() if key.upper() != "EVEJS_DATA_ROOT"},
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,

@@ -216,8 +216,11 @@ def check_update(source, installed, *, evejs_version=None, expected_mod_id=None,
             if len(raw) != size or (digest and digest != 'sha256:' + hashlib.sha256(raw).hexdigest()):
                 raise ModUpdateError('The release metadata failed its size or digest check.')
             candidate = validate_release_metadata(candidate, json.loads(raw), expected_mod_id=expected_mod_id)
-            if supports_evejs(candidate.evejs_versions, evejs_version):
-                return candidate
+            if not supports_evejs(candidate.evejs_versions, evejs_version):
+                logging.getLogger(__name__).warning(
+                    'Mod update %s %s has unconfirmed EveJS support; declaration is advisory.',
+                    candidate.mod_id, candidate.version)
+            return candidate
         except (ValueError, TypeError) as exc:
             logging.getLogger(__name__).warning('Rejected mod update metadata for %s: %s', source.repository, exc)
     return None

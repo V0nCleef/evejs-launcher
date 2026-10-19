@@ -1,6 +1,6 @@
 """Read-only EveJS native-server config preflight.
 
-The 0.12.9 config manager validates persisted config during construction. Keep
+The reviewed config managers validate persisted config during construction. Keep
 this probe in a short-lived Node subprocess so importing the selected server's
 config code cannot contaminate the launcher's Python process.
 """
@@ -16,6 +16,7 @@ import subprocess
 from typing import Mapping
 
 from .platform import get_hidden_process_flags
+from .evejs_compatibility import CONFIG_PREFLIGHT_VERSIONS
 
 
 _PREFLIGHT_TIMEOUT_SECONDS = 10
@@ -126,7 +127,7 @@ function finish(response) {
 
 try {
   const manager = require(path.join(configModuleDir, "manager.js"));
-  if (manager.EVEJS_VERSION !== "0.12.9") {
+  if (manager.EVEJS_VERSION !== process.argv[3]) {
     finish({ status: "unsupported" });
     process.exitCode = 0;
   } else {
@@ -160,7 +161,7 @@ def validate_native_server_config(
     from the child so inherited settings cannot redirect or alter validation
     of the selected installation's persisted config.
 
-    Older installations without both 0.12.9 validator files return an
+    Installations without a reviewed validator version and files return an
     unsupported result and are left to the launcher's existing startup path.
     A rejected config raises :class:`NativeConfigPreflightError` with
     ``valid=False``; execution failures use the same exception with
@@ -179,16 +180,17 @@ def validate_native_server_config(
     manager_path = config_module_dir / "manager.js"
     schema_path = config_module_dir / "schema" / "index.js"
     package_path = selected_root / "server" / "package.json"
+    config_version = _verified_config_package_version(package_path)
     if (
         not manager_path.is_file()
         or not schema_path.is_file()
-        or not _has_verified_0129_package(package_path)
+        or config_version is None
     ):
         return NativeConfigPreflightResult(
             supported=False,
             valid=None,
             message=(
-                "The selected EveJS server does not expose the verified 0.12.9 config "
+                "The selected EveJS server does not expose the verified 0.12.9/261018.1 config "
                 "validator; config preflight was skipped."
             ),
         )
@@ -201,7 +203,7 @@ def validate_native_server_config(
             valid=None,
         )
 
-    command = [node_path, "-", str(selected_root)]
+    command = [node_path, "-", str(selected_root), config_version]
     try:
         completed = subprocess.run(
             command,
@@ -266,7 +268,7 @@ def validate_native_server_config(
             valid=None,
             message=(
                 "The selected EveJS config manager does not match the verified "
-                "0.12.9 validator contract; config preflight was skipped."
+                "0.12.9/261018.1 validator contract; config preflight was skipped."
             ),
         )
     if status == "invalid":
@@ -296,12 +298,18 @@ def _build_child_environment(env: Mapping[str, str] | None) -> dict[str, str]:
     }
 
 
-def _has_verified_0129_package(package_path: Path) -> bool:
+def _verified_config_package_version(package_path: Path) -> str | None:
     try:
         package_data = json.loads(package_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
-        return False
-    return isinstance(package_data, dict) and package_data.get("version") == "0.12.9"
+        return None
+    if (
+        isinstance(package_data, dict)
+        and isinstance(package_data.get("version"), str)
+        and package_data["version"] in CONFIG_PREFLIGHT_VERSIONS
+    ):
+        return package_data["version"]
+    return None
 
 
 def _environment_value(env: Mapping[str, str], name: str) -> str | None:
@@ -356,7 +364,7 @@ def _format_invalid_config_message(diagnostics: tuple[str, ...]) -> str:
         return (
             f"The selected EveJS config manager rejects {file_label} setting "
             "`presence.localChatAuthorityEnabled`. This setting is no longer "
-            "accepted by the 0.12.9 schema; apply the release's migration guidance "
+            "accepted by the selected server's schema; apply the release's migration guidance "
             "to this exact key. No config files were changed."
         )
     if issue == "unknown_setting":

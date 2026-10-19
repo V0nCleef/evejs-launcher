@@ -18,6 +18,23 @@ def example():
     )
 
 
+def test_unlisted_evejs_release_shows_advisory_without_disabling_update(qapp, tmp_path):
+    set_language('en')
+    mod, release = example()
+    mod.evejs_root = tmp_path
+    (tmp_path / 'package.json').write_text('{"version":"261018.1"}')
+    release.evejs_versions = ('0.12.9',)
+    dialog = ModUpdateDialog(mod, release)
+    try:
+        assert not dialog.compatibility_notice.isHidden()
+        assert '261018.1' in dialog.compatibility_notice.text()
+        assert '0.12.9' in dialog.compatibility_notice.text()
+        assert 'still try' in dialog.compatibility_notice.text()
+        assert dialog.update_btn.isEnabled()
+    finally:
+        dialog.deleteLater()
+
+
 @pytest.mark.parametrize('language', [option.code for option in LANGUAGES])
 def test_warning_translates_and_preserves_source_as_plain_text(qapp, language):
     set_language(language)

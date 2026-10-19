@@ -15,7 +15,7 @@ _KINDS = {"loader", "source-integrated", "client-package", "settings"}
 _STRATEGIES = {"loader_rename", "json_boolean", "client_package", "package"}
 NOTIFICATION_ACTIONS = frozenset({"launch_result", "client_exit"})
 SOURCE_PACKAGE_CAPABILITIES = frozenset({"install", "prepare_disable", "prepare_remove"})
-_CAPABILITIES = {"prepare_profile", "install", "verify", "prepare_disable", "prepare_remove", "recover"} | NOTIFICATION_ACTIONS
+_CAPABILITIES = {"prepare_profile", "prepare_server_start", "install", "verify", "prepare_disable", "prepare_remove", "recover"} | NOTIFICATION_ACTIONS
 _RESERVED = {"con", "prn", "aux", "nul", "clock$", *(f"com{i}" for i in range(1, 10)),
              *(f"lpt{i}" for i in range(1, 10))}
 
@@ -224,6 +224,9 @@ def read_api_manifest(root: str | Path, folder: str | Path, payload: dict | None
         if capabilities and helper is None:
             raise ModApiManifestError("Executable launcher capabilities require a helper.")
         launcher_api = LauncherApiSpec(1, minimum, helper, tuple(capabilities))
+        if "prepare_server_start" in capabilities and (kind not in {"loader", "source-integrated"}
+                or strategy not in {"loader_rename", "json_boolean"} or "native" not in backends):
+            raise ModApiManifestError("Server startup preparation requires a Native loader or JSON-activated source mod.")
     if kind == "source-integrated" and strategy == "package" and (launcher_api is None
             or not SOURCE_PACKAGE_CAPABILITIES.issubset(launcher_api.capabilities)):
         raise ModApiManifestError("Source overlay packages must declare install, prepare_disable and prepare_remove.")

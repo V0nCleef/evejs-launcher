@@ -21,8 +21,10 @@ def validate_evejs_root(path: str) -> tuple[bool, str]:
     if not p.is_dir():
         return False, f"Path is not a directory: {path}"
 
+    resolved_root = p.resolve()
+    ca_path = get_ca_cert_path(str(resolved_root))
     required = [
-        ("server/certs/xmpp-ca-cert.pem", "SSL cert (server may not be configured)"),
+        (ca_path.relative_to(resolved_root).as_posix(), "SSL cert (server may not be configured)"),
         ("tools/ClientSETUP/scripts/EvEJSConfig.bat", "Client config script"),
     ]
 
@@ -313,5 +315,10 @@ def get_play_bat_path(evejs_root: str) -> Path:
 
 
 def get_ca_cert_path(evejs_root: str) -> Path:
-    """Get path to the CA certificate."""
-    return Path(evejs_root) / "server" / "certs" / "xmpp-ca-cert.pem"
+    """Use the selected runtime's current CA, even if a stale legacy copy exists."""
+    root = Path(evejs_root)
+    try:
+        directory = inspect_evejs_runtime(root).certificate_directory
+    except (OSError, RuntimeError, TypeError, ValueError):
+        directory = root / "server" / "certs"
+    return directory / "xmpp-ca-cert.pem"

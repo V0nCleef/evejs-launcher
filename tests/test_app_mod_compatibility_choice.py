@@ -130,6 +130,25 @@ def _wait_for(qapp: QApplication, predicate, *, timeout_ms: int = 5000) -> None:
     assert predicate(), "Qt worker did not reach the expected terminal state"
 
 
+def test_unknown_evejs_version_can_run_with_exact_modset_consent(qapp, tmp_path):
+    root = _root(tmp_path / "evejs")
+    (root / "package.json").write_text('{"version":"new-release-format"}')
+    window = _window(root)
+    window._choose_mod_start_compatibility = lambda *_args, **_kwargs: ModStartCompatibilityChoice.RUN_ANYWAY
+    mods = window._applicable_runtime_mods(str(root), backend="native")
+    before = (root / "mods/fixture-mod/loader.js").read_bytes()
+    try:
+        outcome, consent = window._prepare_mod_start_compatibility(
+            str(root), "native", mods, continuation=lambda: None, error_title="Start")
+        assert outcome == "ready" and consent is not None
+        assert consent.matches(root, "native", None, mods)
+        assert (root / "mods/fixture-mod/loader.js").read_bytes() == before
+        (root / "package.json").write_text('{"version":"261018.1"}')
+        assert not consent.matches(root, "native", "261018.1", mods)
+    finally:
+        window.deleteLater()
+
+
 def test_native_cancel_starts_no_services_and_releases_game_lease(
     qapp: QApplication,
     tmp_path: Path,

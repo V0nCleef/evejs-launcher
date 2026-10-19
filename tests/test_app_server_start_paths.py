@@ -58,6 +58,46 @@ def _minimal_window_config() -> dict:
     return cfg
 
 
+@pytest.mark.parametrize("market,game", [(True, False), (False, True), (True, True)])
+def test_native_preparation_owns_one_lease_through_market_and_game_start(bare_window, tmp_path, monkeypatch, market, game):
+    import json
+    from src.core.native_mod_preparation import NativeModPreparation
+    folder = tmp_path / "mods/Fixture"
+    folder.mkdir(parents=True)
+    (folder / "loader.js").write_text("// enabled\n")
+    (folder / "helper.js").write_text("// opt-in\n")
+    (folder / "evejs-launcher.mod.json").write_text(json.dumps({"schemaVersion": 3,
+        "id": "fixture.native", "displayName": "Fixture", "version": "1.0.0", "kind": "loader",
+        "supportedBackends": ["native"], "activation": {"strategy": "loader_rename"}, "restart": "game_server",
+        "launcherApi": {"version": 1, "minLauncherVersion": "1.0.74", "helper": {"runtime": "node", "path": "helper.js"},
+                        "capabilities": ["prepare_server_start"]}}))
+    bare_window._cfg["evejs_root"] = str(tmp_path)
+    bare_window._lifecycle_thread = None
+    bare_window._publish_cached_runtime = lambda: None
+    workers, calls = [], []
+    def begin(worker, handler):
+        workers.append(worker)
+        bare_window._lifecycle_thread = object()
+    def prepare(captured):
+        lease = bare_window._mod_lifecycle_lease
+        assert lease is not None and not lease.released and lease.root == tmp_path.resolve()
+        calls.append(captured.root)
+    bare_window._begin_lifecycle_worker = begin
+    monkeypatch.setattr(NativeModPreparation, "run_locked", prepare)
+    monkeypatch.setattr(app_module.QMessageBox, "critical", lambda *args: pytest.fail(str(args[-1])))
+    try:
+        assert bare_window._start_service_sequence(start_market=market, start_game=game,
+            mode="modded" if game else None, on_ready=None, error_title="Fixture")
+        assert len(workers) == 1 and workers[0]._prepare_server_fn is not None
+        workers[0]._prepare_server_fn(str(tmp_path))
+        assert calls == [tmp_path.resolve()]
+        assert bare_window._mod_lifecycle_lease_token is bare_window._lifecycle_start_token
+        assert bare_window._release_mod_lease_after_lifecycle
+    finally:
+        bare_window._lifecycle_thread = None
+        bare_window._release_mod_lifecycle_lease()
+
+
 def _write_valid_market_seed(root: Path) -> Path:
     market_dir = root / "externalservices" / "market-server"
     config_path = market_dir / "config" / "market-server.local.toml"

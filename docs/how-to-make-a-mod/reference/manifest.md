@@ -126,3 +126,7 @@ An enabled client package needs `verify` before client launch. `prepare_profile`
 Use relative paths with forward slashes. Empty components, `.`, `..`, absolute paths, device names, wildcards, alternate data streams, trailing spaces/periods, symlinks and junctions fail validation. The helper must remain in its captured package. A descriptor or helper changed during an action invalidates the result.
 
 Unsupported fields are errors, not extension points.
+
+## EveJS update integration (1.0.74+)
+
+Any Native loader or JSON-activated source mod can opt into `prepare_server_start`. Existing `settings.files` declarations also protect server configuration during in-place updates. See [Surviving EveJS updates](evejs-upgrades.md) for the complete contract.

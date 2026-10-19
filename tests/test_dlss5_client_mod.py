@@ -147,7 +147,7 @@ def test_supported_package_is_detected_enabled_and_automatic(
     assert mod.evejs_version == evejs_version
 
 
-def test_unsupported_evejs_package_is_visible_as_invalid(
+def test_newly_declared_evejs_version_is_accepted(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -158,10 +158,10 @@ def test_unsupported_evejs_package_is_visible_as_invalid(
     mod = dlss5.discover_dlss5_client_mod(root)
 
     assert mod is not None
-    assert not mod.valid
-    assert not mod.active
-    assert "0.12.6, 0.12.7, 0.12.7.1" in (mod.error or "")
-    assert "0.12.8" in (mod.error or "")
+    assert mod.valid
+    assert mod.active
+    assert "compatibility warning" not in mod.description
+    assert mod.evejs_version == "0.12.8"
 
 
 def test_multi_version_package_matches_the_selected_evejs_root(
@@ -286,7 +286,7 @@ def test_schema3_package_version_is_bound_to_its_receipt_contract(
     assert "package version does not match its trusted manager" in (mod.error or "")
 
 
-def test_manifest_version_must_match_the_selected_evejs_root(
+def test_manifest_version_mismatch_warns_without_blocking_the_user(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -308,8 +308,10 @@ def test_manifest_version_must_match_the_selected_evejs_root(
     mod = dlss5.discover_dlss5_client_mod(root)
 
     assert mod is not None
-    assert not mod.valid
-    assert "selected EveJS 0.12.7 root" in (mod.error or "")
+    assert mod.valid
+    assert mod.active
+    assert "selected root is EveJS 0.12.7" in mod.description
+    assert "declares 0.12.6" in mod.description
 
 
 @pytest.mark.parametrize("malformed_version", ([], {}, None))
@@ -578,6 +580,20 @@ def test_client_scoped_managers_are_bound_to_exact_package_versions() -> None:
         v057: frozenset({"0.5.7"}),
     }
     assert not ({v056, v057} & dlss5._TRUSTED_MANAGER_SHA256)
+
+
+@pytest.mark.parametrize("inherited_key", ["PSMODULEPATH", "PSModulePath", "psmodulepath"])
+def test_windows_powershell_replaces_case_insensitive_module_path(tmp_path, monkeypatch, inherited_key):
+    powershell = tmp_path / "WindowsPowerShell" / "powershell.exe"
+    (powershell.parent / "Modules").mkdir(parents=True)
+    monkeypatch.setattr(dlss5.os, "environ", {inherited_key: "incompatible-PS7-modules", "KEEP": "value"})
+
+    environment = dlss5._windows_powershell_environment(powershell)
+
+    assert [(key, value) for key, value in environment.items() if key.casefold() == "psmodulepath"] == [
+        ("PSModulePath", str(powershell.parent / "Modules"))
+    ]
+    assert environment["KEEP"] == "value"
 
 
 def test_manager_timeout_diagnostic_matches_preparation_budget(

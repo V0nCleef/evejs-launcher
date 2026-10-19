@@ -190,6 +190,10 @@ def test_main_window_canonicalizes_legacy_executable_path_for_all_consumers(
     monkeypatch.setattr(MainWindow, "_refresh_characters", lambda _self: None)
     monkeypatch.setattr(MainWindow, "_prepare_shipboard_voice", lambda _self: None)
     monkeypatch.setattr(MainWindow, "_start_launcher_ambience", lambda _self: None)
+    # This path-only fixture deletes the window immediately. Inventory workers
+    # belong to separate lifecycle tests and must not outlive this window.
+    from src.ui.mod_coordinator import ModCoordinator
+    monkeypatch.setattr(ModCoordinator, "refresh", lambda _self: None)
 
     window = MainWindow()
     window._status_timer.stop()

@@ -18,6 +18,7 @@ MetadataStatus = Literal["valid", "missing", "invalid_or_conflicting"]
 
 _MAX_SOURCE_BYTES = 2 * 1024 * 1024
 _VERSION_METADATA_PATHS = (Path("package.json"), Path("config/version.json"))
+CONFIG_PREFLIGHT_VERSIONS = frozenset({"0.12.9", "261018.1"})
 
 
 @dataclass(frozen=True)
@@ -97,9 +98,11 @@ def inspect_evejs_runtime(root, *, data_root_override=None) -> RuntimeLayout:
         uses_data_root_logs=uses_data_root_logs,
         certificate_check_only_supported=_supports_certificate_check_only(runtime_root),
         config_preflight_supported=_supports_config_preflight(runtime_root),
-        # The inspected beta still reads the CA here. Its broad dataRoot comment
-        # does not establish that certificates move with data-root logs.
-        certificate_directory=server_root / "certs",
+        certificate_directory=(
+            _resolve_data_root(runtime_root, data_root_override) / "certs"
+            if metadata_status == "valid" and _supports_data_root_certificates(runtime_root)
+            else server_root / "certs"
+        ),
         # This is the native default only; EVEJS_GAMESTORE_DATA_DIR remains a
         # separate existing contract and is deliberately not inherited here.
         game_store_default_directory=runtime_root / "_local" / "gameStore",
@@ -150,7 +153,7 @@ def _supports_data_root_logs(root: Path) -> bool:
 
 
 def _supports_config_preflight(root: Path) -> bool:
-    """Recognize the verified 0.12.9 read-only manager contract without loading it."""
+    """Recognize reviewed releases of the read-only manager contract."""
     server_package = _read_known_source(root, Path("server/package.json"))
     manager = _read_known_source(root, Path("server/src/config/manager.js"))
     schema = _read_known_source(root, Path("server/src/config/schema/index.js"))
@@ -160,8 +163,13 @@ def _supports_config_preflight(root: Path) -> bool:
         package = json.loads(server_package)
     except (json.JSONDecodeError, TypeError):
         return False
-    if not isinstance(package, dict) or package.get("version") != "0.12.9":
+    if (
+        not isinstance(package, dict)
+        or not isinstance(package.get("version"), str)
+        or package["version"] not in CONFIG_PREFLIGHT_VERSIONS
+    ):
         return False
+    version = package["version"]
 
     manager_export = re.search(
         r"\bmodule\.exports\s*=\s*\{(?P<properties>[^}]{0,65536})\}",
@@ -169,11 +177,29 @@ def _supports_config_preflight(root: Path) -> bool:
         flags=re.DOTALL,
     )
     return (
-        re.search(r"\bconst\s+EVEJS_VERSION\s*=\s*['\"]0\.12\.9['\"]\s*;", manager)
+        re.search(rf"\bconst\s+EVEJS_VERSION\s*=\s*['\"]{re.escape(version)}['\"]\s*;", manager)
         is not None
         and manager_export is not None
         and re.search(r"\bEVEJS_VERSION\b", manager_export.group("properties"))
         is not None
+    )
+
+
+def _supports_data_root_certificates(root: Path) -> bool:
+    """Require the certificate resolver's implementation, not a path comment."""
+    source = _read_known_source(root, Path("server/src/config/certificateFiles.js"))
+    data_root = _read_known_source(root, Path("server/src/config/dataRoot.js"))
+    if source is None or data_root is None:
+        return False
+    return (
+        re.search(r"\bDEFAULT_DATA_ROOT\s*=\s*path\.join\(REPO_ROOT,\s*['\"]_local['\"]\)", data_root)
+        is not None
+        and re.search(r"\bfunction\s+resolveDataRootPath\s*\(", data_root) is not None
+        and re.search(
+            r"\bfunction\s+certificateDirectory\s*\(\s*\)\s*\{\s*return\s+resolveDataRootPath\(\s*['\"]certs['\"]\s*\)\s*;?\s*\}",
+            source,
+        ) is not None
+        and re.search(r"\bfunction\s+certificateFilePath\s*\(", source) is not None
     )
 
 

@@ -1,5 +1,6 @@
 """Optional EveJS compatibility, kept separate from mod SemVer and EVE builds."""
 from dataclasses import dataclass
+from datetime import date
 from enum import Enum
 import json
 from pathlib import Path
@@ -29,12 +30,8 @@ class EvejsModCompatibility:
 
     @property
     def blocking(self) -> bool:
-        """Declared support that cannot be confirmed must stop this start."""
-
-        return self.status in {
-            EvejsModCompatibilityStatus.UNSUPPORTED,
-            EvejsModCompatibilityStatus.UNKNOWN_INSTALLED_VERSION,
-        }
+        """Version declarations describe testing; users may try other releases."""
+        return False
 
 
 def assess_active_runtime_mods(mods, installed_version):
@@ -43,8 +40,8 @@ def assess_active_runtime_mods(mods, installed_version):
     The caller may pass all mods returned by the runtime's backend-specific
     discovery. Disabled, invalid, and non-server packages are ignored. A
     missing declaration preserves the installer's existing behavior; an
-    explicit declaration with an unknown installed version is blocking, just
-    like :func:`supports_evejs` cannot confirm that combination.
+    explicit declaration with an unknown installed version is advisory too.
+    Actual loader/source failures remain separate runtime results.
     """
     from .mod_manifest import ActivationKind
 
@@ -79,8 +76,8 @@ def assess_active_runtime_mods(mods, installed_version):
             message = (
                 f"{label} declares support for EveJS {declared}, but the selected "
                 "EveJS installation version could not be determined. Check its "
-                "package.json and config/version.json, or disable this mod in "
-                "the Mods page before starting Game."
+                "package.json and config/version.json. You can still try this "
+                "mod; its runtime compatibility is unconfirmed."
             )
         elif supports_evejs(declared_versions, normalized_installed):
             status = EvejsModCompatibilityStatus.SUPPORTED
@@ -111,9 +108,16 @@ def assess_active_runtime_mods(mods, installed_version):
 
 
 def normalize_evejs_version(value):
-    if not isinstance(value, str) or not re.fullmatch(r'v?(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))?', value):
-        raise ValueError('EveJS versions must have three or four numeric components, such as 0.12.7.1.')
-    return value.removeprefix('v')
+    if isinstance(value, str):
+        normalized = value.removeprefix('v')
+        if re.fullmatch(r'(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))?', normalized):
+            return normalized
+        calendar = re.fullmatch(r'([0-9]{2})([0-9]{2})([0-9]{2})\.(?:0|[1-9][0-9]*)', normalized)
+        if calendar:
+            # Calendar builds use YYMMDD.revision, independently of mod SemVer.
+            date(2000 + int(calendar[1]), int(calendar[2]), int(calendar[3]))
+            return normalized
+    raise ValueError('EveJS versions must be an exact version such as 0.12.7.1 or YYMMDD.revision (261018.1).')
 
 
 def parse_evejs_versions(value):

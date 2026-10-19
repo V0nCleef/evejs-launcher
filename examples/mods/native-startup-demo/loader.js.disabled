@@ -1,0 +1,2 @@
+"use strict";
+console.log("[native-startup-demo] Explicit demonstration preload selected.");

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import subprocess
+import pytest
 
 from src.constants import Ports
 from src.workers.server_worker import ServiceStartWorker, ServiceStopWorker
@@ -24,6 +25,35 @@ class FakeProcess:
 def request_terminate(process: FakeProcess) -> bool:
     process.terminate()
     return True
+
+
+@pytest.mark.parametrize("market,game", [(True, False), (False, True), (True, True)])
+def test_native_mod_preparation_precedes_every_requested_service(market, game):
+    events, results = [], []
+    worker = ServiceStartWorker("fixture", mode="modded", start_market=market, start_game=game,
+        prepare_server_fn=lambda root: events.append("prepare"), probe=lambda port: True,
+        start_market_fn=lambda root: events.append("market") or FakeProcess(1),
+        start_game_fn=lambda root, **kw: events.append("game") or FakeProcess(2))
+    worker.completed.connect(results.append)
+    worker.run()
+    assert events == ["prepare", *(["market"] if market else []), *(["game"] if game else [])]
+    assert len(results) == 1 and results[0].succeeded
+
+
+@pytest.mark.parametrize("market,game", [(True, False), (False, True), (True, True)])
+def test_mod_preparation_failure_blocks_all_spawns_even_with_optional_market(market, game):
+    events, results = [], []
+    def fail(root):
+        raise RuntimeError("Unrecognised native source")
+    worker = ServiceStartWorker("fixture", mode="modded", start_market=market, start_game=game,
+        prepare_server_fn=fail, continue_game_after_market_failure=True, probe=lambda port: True,
+        start_market_fn=lambda root: events.append("market") or FakeProcess(1),
+        start_game_fn=lambda root, **kw: events.append("game") or FakeProcess(2))
+    worker.completed.connect(results.append)
+    worker.run()
+    assert not events and len(results) == 1 and not results[0].succeeded
+    assert ("Unrecognised" in results[0].market_error) if market else results[0].market_error is None
+    assert ("Unrecognised" in results[0].game_error) if game else results[0].game_error is None
 
 
 def test_start_worker_waits_for_market_before_starting_game() -> None:

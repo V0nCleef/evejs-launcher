@@ -231,7 +231,7 @@ def test_node_call_receives_fixed_script_root_argument_and_sanitized_environment
     )
 
     assert result.valid is True
-    assert observed["command"] == ["node.exe", "-", str(root.resolve())]
+    assert observed["command"] == ["node.exe", "-", str(root.resolve()), "0.12.9"]
     kwargs = observed["kwargs"]
     assert kwargs["input"] == preflight._NODE_PREFLIGHT_SCRIPT
     assert '"server", "index.js"' not in kwargs["input"]

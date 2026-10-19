@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import json
+import logging
 import os
 from pathlib import Path
 import shutil
@@ -88,7 +89,7 @@ def install_release(mod, release, operation, *, guard, downloader=download_relea
     if not release.metadata_verified or release.mod_id != descriptor.id:
         raise ModUpdateError('The mod update has no matching release metadata.')
     if not supports_evejs(release.evejs_versions, installed_evejs_version(operation.evejs_root)):
-        raise ModUpdateError('This mod update does not support the installed EveJS version.')
+        logging.getLogger(__name__).warning('Installing mod %s with unconfirmed EveJS compatibility.', current.id)
     if Version.parse(release.version) <= Version.parse(current.version):
         raise ModUpdateError('The selected mod release is not newer than the installed version.')
     packages = LocalModPackages(operation.evejs_root)
@@ -134,7 +135,7 @@ def install_release(mod, release, operation, *, guard, downloader=download_relea
             raise ModUpdateError('Package settings cannot preserve or overwrite a mod descriptor during an update.')
         guard()
         if not supports_evejs(candidate.evejs_versions, installed_evejs_version(packages.root)):
-            raise ModUpdateError('The EveJS version changed. Check mod updates again before installing.')
+            logging.getLogger(__name__).warning('EveJS support for mod %s is unconfirmed; proceeding with user-requested update.', current.id)
         current = operation.current(mod)
         report("Backing up mod")
         record = packages.adopt(current)

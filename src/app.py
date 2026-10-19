@@ -119,6 +119,7 @@ from .core.mod_lifecycle_lock import (
     acquire_mod_lifecycle_lease,
 )
 from .core.mod_manager import ActivationKind, Mod, active_loader_names, scan_mods
+from .core.native_mod_preparation import capture_native_mod_preparation
 from .core.mod_management import (
     ManagedModRegistration,
     ManagedModRemovalRequest,
@@ -2352,7 +2353,7 @@ class MainWindow(QMainWindow):
         *,
         error_title: str,
     ) -> bool:
-        """Own the installer-compatible lock before a Game/mod transaction."""
+        """Own the installer-compatible lock before a Native service/mod transaction."""
 
         existing = getattr(self, "_mod_lifecycle_lease", None)
         if existing is not None and not getattr(existing, "released", False):
@@ -2656,31 +2657,12 @@ class MainWindow(QMainWindow):
             item for item in compatibility
             if item.status is EvejsModCompatibilityStatus.UNKNOWN_INSTALLED_VERSION
         )
-        if unknown:
-            self._show_mod_compatibility_message(
-                error_title,
-                "The selected EveJS installation version could not be determined, "
-                "so declared mod support cannot be checked. This choice cannot be "
-                "overridden. Check package.json and config/version.json, or disable "
-                "the affected mods before starting Game.\n\n"
-                + "\n".join(item.message for item in unknown),
-            )
-            return "blocked", None
-
         unsupported = tuple(
             item for item in compatibility
             if item.status is EvejsModCompatibilityStatus.UNSUPPORTED
         )
-        if not unsupported:
+        if not unsupported and not unknown:
             return "ready", None
-
-        if installed_version is None:
-            # Defensive: the assessment above should classify these as unknown.
-            self._show_mod_compatibility_message(
-                error_title,
-                "The selected EveJS installation version is unknown. Startup is blocked.",
-            )
-            return "blocked", None
 
         consent = ModCompatibilityConsent.capture(
             evejs_root,
@@ -3326,6 +3308,7 @@ class MainWindow(QMainWindow):
             self._release_unbound_mod_lifecycle_lease()
             return False
 
+        preparation = None
         if start_game:
             if not self._acquire_game_mod_lifecycle_lease(
                 evejs_root,
@@ -3342,6 +3325,7 @@ class MainWindow(QMainWindow):
                     evejs_root,
                     mode,
                 )
+                preparation = capture_native_mod_preparation(evejs_root, mods=planned_mods)
                 mode = mod_plan.mode
                 if mod_compatibility_consent is not None:
                     from .core.mod_evejs_compatibility import installed_evejs_version
@@ -3395,9 +3379,23 @@ class MainWindow(QMainWindow):
             self._native_mod_runtime_plan = mod_plan
             self._publish_mod_runtime_snapshot(None)
         else:
-            # Market-only starts deliberately do not participate in the Game
-            # mod transaction, nor should they inherit a stranded handoff.
+            # Market also needs preparation before it maps native mod files.
+            # Roots without an opted-in mod keep their existing Market path.
             self._release_unbound_mod_lifecycle_lease()
+            try:
+                preparation = capture_native_mod_preparation(evejs_root)
+                if preparation is not None:
+                    if not self._acquire_game_mod_lifecycle_lease(evejs_root, error_title=error_title):
+                        return False
+                    captured = capture_native_mod_preparation(evejs_root)
+                    if captured is None or captured.signature != preparation.signature:
+                        raise RuntimeError("Server mod preparation changed before startup. Retry.")
+                    preparation = captured
+            except (OSError, TypeError, ValueError, RuntimeError) as exc:
+                self._release_unbound_mod_lifecycle_lease()
+                self._market_error = str(exc)
+                QMessageBox.critical(self, error_title, str(exc))
+                return False
 
         if start_market:
             self._market_intent = ServiceState.STARTING
@@ -3408,7 +3406,7 @@ class MainWindow(QMainWindow):
         self._lifecycle_start_scope = (start_market, start_game)
         start_token = object()
         self._lifecycle_start_token = start_token
-        if start_game:
+        if start_game or preparation is not None:
             self._mod_lifecycle_lease_token = start_token
             self._mod_lifecycle_handoff = None
             self._release_mod_lease_after_lifecycle = True
@@ -3479,6 +3477,7 @@ class MainWindow(QMainWindow):
                 market_preflight_fn=inspect_native_market_database,
                 start_game_fn=start_planned_game,
                 game_runtime_validator=validate_planned_game,
+                prepare_server_fn=(lambda _root, prepared=preparation: prepared.run_locked()) if preparation is not None else None,
                 market_readiness_timeout_sec=MARKET_READINESS_TIMEOUT_SEC,
             )
             log.info(
@@ -3501,6 +3500,7 @@ class MainWindow(QMainWindow):
             if start_game:
                 self._server_intent = None
                 self._native_mod_runtime_plan = None
+            if start_game or preparation is not None:
                 self._release_mod_lifecycle_lease()
             if start_market:
                 self._market_intent = None
@@ -3511,7 +3511,7 @@ class MainWindow(QMainWindow):
                 "The service startup worker could not be started.",
             )
             return False
-        if start_game and not self._lifecycle_active():
+        if (start_game or preparation is not None) and not self._lifecycle_active():
             # Defensive cleanup for a worker launcher that failed to retain its
             # QThread.  Production _begin_lifecycle_worker always retains it;
             # this also keeps injected test adapters from leaking OS handles.

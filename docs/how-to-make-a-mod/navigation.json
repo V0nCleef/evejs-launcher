@@ -252,6 +252,20 @@
         "ko": "17. 게임 내 공용 모드 메뉴"
       },
       "path": "docs/how-to-make-a-mod/17-shared-menu.md"
+    },
+    {
+      "title": "18. Keep mods working through EveJS updates",
+      "titles": {
+        "en": "18. Keep mods working through EveJS updates",
+        "nl": "18. Mods behouden bij EveJS-updates",
+        "fr": "18. Préserver les mods pendant les mises à jour EveJS",
+        "de": "18. Mods bei EveJS-Updates erhalten",
+        "ru": "18. Сохранение модов при обновлении EveJS",
+        "zh_CN": "18. 在 EveJS 更新后保留模组",
+        "ja": "18. EveJS 更新時に MOD を維持する",
+        "ko": "18. EveJS 업데이트 후 모드 유지"
+      },
+      "path": "docs/how-to-make-a-mod/18-evejs-upgrades.md"
     }
   ],
   "examples": [
@@ -295,7 +309,11 @@
     "examples/mods/menu-test-calculator/client/menu.py",
     "examples/mods/menu-test-notepad/evejs-launcher.mod.json",
     "examples/mods/menu-test-notepad/loader.js",
-    "examples/mods/menu-test-notepad/client/menu.py"
+    "examples/mods/menu-test-notepad/client/menu.py",
+    "examples/mods/native-startup-demo/README.md",
+    "examples/mods/native-startup-demo/evejs-launcher.mod.json",
+    "examples/mods/native-startup-demo/helper.js",
+    "examples/mods/native-startup-demo/loader.js.disabled"
   ],
   "references": [
     {
@@ -341,6 +359,10 @@
     {
       "title": "Settings: choose a topic",
       "path": "docs/how-to-make-a-mod/reference/settings.md"
+    },
+    {
+      "title": "Surviving EveJS updates",
+      "path": "docs/how-to-make-a-mod/reference/evejs-upgrades.md"
     }
   ],
   "assets": [

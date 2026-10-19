@@ -51,7 +51,7 @@ MAX_OUTPUT_BYTES = 256 * 1024
 MAX_HELPER_BYTES = 32 * 1024 * 1024
 DEFAULT_HELPER_TIMEOUT = 120.0
 _ACTION_TIMEOUTS = {"install": 3600.0, "recover": 3600.0, "prepare_disable": 600.0, "prepare_remove": 600.0}
-_ACTIONS = {"prepare_profile", "install", "verify", "prepare_disable", "prepare_remove", "recover"} | NOTIFICATION_ACTIONS
+_ACTIONS = {"prepare_profile", "prepare_server_start", "install", "verify", "prepare_disable", "prepare_remove", "recover"} | NOTIFICATION_ACTIONS
 _RESTARTS = {"none", "client", "game_server", "launcher"}
 _BASES = {"mod", "evejs", "profile", "profile_settings", "client"}
 _ENVIRONMENT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
@@ -229,6 +229,9 @@ def _command(descriptor: ModApiDescriptor, request: Path, result: Path) -> tuple
         executable = Path(windows) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
         if not executable.is_file() or not (executable.parent / "Modules").is_dir():
             raise ModApiRuntimeError("Windows PowerShell is unavailable.")
+        # Windows treats environment names case-insensitively. Avoid sending
+        # two spellings whose order could select an inherited PowerShell 7 path.
+        environment = {key: value for key, value in environment.items() if key.casefold() != "psmodulepath"}
         environment["PSModulePath"] = str(executable.parent / "Modules")
         command = [str(executable), "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(helper.path), "-RequestPath", str(request), "-ResultPath", str(result)]
     else:

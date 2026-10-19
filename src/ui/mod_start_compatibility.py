@@ -73,7 +73,8 @@ def _unsupported_signature(
     return tuple(
         (item.mod_id, item.mod_version, tuple(item.declared_versions or ()))
         for item in compatibility
-        if item.status is EvejsModCompatibilityStatus.UNSUPPORTED
+        if item.status in {EvejsModCompatibilityStatus.UNSUPPORTED,
+                           EvejsModCompatibilityStatus.UNKNOWN_INSTALLED_VERSION}
     )
 
 
@@ -83,7 +84,7 @@ class ModCompatibilityConsent:
 
     root: str
     backend: str
-    installed_version: str
+    installed_version: str | None
     modset_sha256: str
     unsupported: tuple[tuple[str, str, tuple[str, ...]], ...]
 
@@ -92,7 +93,7 @@ class ModCompatibilityConsent:
         cls,
         root: str | Path,
         backend: str,
-        installed_version: str,
+        installed_version: str | None,
         mods: tuple[Mod, ...],
         compatibility: tuple[EvejsModCompatibility, ...],
     ) -> "ModCompatibilityConsent":
@@ -111,8 +112,6 @@ class ModCompatibilityConsent:
         installed_version: str | None,
         mods: tuple[Mod, ...],
     ) -> bool:
-        if installed_version is None:
-            return False
         try:
             canonical_root = _canonical_root(root)
             fingerprint = modset_fingerprint(mods)
@@ -134,7 +133,7 @@ class ModStartCompatibilityDialog(QDialog):
     def __init__(
         self,
         compatibility: tuple[EvejsModCompatibility, ...],
-        installed_version: str,
+        installed_version: str | None,
         parent: QWidget | None = None,
         *,
         docker_mode: bool = False,
@@ -162,13 +161,14 @@ class ModStartCompatibilityDialog(QDialog):
         explanation.setWordWrap(True)
         layout.addWidget(explanation)
 
-        heading = QLabel(f"Selected installation: EveJS {installed_version}")
+        heading = QLabel(f"Selected installation: EveJS {installed_version or 'unknown'}")
         heading.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(heading)
 
         rows = []
         for item in compatibility:
-            if item.status is not EvejsModCompatibilityStatus.UNSUPPORTED:
+            if item.status not in {EvejsModCompatibilityStatus.UNSUPPORTED,
+                                   EvejsModCompatibilityStatus.UNKNOWN_INSTALLED_VERSION}:
                 continue
             version = f" (mod {item.mod_version})" if item.mod_version else ""
             declared = ", ".join(item.declared_versions or ())
@@ -184,7 +184,7 @@ class ModStartCompatibilityDialog(QDialog):
 
         buttons = QHBoxLayout()
         buttons.addStretch(1)
-        self.run_anyway_button = QPushButton("Run anyway — unsupported")
+        self.run_anyway_button = QPushButton("Run anyway")
         self.run_anyway_button.setObjectName("runAnywayUnsupportedButton")
         self.disable_button = QPushButton("Disable affected mods")
         self.disable_button.setObjectName("disableAffectedModsButton")

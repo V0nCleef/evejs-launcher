@@ -20,6 +20,7 @@ The process starts suspended, enters a kill-on-close Job Object, then resumes. T
 
 | Action | Purpose |
 | --- | --- |
+| `prepare_server_start` | Opt-in Native server preparation before either Game or Market starts (Launcher 1.0.74+). |
 | `prepare_profile` | Prepare private mod files and/or the captured profile's EVE text settings. No shared client/global writes. |
 | `install` | Install/update shared integration through the mod's own transaction. |
 | `verify` | Verify physical installed state before client launch. Client-launch verification cannot propose config mutations. |
@@ -29,10 +30,27 @@ The process starts suspended, enters a kill-on-close Job Object, then resumes. T
 | `launch_result` | Observe the spawn result after profile preparation, with the captured profile and launch identity. |
 | `client_exit` | Observe the exit code of that exact launched process while the launcher remains open. |
 
-Install/verify/disable/remove/recover receive `profile: null`. Profile preparation
+Install/verify/disable/remove/recover/server preparation receive `profile: null`. Profile preparation
 and client notifications receive the captured profile. Client packages verify
 before optional profile preparation. A `settings` package can prepare profiles
 without a binary installer.
+
+### Native server preparation
+
+Native loader and JSON-activated source-integrated mods can declare `prepare_server_start`
+with `minLauncherVersion: "1.0.74"`. The launcher calls it from the service
+startup worker before Market database inspection or any requested service spawn.
+The selected root's lifecycle lease remains held through startup and runtime
+verification. Disabled mods and mods without this capability are not called.
+
+Return a ready result without writes for an already healthy installation,
+including when the other service is running. Before repairing shared native
+files, verify that both services are stopped and that the files match reviewed
+source or a valid interrupted transaction. Keep rollback generations and saved
+user state. An unsafe or unsupported repair must fail; the launcher then starts
+neither requested service. Preparation cannot return client launch arguments,
+environment variables or settings contributions. It does not receive a client
+profile or permission to start a service itself.
 
 ### Client notifications
 
@@ -333,3 +351,5 @@ not treated as permission to reinstall. Keep the known legacy path until the
 normal upgrade, rollback, backend switch and shared-client checks pass. This does
 not provide a general server login-payload API, and it does not retrofit automatic
 repair into an unchanged older Launcher or an external manual server launcher.
+
+See [Surviving EveJS updates](evejs-upgrades.md) for the generic preservation contract and runnable startup example.

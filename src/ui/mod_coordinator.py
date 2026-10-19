@@ -17,6 +17,7 @@ from src.core.local_mod_packages import (
 )
 from src.core.mod_contributions import ContributionStore, ConfigurationReview, ContributionConflict
 from src.core.mod_inventory import ModInventory, load_mod_inventory, folder_key
+from src.core.mod_updater_preservation import load_inventory_with_updater_protection
 from src.core.mod_operations import ModOperationContext, change_mod_state, remove_local_mod, run_public_action
 from src.core.mod_manifest import ActivationKind
 from src.core.mod_settings import ModSettingsContext, ModSettingsSession, profile_identity
@@ -97,11 +98,15 @@ class ModCoordinator(QObject):
                 self._refresh_pending = True
             elif result.success:
                 self._page.show_inventory(result.value)
+                if result.value.updater_warning:
+                    self._page.operation_notice.setText(result.value.updater_warning)
+                    self._page.operation_notice.show()
                 self._updates.inventory_ready()
             else:
                 self._page.operation_notice.setText(result.error)
                 self._page.operation_notice.show()
-        self.run(lambda: load_mod_inventory(root), present)
+        native = not self.window._docker_mode()
+        self.run(lambda: load_inventory_with_updater_protection(root, native=native), present)
 
     def run(self, operation: Callable[[], object], callback: Callable[[ModOperationResult], None]) -> bool:
         if self._guided_import_pending is not None and not self._guided_step_starting:

@@ -17,6 +17,7 @@ from .client_autologin import (
     require_auto_login_arguments,
 )
 from .dlss5 import ensure_dlss5_client_mod, prepare_dlss5_profile_environment
+from .discovery import get_ca_cert_path
 from .mod_api_runtime import prepare_public_client_mods, public_package_owns_legacy_folder
 from .mod_lifecycle_lock import acquire_mod_lifecycle_lock
 from .mod_client_notifications import start_client_notifications
@@ -314,8 +315,7 @@ def build_env(evejs_root: str, proxy_url: str = "http://127.0.0.1:26002") -> dic
     """
     proxy_url = validate_proxy_origin(proxy_url)
 
-    repo = Path(evejs_root)
-    ca_pem = repo / "server" / "certs" / "xmpp-ca-cert.pem"
+    ca_pem = get_ca_cert_path(evejs_root)
 
     env = os.environ.copy()
     _apply_legacy_identity_compatibility(env)

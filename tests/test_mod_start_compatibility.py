@@ -62,7 +62,7 @@ def test_assess_active_runtime_mods_reports_declared_support_and_mismatch():
         EvejsModCompatibilityStatus.SUPPORTED,
         EvejsModCompatibilityStatus.UNDECLARED,
     ]
-    assert [result.blocking for result in results] == [False, True, False, False]
+    assert [result.blocking for result in results] == [False, False, False, False]
     assert results[1].installed_version == "0.12.9"
     assert results[1].declared_versions == ("0.12.8",)
     assert "Old Loader (mod version 1.0.6)" in results[1].message
@@ -76,7 +76,7 @@ def test_assess_active_runtime_mods_reports_declared_support_and_mismatch():
     assert "existing startup behavior is retained" in results[3].message
 
 
-def test_explicit_support_with_unknown_installed_version_is_blocking():
+def test_explicit_support_with_unknown_installed_version_is_advisory():
     results = assess_active_runtime_mods(
         (
             _mod("Declared Loader", ("0.12.8",)),
@@ -89,7 +89,7 @@ def test_explicit_support_with_unknown_installed_version_is_blocking():
         EvejsModCompatibilityStatus.UNKNOWN_INSTALLED_VERSION,
         EvejsModCompatibilityStatus.UNDECLARED,
     ]
-    assert [result.blocking for result in results] == [True, False]
+    assert [result.blocking for result in results] == [False, False]
     assert results[0].installed_version is None
     assert "version could not be determined" in results[0].message
     assert "package.json" in results[0].message
@@ -103,4 +103,4 @@ def test_invalid_installed_version_is_treated_as_unknown():
     )
 
     assert results[0].status is EvejsModCompatibilityStatus.UNKNOWN_INSTALLED_VERSION
-    assert results[0].blocking
+    assert not results[0].blocking
