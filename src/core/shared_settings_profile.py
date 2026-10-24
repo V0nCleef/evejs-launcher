@@ -20,6 +20,7 @@ from .. import config
 from . import platform
 from .profiles import _is_directory_link, _path_entry_exists
 from .shared_client_settings import SharedSettingsError, SharedClientSettings, _prepare_shared_settings_binding
+from . import shared_drone_settings
 
 _MAX_FILE_SIZE = 16 * 1024 * 1024
 # The verified client's blue.marshal empty dictionary, not an anonymous cache.
@@ -202,6 +203,7 @@ def prepare_shared_character_profile(
     *, account_id: int, character_id: int, evejs_root: str, custom_folder: bool = False,
     target_identity: str | None = None, automatic_source: bool = False,
     destination_folder: Path | None = None, import_folder: str = "",
+    personal_account_settings: bytes | None = None,
 ) -> tuple[str, ...]:
     """Apply a stable source snapshot before this account's client is spawned.
 
@@ -264,8 +266,12 @@ def prepare_shared_character_profile(
         else:
             files, manifest = snapshot
             source_folder = folder
+        try:
+            account_settings = shared_drone_settings.merge(files["account.dat"], personal_account_settings)
+        except (ValueError, UnicodeError, RecursionError) as exc:
+            raise SharedSettingsError("The shared character settings could not be verified.") from exc
         changes = {destination / f"core_char_{character_id}.dat": files["character.dat"],
-                   destination / f"core_user_{account_id}.dat": files["account.dat"]}
+                   destination / f"core_user_{account_id}.dat": account_settings}
         # Only the source's own client writes its persistent main copy. Never
         # reset it to an older snapshot when it relaunches beside other clients.
         if destination == folder and not fresh and running and (account_id, character_id) == (source.account_id, source.character_id):
@@ -308,10 +314,11 @@ def prepare_shared_profile_launch(
     *, account_id: int, character_id: int, evejs_root: str, host: str = "127.0.0.1",
     target_identity: str | None = None, legacy_folder: str = "",
 ) -> SharedClientSettings:
-    """Give the source a persistent profile and each follower a fresh copy.
+    """Give the source a persistent profile and followers a fresh shared layout.
 
     A private named profile also isolates public preferences and other
-    characters on the source's account. No follower can write the baseline.
+    characters on the source's account. Drone groups/favourites remain personal;
+    no follower can write the baseline.
     """
     with platform.serialize_evejs_client_trust_and_spawn():
         managed = profile_tq.parent.parent.parent / "SharedSettings"
@@ -325,11 +332,91 @@ def prepare_shared_profile_launch(
         is_source = (source.account_id, source.character_id) == (account_id, character_id)
         destination = main if is_source else storage / "sessions" / uuid.uuid4().hex
         _safe_storage(destination)
+        personal = None if is_source else _previous_drone_settings(
+            storage, profile_tq, main, source, account_id, character_id)
         prepare_shared_character_profile(profile_tq, main, source, account_id=account_id,
             character_id=character_id, evejs_root=evejs_root, target_identity=target_identity,
             automatic_source=requested is None, destination_folder=destination,
-            import_folder=legacy_folder or str(managed))
+            import_folder=legacy_folder or str(managed), personal_account_settings=personal)
         # A different destination gets a different alias, avoiding live rebinding
         # when other accounts (or another character on this account) are running.
         name = "EveJSLauncherShared_" + _digest(os.path.normcase(str(destination)).encode("utf-8"))[:16]
-        return _prepare_shared_settings_binding(profile_tq, destination, host=host, profile_name=name)
+        result = _prepare_shared_settings_binding(profile_tq, destination, host=host, profile_name=name)
+        if not is_source:
+            personal_root = storage / "pilots"
+            _safe_storage(personal_root)
+            _atomic_bytes(personal_root / f"{account_id}-{character_id}.json", _json_bytes({
+                "schemaVersion": 1, "accountID": account_id, "characterID": character_id,
+                "session": destination.name,
+            }))
+        return result
+
+
+def _previous_drone_settings(storage: Path, profile_tq: Path, main: Path,
+                             source: SharedSettingsSource, account_id: int, character_id: int) -> bytes | None:
+    """Read the pilot's prior file without writing a closed or running session.
+
+    A small pointer makes normal relaunch O(1). On the first fixed launch,
+    inspect old matching sessions and the pilot's Separate profile. Prefer an
+    actual personal grouping over a later session reset to the source template.
+    This also recovers pre-fix groups when that old session still exists.
+    """
+    personal_root = storage / "pilots"
+    if _path_entry_exists(personal_root) and _is_directory_link(personal_root):
+        raise SharedSettingsError("The shared profile backup folder is redirected.")
+    marker = personal_root / f"{account_id}-{character_id}.json"
+    user_name = f"core_user_{account_id}.dat"
+    char_name = f"core_char_{character_id}.dat"
+    if _path_entry_exists(storage / "sessions") and _is_directory_link(storage / "sessions"):
+        raise SharedSettingsError("The shared profile backup folder is redirected.")
+    if marker.exists():
+        try:
+            record = json.loads(_read_file(marker))
+            session = record["session"]
+            if (record.get("schemaVersion") != 1 or type(record.get("accountID")) is not int
+                    or type(record.get("characterID")) is not int
+                    or (record["accountID"], record["characterID"]) != (account_id, character_id)
+                    or not isinstance(session, str) or not re.fullmatch(r"[0-9a-f]{32}", session)):
+                raise ValueError("Invalid personal profile record")
+            previous = storage / "sessions" / session
+            if _is_directory_link(previous) or not (previous / char_name).is_file():
+                raise ValueError("Missing personal profile")
+            return _read_file(previous / user_name)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise SharedSettingsError("The shared character settings could not be verified.") from exc
+
+    sessions = storage / "sessions"
+    if _path_entry_exists(sessions) and _is_directory_link(sessions):
+        raise SharedSettingsError("The shared profile backup folder is redirected.")
+    candidates = []
+    if sessions.is_dir():
+        # Bounded one-time migration. Subsequent launches use the pointer above.
+        folders = list(sessions.iterdir())
+        if len(folders) > 8192:
+            raise SharedSettingsError("The shared character settings could not be verified.")
+        for previous in folders:
+            if (re.fullmatch(r"[0-9a-f]{32}", previous.name) and previous.is_dir()
+                    and not _is_directory_link(previous) and (previous / char_name).is_file()
+                    and (previous / user_name).is_file()):
+                candidates.append(previous / user_name)
+    separate = platform.get_eve_settings_path(str(profile_tq)) / user_name
+    if separate.is_file() and not _is_directory_link(separate):
+        candidates.append(separate)
+    candidates.sort(key=lambda path: path.stat().st_mtime_ns, reverse=True)
+    template_file = main / f"core_user_{source.account_id}.dat"
+    template = _read_file(template_file) if template_file.exists() else None
+    try:
+        template_signature = shared_drone_settings.signature(template) if template and shared_drone_settings.has_drone_settings(template) else None
+        latest = None
+        for candidate in candidates:
+            data = _read_file(candidate)
+            if not shared_drone_settings.has_drone_settings(data):
+                continue
+            signature = shared_drone_settings.signature(data)
+            if latest is None:
+                latest = data
+            if signature != template_signature:
+                return data
+        return latest
+    except (ValueError, UnicodeError, RecursionError) as exc:
+        raise SharedSettingsError("The shared character settings could not be verified.") from exc

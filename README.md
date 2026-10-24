@@ -139,7 +139,7 @@ Under **Settings → Client → EVE Settings**, **Separate settings per account 
 
 Leave **Shared profile** on **First character launched (automatic)** to let the launcher choose for you. That first character becomes the saved source profile; later characters receive its settings and layout.
 
-Only changes saved by the selected source character update the shared profile. Changes made on other characters apply to their current session and are replaced by the source profile at their next launch. Close all EVE clients before changing the source. After all clients close, the next launch captures the source's saved changes for the next group of clients.
+Only changes saved by the selected source character update the shared profile. Other characters keep their own drone groups, group membership and per-ship favourite groups across relaunches. Their other session changes are replaced by the source profile at the next launch. The launcher can recover personal drone groups from a previous matching local session if its saved settings are still available. Close all EVE clients before changing the source. After all clients close, the next launch captures the source's saved changes for the next group of clients.
 
 Each client uses its own working copy so another character cannot overwrite the source, including common preferences and characters on the same account. Original separate settings are kept, and settings are backed up before replacement. Previously configured custom folders are imported automatically; there is no folder picker to configure.
 

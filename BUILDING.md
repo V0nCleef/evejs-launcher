@@ -1,4 +1,4 @@
-# Build Launcher 1.0.63
+# Build Launcher 1.0.75
 
 Use Windows x64, CPython 3.11.15 and requirements-build.txt. The recorded builder
 used PyInstaller 6.21.0. In a fresh environment, install requirements-build.txt:

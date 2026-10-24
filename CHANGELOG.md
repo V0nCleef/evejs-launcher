@@ -2,6 +2,12 @@
 
 ## Changelog
 
+## v1.0.75 - 2026-10-24
+
+- Fixed drone groups being reset when relaunching characters that use a shared settings profile.
+- Keeps each pilot's drone group membership, group identities and per-ship favourite groups while continuing to apply the source character's shared settings and window layout.
+- Recovers personal drone groups from a previous matching local session when that saved session is still available. No extra setup is required.
+
 ## v1.0.74 - 2026-10-19
 
 - Recognizes EveJS calendar releases such as 261018.1 and their current certificate, log and native config-validation paths.
