@@ -1,27 +1,31 @@
-# Launcher 1.0.75 release validation
+# Launcher 1.0.76 release validation
 
-This release fixes personal drone groups being overwritten when a follower
-character relaunches using a shared settings profile.
+Character startup no longer installs or verifies DLSS5, reads its installation
+receipt, or requires a server attachment. Installed renderer detection uses the
+physical client only. Private graphics preferences use a stable profile folder
+across server upgrades; existing preferences and unrelated addons are retained.
 
-- The user confirmed the installed candidate preserves drone groups in the
-  real EVE client and approved public release.
-- 34 focused shared-profile and native-settings checks passed before that
-  manual test. Copied real settings were also decoded independently to confirm
-  that only drone groups and per-ship favourites differ from the source profile.
-- Frozen module comparison found exactly one changed existing module
-  (`src.core.shared_settings_profile`) and one new module
-  (`src.core.shared_drone_settings`). The entry point and all other application
-  modules remain equivalent to 1.0.74. No DLL or PYD dependency was added or changed.
-- The candidate started with isolated settings without launching a server or
-  EVE client, and closed without a fatal startup error.
-- Release packaging retains the exact manually tested executable. Only bundled
-  VERSION, README and CHANGELOG data are updated for the public release.
-- 95 focused shared-settings, build and updater checks passed from the public
-  release checkout. The complete onedir ZIP is checked for CRC, version, layout
-  and source-to-frozen module equivalence before publication. Hosted assets are
-  downloaded and their hashes checked after publication.
+- The user confirmed character startup and working DLSS with the tested 1.0.76
+  executable and local DLSS lifecycle fixes, then authorized both releases.
+- The public release retains that exact executable. Its entry point and all 177
+  bundled application modules match the public release sources after excluding
+  compilation-path metadata. No renderer or client binary is bundled or changed.
+- Focused launch, public-mod integration, profile settings, graphics migration,
+  worker, queue and shared-drone checks passed. Foundation smoke, compilation,
+  dependency consistency and bundled-version checks passed.
+- Native source and frozen launcher windows opened successfully with isolated
+  settings. The source smoke closed normally; the frozen smoke exited after a
+  normal close. The user's subsequent test provides the live character/DLSS proof.
+- The complete test collection was also attempted. A shared-process Qt access
+  violation required per-file process isolation. Those 194 file runs recorded
+  3,734 passing tests, seven skips and ten failures; another Qt file crashed.
+  All eight failing/crashing files reproduced the same outcomes on untouched
+  1.0.75 source. These pre-existing fixture, expectation and Qt failures remain
+  open; this release does not claim a green full suite or change their code.
+- Release ZIPs are checked for CRC, version, top-level layout and executable
+  identity. Published assets are downloaded again and compared with local hashes.
 
-Limits: no additional full live updater handoff or Docker gameplay test is run
-for this Windows settings-only fix. Historical groups can only be recovered
-while a matching saved local session remains available. Exact artifact hashes
-are published in SHA256SUMS.txt.
+DLSS5 0.5.12 separately fixes physical-client verification and global removal
+without requiring the selected server to be attached or the old server to exist.
+Its renderer payload remains 0.5.11. No new GPU compatibility matrix, Docker
+gameplay test or additional live auto-login test is claimed for this release.

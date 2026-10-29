@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "project": "EveJS Launcher",
-  "version": "1.0.75",
-  "scope": "Public source and build inputs for shared-profile drone group persistence",
+  "version": "1.0.76",
+  "scope": "Public source/build inputs for server-independent installed DLSS5 character startup",
   "binary": {
     "file": "EveJS-Launcher-V1.exe",
-    "sha256": "2a295feb2d147ab9957d6e63c8c67ed0318a4ff9d50b740d695eb398ac428bbb"
+    "sha256": "f98f7fd434003c907ed91b8e2adfaa276f5beaaac220977bb9ec71002225f501"
   },
   "files": {
     ".gitattributes": {
@@ -17,12 +17,12 @@
       "bytes": 294
     },
     "BUILDING.md": {
-      "sha256": "8748922c79747b659437b00e7134efb8dfdba3ac3cbdfa69420da5aafbe67cac",
-      "bytes": 625
+      "sha256": "b3d94f38e789404e0e09c3479f78bfaf0c10dba7d5969ccfe0250f260a5dd545",
+      "bytes": 624
     },
     "CHANGELOG.md": {
-      "sha256": "92c6b030a842b692750fe0fe67a7bdf04aac2e5d330f3a9a19868600d360b9ef",
-      "bytes": 83985
+      "sha256": "55813b9bd57506b337628d0c2cef951095d42b9ce67e7b6d1c92aae9def3a2b9",
+      "bytes": 84486
     },
     "EveJS-Launcher/config.json": {
       "sha256": "52af6b6244c877c70f02552daa01dcf7450612cbe5239c04ab9868179354a64b",
@@ -37,15 +37,15 @@
       "bytes": 18865
     },
     "RELEASE-VALIDATION.md": {
-      "sha256": "e4e806d87cf584192aeffd653c51719f9bae76f28f4bd81b9959ef116eb0adb1",
-      "bytes": 1664
+      "sha256": "13d137e940538074cc10ab6e71eebdf1b050f42e6fbe20267cb83bfa16368aac",
+      "bytes": 2151
     },
     "THIRD_PARTY_NOTICES.md": {
       "sha256": "f6b245290423d78f0d88df8dc53129464e8a3938c081bb28da85d08df485ea1b",
       "bytes": 4672
     },
     "VERSION": {
-      "sha256": "2312f6c6fa96c498fbffc768d2351a6a3fceae51aa3ff14c84e7ab21246504cb",
+      "sha256": "ee316f92c3e7a43cb562fcff2598a71c2b016a9759f2315979bdcd7ba7827d52",
       "bytes": 7
     },
     "assets/audio/music/celestial_transit.wav": {
@@ -1096,6 +1096,10 @@
       "sha256": "bd8ab7e16cb9539fc15c1479cf6b36c13ed5c7da5ffbf468308cf2801ee05242",
       "bytes": 50702
     },
+    "src/core/dlss5_runtime.py": {
+      "sha256": "fd3a66eb401e84092fad35c00956fc770d18ef33e0c833e145fedb6a85963028",
+      "bytes": 6385
+    },
     "src/core/dlss5_uninstall.py": {
       "sha256": "c37ec2468e24d3cad4081e0e1b57e9e7246c8ddb4e7cdfe1c00c4392c777dae1",
       "bytes": 19573
@@ -1133,8 +1137,8 @@
       "bytes": 1852
     },
     "src/core/launcher.py": {
-      "sha256": "40f9df4f7b6a40c9cb2ab537376035b6b0f93acfbf06acce3639a5e21863329f",
-      "bytes": 21275
+      "sha256": "3db4bdcd004e30451b3bd152976946cdb60b77e08e062814ffb163c582c97583",
+      "bytes": 21011
     },
     "src/core/local_mod_packages.py": {
       "sha256": "ee41582b4149df66c96641dc461d4c61e7be206263a96c6e71289e31fe1ebb61",
@@ -1221,8 +1225,8 @@
       "bytes": 86083
     },
     "src/core/mod_settings.py": {
-      "sha256": "3a6eb6b6fdd59db812046e7be5e44b1006a5ef11016b98fb402480393c463ed1",
-      "bytes": 13772
+      "sha256": "eaad954b956c3258dd845dab99007240ecc965bae975bec11ef204499def9f0e",
+      "bytes": 14140
     },
     "src/core/mod_settings_schema.py": {
       "sha256": "57c2f5963cf948ec4517a136a7e906305532d54f9c2271bd7f8c67f036ba235d",
@@ -1984,6 +1988,10 @@
       "sha256": "9300d83189c3fe5423744d02ebf9c93f380101f455cf8abf489464f073324d87",
       "bytes": 19900
     },
+    "tests/test_dlss5_launch_independence.py": {
+      "sha256": "6a3cf5ac2a2d8cd2033da88b4068a7804bfcdd634c06c47b64820d2165280233",
+      "bytes": 6616
+    },
     "tests/test_dlss5_process_tree.py": {
       "sha256": "aec76afbebe4d6bc356b079a037c4922f3cecdbd8c7ea203c8d5bff313caa88f",
       "bytes": 12711
@@ -2133,8 +2141,8 @@
       "bytes": 7344
     },
     "tests/test_launcher.py": {
-      "sha256": "c3c527174370b37b1d6128ad6677de6a4cb2bb8bf359652ff23f8d2e8981d986",
-      "bytes": 30024
+      "sha256": "08c13deb16ba516b8228372a442fdb181a1f62bd4f91a22f4e296cf883060868",
+      "bytes": 29886
     },
     "tests/test_legacy_mod_removal_dialog.py": {
       "sha256": "1a4b67f7c9b2ba6c4ca152b678c8162b18d8a19dc905a3761b8308b67e0173d5",
@@ -2169,8 +2177,8 @@
       "bytes": 10467
     },
     "tests/test_mod_api_process_and_launch.py": {
-      "sha256": "26792d7d17fa44cd8569496e434d872d69d57231957ae47e84ead2b7571d4928",
-      "bytes": 8941
+      "sha256": "4621c4b8f9a0c245a22d33c6233ea803cddb877059bda6ccf31939abfc2bb924",
+      "bytes": 8896
     },
     "tests/test_mod_api_runtime_protocol.py": {
       "sha256": "a063a3945ef171d6167f2d767cc197ab86a6e56934e8430c094bf1dc9f8c2926",

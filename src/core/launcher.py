@@ -16,9 +16,9 @@ from .client_autologin import (
     AutoLoginUnavailableError,
     require_auto_login_arguments,
 )
-from .dlss5 import ensure_dlss5_client_mod, prepare_dlss5_profile_environment
+from .dlss5_runtime import prepare_installed_dlss5
 from .discovery import get_ca_cert_path
-from .mod_api_runtime import prepare_public_client_mods, public_package_owns_legacy_folder
+from .mod_api_runtime import prepare_public_client_mods
 from .mod_lifecycle_lock import acquire_mod_lifecycle_lock
 from .mod_client_notifications import start_client_notifications
 from .mod_manifest import scan_mods
@@ -440,11 +440,11 @@ def launch_client(
 
     with serialize_evejs_client_trust_and_spawn(), acquire_mod_lifecycle_lock(selected_client_path):
         mods = scan_mods(evejs_root)
-        # The cross-process client-launch mutex also serializes the DLSS5
-        # manager. Initial install/update may mutate the copied client; the
-        # exact-package path is read-only and remains safe when client one is
-        # already running while client two is prepared.
-        dlss5_environment = {} if public_package_owns_legacy_folder(evejs_root, "mods/DLSS5", mods=mods) else ensure_dlss5_client_mod(evejs_root, selected_client_path)
+        # Installed graphics belong to the physical client. Server/package
+        # replacement and installation journals must never gate character launch.
+        dlss5_environment = prepare_installed_dlss5(profile_tq_path, selected_client_path)
+        launch_mods = tuple(mod for mod in mods
+                            if mod.id != "evejs-dlss5" and mod.path.name.casefold() != "dlss5")
         certificate_client_path = (
             Path(client_path) if client_path else profile_tq_path.resolve()
         )
@@ -456,11 +456,10 @@ def launch_client(
 
         env = build_env(evejs_root, effective_proxy)
         if dlss5_environment:
-            dlss5_environment = {**dlss5_environment, **prepare_dlss5_profile_environment(profile_tq_path, selected_client_path)}
+            env.pop("RESHADE_BASE_PATH_OVERRIDE", None)
             env.update(dlss5_environment)
             log.info(
-                "Verified DLSS5 integration for selected client; "
-                "launching Trinity in DX12 mode with isolated profile state."
+                "Using installed DLSS5 client renderer in DX12 mode."
             )
         if overview_bridge is not None:
             env["EVEJS_OVERVIEW_BRIDGE"] = overview_bridge.command
@@ -495,7 +494,7 @@ def launch_client(
         public_mods = prepare_public_client_mods(
             evejs_root, selected_client_path, profile_tq_path,
             backend="docker" if effective_context.target_identity is not None else "native",
-            protected_environment=dlss5_environment, protected_arguments=arguments, mods=mods, client_lock_held=True,
+            protected_environment=dlss5_environment, protected_arguments=arguments, mods=launch_mods, client_lock_held=True,
             **({"profile_settings_root": shared_settings.folder} if shared_settings is not None else {}),
         )
         env.update(public_mods.environment)

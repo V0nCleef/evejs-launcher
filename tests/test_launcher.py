@@ -577,7 +577,7 @@ def test_launch_client_does_not_inject_dlss5_or_change_inherited_reshade_without
     assert env["RESHADE_BASE_PATH_OVERRIDE"] == str(tmp_path / "stale")
 
 
-def test_launch_client_injects_dx12_for_verified_dlss5_integration(
+def test_launch_client_injects_dx12_for_installed_dlss5_without_manager(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -593,6 +593,8 @@ def test_launch_client_injects_dx12_for_verified_dlss5_integration(
     configured_exe.write_bytes(b"")
     (configured_exe.parent / "dxgi.dll").write_bytes(b"reshade")
     (configured_exe.parent / "renodx-dlss5.addon64").write_bytes(b"renodx")
+    (configured_exe.parent / "nvngx_dlssnr.dll").write_bytes(b"neural runtime")
+    (configured_exe.parent / "sl.dlss_nr.dll").write_bytes(b"neural interposer")
     (configured_exe.parent / "ReShade.ini").write_text(
         "[RenoDX.DLSS5]\nNeuralUplift=1\n",
         encoding="utf-8",
@@ -610,15 +612,8 @@ def test_launch_client_injects_dx12_for_verified_dlss5_integration(
         encoding="utf-8",
     )
     captured: dict[str, object] = {}
-    ensured: list[tuple[str, str]] = []
 
     monkeypatch.setattr(launcher, "get_client_exe_path", lambda _path: exe)
-    monkeypatch.setattr(
-        launcher,
-        "ensure_dlss5_client_mod",
-        lambda root, client: ensured.append((str(root), str(client)))
-        or {"TRINITYPLATFORM": "dx12", "EVEJS_DLSS5": "on"},
-    )
     monkeypatch.setattr(
         launcher,
         "launch_eve_client",
@@ -633,13 +628,12 @@ def test_launch_client_injects_dx12_for_verified_dlss5_integration(
 
     env = captured["env"]
     assert isinstance(env, dict)
-    assert ensured == [(str(evejs_root), str(configured_tq))]
     assert env["TRINITYPLATFORM"] == "dx12"
     assert env["EVEJS_DLSS5"] == "on"
     assert env["RESHADE_BASE_PATH_OVERRIDE"] == str(profile_tq.parent / "DLSS5")
     profile_config = profile_tq.parent / "DLSS5" / "ReShade.ini"
     assert profile_config.is_file()
-    assert "AddonPath=..\\tq\\bin64" in profile_config.read_text(encoding="utf-8")
+    assert f"AddonPath={configured_tq / 'bin64'}" in profile_config.read_text(encoding="utf-8")
 
 
 def test_launch_client_preserves_unicode_paths_through_the_spawn_boundary(

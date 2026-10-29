@@ -66,12 +66,12 @@ def fixture_launcher(tmp_path, monkeypatch, folder_name):
     return root, profile_tq, client, mod
 
 
-def test_public_dlss_folder_routes_once_and_preparation_finishes_before_client_spawn(tmp_path, monkeypatch):
+def test_public_dlss_folder_cannot_request_receipt_verification_before_spawn(tmp_path, monkeypatch):
     root, profile, client, mod = fixture_launcher(tmp_path, monkeypatch, "DLSS5")
     events = []
-    monkeypatch.setattr(launcher, "ensure_dlss5_client_mod", lambda *_args: pytest.fail("public package must not invoke frozen bridge"))
+    monkeypatch.setattr(launcher, "prepare_installed_dlss5", lambda *_args: {"TRINITYPLATFORM": "dx12"})
     def prepare(*args, **kwargs):
-        assert kwargs["mods"] == [mod]
+        assert kwargs["mods"] == ()
         assert kwargs["protected_arguments"] == ("/port:26000",)
         events.append("profile-committed")
         return runtime.PreparedClientMods(MappingProxyType({"TRINITYPLATFORM": "dx12"}), ("/fixture:enabled",), ())
@@ -142,14 +142,14 @@ def test_spawn_dispatches_captured_notification_outcome(tmp_path, monkeypatch, f
         assert events == ["spawn", {"backend": "native", "process": process}]
 
 
-def test_unrelated_public_mod_does_not_suppress_the_legacy_dlss_bridge(tmp_path, monkeypatch):
+def test_unrelated_public_mod_keeps_installed_renderer_detection(tmp_path, monkeypatch):
     root, profile, client, _mod = fixture_launcher(tmp_path, monkeypatch, "another-mod")
     events = []
-    monkeypatch.setattr(launcher, "ensure_dlss5_client_mod", lambda *_args: events.append("legacy") or {})
+    monkeypatch.setattr(launcher, "prepare_installed_dlss5", lambda *_args: events.append("renderer") or {})
     monkeypatch.setattr(launcher, "prepare_public_client_mods", lambda *_args, **_kwargs: runtime.PreparedClientMods({}, (), ()))
     monkeypatch.setattr(launcher, "launch_eve_client", lambda *_args, **_kwargs: events.append("spawn"))
     launcher.launch_client(str(root), profile, client_path=str(client))
-    assert events == ["legacy", "spawn"]
+    assert events == ["renderer", "spawn"]
 
 
 def test_failed_public_preparation_never_spawns_the_client(tmp_path, monkeypatch):

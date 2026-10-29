@@ -76,6 +76,11 @@ class ModSettingsContext:
     def mod_data_root(self) -> Path | None:
         if self.profile_root is None:
             return None
+        # Graphics preferences follow the pilot/client across EveJS upgrades.
+        # Keep the form and runtime on the same stable directory, including
+        # after the previous server or package folder has been removed.
+        if self.mod_folder.relative_to(self.evejs_root).as_posix().casefold() == "mods/dlss5":
+            return self.profile_root / "DLSS5"
         # Stable across mod versions, separate for equal IDs in distinct roots.
         global_owner = ContributionOwner(self.evejs_root, self.owner.mod_relative_path)
         return self.profile_root / "mods" / global_owner.id[:24]

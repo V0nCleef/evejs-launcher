@@ -2,6 +2,12 @@
 
 ## Changelog
 
+## v1.0.76 - 2026-10-29
+
+- Character launch uses the installed DLSS5 renderer independently of the selected EveJS version, mod folder, installation receipts and server attachments.
+- Removed DLSS5 installation, repair and verification from character startup. Optional graphics preference errors no longer prevent launching a character.
+- Keeps each profile's ReShade and Neural Rendering preferences in a stable location across EveJS upgrades, including after an old server or mod folder is removed.
+
 ## v1.0.75 - 2026-10-24
 
 - Fixed drone groups being reset when relaunching characters that use a shared settings profile.
