@@ -14,7 +14,9 @@ from urllib.parse import urlsplit
 from .client_autologin import (
     AutoLoginLaunch,
     AutoLoginUnavailableError,
+    NO_CONSOLE_ARGUMENT,
     require_auto_login_arguments,
+    supports_client_no_console,
 )
 from .dlss5_runtime import prepare_installed_dlss5
 from .discovery import get_ca_cert_path
@@ -407,6 +409,7 @@ def launch_client(
     overview_bridge: OverviewBridgeLaunch | None = None,
     pre_spawn_check: Callable[[], None] | None = None,
     shared_settings: SharedClientSettings | None = None,
+    hide_console: bool = False,
 ) -> subprocess.Popen:
     """Launch the EVE client executable from a profile junction.
 
@@ -418,10 +421,12 @@ def launch_client(
             derive the ResFiles cache (mirrors Play.bat behaviour).
         auto_login: Optional typed local-login intent.  When present, the
         exact copied client and EveJS password-bypass configuration are
-            verified before the guarded login, character, and no-console
+            verified before the guarded login, optional character, and no-console
             switches are added.
         overview_bridge: Optional one-shot capture/apply command for a verified
             launcher-patched client.
+        hide_console: Suppress the client's debug console using its native
+            switch when supported, independently of automatic login.
 
     Returns:
         subprocess.Popen for the launched process.
@@ -491,6 +496,12 @@ def launch_client(
                 )
                 auto_login = None
 
+        if hide_console and NO_CONSOLE_ARGUMENT not in arguments:
+            if supports_client_no_console(exe):
+                arguments += (NO_CONSOLE_ARGUMENT,)
+            else:
+                log.info("The selected EVE client does not expose /noconsole.")
+
         public_mods = prepare_public_client_mods(
             evejs_root, selected_client_path, profile_tq_path,
             backend="docker" if effective_context.target_identity is not None else "native",
@@ -507,9 +518,11 @@ def launch_client(
             log.info(
                 "Starting EVE with verified local auto-login "
                 "(account=%s character_id=%s "
-                "switches=noconsole,login,autoSelectCharacter)",
+                "switches=%s)",
                 auto_login.username,
                 auto_login.character_id,
+                "noconsole,login,autoSelectCharacter" if auto_login.character_id is not None
+                else "noconsole,login",
             )
         backend = "docker" if effective_context.target_identity is not None else "native"
         try:

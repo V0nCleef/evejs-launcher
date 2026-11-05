@@ -116,6 +116,7 @@ def test_dialog_requires_patched_ready_snapshot_for_overview_copy(
         3396210,
     )
     dialog = NewCharacterDialog([_account()], status, {140000007})
+    QTest.mouseClick(dialog.advanced_button, Qt.MouseButton.LeftButton)
     spy = QSignalSpy(dialog.create_requested)
     dialog.account_edit.setText("fixture-new")
     dialog.character_edit.setText("Fixture Pilot")
@@ -141,6 +142,7 @@ def test_dialog_uses_javascript_character_name_semantics(
         3396210,
     )
     dialog = NewCharacterDialog([], status, set())
+    QTest.mouseClick(dialog.advanced_button, Qt.MouseButton.LeftButton)
     spy = QSignalSpy(dialog.create_requested)
     dialog.account_edit.setText("fixture-new")
 
@@ -254,6 +256,7 @@ def test_dialog_allows_creation_with_an_uncaptured_overview_source(
         3396210,
     )
     dialog = NewCharacterDialog([_account()], status, set())
+    QTest.mouseClick(dialog.advanced_button, Qt.MouseButton.LeftButton)
     dialog.account_edit.setText("fixture-new")
     dialog.character_edit.setText("Fixture Pilot")
     dialog.overview_combo.setCurrentIndex(1)
@@ -283,6 +286,7 @@ def test_dialog_revalidates_first_time_source_after_patch_and_capture(
         3396210,
     )
     dialog = NewCharacterDialog([_account()], ready, set())
+    QTest.mouseClick(dialog.advanced_button, Qt.MouseButton.LeftButton)
     dialog.account_edit.setText("fixture-new")
     dialog.character_edit.setText("Fixture Pilot")
     dialog.overview_combo.setCurrentIndex(1)

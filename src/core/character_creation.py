@@ -67,6 +67,14 @@ class CharacterCreationResult:
     backup_path: Path
 
 
+def normalize_account_name(value: object) -> str | None:
+    """Validate the account name also used as a local client profile name."""
+    if not isinstance(value, str):
+        return None
+    username = value.strip()
+    return username if _ACCOUNT_PATTERN.fullmatch(username) else None
+
+
 def normalize_character_name(value: object) -> str | None:
     """Return the exact character-name form accepted by the JS helper.
 
@@ -94,11 +102,11 @@ def normalize_creation_request(
 ) -> CharacterCreationRequest:
     """Validate and normalize the values sent to EveJS internals."""
     root = Path(request.evejs_root).expanduser()
-    username = request.username.strip()
+    username = normalize_account_name(request.username)
     character_name = normalize_character_name(request.character_name)
     if not root.is_dir():
         raise CharacterCreationError("Select a valid EveJS root first.")
-    if not _ACCOUNT_PATTERN.fullmatch(username):
+    if username is None:
         raise CharacterCreationError(
             "Account names must be 3-32 characters and use only letters, "
             "numbers, dots, dashes, or underscores."

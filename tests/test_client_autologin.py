@@ -153,6 +153,12 @@ def test_arguments_use_only_dummy_local_value_and_exact_character_id() -> None:
     )
 
 
+def test_account_only_login_omits_character_selection() -> None:
+    assert build_auto_login_arguments(AutoLoginLaunch("fixture-new")) == (
+        "/noconsole", "/login:fixture-new:evejs-local",
+    )
+
+
 @pytest.mark.parametrize(
     "intent",
     [

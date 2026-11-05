@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from src.core import launcher
-from src.core.client_autologin import AutoLoginLaunch
+from src.core.client_autologin import AutoLoginLaunch, build_auto_login_arguments
 from src.core.launcher import ClientLaunchContext
 from src.core.runtime.endpoints import Endpoint, RuntimeEndpoints
 
@@ -683,9 +683,13 @@ def test_launch_client_preserves_unicode_paths_through_the_spawn_boundary(
     assert env["USERNAME"] == "EVEJS-USER"
 
 
+@pytest.mark.parametrize("hide_console", [False, True])
+@pytest.mark.parametrize("character_id", [None, 90000001])
 def test_launch_client_passes_only_verified_typed_auto_login_arguments(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    hide_console: bool,
+    character_id: int | None,
 ) -> None:
     _accept_fixture_cache(monkeypatch)
     profile_tq = tmp_path / "profiles" / "account" / "tq"
@@ -700,11 +704,7 @@ def test_launch_client_passes_only_verified_typed_auto_login_arguments(
     monkeypatch.setattr(
         launcher,
         "require_auto_login_arguments",
-        lambda intent, **kwargs: (
-            "/noconsole",
-            f"/login:{intent.username}:fixture-dummy",
-            f"/autoSelectCharacter:{intent.character_id}",
-        ),
+        lambda intent, **kwargs: build_auto_login_arguments(intent),
     )
     monkeypatch.setattr(
         launcher,
@@ -723,16 +723,58 @@ def test_launch_client_passes_only_verified_typed_auto_login_arguments(
         profile_tq_path=profile_tq,
         client_path=str(configured_tq),
         launch_context=ClientLaunchContext.native(),
-        auto_login=AutoLoginLaunch("fixture-account", 90000001),
+        auto_login=AutoLoginLaunch("fixture-account", character_id),
+        hide_console=hide_console,
     )
 
     assert result is not None
     assert captured["arguments"] == (
         "/port:26000",
         "/noconsole",
-        "/login:fixture-account:fixture-dummy",
-        "/autoSelectCharacter:90000001",
+        "/login:fixture-account:evejs-local",
+    ) + (("/autoSelectCharacter:90000001",) if character_id is not None else ())
+
+
+@pytest.mark.parametrize(
+    ("hide_console", "supports_switch", "expected_arguments"),
+    [
+        (True, True, ("/port:26000", "/noconsole")),
+        (False, True, ("/port:26000",)),
+        (True, False, ("/port:26000",)),
+    ],
+)
+def test_manual_login_hides_console_without_auto_login_arguments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hide_console: bool,
+    supports_switch: bool,
+    expected_arguments: tuple[str, ...],
+) -> None:
+    _accept_fixture_cache(monkeypatch)
+    profile_tq = tmp_path / "profiles" / "fixture-account" / "tq"
+    exe = profile_tq / "bin64" / "exefile.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"fixture /noconsole" if supports_switch else b"fixture")
+    configured_tq = tmp_path / "client" / "tq"
+    _create_client_cache(configured_tq)
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(launcher, "get_client_exe_path", lambda _path: exe)
+    monkeypatch.setattr(
+        launcher, "require_auto_login_arguments",
+        lambda *_args, **_kwargs: pytest.fail("Manual login must stay manual"),
     )
+    monkeypatch.setattr(
+        launcher, "launch_eve_client",
+        lambda executable, env, cwd, *, arguments: captured.update(arguments=arguments)
+        or object(),
+    )
+
+    launcher.launch_client(
+        evejs_root=str(tmp_path / "evejs"), profile_tq_path=profile_tq,
+        client_path=str(configured_tq), hide_console=hide_console,
+    )
+
+    assert captured["arguments"] == expected_arguments
 
 
 @pytest.mark.parametrize("missing", ["resfiles", "index"])

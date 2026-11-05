@@ -57,7 +57,10 @@ Services started elsewhere are detected as externally managed. The launcher does
 - Search, filter, hide characters, and create named launch groups with **Manage Groups**.
 - Launch one character, all visible characters, or the selected group. Launches are staggered, and the same account cannot be launched twice at once.
 - Cancel a launch queue without closing clients that already started.
-- Create characters on Native or compatible Managed Docker installations. Optional GM and overview-copy controls are available where supported.
+- **Simple New Character** signs into the entered account automatically when Auto-Login is enabled and supported, then lets you create your character in-game. The server stays running and the client's debug console stays hidden on supported clients. New accounts require the server's `devAutoCreateAccounts` setting; existing clients may stay open.
+
+  Account-only login starts with an independent profile. Once the character exists, launches from its roster card use your configured shared character settings.
+- **Advanced Character Create** reveals starter-character, GM, and overview-copy settings. Close EVE clients first. The launcher stops its services briefly, backs up and verifies the changes, then restores the prior service state. Services started elsewhere must be stopped from their original console first.
 - On Native, deletion requires services and clients to be offline, makes a backup, and asks for typed confirmation.
 
 Each account uses its own launcher profile. Normal login stays inside the EVE client. Compatible Native installations can opt into **Auto-Login Character** after the launcher verifies the supported client and local server setup; real account passwords are not stored.

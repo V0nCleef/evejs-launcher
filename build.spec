@@ -105,6 +105,7 @@ a = Analysis(
         ("assets/hero/hero_nebula.png", "assets/hero"),  # updater artwork fallback
         ('assets/deep_signal/operations_orbital.png', 'assets/deep_signal'),
         ('assets/deep_signal/operations_scene.json', 'assets/deep_signal'),
+        ('assets/character_creation/*.png', 'assets/character_creation'),
         # Explicit release allowlist: review renders and future drafts must not
         # become bundled merely because somebody placed a WAV beside this file.
         # Personal playlist paths remain local config references.

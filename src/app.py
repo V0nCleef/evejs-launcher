@@ -96,6 +96,7 @@ from .core.groups import (
     select_group,
 )
 from .core.character_creation import (
+    normalize_account_name,
     CharacterCreationRequest,
     CharacterCreationResult,
     normalize_character_name,
@@ -430,65 +431,62 @@ def _prepare_and_spawn_client(request: ClientLaunchRequest) -> LaunchedProcess:
     auto_login = None
     docker_auto_login_probe = None
     server_password_bypass_verified = False
-    if request.auto_login_enabled:
-        if request.character_id is None:
+    # A blank character name is the explicit account-only creation route.
+    # Preserve manual fallback for named roster launches whose ID is missing.
+    if request.auto_login_enabled and (
+        request.character_id is not None or not request.character_name
+    ):
+        if request.launch_context.target_identity is not None:
+            docker_auto_login_probe = request.docker_auto_login_probe
+            if docker_auto_login_probe is None:
+                raise DockerAutoLoginContextError(
+                    "The selected Docker launch target could not be verified."
+                )
+        client_capability = inspect_client_auto_login_capability(
+            request.client_path
+        )
+        if not client_capability.supported:
             log.info(
-                "Client auto-login requested but no character ID was supplied; "
-                "starting in manual login mode."
+                "Client auto-login requested but the copied client is "
+                "unsupported; starting in manual login mode (%s).",
+                client_capability.reason,
             )
-        else:
-            if request.launch_context.target_identity is not None:
-                docker_auto_login_probe = request.docker_auto_login_probe
-                if docker_auto_login_probe is None:
-                    raise DockerAutoLoginContextError(
-                        "The selected Docker launch target could not be verified."
-                    )
-            client_capability = inspect_client_auto_login_capability(
-                request.client_path
+        elif request.launch_context.target_identity is not None:
+            probe = request.docker_auto_login_probe
+            assert probe is not None
+            check = inspect_docker_auto_login_capability(
+                probe,
+                request.launch_context,
             )
-            if not client_capability.supported:
-                log.info(
-                    "Client auto-login requested but the copied client is "
-                    "unsupported; starting in manual login mode (%s).",
-                    client_capability.reason,
+            if check.enabled:
+                server_password_bypass_verified = True
+                auto_login = AutoLoginLaunch(
+                    username=request.username,
+                    character_id=request.character_id,
                 )
-            elif request.launch_context.target_identity is not None:
-                probe = request.docker_auto_login_probe
-                assert probe is not None
-                check = inspect_docker_auto_login_capability(
-                    probe,
-                    request.launch_context,
-                )
-                docker_auto_login_probe = probe
-                if check.enabled:
-                    server_password_bypass_verified = True
-                    auto_login = AutoLoginLaunch(
-                        username=request.username,
-                        character_id=request.character_id,
-                    )
-                else:
-                    log.info(
-                        "Client auto-login requested but the Docker server "
-                        "setting is unavailable; starting in manual login mode "
-                        "(%s).",
-                        check.reason,
-                    )
             else:
-                capability = inspect_auto_login_capability(
-                    request.evejs_root,
-                    request.client_path,
+                log.info(
+                    "Client auto-login requested but the Docker server "
+                    "setting is unavailable; starting in manual login mode "
+                    "(%s).",
+                    check.reason,
                 )
-                if capability.supported:
-                    auto_login = AutoLoginLaunch(
-                        username=request.username,
-                        character_id=request.character_id,
-                    )
-                else:
-                    log.info(
-                        "Client auto-login requested but the Native setup is "
-                        "unsupported; starting in manual login mode (%s).",
-                        capability.reason,
-                    )
+        else:
+            capability = inspect_auto_login_capability(
+                request.evejs_root,
+                request.client_path,
+            )
+            if capability.supported:
+                auto_login = AutoLoginLaunch(
+                    username=request.username,
+                    character_id=request.character_id,
+                )
+            else:
+                log.info(
+                    "Client auto-login requested but the Native setup is "
+                    "unsupported; starting in manual login mode (%s).",
+                    capability.reason,
+                )
     log.info(
         "Client auto-login state requested=%s candidate=%s account=%s",
         request.auto_login_enabled,
@@ -515,6 +513,7 @@ def _prepare_and_spawn_client(request: ClientLaunchRequest) -> LaunchedProcess:
         client_path=request.client_path,
         launch_context=request.launch_context,
         auto_login=auto_login,
+        hide_console=request.hide_console,
         auto_login_server_password_bypass_verified=(
             server_password_bypass_verified
         ),
@@ -5234,6 +5233,7 @@ class MainWindow(QMainWindow):
         )
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         dialog.create_requested.connect(self._on_new_character_create)
+        dialog.account_login_requested.connect(self._on_new_account_login)
         dialog.patch_requested.connect(
             lambda: self._begin_overview_patch(OverviewPatchAction.PATCH)
         )
@@ -5376,6 +5376,25 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "EVE Client", message)
         if self._close_in_progress:
             QTimer.singleShot(0, self.close)
+
+    @pyqtSlot(str)
+    def _on_new_account_login(self, username: str) -> None:
+        """Use normal client registration without acquiring maintenance ownership."""
+        dialog = self._new_character_dialog
+        if dialog is None or self._close_in_progress:
+            return
+        if self._lifecycle_active() or self._mod_removal_conflict_active():
+            dialog.show_error("Wait for the current launcher operation to finish.")
+            return
+        username = normalize_account_name(username)
+        if username is None:
+            dialog.show_error(
+                "Account names must be 3-32 characters and use only letters, "
+                "numbers, dots, dashes, or underscores."
+            )
+            return
+        dialog.accept()
+        self._on_character_launch(username, "")
 
     def _on_new_character_create(self, draft: NewCharacterDraft) -> None:
         dialog = self._new_character_dialog
@@ -6624,6 +6643,13 @@ class MainWindow(QMainWindow):
                     QMessageBox.information(self, "Overview Copy", message)
                 return None
 
+        # Account-only login has no authenticated character IDs yet. Use its
+        # independent login profile until normal character launches can apply
+        # the configured shared character settings.
+        settings_mode = (
+            "separate" if character_id is None
+            else str(self._cfg.get("client_settings_mode", "separate"))
+        )
         return ClientLaunchRequest(
             username=username,
             character_name=character_name,
@@ -6633,13 +6659,20 @@ class MainWindow(QMainWindow):
             launch_context=launch_context,
             character_id=character_id,
             auto_login_enabled=auto_login_enabled,
+            hide_console=character_id is None,
             docker_auto_login_probe=docker_auto_login_probe,
             overview_bridge=overview_bridge,
-            client_settings_mode=str(self._cfg.get("client_settings_mode", "separate")),
-            shared_settings_folder=str(self._cfg.get("shared_settings_folder", "")),
+            client_settings_mode=settings_mode,
+            shared_settings_folder=(
+                str(self._cfg.get("shared_settings_folder", ""))
+                if settings_mode == "shared" else ""
+            ),
             account_id=next((account.account_id for account in getattr(self, "_accounts", ())
                              if account.username == username), None),
-            shared_settings_source=SharedSettingsSource.from_config(self._cfg.get("shared_settings_source")),
+            shared_settings_source=(
+                SharedSettingsSource.from_config(self._cfg.get("shared_settings_source"))
+                if settings_mode == "shared" else None
+            ),
         )
 
     @staticmethod
@@ -6791,7 +6824,7 @@ class MainWindow(QMainWindow):
             request.username,
             request.character_name,
         )
-        if not from_queue:
+        if not from_queue and request.character_name:
             self._announce_shipboard(
                 VoiceEvent.CHARACTER_LAUNCHING,
                 character_name=request.character_name,

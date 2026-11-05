@@ -9,6 +9,10 @@ from .translations_eu import UI_PHRASES_BY_LANGUAGE as EU_UI_PHRASES
 from .translations_character_details import TRANSLATIONS as _CHARACTER_TRANSLATIONS
 from .translations_ja_ko import UI_PHRASES_BY_LANGUAGE as JA_KO_UI_PHRASES
 from .translations_auto_login import UI_PHRASES_BY_LANGUAGE as AUTO_LOGIN_UI_PHRASES
+from .translations_character_setup import (
+    SOURCE_PHRASES as CHARACTER_SETUP_SOURCE_PHRASES,
+    UI_PHRASES_BY_LANGUAGE as CHARACTER_SETUP_UI_PHRASES,
+)
 from .translations_startup_scripts import (
     SOURCE_PHRASES as STARTUP_SCRIPT_SOURCE_PHRASES,
     UI_PHRASES_BY_LANGUAGE as STARTUP_SCRIPT_UI_PHRASES,
@@ -38,11 +42,13 @@ for _language, _catalog in STARTUP_SCRIPT_UI_PHRASES.items():
     UI_PHRASES_BY_LANGUAGE[_language] = {**UI_PHRASES_BY_LANGUAGE[_language], **_catalog}
 for _language, _catalog in SHARED_SETTINGS_UI_PHRASES.items():
     UI_PHRASES_BY_LANGUAGE[_language] = {**UI_PHRASES_BY_LANGUAGE[_language], **_catalog}
+for _language, _catalog in CHARACTER_SETUP_UI_PHRASES.items():
+    UI_PHRASES_BY_LANGUAGE[_language] = {**UI_PHRASES_BY_LANGUAGE[_language], **_catalog}
 
 # A few feature catalogs register phrases after the exact-key legacy catalogs
 # load, so those older catalogs can keep enforcing their own source parity.
 SOURCE_PHRASES = tuple(
-    sorted(set(_CANONICAL_SOURCE_PHRASES) | set(AUTO_LOGIN_SOURCE_PHRASES) | set(STARTUP_SCRIPT_SOURCE_PHRASES) | set(SHARED_SETTINGS_SOURCE_PHRASES))
+    sorted(set(_CANONICAL_SOURCE_PHRASES) | set(AUTO_LOGIN_SOURCE_PHRASES) | set(STARTUP_SCRIPT_SOURCE_PHRASES) | set(SHARED_SETTINGS_SOURCE_PHRASES) | set(CHARACTER_SETUP_SOURCE_PHRASES))
 )
 SOURCE_PHRASE_SET = frozenset(SOURCE_PHRASES)
 

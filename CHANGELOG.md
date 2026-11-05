@@ -2,6 +2,14 @@
 
 ## Changelog
 
+## v1.0.77 - 2026-11-05
+
+- Choose between illustrated **Simple New Character** and **Advanced Character Create** buttons. Simple lets you create accounts and characters in-game while game and market services stay online; Advanced keeps the offline starter-character, GM, and overview options.
+- Simple creation signs into the entered account automatically when Auto-Login is enabled and supported, without selecting an existing character. The EVE debug console stays hidden on supported clients.
+- New-account login uses an independent profile even when shared character settings are enabled. Later launches from the character roster use the selected shared settings.
+- Entered names are preserved when switching creation methods, and the form scrolls on shorter screens.
+- Thanks to Delta0070 for reporting the missing online account-creation option. 🫡
+
 ## v1.0.76 - 2026-10-29
 
 - Character launch uses the installed DLSS5 renderer independently of the selected EveJS version, mod folder, installation receipts and server attachments.

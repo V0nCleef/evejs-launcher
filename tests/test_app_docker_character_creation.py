@@ -42,6 +42,7 @@ class _Signal:
 class _DialogSpy:
     def __init__(self) -> None:
         self.create_requested = _Signal()
+        self.account_login_requested = _Signal()
         self.patch_requested = _Signal()
         self.restore_requested = _Signal()
         self.finished = _Signal()
@@ -294,6 +295,7 @@ def test_managed_docker_enables_and_opens_character_dialog(
     assert window._new_character_dialog is opened
     assert constructor["kwargs"]["runtime_label"] == "MANAGED DOCKER COMPOSE"  # type: ignore[index]
     assert opened.create_requested.slots == [window._on_new_character_create]
+    assert opened.account_login_requested.slots == [window._on_new_account_login]
 
 
 def test_connect_only_disables_and_denies_character_dialog(

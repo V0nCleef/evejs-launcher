@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 import threading
 import time
@@ -775,18 +776,20 @@ def test_stale_queue_completion_cannot_clear_current_launch_queue(
         window.deleteLater()
 
 
-def test_perform_launch_forwards_exact_character_as_typed_auto_login_intent(
+@pytest.mark.parametrize("character_id", [None, 90000001])
+def test_perform_launch_forwards_account_and_optional_character_as_auto_login_intent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    character_id: int | None,
 ) -> None:
     request = ClientLaunchRequest(
         username="fixture-account",
-        character_name="Fixture Character",
+        character_name="Fixture Character" if character_id is not None else "",
         evejs_root=str(tmp_path / "evejs"),
         client_path=str(tmp_path / "client" / "tq"),
         profiles_root=tmp_path / "profiles",
         launch_context=ClientLaunchContext.native(),
-        character_id=90000001,
+        character_id=character_id,
         auto_login_enabled=True,
     )
     (request.profiles_root / request.username / "tq").mkdir(parents=True)
@@ -834,7 +837,7 @@ def test_perform_launch_forwards_exact_character_as_typed_auto_login_intent(
     intent = captured["auto_login"]
     assert intent is not None
     assert intent.username == "fixture-account"
-    assert intent.character_id == 90000001
+    assert intent.character_id == character_id
     assert captured["auto_login_server_password_bypass_verified"] is False
     pre_spawn_check = captured["pre_spawn_check"]
     assert callable(pre_spawn_check)
@@ -843,10 +846,12 @@ def test_perform_launch_forwards_exact_character_as_typed_auto_login_intent(
 
 
 @pytest.mark.parametrize("bypass_enabled", [True, False])
+@pytest.mark.parametrize("character_id", [None, 90000001])
 def test_docker_launch_uses_only_verified_bypass_and_rechecks_before_spawn(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     bypass_enabled: bool,
+    character_id: int | None,
 ) -> None:
     target = ComposeTarget(tmp_path / "compose.yaml", tmp_path, "fixture")
     context = ClientLaunchContext(
@@ -860,12 +865,12 @@ def test_docker_launch_uses_only_verified_bypass_and_rechecks_before_spawn(
     )
     request = ClientLaunchRequest(
         username="fixture-account",
-        character_name="Fixture Character",
+        character_name="Fixture Character" if character_id is not None else "",
         evejs_root=str(tmp_path / "evejs"),
         client_path=str(tmp_path / "client" / "tq"),
         profiles_root=tmp_path / "profiles",
         launch_context=context,
-        character_id=90000001,
+        character_id=character_id,
         auto_login_enabled=True,
         docker_auto_login_probe=DockerAutoLoginProbe(target, "b" * 64),
     )
@@ -931,15 +936,21 @@ def test_docker_launch_uses_only_verified_bypass_and_rechecks_before_spawn(
     assert identity_checks == [(request.docker_auto_login_probe, context)]
 
 
-def test_perform_launch_keeps_manual_mode_argument_free(
+@pytest.mark.parametrize("auto_login_requested", [False, True])
+def test_named_character_without_id_keeps_manual_mode_argument_free(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    auto_login_requested: bool,
 ) -> None:
-    request = _request(tmp_path)
+    request = replace(_request(tmp_path), auto_login_enabled=auto_login_requested)
     (request.profiles_root / request.username / "tq").mkdir(parents=True)
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(app_module, "wait_for_client_endpoints", lambda _context: None)
+    monkeypatch.setattr(
+        app_module, "inspect_client_auto_login_capability",
+        lambda *_args: pytest.fail("A named character needs its ID for automatic login"),
+    )
     monkeypatch.setattr(
         app_module,
         "create_profile",

@@ -47,10 +47,10 @@ class AutoLoginCapability:
 
 @dataclass(frozen=True)
 class AutoLoginLaunch:
-    """Validated-at-launch intent to sign in and enter one character."""
+    """Validated-at-launch intent to sign in and optionally enter a character."""
 
     username: str
-    character_id: int
+    character_id: int | None = None
 
 
 class AutoLoginUnavailableError(RuntimeError):
@@ -97,7 +97,7 @@ def _client_entries_match(code_archive: Path) -> bool:
     return True
 
 
-def _client_supports_no_console(executable: Path) -> bool:
+def supports_client_no_console(executable: Path) -> bool:
     """Return whether the copied client exposes its native no-console mode."""
     try:
         return b"/noconsole" in executable.read_bytes()
@@ -146,7 +146,7 @@ def inspect_client_auto_login_capability(
             "The build 3396210 login modules are missing or modified.",
             build=build,
         )
-    if not _client_supports_no_console(client / "bin64" / "exefile.exe"):
+    if not supports_client_no_console(client / "bin64" / "exefile.exe"):
         return _unsupported(
             "The copied client does not expose the required no-console mode.",
             build=build,
@@ -170,8 +170,8 @@ def is_loopback_host(host: str) -> bool:
         return False
 
 
-def build_auto_login_arguments(intent: AutoLoginLaunch) -> tuple[str, str, str]:
-    """Build the three client arguments allowed for automatic login."""
+def build_auto_login_arguments(intent: AutoLoginLaunch) -> tuple[str, ...]:
+    """Build native account login, optionally selecting an existing character."""
     username = intent.username
     if (
         not isinstance(username, str)
@@ -182,17 +182,19 @@ def build_auto_login_arguments(intent: AutoLoginLaunch) -> tuple[str, str, str]:
     ):
         raise ValueError("The account username is not safe for automatic login.")
     character_id = intent.character_id
-    if (
+    if character_id is not None and (
         isinstance(character_id, bool)
         or not isinstance(character_id, int)
         or character_id <= 0
     ):
         raise ValueError("A positive character ID is required for automatic login.")
-    return (
+    arguments = (
         NO_CONSOLE_ARGUMENT,
         f"/login:{username}:{LOCAL_DUMMY_PASSWORD}",
-        f"/autoSelectCharacter:{character_id}",
     )
+    if character_id is not None:
+        arguments += (f"/autoSelectCharacter:{character_id}",)
+    return arguments
 
 
 def require_auto_login_arguments(
@@ -202,7 +204,7 @@ def require_auto_login_arguments(
     client_path: str | Path,
     game_host: str,
     server_password_bypass_verified: bool = False,
-) -> tuple[str, str, str]:
+) -> tuple[str, ...]:
     """Fail closed unless copied-client and server gates have been verified.
 
     Docker callers may attest the server setting from the selected running

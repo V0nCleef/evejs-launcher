@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import re
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -15,12 +15,13 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
 from src.constants import COLORS as C, SEMANTIC_COLORS as S
-from src.core.character_creation import normalize_character_name
+from src.core.character_creation import normalize_account_name, normalize_character_name
 from src.core.db import Account
 from src.core.overview_patch import OverviewPatchState, OverviewPatchStatus
 from src.i18n import translate_ui_phrase
@@ -29,9 +30,7 @@ from src.widgets.ui_translation import (
     set_translatable_text,
     set_translatable_text_template,
 )
-
-
-_ACCOUNT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{2,31}$")
+from src.widgets.character_setup_button import CharacterSetupButton
 
 
 @dataclass(frozen=True)
@@ -44,6 +43,7 @@ class NewCharacterDraft:
 
 class NewCharacterDialog(QDialog):
     create_requested = pyqtSignal(object)
+    account_login_requested = pyqtSignal(str)
     patch_requested = pyqtSignal()
     restore_requested = pyqtSignal()
 
@@ -61,8 +61,10 @@ class NewCharacterDialog(QDialog):
         self.setModal(True)
         self.setObjectName("newCharacterDialog")
         self.setProperty("deepSignal", True)
-        self.resize(680, 600)
-        self.setMinimumSize(560, 520)
+        self.resize(720, 720)
+        self.setMinimumSize(560, 580)
+        if self.screen() is not None:
+            self.resize(720, max(580, min(720, self.screen().availableGeometry().height() - 60)))
         self.setMaximumWidth(760)
         self.setAccessibleName("Create new local character")
         self._accounts = list(accounts)
@@ -70,6 +72,7 @@ class NewCharacterDialog(QDialog):
         self._patch_status = patch_status
         self._runtime_label = str(runtime_label).strip().upper() or "EVEJS RUNTIME"
         self._busy = False
+        self._setup_mode = "online"
         self._build_ui()
         register_translatable_widget_tree(self)
         self._apply_deep_signal_style()
@@ -94,15 +97,41 @@ class NewCharacterDialog(QDialog):
         title.setObjectName("dialogTitle")
         title.setProperty("class", "title")
         root.addWidget(title)
-        intro = QLabel(
-            "Creates a new local EveJS account and its starter character. "
-            "The game and market services are stopped briefly so the database "
-            "can be backed up and updated safely."
+        self.easy_button = CharacterSetupButton(
+            "Simple New Character", "Start your journey in-game.",
+            "SERVER STAYS ONLINE", "easy.png", accent="#66dfef",
         )
-        intro.setWordWrap(True)
-        intro.setObjectName("dialogIntro")
-        intro.setProperty("class", "secondary")
-        root.addWidget(intro)
+        self.advanced_button = CharacterSetupButton(
+            "Advanced Character Create", "Configure your pilot before launch.",
+            "OFFLINE SETUP", "advanced.png", accent="#e6b970",
+        )
+        self._setup_group = QButtonGroup(self)
+        self._setup_group.setExclusive(True)
+        self._setup_group.addButton(self.easy_button, 0)
+        self._setup_group.addButton(self.advanced_button, 1)
+        self.easy_button.setChecked(True)
+        choices = QHBoxLayout()
+        choices.setSpacing(12)
+        choices.addWidget(self.easy_button, 1)
+        choices.addWidget(self.advanced_button, 1)
+        root.addLayout(choices)
+        self.intro_label = QLabel()
+        self.intro_label.setWordWrap(True)
+        self.intro_label.setObjectName("dialogIntro")
+        self.intro_label.setProperty("class", "secondary")
+        root.addWidget(self.intro_label)
+
+        self.form_scroll = QScrollArea()
+        self.form_scroll.setWidgetResizable(True)
+        self.form_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.form_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.form_scroll.setStyleSheet("QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: none; }")
+        form_content = QWidget()
+        body = QVBoxLayout(form_content)
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(12)
+        self.form_scroll.setWidget(form_content)
+        root.addWidget(self.form_scroll, 1)
 
         identity_card = QFrame()
         identity_card.setObjectName("identityCard")
@@ -111,10 +140,12 @@ class NewCharacterDialog(QDialog):
         identity_layout.setContentsMargins(16, 14, 16, 14)
         identity_layout.setSpacing(10)
         identity_title = QLabel("ACCOUNT & CHARACTER")
+        self.identity_title = identity_title
         identity_title.setObjectName("identityTitle")
         identity_title.setProperty("class", "sectionTitle")
         identity_layout.addWidget(identity_title)
         form = QFormLayout()
+        self._identity_form = form
         form.setHorizontalSpacing(18)
         form.setVerticalSpacing(10)
         self.account_edit = QLineEdit()
@@ -132,17 +163,15 @@ class NewCharacterDialog(QDialog):
         form.addRow("Character name:", self.character_edit)
         form.addRow("GM account:", self.gm_check)
         identity_layout.addLayout(form)
-        password_note = QLabel(
-            "Local login uses the launcher's EveJS development credential; no "
-            "real EVE Online credentials are created or stored."
-        )
-        password_note.setWordWrap(True)
-        password_note.setObjectName("credentialNote")
-        password_note.setProperty("class", "muted")
-        identity_layout.addWidget(password_note)
-        root.addWidget(identity_card)
+        self.password_note = QLabel()
+        self.password_note.setWordWrap(True)
+        self.password_note.setObjectName("credentialNote")
+        self.password_note.setProperty("class", "muted")
+        identity_layout.addWidget(self.password_note)
+        body.addWidget(identity_card)
 
         overview_card = QFrame()
+        self.overview_card = overview_card
         overview_card.setObjectName("overviewCard")
         overview_card.setProperty("class", "card")
         overview_layout = QVBoxLayout(overview_card)
@@ -191,7 +220,8 @@ class NewCharacterDialog(QDialog):
         self.restore_button.clicked.connect(self.restore_requested.emit)
         patch_row.addWidget(self.restore_button)
         overview_layout.addLayout(patch_row)
-        root.addWidget(overview_card)
+        body.addWidget(overview_card)
+        body.addStretch(1)
 
         self.error_label = QLabel()
         self.error_label.setObjectName("dialogError")
@@ -217,6 +247,44 @@ class NewCharacterDialog(QDialog):
         self.account_edit.textChanged.connect(self._validate)
         self.character_edit.textChanged.connect(self._validate)
         self.overview_combo.currentIndexChanged.connect(self._validate)
+        self._setup_group.idClicked.connect(self._on_setup_method_clicked)
+        self._update_setup_mode()
+
+    @property
+    def setup_mode(self) -> str:
+        return self._setup_mode
+
+    def _on_setup_method_clicked(self, button_id: int) -> None:
+        self._setup_mode = "online" if button_id == 0 else "offline"
+        self._update_setup_mode()
+
+    def _update_setup_mode(self) -> None:
+        online = self._setup_mode == "online"
+        self._identity_form.setRowVisible(self.character_edit, not online)
+        self._identity_form.setRowVisible(self.gm_check, not online)
+        self.overview_card.setVisible(not online)
+        set_translatable_text(self.identity_title, "ACCOUNT LOGIN" if online else "ACCOUNT & CHARACTER")
+        set_translatable_text(
+            self.intro_label,
+            "Launch the EVE client while game and market services keep running. "
+            "Sign in with the account name below, then create your character "
+            "in-game. The server must allow automatic account creation."
+            if online else
+            "Creates a new local EveJS account and its starter character. "
+            "The game and market services are stopped briefly so the database "
+            "can be backed up and updated safely.",
+        )
+        set_translatable_text(
+            self.password_note,
+            "Registration and account permissions are controlled by the server. "
+            "Existing accounts can also log in here."
+            if online else
+            "Local login uses the launcher's EveJS development credential; no "
+            "real EVE Online credentials are created or stored.",
+        )
+        self.show_error("")
+        self._style_action_button(self.create_button, "primary" if online else "advanced")
+        self._validate()
 
     def _apply_deep_signal_style(self) -> None:
         """Give the native dialog the same static glass-console treatment."""
@@ -232,7 +300,7 @@ class NewCharacterDialog(QDialog):
             }}
             QLabel#dialogEyebrow {{
                 color: {S['accent']};
-                font-size: 13px;
+                font-size: 9px;
                 font-weight: 700;
                 letter-spacing: 2px;
             }}
@@ -242,7 +310,7 @@ class NewCharacterDialog(QDialog):
                 font-weight: 700;
                 letter-spacing: 2px;
             }}
-            QLabel#dialogIntro {{ color: {S['text_secondary']}; font-size: 13px; }}
+            QLabel#dialogIntro {{ color: {S['text_secondary']}; font-size: 11px; }}
             QFrame#identityCard, QFrame#overviewCard {{
                 background-color: rgba(10, 24, 36, 232);
                 border: 1px solid {S['border']};
@@ -250,13 +318,13 @@ class NewCharacterDialog(QDialog):
             }}
             QLabel#identityTitle, QLabel#overviewTitle {{
                 color: {S['accent']};
-                font-size: 13px;
+                font-size: 10px;
                 font-weight: 700;
                 letter-spacing: 1px;
             }}
             QLabel#credentialNote, QLabel#overviewHint {{
                 color: {S['text_muted']};
-                font-size: 13px;
+                font-size: 10px;
             }}
             QLineEdit, QComboBox {{
                 min-height: 32px;
@@ -294,7 +362,10 @@ class NewCharacterDialog(QDialog):
 
     @staticmethod
     def _style_action_button(button: QPushButton, variant: str) -> None:
-        if variant == "primary":
+        if variant == "advanced":
+            background, color, border = C["gold"], S["background"], C["gold"]
+            hover_background, hover_color = S["text_primary"], S["background"]
+        elif variant == "primary":
             background, color, border = S["accent"], S["background"], S["accent"]
             hover_background, hover_color = S["text_primary"], S["background"]
         elif variant == "secondary":
@@ -313,7 +384,7 @@ class NewCharacterDialog(QDialog):
                 border: 1px solid {border};
                 border-radius: 5px;
                 padding: 0 14px;
-                font-size: 13px;
+                font-size: 9px;
                 font-weight: 700;
                 letter-spacing: 1px;
             }}
@@ -371,6 +442,8 @@ class NewCharacterDialog(QDialog):
     def set_busy(self, busy: bool, message: str = "") -> None:
         self._busy = bool(busy)
         for widget in (
+            self.easy_button,
+            self.advanced_button,
             self.account_edit,
             self.character_edit,
             self.gm_check,
@@ -393,15 +466,16 @@ class NewCharacterDialog(QDialog):
         return value if isinstance(value, int) and not isinstance(value, bool) else None
 
     def _validate(self) -> None:
-        username = self.account_edit.text().strip()
+        username = normalize_account_name(self.account_edit.text())
         character_name = normalize_character_name(self.character_edit.text())
         source_id = self._selected_source()
+        online = self._setup_mode == "online"
         valid = bool(
-            _ACCOUNT_PATTERN.fullmatch(username)
-            and character_name is not None
+            username is not None
+            and (online or character_name is not None)
         )
-        action_text = "CREATE CHARACTER"
-        if source_id is not None:
+        action_text = "LAUNCH CLIENT" if online else "CREATE CHARACTER"
+        if not online and source_id is not None:
             if self._patch_status.state is not OverviewPatchState.PATCHED:
                 valid = False
                 action_text = "PATCH CLIENT FIRST"
@@ -435,13 +509,20 @@ class NewCharacterDialog(QDialog):
     def _submit(self) -> None:
         if not self.create_button.isEnabled():
             return
+        username = normalize_account_name(self.account_edit.text())
+        if username is None:
+            return
+        if self._setup_mode == "online":
+            self.show_error("")
+            self.account_login_requested.emit(username)
+            return
         character_name = normalize_character_name(self.character_edit.text())
         if character_name is None:
             return
         self.show_error("")
         self.create_requested.emit(
             NewCharacterDraft(
-                username=self.account_edit.text().strip(),
+                username=username,
                 character_name=character_name,
                 is_gm=self.gm_check.isChecked(),
                 overview_source_character_id=self._selected_source(),

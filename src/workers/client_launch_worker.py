@@ -44,6 +44,7 @@ class ClientLaunchRequest:
     shared_settings_folder: str = ""
     account_id: int | None = None
     shared_settings_source: SharedSettingsSource | None = None
+    hide_console: bool = False
 
 
 @dataclass(frozen=True)

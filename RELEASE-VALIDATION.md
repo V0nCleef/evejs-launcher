@@ -1,31 +1,39 @@
-# Launcher 1.0.76 release validation
+# Launcher 1.0.77 release validation
 
-Character startup no longer installs or verifies DLSS5, reads its installation
-receipt, or requires a server attachment. Installed renderer detection uses the
-physical client only. Private graphics preferences use a stable profile folder
-across server upgrades; existing preferences and unrelated addons are retained.
+Simple New Character signs into an account without selecting an existing
+character, allowing creation in-game while the game and market services stay
+online. Advanced Character Create retains the offline maintenance workflow.
 
-- The user confirmed character startup and working DLSS with the tested 1.0.76
-  executable and local DLSS lifecycle fixes, then authorized both releases.
-- The public release retains that exact executable. Its entry point and all 177
-  bundled application modules match the public release sources after excluding
-  compilation-path metadata. No renderer or client binary is bundled or changed.
-- Focused launch, public-mod integration, profile settings, graphics migration,
-  worker, queue and shared-drone checks passed. Foundation smoke, compilation,
-  dependency consistency and bundled-version checks passed.
-- Native source and frozen launcher windows opened successfully with isolated
-  settings. The source smoke closed normally; the frozen smoke exited after a
-  normal close. The user's subsequent test provides the live character/DLSS proof.
-- The complete test collection was also attempted. A shared-process Qt access
-  violation required per-file process isolation. Those 194 file runs recorded
-  3,734 passing tests, seven skips and ten failures; another Qt file crashed.
-  All eight failing/crashing files reproduced the same outcomes on untouched
-  1.0.75 source. These pre-existing fixture, expectation and Qt failures remain
-  open; this release does not claim a green full suite or change their code.
-- Release ZIPs are checked for CRC, version, top-level layout and executable
-  identity. Published assets are downloaded again and compared with local hashes.
+- The user confirmed that Simple creation works with automatic account login
+  and no EVE debug console, then authorized the release.
+- The final 377 release-related checks passed in isolated test-file processes.
+  Coverage includes both creation methods, account-only and character login,
+  manual fallback, Native and Docker verification gates, worker/queue behavior,
+  real Windows profile junctions, shared settings, localization and schema-2
+  activation-journal compatibility.
+- All 197 test files were run against the final source. They recorded 3,778
+  passes, seven skips, ten failures and one additional Qt process crash. The
+  same remaining failures and crash reproduced in eight test files on untouched
+  1.0.76 source. These existing fixture, expectation and Qt issues remain open;
+  this release does not claim a green complete suite. Shared-process suite runs
+  also encountered native Qt failures on both versions.
+- A Docker launch regression found during comparison was fixed before release:
+  named characters without an ID retain manual login; the account-only route
+  can use automatic login without an ID.
+- Foundation smoke, source compilation, dependency consistency, build-version
+  agreement and working-tree whitespace checks passed. The builder uses the
+  recorded Windows x64 CPython 3.12.14 and pinned build requirements.
+- The packaged GUI opened as version 1.0.77 with isolated settings and service
+  startup disabled, and a monitored normal close returned exit code 0. Its entry
+  point and all 179 bundled application modules match the reviewed source after
+  excluding compilation filenames. Both character-creation icons match their
+  source bytes; bundled version, changelog and README match the release inputs.
+- The updater ZIP is verified for CRC, top-level directory layout, bundled
+  version, changelog heading and executable identity. Published assets are
+  downloaded again and compared with local SHA-256 hashes.
 
-DLSS5 0.5.12 separately fixes physical-client verification and global removal
-without requiring the selected server to be attached or the old server to exist.
-Its renderer payload remains 0.5.11. No new GPU compatibility matrix, Docker
-gameplay test or additional live auto-login test is claimed for this release.
+Automatic login keeps the existing supported-client, local-endpoint and server
+password-bypass checks. Unknown accounts require server-side automatic account
+creation. No real account password is stored, and no client or renderer binary
+is bundled. Docker paths have automated coverage; no new live Docker gameplay
+validation is claimed.
