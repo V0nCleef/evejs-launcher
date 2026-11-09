@@ -316,6 +316,7 @@ from .ui import update_coordinator as update_coordination
 from .ui.mod_start_compatibility import (
     ModCompatibilityConsent,
     ModStartCompatibilityChoice,
+    ModStartCompatibilityDecision,
     ModStartCompatibilityDialog,
     affected_mods as compatibility_affected_mods,
 )
@@ -2456,17 +2457,19 @@ class MainWindow(QMainWindow):
         installed_version: str,
         *,
         docker_mode: bool = False,
-    ) -> ModStartCompatibilityChoice:
+        mod_keys: tuple[str, ...] | None = None,
+    ) -> ModStartCompatibilityDecision:
         """Dialog seam kept small so start-flow decisions remain testable."""
         dialog = ModStartCompatibilityDialog(
             compatibility,
             installed_version,
             self,
             docker_mode=docker_mode,
+            mod_keys=mod_keys,
         )
         try:
             dialog.exec()
-            return dialog.choice
+            return ModStartCompatibilityDecision(dialog.choice, dialog.selected_mod_keys)
         finally:
             dialog.deleteLater()
 
@@ -2638,11 +2641,15 @@ class MainWindow(QMainWindow):
         )
         from .ui.mod_start_compatibility import ModCompatibilityConsent
 
-        if not self._mod_start_selection_matches(
-            evejs_root,
-            backend,
-            docker_target_identity,
-        ):
+        def selection_matches() -> bool:
+            return self._mod_start_selection_matches(
+                evejs_root, backend, docker_target_identity,
+            ) and (
+                expected_observed_target is None
+                or expected_observed_target == self._current_observed_docker_target_identity()
+            )
+
+        if not selection_matches():
             self._show_mod_compatibility_message(
                 error_title,
                 "The selected EveJS root or backend changed before the "
@@ -2663,78 +2670,113 @@ class MainWindow(QMainWindow):
         if not unsupported and not unknown:
             return "ready", None
 
+        from .core.mod_compatibility_approvals import LocalCompatibilityApprovals, payload_fingerprint
+        from .core.mod_runtime_state import mod_state_key
+        approval_store = LocalCompatibilityApprovals(evejs_root)
+        affected = compatibility_affected_mods(mods, compatibility)
+        approved_payloads = {mod_state_key(mod): approval_store.matching_fingerprint(mod, backend, installed_version) for mod in affected}
+        approved_payloads = {key: value for key, value in approved_payloads.items() if value is not None}
+        unresolved = tuple(mod for mod in affected if mod_state_key(mod) not in approved_payloads)
+        if not unresolved:
+            return "ready", ModCompatibilityConsent.capture(
+                evejs_root, backend, installed_version, mods, compatibility, local_payloads=approved_payloads.items(),
+            )
+        approval_payloads = {}
+        for mod in unresolved:
+            try:
+                approval_payloads[mod_state_key(mod)] = payload_fingerprint(mod)
+            except (OSError, ValueError, RuntimeError):
+                pass  # Run once stays available; this package cannot be remembered.
+
         consent = ModCompatibilityConsent.capture(
             evejs_root,
             backend,
             installed_version,
             mods,
             compatibility,
+            local_payloads={**approved_payloads, **approval_payloads}.items(),
         )
-        choice = self._choose_mod_start_compatibility(
-            compatibility,
-            installed_version,
-            docker_mode=(backend == DOCKER_BACKEND),
-        )
-        if choice is ModStartCompatibilityChoice.CANCEL:
+        while unresolved:
+            # Keep every checkbox bound to its captured physical package, not
+            # an ID/version signature that another package could also declare.
+            review_keys = tuple(mod_state_key(mod) for mod in unresolved)
+            if len(set(review_keys)) != len(review_keys):
+                self._show_mod_compatibility_message(error_title, "The reviewed mod identities are ambiguous. Retry startup.")
+                return "cancelled", None
+            decision = self._choose_mod_start_compatibility(
+                assess_active_runtime_mods(unresolved, installed_version),
+                installed_version,
+                docker_mode=(backend in {"docker", DOCKER_BACKEND}),
+                mod_keys=review_keys,
+            )
+            # Old one-start enum choices remain usable; a bare REMEMBER carries
+            # no explicit selection and must never grant blanket approval.
+            choice = decision.choice if isinstance(decision, ModStartCompatibilityDecision) else decision
+            if not selection_matches():
+                self._show_mod_compatibility_message(
+                    error_title,
+                    "The selected EveJS root or backend changed while the "
+                    "compatibility choice was open. No mod files or processes were changed.",
+                )
+                return "cancelled", None
+            try:
+                current_mods = self._applicable_runtime_mods(evejs_root, backend=backend)
+                current_version = installed_evejs_version(evejs_root)
+            except (ModManagerError, ModRuntimeStateError, OSError, TypeError, ValueError) as exc:
+                self._show_mod_compatibility_message(
+                    error_title,
+                    "The mod set changed while the compatibility choice was open. "
+                    "No mod files or processes were changed.\n\n" + str(exc),
+                )
+                return "cancelled", None
+            if not consent.matches(evejs_root, backend, current_version, current_mods):
+                self._show_mod_compatibility_message(
+                    error_title,
+                    "The mod set or EveJS version changed while the compatibility "
+                    "choice was open. Retry startup to review the current state.",
+                )
+                return "cancelled", None
+            if choice is ModStartCompatibilityChoice.CANCEL:
+                return "cancelled", None
+            if choice is ModStartCompatibilityChoice.RUN_ANYWAY:
+                return "ready", consent
+            if choice is ModStartCompatibilityChoice.REMEMBER:
+                selected = decision.selected_mod_keys if isinstance(decision, ModStartCompatibilityDecision) else ()
+                if (type(selected) is not tuple or not selected
+                        or any(type(key) is not str for key in selected)
+                        or len(set(selected)) != len(selected)
+                        or not set(selected) <= set(review_keys)):
+                    self._show_mod_compatibility_message(error_title, "Choose at least one reviewed mod to remember. Startup was cancelled.")
+                    return "cancelled", None
+                selected_keys = set(selected)
+                if not selected_keys <= approval_payloads.keys():
+                    self._show_mod_compatibility_message(error_title, "The selected mod files could not be verified for local approval.")
+                    return "cancelled", None
+                selected_mods = tuple(mod for mod in current_mods if mod_state_key(mod) in selected_keys)
+                try:
+                    approval_store.remember(
+                        selected_mods, backend, installed_version,
+                        {key: approval_payloads[key] for key in selected},
+                        lease=getattr(self, "_mod_lifecycle_lease", None),
+                    )
+                except (OSError, ValueError, RuntimeError) as exc:
+                    self._show_mod_compatibility_message(error_title, str(exc))
+                    return "cancelled", None
+                unresolved = tuple(mod for mod in unresolved if mod_state_key(mod) not in selected_keys)
+                if not unresolved:
+                    return "ready", consent
+                continue
+            if choice is ModStartCompatibilityChoice.DISABLE_AFFECTED:
+                remaining = set(review_keys)
+                affected = tuple(mod for mod in current_mods if mod_state_key(mod) in remaining)
+                queued = self._queue_compatibility_mod_disable(
+                    evejs_root, backend, affected,
+                    continuation=continuation, error_title=error_title,
+                    docker_target_identity=docker_target_identity,
+                    expected_observed_target=expected_observed_target,
+                )
+                return ("queued" if queued else "cancelled"), None
             return "cancelled", None
-        if not self._mod_start_selection_matches(
-            evejs_root,
-            backend,
-            docker_target_identity,
-        ):
-            self._show_mod_compatibility_message(
-                error_title,
-                "The selected EveJS root or backend changed while the "
-                "compatibility choice was open. No mods or processes were changed.",
-            )
-            return "cancelled", None
-        try:
-            current_mods = self._applicable_runtime_mods(
-                evejs_root,
-                backend=backend,
-            )
-            current_version = installed_evejs_version(evejs_root)
-        except (ModManagerError, ModRuntimeStateError, OSError, TypeError, ValueError) as exc:
-            self._show_mod_compatibility_message(
-                error_title,
-                "The mod set changed while the compatibility choice was open. "
-                "No mods or processes were changed.\n\n"
-                + str(exc),
-            )
-            return "cancelled", None
-        if not consent.matches(
-            evejs_root,
-            backend,
-            current_version,
-            current_mods,
-        ):
-            self._show_mod_compatibility_message(
-                error_title,
-                "The mod set or EveJS version changed while the compatibility "
-                "choice was open. Retry startup to review the current state.",
-            )
-            return "cancelled", None
-        if choice is ModStartCompatibilityChoice.RUN_ANYWAY:
-            return "ready", consent
-        if choice is ModStartCompatibilityChoice.DISABLE_AFFECTED:
-            current_compatibility = assess_active_runtime_mods(
-                current_mods,
-                current_version,
-            )
-            affected = compatibility_affected_mods(
-                current_mods,
-                current_compatibility,
-            )
-            queued = self._queue_compatibility_mod_disable(
-                evejs_root,
-                backend,
-                affected,
-                continuation=continuation,
-                error_title=error_title,
-                docker_target_identity=docker_target_identity,
-                expected_observed_target=expected_observed_target,
-            )
-            return ("queued" if queued else "cancelled"), None
         return "cancelled", None
 
     @staticmethod

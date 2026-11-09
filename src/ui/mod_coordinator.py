@@ -75,6 +75,7 @@ class ModCoordinator(QObject):
         page.helper_requested.connect(self.public_action)
         page.remove_mod_requested.connect(self.remove)
         page.registry_relocation_requested.connect(self.register_copied_registry)
+        page.forget_compatibility_requested.connect(self.forget_compatibility_approvals)
         page.set_refresh_handler(self.refresh)
 
     def refresh(self):
@@ -107,6 +108,23 @@ class ModCoordinator(QObject):
                 self._page.operation_notice.show()
         native = not self.window._docker_mode()
         self.run(lambda: load_inventory_with_updater_protection(root, native=native), present)
+
+    def forget_compatibility_approvals(self):
+        """Clear only local startup choices through the retained mod worker."""
+        if self._page is None or not self._page._evejs_root.strip():
+            return
+        from src.core.mod_compatibility_approvals import LocalCompatibilityApprovals
+        root = self._page._evejs_root
+
+        def present(result):
+            if root != self._page._evejs_root:
+                return
+            message = ("Local approvals forgotten. Mod files and author declarations were not changed."
+                       if result.success else result.error)
+            self._page.operation_notice.setText(translate_ui_phrase(message))
+            self._page.operation_notice.show()
+
+        self.run(lambda: LocalCompatibilityApprovals(root).forget(), present)
 
     def run(self, operation: Callable[[], object], callback: Callable[[ModOperationResult], None]) -> bool:
         if self._guided_import_pending is not None and not self._guided_step_starting:

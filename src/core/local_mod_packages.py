@@ -232,10 +232,13 @@ def _package_prefix(entries: list[tuple[str, int, bool]]) -> str:
     return candidates[0]
 
 
-def _fingerprint(folder: Path, limits: PackageLimits) -> str:
+def _fingerprint(folder: Path, limits: PackageLimits, *, exclude_files=frozenset(), canonical_names=None, include_directories=True) -> str:
     digest = hashlib.sha256()
-    for name, _, directory in sorted(_folder_entries(folder, limits)):
-        digest.update((name + ("/" if directory else "") + "\0").encode("utf-8"))
+    for name, _, directory in sorted(_folder_entries(folder, limits), key=lambda item: (canonical_names or {}).get(item[0], item[0])):
+        if name in exclude_files or (directory and not include_directories):
+            continue
+        identity = (canonical_names or {}).get(name, name)
+        digest.update((identity + ("/" if directory else "") + "\0").encode("utf-8"))
         if not directory:
             path = folder / name
             before = _ordinary(path, directory=False)

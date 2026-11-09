@@ -10,8 +10,11 @@ from collections.abc import Iterable, Sequence
 # folders contain their own ICU, OpenSSL, and UCRT DLLs, which PyInstaller may
 # mistake for application dependencies.  Qt then loads the wrong ABI at startup
 # and fails before the launcher can display its own diagnostics.
+# Match the whole installed runtime, so newly added native tools cannot escape
+# a per-tool denylist. Keep older cache/tool markers for earlier installations.
 FORBIDDEN_BUILD_PATH_MARKERS = (
     "\\.cache\\codex-runtimes\\",
+    "\\windowsapps\\openai.codexprimaryruntime.",
     "\\dependencies\\native\\poppler\\",
     "\\dependencies\\native\\libheif\\",
     "\\program files\\amazon corretto\\",

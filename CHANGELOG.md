@@ -2,6 +2,14 @@
 
 ## Changelog
 
+## v1.0.78 - 2026-11-09
+
+- Choose individual mods to remember for the exact mod files, EveJS build, installation and backend, then review the remaining mods separately. Declared settings changes retain that choice; changed mod files or a new EveJS build prompt again. Use **Forget local approvals** in Mods to reset these choices. Author support declarations stay unchanged.
+- Launcher updates now require Game, Market and tracked EVE clients to be stopped, including services detected outside the launcher.
+- Adds native config validation for EveJS 261108.1 and shared Mods menu support for GridCheck's client-agent v1 login hook.
+- Installed DLSS5 renderer profiles consistently use F6 to toggle neural rendering while preserving other graphics preferences.
+- Packaging rejects DLLs from every Codex runtime tool folder, including newly added image tooling.
+
 ## v1.0.77 - 2026-11-05
 
 - Choose between illustrated **Simple New Character** and **Advanced Character Create** buttons. Simple lets you create accounts and characters in-game while game and market services stay online; Advanced keeps the offline starter-character, GM, and overview options.

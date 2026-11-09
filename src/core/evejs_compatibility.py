@@ -18,7 +18,7 @@ MetadataStatus = Literal["valid", "missing", "invalid_or_conflicting"]
 
 _MAX_SOURCE_BYTES = 2 * 1024 * 1024
 _VERSION_METADATA_PATHS = (Path("package.json"), Path("config/version.json"))
-CONFIG_PREFLIGHT_VERSIONS = frozenset({"0.12.9", "261018.1"})
+CONFIG_PREFLIGHT_VERSIONS = frozenset({"0.12.9", "261018.1", "261108.1"})
 
 
 @dataclass(frozen=True)

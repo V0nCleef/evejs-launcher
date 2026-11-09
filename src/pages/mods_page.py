@@ -663,6 +663,7 @@ class ModsPage(QWidget):
     move_requested = pyqtSignal(object, int)
     helper_requested = pyqtSignal(object, str)
     registry_relocation_requested = pyqtSignal(object)
+    forget_compatibility_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None, *, defer_inventory: bool = False) -> None:
         super().__init__(parent)
@@ -779,6 +780,19 @@ class ModsPage(QWidget):
         )
         registry_banner_layout.addWidget(self.register_mods_btn)
         root.addWidget(self.registry_banner)
+
+        approval_controls = QHBoxLayout()
+        approval_note = QLabel("Local user approvals are separate from author support.")
+        approval_note.setWordWrap(True)
+        mark_translatable(approval_note)
+        approval_controls.addWidget(approval_note, 1)
+        self.forget_compatibility_btn = QPushButton("Forget local approvals")
+        mark_translatable(self.forget_compatibility_btn)
+        self.forget_compatibility_btn.setAccessibleName("Forget local approvals")
+        set_translatable_tooltip(self.forget_compatibility_btn, "Show compatibility prompts again for this installation. Mod files and author declarations stay unchanged.")
+        self.forget_compatibility_btn.clicked.connect(self.forget_compatibility_requested.emit)
+        approval_controls.addWidget(self.forget_compatibility_btn)
+        root.addLayout(approval_controls)
 
         self.runtime_panel = QFrame(self)
         self.runtime_panel.setProperty("class", "modsRuntimePanel")
@@ -1523,6 +1537,7 @@ class ModsPage(QWidget):
             can_apply = False
         self.apply_btn.setEnabled(can_apply)
         editable = self._can_mutate() and not self._lifecycle_busy and bool(self._evejs_root)
+        self.forget_compatibility_btn.setEnabled(not self._lifecycle_busy and bool(self._evejs_root))
         for button in (self.add_zip_btn, self.add_folder_btn):
             button.setEnabled(editable and not self._inventory.registry_error)
         preview = self._inventory.relocation_preview

@@ -12,6 +12,25 @@ from build_support import (
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.parametrize("tool_name", ["jxrlib", "future-image-tool"])
+def test_new_codex_native_toolchain_cannot_enter_the_bundle(tool_name: str) -> None:
+    toolchain = (
+        r"C:\Program Files\WindowsApps\OpenAI.CodexPrimaryRuntime.v26-1104"
+        rf"\dependencies\native\{tool_name}\bin"
+    )
+    clean, removed = sanitize_build_path(
+        ";".join((r"C:\Python312", toolchain, r"C:\Windows\System32")),
+        separator=";",
+    )
+
+    assert clean == r"C:\Python312;C:\Windows\System32"
+    assert removed == (toolchain,)
+    with pytest.raises(RuntimeError, match=r"ucrtbase\.dll"):
+        reject_contaminated_binaries(
+            (("ucrtbase.dll", toolchain + r"\ucrtbase.dll", "BINARY"),)
+        )
+
+
 def test_sanitize_build_path_removes_foreign_dll_toolchains() -> None:
     clean, removed = sanitize_build_path(
         ";".join(

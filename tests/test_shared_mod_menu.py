@@ -414,12 +414,19 @@ def test_native_one_icon_ordinary_account_and_insider_top_level(api, monkeypatch
     assert mapping == {'native-button': BaseButton} and InsiderService.Show is original_show
 
 
-def test_python27_parse_and_node_delivery_composes_prior_wrapper(root, tmp_path):
+@pytest.mark.parametrize("gridcheck", [False, True])
+def test_python27_parse_and_node_delivery_composes_prior_wrapper(root, tmp_path, gridcheck):
     from lib2to3.pgen2 import driver
     from lib2to3 import pygram, pytree
     parser = driver.Driver(pygram.python_grammar, convert=pytree.convert)
     parser.parse_string(CLIENT.read_text(encoding='utf-8'))
     folder = install(root)
+    if gridcheck:
+        handshake = root / 'server/src/network/tcp/handshake.js'
+        handshake.write_text(HANDSHAKE.replace('  return buildMarshaledString(expr);', '''  // gridcheck:patch client-agent v1
+  const gridcheckClientFunc = globalThis[Symbol.for("gridcheck.clientAgent.v1")];
+  if (gridcheckClientFunc) return buildMarshaledString(gridcheckClientFunc.wrapLoginExpression(expr, clientId));
+  return buildMarshaledString(expr);'''))
     material = capture_shared_menu(root, (folder.name,))
     stage_shared_menu(root, material)
     node = os.environ.get('EVEJS_TEST_NODE') or shutil.which('node')
@@ -427,7 +434,10 @@ def test_python27_parse_and_node_delivery_composes_prior_wrapper(root, tmp_path)
         pytest.skip('Node is needed for actual JavaScript bridge execution')
     # An independently appended payload wraps the stock builder first.
     harness = tmp_path / 'harness.cjs'
-    harness.write_text('''const Module = require('module');
+    harness.write_text(('''globalThis[Symbol.for("gridcheck.clientAgent.v1")] = {
+wrapLoginExpression: expr => '(lambda gridcheck_client: gridcheck_client)(' + expr + ')'
+};
+''' if gridcheck else '') + '''const Module = require('module');
 const previous = Module.prototype._compile;
 Module.prototype._compile = function(source, filename) {
  if (filename.endsWith('handshake.js')) source += `\nconst old = buildTidiSignedFunc;
@@ -443,6 +453,8 @@ console.log(JSON.stringify({head:packet[0], length:packet.readUInt32LE(1), expre
     packet = json.loads(result.stdout.splitlines()[-1])
     assert packet['head'] == 0x74 and packet['length'] == len(packet['expression'])
     assert '(lambda other: other)(' in packet['expression']
+    if gridcheck:
+        assert '(lambda gridcheck_client: gridcheck_client)(' in packet['expression']
     assert '<evejs-shared-mod-menu>' in packet['expression']
     assert 'DELIVERY_READY:v1' in result.stdout
     parser.parse_string(packet['expression'] + '\n')

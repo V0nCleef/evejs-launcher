@@ -50,3 +50,19 @@ def test_checker_reports_missing_launcher_package_without_offering_update(qapp, 
     assert updates == []
     assert len(failures) == 1
     assert "EveJS-Launcher-V1.zip" in failures[0]
+
+
+@pytest.mark.parametrize("remote", ["v1.0.77", "v1.0.78"])
+def test_local_1078_never_offers_an_equal_or_older_remote_build(qapp, monkeypatch, remote):
+    monkeypatch.setattr(checker, "get_current_version", lambda: "1.0.78")
+    monkeypatch.setattr(checker, "get_latest_release", lambda: {
+        "tag_name": remote, "assets": [BINARY],
+    })
+    worker = checker.UpdateChecker()
+    updates, failures, current = [], [], []
+    worker.update_available.connect(lambda *args: updates.append(args))
+    worker.check_failed.connect(failures.append)
+    worker.up_to_date.connect(lambda: current.append(True))
+    worker.run()
+    assert worker.current_version == "1.0.78"
+    assert updates == [] and failures == [] and current == [True]

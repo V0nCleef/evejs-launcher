@@ -1,4 +1,5 @@
 """Installed renderer use must survive server/package/journal replacement."""
+import configparser
 from pathlib import Path
 
 import pytest
@@ -89,6 +90,34 @@ def test_each_pilot_keeps_private_neural_rendering_state(renderer):
     prepare_installed_dlss5(second, client)
     assert a["RESHADE_BASE_PATH_OVERRIDE"] != b["RESHADE_BASE_PATH_OVERRIDE"]
     assert "NeuralUplift=0" in (Path(b["RESHADE_BASE_PATH_OVERRIDE"]) / "ReShade.ini").read_text()
+
+
+@pytest.mark.parametrize("saved_key", [None, "0", "118", "117"])
+def test_direct_renderer_normalizes_f6_without_resetting_private_preferences(renderer, saved_key):
+    client, profile = renderer
+    config = profile.parent / "DLSS5" / "ReShade.ini"
+    config.parent.mkdir()
+    config.write_text(
+        f"[ADDON]\nAddonPath={client / 'bin64'}\n"
+        "LoadFromDllMain=another.addon64,renodx-dlss5.addon64\n"
+        "[GENERAL]\nPresetPath=custom-preset.ini\n"
+        "[RenoDX.DLSS5]\nEnableHooks=2\nNeuralUplift=0\nNRIntensity=0.42\n"
+        + (f"NRToggleKey={saved_key}\n" if saved_key is not None else "")
+    )
+    expected = configparser.RawConfigParser()
+    expected.read_string(config.read_text())
+    expected["RenoDX.DLSS5"]["NRToggleKey"] = "117"
+    client_preferences = (client / "bin64" / "ReShade.ini").read_bytes()
+
+    prepare_installed_dlss5(profile, client)
+
+    actual = configparser.RawConfigParser()
+    actual.read_string(config.read_text())
+    assert actual == expected
+    assert (client / "bin64" / "ReShade.ini").read_bytes() == client_preferences
+    prepared = config.read_bytes()
+    prepare_installed_dlss5(profile, client)
+    assert config.read_bytes() == prepared
 
 
 @pytest.mark.parametrize("problem", ["missing", "bad-ini", "write-failure"])

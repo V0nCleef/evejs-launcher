@@ -190,7 +190,7 @@ def validate_native_server_config(
             supported=False,
             valid=None,
             message=(
-                "The selected EveJS server does not expose the verified 0.12.9/261018.1 config "
+                "The selected EveJS server does not expose the verified 0.12.9/261018.1/261108.1 config "
                 "validator; config preflight was skipped."
             ),
         )
@@ -268,7 +268,7 @@ def validate_native_server_config(
             valid=None,
             message=(
                 "The selected EveJS config manager does not match the verified "
-                "0.12.9/261018.1 validator contract; config preflight was skipped."
+                "0.12.9/261018.1/261108.1 validator contract; config preflight was skipped."
             ),
         )
     if status == "invalid":

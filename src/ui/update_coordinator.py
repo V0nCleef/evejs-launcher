@@ -63,13 +63,20 @@ def _on_update_clicked(self) -> None:
 
 def _begin_update_install(self) -> None:
     """Show progress before downloading, then retain the worker through teardown."""
-    from ..core.application_operations import update_active, update_blocked
+    from ..core.application_operations import running_runtime_components, update_active, update_blocked
     if update_active(self):
         return
     if update_blocked(self):
         QMessageBox.information(
             self, "Operation In Progress",
             "Wait for the active operation to finish before installing a launcher update.",
+        )
+        return
+    if running_runtime_components(self):
+        QMessageBox.information(
+            self, "Runtime Still Running",
+            "Stop Game and Market and close EVE clients before installing a launcher update. "
+            "Stop externally managed services from their original console.",
         )
         return
     if not self._latest_download_url:

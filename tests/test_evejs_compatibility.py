@@ -196,3 +196,13 @@ def test_config_preflight_requires_confirmed_beta_metadata_and_manager_export(tm
         'const EVEJS_VERSION = "0.12.8";\nmodule.exports = { EVEJS_VERSION };\n',
     )
     assert inspect_evejs_runtime(root).config_preflight_supported is False
+
+
+def test_reviewed_2611081_config_preflight_requires_matching_manager(tmp_path):
+    root = _runtime_root(tmp_path, version="261108.1")
+    assert inspect_evejs_runtime(root).config_preflight_supported is True
+    _write(
+        root / "server/src/config/manager.js",
+        'const EVEJS_VERSION = "261028.1";\nmodule.exports = { EVEJS_VERSION };\n',
+    )
+    assert inspect_evejs_runtime(root).config_preflight_supported is False

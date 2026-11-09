@@ -35,3 +35,29 @@ def active_mutations(owner: object, *, exclude: tuple[str, ...] = ()) -> tuple[s
 
 def update_blocked(owner: object) -> bool:
     return bool(vars(owner).get("_close_in_progress") or active_mutations(owner))
+
+
+def running_runtime_components(owner: object) -> tuple[str, ...]:
+    """Use owned handles and cached observations without GUI-thread network I/O."""
+    from .service_status import ServiceState
+
+    state = vars(owner)
+    snapshot = state.get("_runtime_snapshot")
+    reachability = state.get("_service_reachability", (False, False))
+    active_states = {ServiceState.STARTING, ServiceState.ONLINE, ServiceState.STOPPING}
+    running = []
+    for index, (label, field, service) in enumerate((
+        ("Game", "_server_proc", "game"),
+        ("Market", "_market_proc", "market"),
+    )):
+        process = state.get(field)
+        if (
+            (process is not None and process.poll() is None)
+            or reachability[index]
+            or getattr(snapshot, service, None) in active_states
+        ):
+            running.append(label)
+    tracker = state.get("_tracker")
+    if tracker is not None and tracker.running_count > 0:
+        running.append("EVE clients")
+    return tuple(running)

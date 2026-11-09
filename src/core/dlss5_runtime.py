@@ -132,6 +132,7 @@ def _prepare_preferences(profile_tq: Path, client: Path) -> Path:
         addons = (addons + "," if addons else "") + "renodx-dlss5.addon64"
     text = _set_ini_value(text, "ADDON", "LoadFromDllMain", addons)
     text = _set_ini_value(text, "RenoDX.DLSS5", "EnableHooks", "2")
+    text = _set_ini_value(text, "RenoDX.DLSS5", "NRToggleKey", "117")
     text = _set_ini_value(text, "RenoDX.DLSS5", "NeuralUplift", "1", preserve_existing=True)
     if text != current:
         _write_text_atomic(destination, text)

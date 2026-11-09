@@ -27,6 +27,11 @@ _SEAM = re.compile(
     r'function buildTidiSignedFunc\(clientId\)\s*\{\s*'
     r'const pyCode = buildTidiSignedFuncSource\(clientId\);\s*'
     r'''const expr = 'eval\(compile\("' \+ pyCode \+ '\", "<tidi>", "exec"\)\)';\s*'''
+    # GridCheck client-agent v1 preserves this marshaled envelope. The delivery
+    # loader composes its returned expression without discarding the hook.
+    r'(?:\s*// gridcheck:patch client-agent v1\s*'
+    r'const gridcheckClientFunc = globalThis\[Symbol\.for\("gridcheck\.clientAgent\.v1"\)\];\s*'
+    r'if \(gridcheckClientFunc\) return buildMarshaledString\(gridcheckClientFunc\.wrapLoginExpression\(expr, clientId\)\);\s*)?'
     r'return buildMarshaledString\(expr\);\s*\}'
 )
 
