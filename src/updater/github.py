@@ -1,4 +1,4 @@
-"""GitHub Releases API client — stdlib only, no external dependencies.
+"""GitHub Releases API client with verified native Windows TLS.
 
 Uses :mod:`urllib.request` to query the GitHub REST API for the latest
 release of the EveJS Launcher and to download update assets.
@@ -13,6 +13,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable
+
+from .tls import update_ssl_context
 
 # ── Configurable repo ────────────────────────────────────────────────────────
 GITHUB_REPO: str = "V0nCleef/evejs-launcher"
@@ -65,7 +67,7 @@ def get_latest_release(repo: str | None = None) -> dict[str, Any] | None:
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT, context=update_ssl_context()) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         _logger.warning("GitHub API returned HTTP %s for %s", exc.code, url)
@@ -136,7 +138,7 @@ def download_asset(
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT, context=update_ssl_context()) as resp:
             total = int(resp.headers.get("Content-Length", 0))
             downloaded = 0
             chunk_size = 64 * 1024  # 64 KiB

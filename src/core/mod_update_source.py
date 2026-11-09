@@ -11,6 +11,8 @@ import urllib.request
 import logging
 from urllib.parse import urlsplit, unquote
 
+from ..updater.tls import update_ssl_context
+
 
 class ModUpdateError(ValueError):
     pass
@@ -163,7 +165,8 @@ class _GitHubRedirects(urllib.request.HTTPRedirectHandler):
 
 def github_open(url):
     request = urllib.request.Request(url, headers={"User-Agent": "EveJS-Launcher-ModUpdates/1", "Accept": "application/vnd.github+json"})
-    return urllib.request.build_opener(_GitHubRedirects()).open(request, timeout=15)
+    secure = urllib.request.HTTPSHandler(context=update_ssl_context())
+    return urllib.request.build_opener(_GitHubRedirects(), secure).open(request, timeout=15)
 
 
 def validate_release_metadata(release, payload, *, expected_mod_id=None):

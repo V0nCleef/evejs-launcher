@@ -15,7 +15,9 @@ _KINDS = {"loader", "source-integrated", "client-package", "settings"}
 _STRATEGIES = {"loader_rename", "json_boolean", "client_package", "package"}
 NOTIFICATION_ACTIONS = frozenset({"launch_result", "client_exit"})
 SOURCE_PACKAGE_CAPABILITIES = frozenset({"install", "prepare_disable", "prepare_remove"})
-_CAPABILITIES = {"prepare_profile", "prepare_server_start", "install", "verify", "prepare_disable", "prepare_remove", "recover"} | NOTIFICATION_ACTIONS
+ENABLED_UPDATE_PROTOCOL = "evejs-mod-enabled-update-v1"
+ENABLED_UPDATE_ACTIONS = frozenset({"prepare_update", "apply_update", "commit_update", "rollback_update"})
+_CAPABILITIES = {"prepare_profile", "prepare_server_start", "install", "verify", "prepare_disable", "prepare_remove", "recover"} | NOTIFICATION_ACTIONS | ENABLED_UPDATE_ACTIONS
 _RESERVED = {"con", "prn", "aux", "nul", "clock$", *(f"com{i}" for i in range(1, 10)),
              *(f"lpt{i}" for i in range(1, 10))}
 
@@ -31,11 +33,19 @@ class ModApiHelper:
 
 
 @dataclass(frozen=True)
+class EnabledUpdateSpec:
+    protocol: str
+    compatibility: str
+    from_versions: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class LauncherApiSpec:
     version: int
     min_launcher_version: str
     helper: ModApiHelper | None
     capabilities: tuple[str, ...]
+    enabled_update: EnabledUpdateSpec | None = None
 
 
 @dataclass(frozen=True)
@@ -204,7 +214,7 @@ def read_api_manifest(root: str | Path, folder: str | Path, payload: dict | None
         raise ModApiManifestError("Only JSON activation accepts configuration path fields.")
     launcher_api = None
     if "launcherApi" in payload:
-        api = _keys(payload["launcherApi"], {"version"}, {"minLauncherVersion", "helper", "capabilities"}, "launcherApi")
+        api = _keys(payload["launcherApi"], {"version"}, {"minLauncherVersion", "helper", "capabilities", "enabledUpdate"}, "launcherApi")
         if type(api["version"]) is not int or api["version"] != 1:
             raise ModApiManifestError("Unsupported launcher API version.")
         minimum = _text(api.get("minLauncherVersion", "1.0.53"), "Minimum launcher version", 32)
@@ -223,7 +233,30 @@ def read_api_manifest(root: str | Path, folder: str | Path, payload: dict | None
             raise ModApiManifestError("Unsupported or repeated launcher capability.")
         if capabilities and helper is None:
             raise ModApiManifestError("Executable launcher capabilities require a helper.")
-        launcher_api = LauncherApiSpec(1, minimum, helper, tuple(capabilities))
+        enabled_update = None
+        if "enabledUpdate" in api:
+            from .mod_update_source import Version
+            update = _keys(api["enabledUpdate"], {"protocol", "compatibility", "fromVersions"}, set(), "enabledUpdate")
+            predecessors = update["fromVersions"]
+            compatibility = _text(update["compatibility"], "Enabled update compatibility", 128)
+            if (update["protocol"] != ENABLED_UPDATE_PROTOCOL
+                    or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,127}", compatibility)
+                    or not isinstance(predecessors, list) or not 1 <= len(predecessors) <= 64
+                    or any(not isinstance(value, str) for value in predecessors)
+                    or len(set(predecessors)) != len(predecessors)
+                    or not ENABLED_UPDATE_ACTIONS <= set(capabilities)
+                    or kind != "loader" or strategy != "loader_rename" or "native" not in backends
+                    or tuple(map(int, minimum.split('.'))) < (1, 0, 79)):
+                raise ModApiManifestError("Unsupported enabled update contract.")
+            try:
+                for value in predecessors:
+                    Version.parse(value)
+            except ValueError as exc:
+                raise ModApiManifestError("Enabled update predecessors must be exact mod versions.") from exc
+            enabled_update = EnabledUpdateSpec(ENABLED_UPDATE_PROTOCOL, compatibility, tuple(predecessors))
+        if ENABLED_UPDATE_ACTIONS.intersection(capabilities) and enabled_update is None:
+            raise ModApiManifestError("Update helper actions require an enabledUpdate contract.")
+        launcher_api = LauncherApiSpec(1, minimum, helper, tuple(capabilities), enabled_update)
         if "prepare_server_start" in capabilities and (kind not in {"loader", "source-integrated"}
                 or strategy not in {"loader_rename", "json_boolean"} or "native" not in backends):
             raise ModApiManifestError("Server startup preparation requires a Native loader or JSON-activated source mod.")

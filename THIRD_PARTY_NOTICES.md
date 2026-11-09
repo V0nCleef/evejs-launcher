@@ -24,6 +24,10 @@ The Windows release includes or links the following third-party software. Copyri
 
 The release archive also contains the license notices shipped by Qt and Python. The project repository provides the complete corresponding launcher source and build configuration for each published release tag.
 
+Version 1.0.79 additionally bundles truststore 0.10.5 (MIT) for native Windows
+certificate validation. See [its license](licenses/TRUSTSTORE-MIT.txt) and
+[corresponding source](https://github.com/sethmlarson/truststore/tree/v0.10.5).
+
 The Deep Signal orbital background in `assets/deep_signal/operations_orbital.png`
 was generated specifically for this project with OpenAI's image-generation
 tool on 2026-08-12. It depicts an original, franchise-neutral orbital facility;

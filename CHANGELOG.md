@@ -2,6 +2,13 @@
 
 ## Changelog
 
+## v1.0.79 - 2026-11-09
+
+- GitHub update checks and downloads use native Windows certificate validation and hostname checks while retaining TLS verification.
+- Updates can use an explicitly declared enabled-mod handoff to preserve pending work and native support, including NPC Market Buyers upgrades from 0.1.20, 0.1.21 or 0.1.22 to 0.1.23.
+- Interrupted handoffs restore native files before the previous package, or finish the new version after a durable commit decision. Pending settlements remain unchanged and ordinary Disable/Remove checks stay in place.
+- An unchanged package from a refused pre-swap update is verified without unnecessarily running its installer again.
+
 ## v1.0.78 - 2026-11-09
 
 - Choose individual mods to remember for the exact mod files, EveJS build, installation and backend, then review the remaining mods separately. Declared settings changes retain that choice; changed mod files or a new EveJS build prompt again. Use **Forget local approvals** in Mods to reset these choices. Author support declarations stay unchanged.

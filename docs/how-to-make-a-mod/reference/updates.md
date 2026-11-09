@@ -99,6 +99,47 @@ Native server mods require the server to be stopped before update; client packag
 
 The previous package is retained during replacement. If installation fails, the launcher attempts to restore the previous version and enabled state through the mod's lifecycle provider. If recovery cannot finish, **Recover mod update** exposes the pending operation. Keep the retained package and recovery records until recovery succeeds; do not delete them to clear an error. The mod still owns recovery of its external binary changes.
 
+## Enabled-mod handoff (Launcher 1.0.79+)
+
+An enabled stateful loader can offer a transaction that preserves its pending
+work instead of uninstalling its runtime before replacement. This is an explicit
+incoming-package contract for Native loader/loader_rename mods:
+
+```json
+"launcherApi": {
+  "version": 1,
+  "minLauncherVersion": "1.0.79",
+  "helper": {"runtime": "node", "path": "helper.js"},
+  "capabilities": ["prepare_update", "apply_update", "commit_update", "rollback_update"],
+  "enabledUpdate": {
+    "protocol": "evejs-mod-enabled-update-v1",
+    "compatibility": "author.example.pending-v1",
+    "fromVersions": ["1.0.0"]
+  }
+}
+```
+
+Keep the other lifecycle capabilities your mod needs. Your incoming helper must
+validate the actual predecessor's identity, native ownership and pending-data
+protocol; listing a version does not establish compatibility. The helper receives
+the usual correlated request plus `update` with `protocol`, canonical UUID
+`transactionId`, `fromVersion`, exact installed `fromModRoot` and `toVersion`.
+
+`prepare_update` validates and durably snapshots external runtime files without
+changing them. `apply_update` performs a recoverable replacement. Before calling
+`commit_update`, the Launcher durably decides to keep the new enabled package;
+commit must be idempotent after lost replies or interrupted cleanup.
+`rollback_update` restores the exact previous external files and receipt, including
+partial application, before the Launcher restores the previous package. Retain
+snapshots until commit or rollback completes, and refuse unknown concurrent edits.
+
+All four actions require ready correlated replies with no contributions, launch
+options, restarts or client enrollment. The retained helper runs with the incoming
+installation's preserved settings. Do not settle purchases, clear financial queues
+or start services from these actions. Genuine Disable and Remove retain their
+normal cleanup guards. Ordinary updates without this opt-in retain the existing
+update flow; unsupported contracts refuse before helper execution.
+
 ## DLSS5 + ReShade example
 
 DLSS5 remains a separate combined renderer package. Its helper owns installation, verification and recovery of the physical copied EVE client. Update metadata tells the launcher where to find a new package; it does not move the renderer's implementation into the launcher.

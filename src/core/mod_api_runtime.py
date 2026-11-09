@@ -28,7 +28,10 @@ import uuid
 
 from ..constants import APP_VERSION
 from . import platform as platform_api
-from .mod_api_manifest import ModApiDescriptor, NOTIFICATION_ACTIONS, read_api_manifest
+from .mod_api_manifest import (
+    ModApiDescriptor, NOTIFICATION_ACTIONS, ENABLED_UPDATE_ACTIONS,
+    ENABLED_UPDATE_PROTOCOL, read_api_manifest, _relative_path, _safe_path,
+)
 from .mod_config_documents import canonical_key
 from .mod_contributions import (
     ConfigurationReview, ContributionConflict, ContributionOwner, ContributionPlan,
@@ -50,8 +53,9 @@ MAX_REPLY_BYTES = 1024 * 1024
 MAX_OUTPUT_BYTES = 256 * 1024
 MAX_HELPER_BYTES = 32 * 1024 * 1024
 DEFAULT_HELPER_TIMEOUT = 120.0
-_ACTION_TIMEOUTS = {"install": 3600.0, "recover": 3600.0, "prepare_disable": 600.0, "prepare_remove": 600.0}
-_ACTIONS = {"prepare_profile", "prepare_server_start", "install", "verify", "prepare_disable", "prepare_remove", "recover"} | NOTIFICATION_ACTIONS
+_ACTION_TIMEOUTS = {"install": 3600.0, "recover": 3600.0, "prepare_disable": 600.0, "prepare_remove": 600.0,
+                    **{action: 600.0 for action in ENABLED_UPDATE_ACTIONS}}
+_ACTIONS = {"prepare_profile", "prepare_server_start", "install", "verify", "prepare_disable", "prepare_remove", "recover"} | NOTIFICATION_ACTIONS | ENABLED_UPDATE_ACTIONS
 _RESTARTS = {"none", "client", "game_server", "launcher"}
 _BASES = {"mod", "evejs", "profile", "profile_settings", "client"}
 _ENVIRONMENT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
@@ -442,6 +446,11 @@ def validate_helper_result(payload: dict, descriptor: ModApiDescriptor, context:
     if files and context.store_root(files) != helper_coordination_root(descriptor, context, action):
         raise ModApiRuntimeError("The helper reply cannot change its captured coordination root.")
     receipt = _receipt(payload["receipt"], descriptor, context) if "receipt" in payload else None
+    if action in ENABLED_UPDATE_ACTIONS and (
+        edits or files or payload["environment"] or payload["arguments"] or restarts
+        or any(key in payload for key in ("receipt", "clientScriptDelivery", "clientPreparation"))
+    ):
+        raise ModApiRuntimeError("Enabled update replies cannot request contributions, launch options or enrollment.")
     if action in NOTIFICATION_ACTIONS and (edits or payload["environment"] or payload["arguments"] or restarts or receipt):
         raise ModApiRuntimeError("Notification replies cannot request mutations or launch changes.")
     if success and state == "ready" and descriptor.kind == "client-package" and action != "prepare_profile" and action not in NOTIFICATION_ACTIONS and receipt is None:
@@ -469,14 +478,44 @@ def validate_helper_result(payload: dict, descriptor: ModApiDescriptor, context:
         _environment(payload["environment"]), _arguments(payload["arguments"]), receipt, request_path, delivery, preparation)
 
 
-def run_mod_helper(descriptor: ModApiDescriptor, action: str, context: ModSettingsContext, *, backend: str = "native", timeout: float | None = None, runner: Callable | None = None, event: dict | None = None) -> ModHelperResult:
+def validate_enabled_update_context(descriptor, context, update, backend):
+    """Validate the same root-bound context on initial execution and recovery."""
+    api = descriptor.launcher_api
+    spec = api.enabled_update if api else None
+    if (spec is None or backend != "native" or not isinstance(update, dict)
+            or set(update) != {"protocol", "transactionId", "fromVersion", "fromModRoot", "toVersion"}
+            or update["protocol"] != ENABLED_UPDATE_PROTOCOL
+            or update["fromVersion"] not in spec.from_versions
+            or update["toVersion"] != descriptor.version):
+        raise ModApiRuntimeError("The enabled update context does not match the declared contract.")
+    try:
+        from .mod_update_source import Version
+        if (not isinstance(update["transactionId"], str)
+                or str(uuid.UUID(update["transactionId"])) != update["transactionId"]
+                or Version.parse(update["toVersion"]) <= Version.parse(update["fromVersion"])):
+            raise ValueError("Invalid transaction/version")
+        target = Path(update["fromModRoot"])
+        relative = target.relative_to(context.evejs_root)
+        if (not target.is_absolute() or len(relative.parts) != 2 or relative.parts[0] != "mods"
+                or os.path.normcase(str(target.resolve())) != os.path.normcase(str(target))):
+            raise ValueError("Invalid installed mod target")
+        _safe_path(context.evejs_root, _relative_path(relative.as_posix(), "Update target"), "Update target")
+    except (TypeError, ValueError, OSError, AttributeError) as exc:
+        raise ModApiRuntimeError("The enabled update transaction or physical target is invalid.") from exc
+
+
+def run_mod_helper(descriptor: ModApiDescriptor, action: str, context: ModSettingsContext, *, backend: str = "native", timeout: float | None = None, runner: Callable | None = None, event: dict | None = None, update: dict | None = None) -> ModHelperResult:
     with acquire_mod_lifecycle_lock(helper_coordination_root(descriptor, context, action)):
-        return run_mod_helper_locked(descriptor, action, context, backend=backend, timeout=timeout, runner=runner, event=event)
+        return run_mod_helper_locked(descriptor, action, context, backend=backend, timeout=timeout, runner=runner, event=event, update=update)
 
 
-def run_mod_helper_locked(descriptor: ModApiDescriptor, action: str, context: ModSettingsContext, *, backend: str = "native", timeout: float | None = None, runner: Callable | None = None, event: dict | None = None) -> ModHelperResult:
+def run_mod_helper_locked(descriptor: ModApiDescriptor, action: str, context: ModSettingsContext, *, backend: str = "native", timeout: float | None = None, runner: Callable | None = None, event: dict | None = None, update: dict | None = None) -> ModHelperResult:
     """Caller holds helper_coordination_root's lease through the terminal result."""
     context = _captured_context(descriptor, context, action, backend)
+    if action in ENABLED_UPDATE_ACTIONS:
+        validate_enabled_update_context(descriptor, context, update, backend)
+    elif update is not None:
+        raise ModApiRuntimeError("Only enabled update actions accept an update context.")
     if action in NOTIFICATION_ACTIONS:
         if not isinstance(event, dict) or set(event) != {"launchId", "status", "pid", "exitCode", "errorType"}:
             raise ModApiRuntimeError("A notification requires a captured client event.")
@@ -511,6 +550,8 @@ def run_mod_helper_locked(descriptor: ModApiDescriptor, action: str, context: Mo
     }
     if event is not None:
         request["event"] = dict(event)
+    if update is not None:
+        request["update"] = dict(update)
     encoded = json.dumps(request, ensure_ascii=False, allow_nan=False).encode("utf-8")
     if len(encoded) > MAX_REPLY_BYTES:
         raise ModApiRuntimeError("The helper request exceeds the size limit.")

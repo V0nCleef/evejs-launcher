@@ -164,6 +164,8 @@ a = Analysis(
         'src.pages.settings_page',
         'src.updater.github', 'src.updater.checker', 'src.updater.dialog', 'src.updater.installer',
         'src.updater.progress_dialog', 'src.updater.handoff',
+        'src.updater.tls', 'truststore', 'truststore._api',
+        'truststore._windows', 'truststore._ssl_constants',
         'src.utils.logger', 'src.utils.cache',
     ] + collect_submodules('uncompyle6') + collect_submodules('xdis') + collect_submodules('spark_parser'),
     hookspath=[],

@@ -22,6 +22,8 @@ from .mod_relationships import plan_mod_order
 from .mod_settings_schema import parse_settings_schema
 from .mod_evejs_compatibility import installed_evejs_version, supports_evejs
 from .mod_update_source import ModUpdateError, Version, download_release
+from .mod_enabled_updates import PHASES as ENABLED_PHASES, install_enabled_release, recover_enabled_release
+from .mod_api_manifest import ENABLED_UPDATE_PROTOCOL
 
 UPDATE_ROOT = Path('_local/launcher-mod-updates')
 
@@ -51,7 +53,9 @@ def _jobs(root):
         if path.stat().st_size > 65536:
             raise ModUpdateError('The mod update recovery record is too large.')
         data = json.loads(path.read_text(encoding='utf-8'))
-        if data.get('schemaVersion') != 1 or data.get('phase') not in {'prepared', 'disabled', 'swapping', 'installed', 'complete', 'rolled_back', 'recovering'}:
+        ordinary = data.get('schemaVersion') == 1 and data.get('phase') in {'prepared', 'disabled', 'swapping', 'installed', 'complete', 'rolled_back', 'recovering'}
+        enabled = data.get('schemaVersion') == 2 and data.get('mode') == ENABLED_UPDATE_PROTOCOL and data.get('phase') in ENABLED_PHASES
+        if not ordinary and not enabled:
             raise ModUpdateError('Unsupported mod update recovery record.')
         jobs.append((path, data))
     return jobs
@@ -137,6 +141,9 @@ def install_release(mod, release, operation, *, guard, downloader=download_relea
         if not supports_evejs(candidate.evejs_versions, installed_evejs_version(packages.root)):
             logging.getLogger(__name__).warning('EveJS support for mod %s is unconfirmed; proceeding with user-requested update.', current.id)
         current = operation.current(mod)
+        if current.active and candidate.launcher_api and candidate.launcher_api.enabled_update is not None:
+            return install_enabled_release(current, candidate, stage, journal, packages, operation,
+                                           preserved, guard=guard, report=report)
         report("Backing up mod")
         record = packages.adopt(current)
         data = dict(schemaVersion=1, phase='prepared', target=current.path.relative_to(packages.root).as_posix(),
@@ -190,8 +197,10 @@ def install_release(mod, release, operation, *, guard, downloader=download_relea
             try:
                 report("Restoring previous version")
                 recover_update(journal, operation, guard=guard)
+                if json.loads(journal.read_text(encoding='utf-8'))['phase'] == 'complete':
+                    return 'Update complete.'
             except Exception as recovery:
-                raise ModUpdateError(f'{error}\nRecovery is pending; previous files were retained. {recovery}') from error
+                raise ModUpdateError(f'{error}\nRecovery is pending; transaction files were retained. {recovery}') from error
             raise ModUpdateError(f'{error}\nThe previous mod version and enabled state were restored.') from error
         raise
     finally:
@@ -206,11 +215,41 @@ def recover_update(journal, operation, *, guard):
     journal, data = matches[0]
     if data['phase'] in {'complete', 'rolled_back'}:
         return
+    if data.get('schemaVersion') == 2:
+        return recover_enabled_release(journal, data, operation, guard=guard)
     target = _safe_path(packages.root, _relative_path(data['target'], 'Update target'), 'Update target')
     if target.parent != packages.root / 'mods' or type(data.get('enabled')) is not bool:
         raise ModUpdateError('Invalid update recovery target.')
     backup = journal.parent / 'previous'
     guard()
+    if data['phase'] == 'prepared' and not backup.exists() and data.get('packageKind') == 'loader':
+        # A refused old cleanup has not swapped the package. Prove the exact
+        # original is still active/owned and verify it without installing again.
+        from .mod_api_runtime import run_mod_helper_locked
+        with acquire_mod_lifecycle_lock(packages.root):
+            restored = _current(packages.root, target)
+            record = next((row for row in packages.records() if row.record_id == data.get('recordId')), None)
+            if (record is None or record.relative_path != data['target'] or record.mod_id != data['modId']
+                    or restored.id != data['modId'] or restored.version != data['oldVersion']
+                    or restored.active != data['enabled']
+                    or _fingerprint(target, packages.limits) != record.fingerprint):
+                raise ModUpdateError('The original prepared update changed; automatic no-op recovery stopped.')
+            descriptor = restored.api_descriptor
+            api = descriptor.launcher_api if descriptor else None
+            if data['enabled'] and api and {'install', 'prepare_disable', 'prepare_remove'}.intersection(api.capabilities):
+                if 'verify' not in api.capabilities:
+                    raise ModUpdateError('The unchanged original package needs its verification provider before recovery.')
+                result = run_mod_helper_locked(descriptor, 'verify', operation.capture(restored), backend=operation.backend)
+                result.require_ready()
+                if (result.contributions or result.environment or result.arguments or result.restart_required
+                        or result.client_script_delivery is not None or result.client_preparation is not None
+                        or (result.receipt is not None and result.receipt.state != 'active')):
+                    raise ModUpdateError('Prepared update verification requested changes instead of proving the original state.')
+                if operation.current(restored) != restored or _fingerprint(target, packages.limits) != record.fingerprint:
+                    raise ModUpdateError('The original package changed during prepared update recovery.')
+            data['phase'] = 'rolled_back'
+            _save(journal, data)
+        return
     if backup.exists():
         if _fingerprint(backup, packages.limits) != data['oldFingerprint']:
             raise ModUpdateError('The retained previous package changed; automatic recovery stopped.')
