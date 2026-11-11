@@ -76,6 +76,7 @@ def _account(
 )
 def test_home_counts_only_visible_non_banned_characters(
     qapp: QApplication,
+    close_main_window,
     monkeypatch: pytest.MonkeyPatch,
     accounts: list[Account],
     hidden: list[str],
@@ -107,13 +108,12 @@ def test_home_counts_only_visible_non_banned_characters(
         assert window._home_page.accounts_count == expected_accounts
         assert window._home_page.characters_count == expected_characters
     finally:
-        window.close()
-        _wait_for_data(qapp, window)
-        window.deleteLater()
+        close_main_window(window)
 
 
 def test_launch_all_requires_visible_account_and_complete_paths(
     qapp: QApplication,
+    close_main_window,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     accounts = [_account("account-a", 1, _character(101, "Pilot One"))]
@@ -147,6 +147,4 @@ def test_launch_all_requires_visible_account_and_complete_paths(
         assert window._home_page.btn_launch_all.isEnabled() is False
         assert "Configure" in window._home_page.btn_launch_all.toolTip()
     finally:
-        window.close()
-        _wait_for_data(qapp, window)
-        window.deleteLater()
+        close_main_window(window)

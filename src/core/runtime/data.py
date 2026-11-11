@@ -1,7 +1,7 @@
 """Runtime-selected Native and Docker character data providers.
 
-Docker volume data is read only through the shipped, allowlisted Config Editor
-export command.  A verified host bind is the sole Docker path allowed to use
+Docker volume rosters use a shipped, bounded read-only SQLite projection;
+details retain the allowlisted Config Editor export command.  A verified host bind is the sole Docker path allowed to use
 the existing SQLite reader.
 """
 from __future__ import annotations
@@ -11,12 +11,13 @@ import hashlib
 import json
 import logging
 import math
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Callable, Mapping, Protocol
 
 from src.core import db
 from src.core.db import Account, Character
 from src.core.runtime.character_display import DISPLAY_SCRIPT
+from src.core.runtime.character_roster import ROSTER_SCRIPT
 from src.core.runtime.docker_cli import (
     DockerCommandError,
     DockerCommandRunner,
@@ -147,7 +148,7 @@ class DockerExportDataSource:
         self.output_limit = int(output_limit)
 
     def load_accounts(self) -> list[Account]:
-        value = self._load_export(None, _map_export_accounts)
+        value = self._load_export(None, _map_roster_accounts, roster=True)
         if not isinstance(value, list):
             raise DataSourceError(
                 "malformed_export",
@@ -182,11 +183,11 @@ class DockerExportDataSource:
         self,
         char_id: int | None,
         projector: Callable[[Mapping[str, object]], object],
-        *, display: bool = False,
+        *, display: bool = False, roster: bool = False,
     ) -> object | None:
-        command = self._command(char_id, display=display)
+        command = self._command(char_id, display=display, roster=roster)
         args = self.target.compose_args(self.runner.executable, *command)
-        self._assert_allowlisted(args, char_id, display=display)
+        self._assert_allowlisted(args, char_id, display=display, roster=roster)
         try:
             projection = self.runner.run_parsed(
                 args,
@@ -238,7 +239,7 @@ class DockerExportDataSource:
             )
         return projection.value
 
-    def _command(self, char_id: int | None, *, display: bool = False) -> tuple[str, ...]:
+    def _command(self, char_id: int | None, *, display: bool = False, roster: bool = False) -> tuple[str, ...]:
         raw_state = (self.server_record.raw_state or "").casefold()
         if not self.server_record.exists:
             raise DataSourceError(
@@ -259,8 +260,10 @@ class DockerExportDataSource:
                 "container_busy",
                 "Docker character data is unavailable while the Server container changes state.",
             )
-        if display:
-            command = (*prefix, "-e", "NODE_OPTIONS=", "server", "node", "-e", DISPLAY_SCRIPT)
+        if display or roster:
+            if display and roster or roster and char_id is not None:
+                raise ValueError("A roster query cannot request character details.")
+            command = (*prefix, "-e", "NODE_OPTIONS=", "server", "node", "-e", ROSTER_SCRIPT if roster else DISPLAY_SCRIPT)
             return command if char_id is None else (*command, str(char_id))
         command = (
             *prefix,
@@ -277,11 +280,11 @@ class DockerExportDataSource:
         self,
         args: tuple[str, ...],
         char_id: int | None,
-        *, display: bool = False,
+        *, display: bool = False, roster: bool = False,
     ) -> None:
         expected = self.target.compose_args(
             self.runner.executable,
-            *self._command(char_id, display=display),
+            *self._command(char_id, display=display, roster=roster),
         )
         if args != expected:
             raise RuntimeError("Docker data command is outside the exact export allowlist.")
@@ -337,7 +340,10 @@ def select_docker_data_source(
 
     identity = docker_project_identity(target, config.project_name, config=config)
     if mount.type.casefold() == "bind":
-        game_store_path = _resolve_bind_source(target, mount.source)
+        # resolve_mount returns the owning mount, which may cover the whole
+        # data root rather than gameStore itself. Preserve its relative suffix.
+        suffix = PurePosixPath(_GAME_STORE_TARGET).relative_to(mount.target)
+        game_store_path = _resolve_bind_source(target, mount.source).joinpath(*suffix.parts)
         if not (game_store_path / "gamestore.sqlite").is_file():
             raise DataSourceError(
                 "bind_unavailable",
@@ -628,6 +634,51 @@ def _parse_export_player(
         security_status=_finite_float(player.get("securityStatus") if player.get("securityStatus") is not None else player.get("securityRating", 0.0)),
     )
     return username, account_id, role, banned, character
+
+
+def _map_roster_accounts(payload: Mapping[str, object]) -> list[Account]:
+    accounts, players = payload.get("accounts"), payload.get("players")
+    if not isinstance(accounts, list) or len(accounts) > _MAX_PLAYERS or not isinstance(players, list) or len(players) > _MAX_PLAYERS:
+        raise DataSourceError("malformed_export", "Docker roster requires bounded authoritative account and character lists.")
+    identities = {}
+    try:
+        for account in accounts:
+            if not isinstance(account, Mapping):
+                raise ValueError
+            identity = _nonnegative_int(account.get("accountId"))
+            name = _required_text(account.get("accountName"))
+            banned = _strict_bool(account.get("banned", False))
+            gm = _strict_bool(account.get("isGM", False))
+            role = "gm" if gm else _required_text(account.get("role", "0"))
+            if identity in identities or any(value.username.casefold() == name.casefold() for value in identities.values()):
+                raise ValueError
+            identities[identity] = Account(name, identity, role, banned)
+        valid = []
+        for player in players:
+            if not isinstance(player, Mapping) or "accountId" not in player:
+                raise ValueError
+            identity = player.get("accountId")
+            if identity is None:
+                continue
+            identity = _nonnegative_int(identity)
+            if identity not in identities:
+                continue
+            account = identities[identity]
+            if player.get("accountName") != account.username:
+                raise ValueError
+            if _strict_bool(player.get("banned")) is not account.banned or _strict_bool(player.get("isGM")) is not (account.role == "gm"):
+                raise ValueError
+            # Account membership and account flags come from the account table.
+            valid.append(dict(player, banned=account.banned, isGM=account.role == "gm"))
+        mapped = _map_export_accounts({"players":valid})
+        for account in mapped:
+            identities[account.account_id].characters = account.characters
+        skipped = len(players) - len(valid) + _nonnegative_int(payload.get("skippedRecords", 0))
+        if skipped:
+            log.info("Docker roster omitted %s unmatched or retired records", skipped)
+        return sorted(identities.values(),key=lambda account:account.username.casefold())
+    except (TypeError, ValueError, OverflowError):
+        raise DataSourceError("malformed_export", "Docker roster contains inconsistent account identities.") from None
 
 
 def _map_export_accounts(payload: Mapping[str, object]) -> list[Account]:

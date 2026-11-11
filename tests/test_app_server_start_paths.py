@@ -169,6 +169,7 @@ def bare_window(qapp: QApplication) -> MainWindow:
 
 def test_main_window_constructs_without_legacy_settings_prompt(
     qapp: QApplication,
+    close_main_window,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = _minimal_window_config()
@@ -180,7 +181,7 @@ def test_main_window_constructs_without_legacy_settings_prompt(
         assert window._settings_page is not None
         assert callable(window._settings_page._save_validator)
     finally:
-        window.deleteLater()
+        close_main_window(window)
 
 
 def _defer_native_start_worker(window):
@@ -226,6 +227,7 @@ def test_launcher_created_character_is_exempt_from_automatic_hiding(
 
 def test_main_window_connects_mods_apply_to_central_restart(
     qapp: QApplication,
+    close_main_window,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = _minimal_window_config()
@@ -248,7 +250,7 @@ def test_main_window_connects_mods_apply_to_central_restart(
         assert restarted[0][1]["continuous_mod_lifecycle"] is True
         assert "mode_override" not in restarted[0][1]
     finally:
-        window.deleteLater()
+        close_main_window(window)
 
 
 @pytest.mark.parametrize(

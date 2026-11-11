@@ -353,10 +353,13 @@ def test_settings_save_refreshes_the_home_server_mode_label(
 ) -> None:
     window, _probes = status_window
     (tmp_path / "StartServerWithMods.bat").write_text("", encoding="utf-8")
+    loader = tmp_path / "mods" / "Example" / "loader.js"
+    loader.parent.mkdir(parents=True)
+    loader.write_text("// Configured loader determines the next startup mode.\n", encoding="utf-8")
     window._cfg["evejs_root"] = str(tmp_path)
 
     window._on_settings_saved(
         {"server_start_preference": "StartServerWithMods.bat"}
     )
 
-    assert window._home_page.services_card.mode_label.text() == "MODDED"
+    assert window._home_page.services_card.mode_label.text() == "NEXT START: MODDED"

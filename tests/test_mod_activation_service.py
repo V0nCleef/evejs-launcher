@@ -150,3 +150,19 @@ def test_legacy_loader_name_with_uppercase_and_space_is_journalled(
     intent = read_mod_activation_state(tmp_path).for_mod("Zeta Mod")
     assert intent is not None
     assert intent.phase is ActivationPhase.PENDING_RESTART
+def test_deployment_preparation_precedes_intent_under_the_same_lock(tmp_path,monkeypatch):
+    _use_state_dir(monkeypatch,tmp_path)
+    mod=_loader(tmp_path,active=False)
+    from src.core.mod_runtime_state import mod_contract_sha256
+    captured=[]
+    def stage(current,desired):
+        with pytest.raises(ModLifecycleBusyError):
+            acquire_mod_lifecycle_lease(tmp_path,timeout_sec=0)
+        assert read_mod_activation_state(tmp_path).for_mod(mod.id) is None
+        # A deployed input belongs to the contract frozen after preparation.
+        (current.path/"loader.js.disabled").write_text("module.exports={staged:true};")
+        captured.append(mod_contract_sha256(current))
+    assert service.request_mod_activation(mod,True,preparation=stage) is True
+    intent=read_mod_activation_state(tmp_path).for_mod(mod.id)
+    assert intent.phase is ActivationPhase.PENDING_RESTART
+    assert intent.contract_sha256==captured[0]

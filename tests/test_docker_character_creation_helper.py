@@ -132,7 +132,7 @@ def _transaction_probe(tmp_path: Path, mode: str) -> dict:
         const path = require("path");
         const helper = require(__DOCKER_HELPER__);
         const mode = __MODE__;
-        const reviewedVersion = mode.startsWith("v0126-") ? "0.12.6" : "0.12.5";
+        const reviewedVersion = mode.startsWith("current-") ? "261108.1" : mode.startsWith("v0126-") ? "0.12.6" : "0.12.5";
         const starterSkillEntries = [
           { typeID: 3300, level: 4 },
           { typeID: 3301, level: 1 },
@@ -165,9 +165,9 @@ def _transaction_probe(tmp_path: Path, mode: str) -> dict:
           const skillRank = skillType.skillRank;
           const skillPoints = entry.level <= 0
             ? 0
-            : Math.round(
-              250 * skillRank * Math.pow(Math.sqrt(32), entry.level - 1),
-            );
+            : reviewedVersion === "261108.1"
+              ? Math.ceil(skillRank * 250 * 2 ** (2.5 * (entry.level - 1)))
+              : Math.round(250 * skillRank * Math.pow(Math.sqrt(32), entry.level - 1));
           return {
             itemID: characterId * 100000 + entry.typeID,
             typeID: entry.typeID,
@@ -512,7 +512,7 @@ def _transaction_probe(tmp_path: Path, mode: str) -> dict:
                   {
                     accountId: session.userid,
                     characterName: args[0],
-                    ...(reviewedVersion === "0.12.6"
+                    ...(reviewedVersion !== "0.12.5"
                       ? { raceID: 1, skillPoints: starterSkillPointTotal }
                       : {}),
                     shipID: shipId,
@@ -561,7 +561,7 @@ def _transaction_probe(tmp_path: Path, mode: str) -> dict:
                   },
                   { force: true },
                 );
-                if (reviewedVersion === "0.12.6") {
+                if (reviewedVersion !== "0.12.5") {
                   database.write(
                     "skills",
                     "/",
@@ -641,7 +641,7 @@ def _transaction_probe(tmp_path: Path, mode: str) -> dict:
                       [characterId]: {
                         statuses: {
                           [messageId]: {
-                            ...(reviewedVersion === "0.12.6"
+                            ...(reviewedVersion !== "0.12.5"
                               ? { messageID: messageId }
                               : {}),
                             statusMask: 0,
@@ -655,6 +655,7 @@ def _transaction_probe(tmp_path: Path, mode: str) -> dict:
                   },
                   { force: true },
                 );
+                if (reviewedVersion !== "261108.1" || mode === "current-unexpected-notification") {
                 const notificationId = state.notifications._meta.nextNotificationID;
                 const notification = {
                   notificationID: notificationId,
@@ -700,6 +701,7 @@ def _transaction_probe(tmp_path: Path, mode: str) -> dict:
                   },
                   { force: true },
                 );
+                }
                 if (
                   mode === "operation-failure-outbox" ||
                   mode === "verified-commit-outbox"
@@ -829,7 +831,7 @@ def _transaction_probe(tmp_path: Path, mode: str) -> dict:
                   mode.startsWith("preexisting-") ||
                   mode.startsWith("retained-") ||
                   mode.startsWith("contract-") ||
-                  mode.startsWith("v0126-");
+                  mode.startsWith("v0126-") || mode.startsWith("current-");
                 if (
                   !reachesVerification
                 ) {
@@ -840,7 +842,7 @@ def _transaction_probe(tmp_path: Path, mode: str) -> dict:
                 return characterId;
               }
             },
-            ...(reviewedVersion === "0.12.6"
+            ...(reviewedVersion !== "0.12.5"
               ? {
                   getCharacterCreationRace(raceID) {
                     const skills = mode === "v0126-skill-overbound-profile"
@@ -1544,13 +1546,30 @@ def test_cli_semantic_failure_keeps_trusted_marker_on_exit_zero(
     assert len(lines) == 1
     assert lines[0].startswith(RESULT_PREFIX)
     result = json.loads(lines[0][len(RESULT_PREFIX) :])
+    guards = result.pop("guardLines", [])
+    assert all(type(line) is int for line in guards)
+    result.pop("guardLine", None)
     assert result == {
         "ok": False,
         "error": "Docker character creation failed",
-        "code": "CHARACTER_CREATION_FAILED",
+        "code": "INVALID_REQUEST",
         "backupCreated": False,
         "rollbackSucceeded": False,
         "restartSafe": False,
     }
     assert private_value not in completed.stdout
     assert private_value not in completed.stderr
+
+
+def test_current_server_ceil_skill_points_and_client_side_mail_notification(tmp_path):
+    report=_transaction_probe(tmp_path,"current-success")
+    assert report["result"]["ok"] is True
+    assert "skills" in report["touched"] and "notifications" not in report["touched"]
+    assert "rollback" not in report["events"]
+
+
+def test_current_server_rejects_unexpected_persistent_mail_notification(tmp_path):
+    report=_transaction_probe(tmp_path,"current-unexpected-notification")
+    assert report["result"]["ok"] is False
+    assert report["result"]["rollbackSucceeded"] is True
+    assert report["stateMatchesInitial"] is True

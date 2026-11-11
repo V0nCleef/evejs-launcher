@@ -590,6 +590,7 @@ def test_docker_account_refresh_rejects_result_from_other_observed_target() -> N
 
 def test_docker_account_results_require_observed_target_authority() -> None:
     window = MainWindow.__new__(MainWindow)
+    window._settings_page = None
     window._cfg = {
         "runtime_backend": "docker_compose",
         "docker_control_policy": "connect_only",

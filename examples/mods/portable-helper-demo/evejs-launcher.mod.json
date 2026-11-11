@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 3,
+  "id": "portable-helper-demo",
+  "displayName": "Portable Helper Example",
+  "version": "1.0.0",
+  "description": "A Docker Node helper with one owned persistent receipt; no gameplay changes.",
+  "kind": "loader",
+  "supportedBackends": ["docker"],
+  "activation": {"strategy": "loader_rename"},
+  "restart": "game_server",
+  "launcherApi": {
+    "version": 1,
+    "minLauncherVersion": "1.0.80",
+    "helper": {"runtime": "node", "path": "helper.cjs"},
+    "capabilities": ["install", "verify", "prepare_server_start", "prepare_disable", "prepare_remove", "recover"]
+  },
+  "docker": {
+    "schemaVersion": 1,
+    "dataDirectory": "portable-helper-demo",
+    "serverHelper": {
+      "runtime": "node", "path": "helper.cjs",
+      "actions": ["install", "verify", "prepare_server_start", "prepare_disable", "prepare_remove", "recover"]
+    },
+    "hostActions": []
+  }
+}

@@ -53,7 +53,9 @@ def assess_active_runtime_mods(mods, installed_version):
     runtime_kinds = {ActivationKind.LOADER_RENAME, ActivationKind.JSON_BOOLEAN}
     results = []
     for mod in mods:
-        if not mod.valid or not mod.active or mod.activation_kind not in runtime_kinds:
+        docker = getattr(mod.api_descriptor, "docker", None)
+        if not mod.valid or not mod.active or (mod.activation_kind not in runtime_kinds and not (
+                docker is not None and docker.image is not None)):
             continue
 
         descriptor = mod.api_descriptor

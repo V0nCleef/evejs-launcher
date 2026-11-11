@@ -265,3 +265,27 @@ def test_compose_inspector_exec_probe_is_exact_and_secret_free(
 
     with pytest.raises(ValueError, match="server identity"):
         inspector.server_password_bypass_enabled(target, record, "unsafe;id")
+
+
+@pytest.mark.parametrize("enabled",[True,False])
+def test_online_creation_checks_current_server_without_a_maintenance_mutation(tmp_path,enabled):
+    from src.core.runtime.docker_autologin import require_docker_account_creation
+    _,_,report,context,probe = _fixture(tmp_path)
+    inspector = _Inspector(report,enabled=enabled)
+    inspector.server_account_creation_enabled = inspector.server_password_bypass_enabled
+    if enabled:
+        require_docker_account_creation(probe,context,inspector=inspector)
+    else:
+        with pytest.raises(DockerAutoLoginContextError,match="devAutoCreateAccounts"):
+            require_docker_account_creation(probe,context,inspector=inspector)
+    assert inspector.preflight_calls == 2 and inspector.exec_container_ids == [_FULL_ID]
+
+
+def test_online_creation_refuses_a_replaced_server(tmp_path):
+    from src.core.runtime.docker_autologin import require_docker_account_creation
+    _,_,report,context,probe = _fixture(tmp_path)
+    inspector = _Inspector(report)
+    inspector.server_account_creation_enabled = inspector.server_password_bypass_enabled
+    inspector.runtime_identities = [_RUNTIME_ID,"c"*64]
+    with pytest.raises(DockerAutoLoginContextError,match="changed"):
+        require_docker_account_creation(probe,context,inspector=inspector)

@@ -1,4 +1,4 @@
-# Build Launcher 1.0.77
+# Build Launcher 1.0.80
 
 Use Windows x64, CPython 3.12.14 and requirements-build.txt. The recorded builder
 used PyInstaller 6.21.0. In a fresh environment, install requirements-build.txt:
@@ -10,3 +10,29 @@ The build does not launch the application. Test against isolated settings.
 SOURCE-MANIFEST.json records source/build inputs and the packaged EXE hash;
 it does not promise reproducible EXE bytes across toolchains. See
 RELEASE-VALIDATION.md for release validation.
+
+## Isolated startup and close checks
+
+The source entry point and packaged executable accept an explicit diagnostic:
+
+```powershell
+.\EveJS-Launcher-V1.exe --headless-check C:\Launcher-QA --check-mode immediate
+```
+
+Use an absolute writable directory without junctions or symlinks. Each invocation
+creates a fresh `run-<id>` subdirectory with private APPDATA, LOCALAPPDATA, temporary
+files and empty synthetic installation roots. Automatic updates, audio and service
+startup are disabled. The diagnostic uses Qt's offscreen platform and never sends
+desktop input. It does not reuse an existing launcher configuration or installation.
+
+Modes are `immediate`, `normal`, `profiles`, `updater` and `wizard`. They exercise
+the common entry point and close handling, a two-profile round trip, a deliberately
+delayed update-check response, and cancellation of the first-run wizard. The updater
+mode substitutes metadata locally; it does not contact GitHub or install an update.
+Read `run-<id>\result.json` and require both `status: passed` and process exit code 0.
+Failures or a 35-second watchdog return a nonzero exit code. Invalid arguments fail
+before normal launcher logging. Remove only the diagnostic directories you created
+when their reports are no longer needed.
+
+These checks cover the actual frozen Qt application without a desktop window.
+They do not claim native window-manager, rendering or retail-gameplay coverage.

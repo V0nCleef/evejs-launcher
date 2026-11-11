@@ -11,7 +11,7 @@ import shutil
 import uuid
 
 from .local_mod_packages import LocalModPackages, LocalModPackageError, _fingerprint, _ordinary
-from .mod_api_manifest import ENABLED_UPDATE_PROTOCOL, read_api_manifest, _relative_path, _safe_path
+from .mod_api_manifest import ENABLED_UPDATE_ACTIONS, ENABLED_UPDATE_PROTOCOL, read_api_manifest, _relative_path, _safe_path
 from .mod_api_runtime import run_mod_helper_locked, validate_enabled_update_context
 from .mod_activation_state import prepare_mod_activation, mark_mod_activation_pending
 from .mod_lifecycle_lock import acquire_mod_lifecycle_lock
@@ -91,8 +91,12 @@ def _call(packages, journal, data, operation, action, guard):
     guard()
     _registry(packages, data, previous=None)
     descriptor, context = _provider(packages, journal, data, operation)
-    result = run_mod_helper_locked(descriptor, action, context, backend=operation.backend,
-                                   update=dict(data["update"]))
+    if operation.backend == "docker":
+        from .mod_operations import run_docker_helper_locked
+        result = run_docker_helper_locked(descriptor, action, context, operation, update=dict(data["update"]))
+    else:
+        result = run_mod_helper_locked(descriptor, action, context, backend=operation.backend,
+                                       update=dict(data["update"]))
     result.require_ready()
     # The runtime validator also enforces this. Keep the orchestration boundary
     # explicit, including injected runners used by transaction tests.
@@ -106,7 +110,7 @@ def _call(packages, journal, data, operation, action, guard):
 def _load(packages, journal, data, operation):
     required = {"schemaVersion", "mode", "phase", "target", "modId", "oldVersion", "newVersion", "enabled",
                 "recordId", "oldRecord", "oldFingerprint", "newFingerprint", "providerFingerprint", "update"}
-    if (not isinstance(data, dict) or not required <= data.keys() or data.keys() - required - {"rollbackFrom"}
+    if (not isinstance(data, dict) or not required <= data.keys() or data.keys() - required - {"rollbackFrom", "dockerImageBefore", "dockerImageTransaction"}
             or data["schemaVersion"] != 2 or data["mode"] != ENABLED_UPDATE_PROTOCOL
             or data["phase"] not in PHASES or data["enabled"] is not True):
         raise ModUpdateError("Invalid enabled update recovery journal.")
@@ -126,6 +130,15 @@ def _load(packages, journal, data, operation):
             or str(uuid.UUID(journal.parent.name)) != update.get("transactionId")):
         raise ModUpdateError("The enabled update context does not match its retained transaction.")
     _provider(packages, journal, data, operation)
+    if "dockerImageBefore" in data:
+        if operation.backend != "docker":
+            raise ModUpdateError("A Docker image transaction cannot resume on Native.")
+        if data["dockerImageBefore"] is not None:
+            from .runtime.docker_mod_images import validate_image_record
+            validate_image_record(data["dockerImageBefore"])
+    if "dockerImageTransaction" in data:
+        if data["dockerImageTransaction"] != update["transactionId"] or "dockerImageBefore" not in data:
+            raise ModUpdateError("The image transaction does not match this enabled update.")
     _registry(packages, data, previous=None)
     return target
 
@@ -160,7 +173,9 @@ def _discard_provider(packages, journal):
 def install_enabled_release(current, candidate, stage, journal, packages, operation, preserved, *, guard, report):
     spec = candidate.launcher_api.enabled_update
     old_spec = current.api_descriptor.launcher_api.enabled_update if current.api_descriptor.launcher_api else None
-    if (operation.backend != "native" or current.version not in spec.from_versions
+    if (operation.backend not in {"native", "docker"}
+            or (operation.backend == "docker" and (candidate.docker is None or current.api_descriptor.docker is None or not ENABLED_UPDATE_ACTIONS.issubset(candidate.docker.server_actions)))
+            or current.version not in spec.from_versions
             or (old_spec is not None and (old_spec.protocol, old_spec.compatibility) != (spec.protocol, spec.compatibility))):
         raise ModUpdateError("The incoming enabled update contract does not admit this installed version/backend.")
     guard()
@@ -197,7 +212,16 @@ def install_enabled_release(current, candidate, stage, journal, packages, operat
             newFingerprint=package_fingerprint(stage, packages), providerFingerprint=provider_fingerprint,
             update=dict(protocol=ENABLED_UPDATE_PROTOCOL, transactionId=str(uuid.UUID(journal.parent.name)),
                         fromVersion=current.version, fromModRoot=str(current.path), toVersion=candidate.version))
+        if operation.backend == "docker":
+            from .runtime.docker_mod_images import _registry as image_registry
+            data["dockerImageBefore"] = image_registry(packages.root).get(current.id)
+        image_spec = getattr(getattr(candidate,"docker",None),"image",None)
+        if operation.backend == "docker" and image_spec is not None:
+            data["dockerImageTransaction"] = data["update"]["transactionId"]
         _save(journal, data, "prepared")
+        if "dockerImageTransaction" in data:
+            from .runtime.docker_mod_images import prepare_image_transaction
+            prepare_image_transaction(packages.root,data["dockerImageTransaction"],current.id,data["dockerImageBefore"])
         _save(journal, data, "preparing")
         report("Preparing enabled mod update")
         _call(packages, journal, data, operation, "prepare_update", guard)
@@ -236,6 +260,9 @@ def _finish_commit(packages, journal, data, operation, guard):
     # finish commit, never restore the obsolete package/native payload.
     _save(journal, data, "committing")
     _call(packages, journal, data, operation, "commit_update", guard)
+    if "dockerImageTransaction" in data:
+        from .runtime.docker_mod_images import commit_image_transaction
+        commit_image_transaction(packages.root,data["dockerImageTransaction"],data["modId"])
     _save(journal, data, "complete")
 
 
@@ -281,6 +308,11 @@ def recover_enabled_release(journal, data, operation, *, guard):
                     target.rename(failed)
                 backup.rename(target)
             _package(packages, target, data, previous=True)
+            if "dockerImageBefore" in data:
+                from .runtime.docker_mod_images import restore_image_binding
+                provider_descriptor, _ = _provider(packages, journal, data, operation)
+                restore_image_binding(packages.root, provider_descriptor, data["dockerImageBefore"],
+                                      transaction_id=data.get("dockerImageTransaction"))
             _activate(_installed(packages, target))
             _registry(packages, data, previous=True)
             _save(journal, data, "rolled_back")

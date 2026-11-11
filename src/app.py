@@ -50,6 +50,7 @@ from .widgets.localized_dialogs import (
 )
 
 from . import config
+from .core.installation_profiles import client_profiles_root
 from .i18n import (
     current_language,
     format_character_deletion_confirmation,
@@ -175,6 +176,7 @@ from .core.profiles import (
     PROFILES_ROOT,
     configure_profile_game_endpoint,
     create_profile,
+    get_eve_settings_path,
     prefill_username,
 )
 from .core.server_launcher import (
@@ -393,6 +395,11 @@ def _perform_client_launch(request: ClientLaunchRequest) -> LaunchedProcess:
 
 
 def _prepare_and_spawn_client(request: ClientLaunchRequest) -> LaunchedProcess:
+    if request.require_account_creation:
+        from .core.runtime.docker_autologin import require_docker_account_creation
+        if request.docker_auto_login_probe is None:
+            raise DockerAutoLoginContextError("The selected online account-creation target could not be verified.")
+        require_docker_account_creation(request.docker_auto_login_probe,request.launch_context)
     shared = request.client_settings_mode == "shared"
     if shared:
         require_shared_settings_support(request.client_path)
@@ -419,7 +426,9 @@ def _prepare_and_spawn_client(request: ClientLaunchRequest) -> LaunchedProcess:
         settings_options = {"settings_dir": shared_settings.folder}
         prefill_username(request.username, **settings_options, update_username=True)
     else:
-        prefill_username(request.username)
+        if request.profiles_root != Path(PROFILES_ROOT):
+            settings_options = {"settings_dir": get_eve_settings_path(str(profile_path))}
+        prefill_username(request.username, **settings_options)
     configure_profile_game_endpoint(
         request.username,
         profile_path,
@@ -497,6 +506,8 @@ def _prepare_and_spawn_client(request: ClientLaunchRequest) -> LaunchedProcess:
 
     def pre_spawn_check() -> None:
         require_client_endpoints_ready(request.launch_context)
+        if request.require_account_creation:
+            require_docker_account_creation(request.docker_auto_login_probe,request.launch_context)
         if docker_auto_login_probe is not None:
             assert_docker_auto_login_context_current(
                 docker_auto_login_probe,
@@ -515,6 +526,7 @@ def _prepare_and_spawn_client(request: ClientLaunchRequest) -> LaunchedProcess:
         launch_context=request.launch_context,
         auto_login=auto_login,
         hide_console=request.hide_console,
+        **({"docker_mod_operation": request.docker_mod_operation} if request.docker_mod_operation is not None else {}),
         auto_login_server_password_bypass_verified=(
             server_password_bypass_verified
         ),
@@ -939,6 +951,9 @@ class MainWindow(QMainWindow):
 
         # Status bar (bottom)
         self._status_bar = StatusBar(self)
+        from .ui.installation_coordinator import InstallationBar
+        self._installation_bar = InstallationBar(self)
+        self._status_bar.set_installation_controls(self._installation_bar)
         root.addWidget(self._status_bar)
 
     # ── Page switching with cross-fade ─────────────────────────────────
@@ -1545,6 +1560,16 @@ class MainWindow(QMainWindow):
 
         return target_factory
 
+    def _docker_project_target_factory(self) -> Callable[[], ComposeTarget]:
+        """Capture the selected project without validating its next-start mods.
+
+        Explicit Stop and log viewing must remain available when a generated
+        preload or image contribution has drifted. The controller still proves
+        the selected Compose project and service identities before stopping it.
+        """
+        draft = self._docker_setup_draft()
+        return lambda: build_compose_target(draft)
+
     def _docker_setup_draft(self) -> DockerSetupDraft:
         """Capture the selected target once before worker-thread validation."""
         return DockerSetupDraft(
@@ -1579,6 +1604,7 @@ class MainWindow(QMainWindow):
         suppress_failure_dialog: bool = False,
         docker_mod_apply_result: DockerModApplyResult | None = None,
         mod_compatibility_consent: ModCompatibilityConsent | None = None,
+        verification_only: bool = False,
     ) -> bool:
         if not self._docker_managed():
             self._docker_unavailable(self._docker_control_reason())
@@ -1597,7 +1623,7 @@ class MainWindow(QMainWindow):
                 DockerLifecycleAction.STOP_ALL,
             }
             or (
-                action is DockerLifecycleAction.RECREATE_GAME
+                action in {DockerLifecycleAction.RECREATE_GAME, DockerLifecycleAction.RECREATE_STACK}
                 and getattr(self, "_pending_docker_mod_plan", None) is not None
             )
         )
@@ -1755,21 +1781,53 @@ class MainWindow(QMainWindow):
             DockerLifecycleAction.STOP_ALL,
             DockerLifecycleAction.RESTART_GAME,
             DockerLifecycleAction.RECREATE_GAME,
+            DockerLifecycleAction.RECREATE_STACK,
         }:
             self._publish_mod_runtime_snapshot(None)
+
+        captured_client_root = self._cfg.get("client_path", "")
+        captured_mod_lease = getattr(self, "_mod_lifecycle_lease", None)
+        import copy
+        captured_installations = copy.deepcopy(self._cfg)
+        readiness_budget = max(30, min(900, int(self._cfg.get("docker_readiness_timeout_sec", 180))))
 
         def controller_factory(target: ComposeTarget) -> ManagedComposeController:
             # This factory runs only after DockerLifecycleWorker has moved to
             # its worker thread. Inspector and controller intentionally share
             # one runner, keeping discovery and CLI use off the GUI thread.
             runner = DockerCommandRunner()
+            if not verification_only and action in {DockerLifecycleAction.START_GAME, DockerLifecycleAction.START_STACK,
+                    DockerLifecycleAction.START_MARKET, DockerLifecycleAction.RESTART_GAME,
+                    DockerLifecycleAction.RECREATE_GAME, DockerLifecycleAction.RECREATE_STACK}:
+                from .core.runtime.installation_collisions import require_distinct_installation_resources
+                require_distinct_installation_resources(captured_installations, target, ComposeInspector(runner))
+            from .core.runtime.docker_mod_preparation import capture_docker_mod_preparation
+            preparation = (
+                capture_docker_mod_preparation(target, captured_client_root)
+                if not verification_only and action in {
+                    DockerLifecycleAction.START_GAME, DockerLifecycleAction.START_STACK,
+                    DockerLifecycleAction.RESTART_GAME, DockerLifecycleAction.RECREATE_GAME,
+                    DockerLifecycleAction.RECREATE_STACK,
+                }
+                else None
+            )
             return ManagedComposeController(
                 target, ComposeInspector(runner), runner,
                 policy=DockerControlPolicy.MANAGED,
                 expected_target_identity=expected_target_identity,
+                readiness_timeout_sec=readiness_budget,
+                verification_only=verification_only,
+                installation_profile_id=captured_installations.get("active_installation_profile"),
+                **({"before_game_start": preparation, "lifecycle_lease": captured_mod_lease}
+                   if preparation is not None else {}),
             )
 
-        if docker_mod_apply_result is None:
+        if (expected_target_identity is None and docker_mod_apply_result is None
+                and action in {DockerLifecycleAction.STOP_GAME,
+                               DockerLifecycleAction.STOP_MARKET,
+                               DockerLifecycleAction.STOP_ALL}):
+            target_factory = self._docker_project_target_factory()
+        elif docker_mod_apply_result is None:
             target_factory = self._docker_lifecycle_target_factory()
         else:
             target_factory = self._docker_lifecycle_target_factory(
@@ -1830,9 +1888,10 @@ class MainWindow(QMainWindow):
             DockerLifecycleAction.START_STACK,
             DockerLifecycleAction.RESTART_GAME,
             DockerLifecycleAction.RECREATE_GAME,
+            DockerLifecycleAction.RECREATE_STACK,
         } else snapshot.game
         market = (ServiceState.STARTING
-                  if action in {DockerLifecycleAction.START_MARKET, DockerLifecycleAction.START_GAME, DockerLifecycleAction.START_STACK}
+                  if action in {DockerLifecycleAction.START_MARKET, DockerLifecycleAction.START_GAME, DockerLifecycleAction.START_STACK, DockerLifecycleAction.RECREATE_STACK}
                   and snapshot.market is not ServiceState.ONLINE else snapshot.market)
         game = ServiceState.STOPPING if action in {DockerLifecycleAction.STOP_GAME, DockerLifecycleAction.STOP_ALL} else game
         market = ServiceState.STOPPING if action in {DockerLifecycleAction.STOP_MARKET, DockerLifecycleAction.STOP_ALL} else market
@@ -1889,7 +1948,7 @@ class MainWindow(QMainWindow):
             self._docker_close_pending and self._docker_close_stop_started
         )
         pending_mod_recreate = bool(
-            expected_action is DockerLifecycleAction.RECREATE_GAME
+            expected_action in {DockerLifecycleAction.RECREATE_GAME, DockerLifecycleAction.RECREATE_STACK}
             and getattr(self, "_pending_docker_mod_plan", None) is not None
         )
         game_runtime_observation_conflict = False
@@ -1932,7 +1991,7 @@ class MainWindow(QMainWindow):
             )
             game_runtime_observation_conflict = bool(
                 result.succeeded
-                and result.action is DockerLifecycleAction.RECREATE_GAME
+                and result.action in {DockerLifecycleAction.RECREATE_GAME, DockerLifecycleAction.RECREATE_STACK}
                 and result.game_runtime_identity is not None
                 and not pending_mod_recreate
                 and observed_game_runtime_binding
@@ -1950,7 +2009,7 @@ class MainWindow(QMainWindow):
                 game_state = self._docker_lifecycle_record_state(game_record)
                 if (
                     result.succeeded
-                    and result.action is DockerLifecycleAction.RECREATE_GAME
+                    and result.action in {DockerLifecycleAction.RECREATE_GAME, DockerLifecycleAction.RECREATE_STACK}
                 ):
                     # ManagedComposeController has already proven semantic
                     # readiness for no-healthcheck targets at this boundary. A
@@ -1993,6 +2052,17 @@ class MainWindow(QMainWindow):
                 game_error = result.error if affected_game else prior.game_error
                 market_error = result.error if affected_market else prior.market_error
                 snapshot = replace(prior, game_error=game_error, market_error=market_error)
+            if (not result.succeeded and affected_game and not pending_mod_recreate
+                    and result.diagnostic_code in {"readiness_timeout", "inspection_unavailable", "image_unverified", "runtime_changed"}
+                    and result.target_identity):
+                target = result.target_identity
+                self.__dict__.setdefault("_deferred_docker_mod_verification", {})[target] = {
+                    "ordinary":True,"plan":None,"mods":(),"result":replace(result,action=DockerLifecycleAction.RECREATE_STACK),
+                    "consent":None,"apply_result":None,"generation":getattr(self,"_monitor_generation",0),
+                    "settings":self._docker_monitor_settings_identity(),"floor":time.monotonic_ns(),"auto_retry":True}
+                self.__dict__.setdefault("_docker_mod_quarantined_targets", {})[target] = time.monotonic_ns()
+                snapshot = replace(snapshot,game=ServiceState.UNKNOWN,target_identity=target,
+                    game_error="Docker runtime verification is pending. Retry verification or explicitly stop Server.")
             self._runtime_snapshot = snapshot
             self._apply_runtime_snapshot(snapshot)
             if (
@@ -2033,11 +2103,12 @@ class MainWindow(QMainWindow):
             and expected_action in {
                 DockerLifecycleAction.START_GAME, DockerLifecycleAction.START_STACK,
                 DockerLifecycleAction.RESTART_GAME, DockerLifecycleAction.RECREATE_GAME,
+            DockerLifecycleAction.RECREATE_STACK,
             }
         ):
             self._start_companion_scripts_for_game()
         if (
-            expected_action is DockerLifecycleAction.RECREATE_GAME
+            expected_action in {DockerLifecycleAction.RECREATE_GAME, DockerLifecycleAction.RECREATE_STACK}
             and getattr(self, "_pending_docker_mod_plan", None) is not None
         ):
             self._pending_docker_mod_lifecycle_result = (
@@ -2109,6 +2180,8 @@ class MainWindow(QMainWindow):
             {},
         )
         if token is None:
+            if self._retry_deferred_docker_verification(observation, generation):
+                return
             if observation.target_identity in quarantined_targets:
                 # ``observation_changed`` is deduplicated; sampled must also be
                 # able to recognize a late, authoritative stopped state.
@@ -2148,12 +2221,19 @@ class MainWindow(QMainWindow):
             and observation.game_runtime_identity
             == getattr(result, "game_runtime_identity", None)
         )
+        if exact_runtime and "market" in dict(getattr(result,"immutable_images",())):
+            exact_runtime = bool(observation.market is ServiceState.ONLINE
+                and observation.market_identity == getattr(records.get("market"),"short_id",None))
         if exact_runtime:
             quarantined_targets.pop(observation.target_identity, None)
-        # Apply only after an exact retry has removed this target's quarantine.
-        # A mismatch remains suppressed and follows the corrective-stop path.
+        # A warming service or a transient monitor failure is not evidence
+        # that the successful recreate started the wrong mod environment.
+        if not exact_runtime:
+            log.info("Docker post-recreate observation remains inconclusive target=%s state=%s",
+                     getattr(result, "target_identity", None), observation.game)
+            return
         self._on_docker_observation(observation, generation)
-        self._complete_docker_mod_post_result_observation(token, exact_runtime)
+        self._complete_docker_mod_post_result_observation(token, True)
 
     def _on_docker_mod_observation_timeout(self, token: object) -> None:
         """Fail closed when no post-result monitor sample arrives in time."""
@@ -2222,6 +2302,7 @@ class MainWindow(QMainWindow):
             DockerLifecycleAction.STOP_ALL: (True, True),
             DockerLifecycleAction.RESTART_GAME: (True, False),
             DockerLifecycleAction.RECREATE_GAME: (True, False),
+            DockerLifecycleAction.RECREATE_STACK: (True, True),
         }[action]
 
     @staticmethod
@@ -2794,6 +2875,8 @@ class MainWindow(QMainWindow):
         order_plan = plan_mod_order(discovered, backend=support_name)
         discovered = order_plan.mods
         server_kinds = {ActivationKind.LOADER_RENAME, ActivationKind.JSON_BOOLEAN}
+        if backend == DOCKER_BACKEND:
+            server_kinds.add(ActivationKind.PACKAGE)
         invalid = tuple(mod for mod in discovered if not mod.valid and mod.active
                         and mod.activation_kind in server_kinds and support_name in mod.supported_backends)
         if invalid:
@@ -2810,7 +2893,9 @@ class MainWindow(QMainWindow):
             applicable = tuple(
                 mod
                 for mod in applicable
-                if mod.activation_kind is ActivationKind.LOADER_RENAME
+                if mod.activation_kind is ActivationKind.LOADER_RENAME or (
+                    mod.api_descriptor is not None and mod.api_descriptor.docker is not None
+                    and mod.api_descriptor.docker.image is not None)
             )
         try:
             order_plan.require_valid(applicable)
@@ -4445,6 +4530,8 @@ class MainWindow(QMainWindow):
                 policy=DockerControlPolicy.MANAGED,
                 shared_menu_material=candidate_plan.shared_menu,
             )
+            from .core.runtime.docker_mod_images import prepare_image_override
+            prepare_image_override(Path(evejs_root), policy=DockerControlPolicy.MANAGED)
             plan = build_mod_runtime_plan(
                 evejs_root,
                 mods,
@@ -4513,8 +4600,11 @@ class MainWindow(QMainWindow):
             )
         lifecycle_error = ""
         try:
+            image_state = Path(evejs_root) / ".evejs-launcher" / "docker-images.json"
+            recreate_action = (DockerLifecycleAction.RECREATE_STACK if image_state.exists()
+                               else DockerLifecycleAction.RECREATE_GAME)
             lifecycle_started = self._begin_docker_lifecycle(
-                DockerLifecycleAction.RECREATE_GAME,
+                recreate_action,
                 expected_target_identity=_expected_target_identity,
                 on_complete=lambda succeeded, consent=compatibility_consent, callback=_on_complete: self._on_docker_mod_recreate_completed(
                     succeeded,
@@ -4649,6 +4739,7 @@ class MainWindow(QMainWindow):
                         result.server_node_options_sha256
                     ),
                     runtime_identity=result.game_runtime_identity,
+                    **({"attested_images": result.immutable_images} if getattr(result, "immutable_images", ()) else {}),
                 )
                 write_mod_runtime_snapshot(snapshot)
                 clear_confirmed_mod_activations(
@@ -4720,61 +4811,92 @@ class MainWindow(QMainWindow):
                     finish_continuation(False)
                     return
 
-        root = str(plan.root) if isinstance(plan, ModRuntimePlan) else str(
-            self._cfg.get("evejs_root", "")
-        )
-        self._mark_matching_mod_activations_failed(
-            root,
-            tuple(mod for mod in planned_mods if isinstance(mod, Mod)),
-            "docker-runtime-verification-failed",
-        )
+        target = getattr(result, "target_identity", None)
+        if isinstance(target, str):
+            deferred = self.__dict__.setdefault("_deferred_docker_mod_verification", {})
+            deferred[target] = {
+                "plan": plan, "mods": planned_mods, "result": result,
+                "consent": compatibility_consent, "apply_result": apply_result,
+                "generation": getattr(self, "_monitor_generation", 0),
+                "settings": self._docker_monitor_settings_identity(),
+                "floor": time.monotonic_ns(), "auto_retry": True,
+            }
+            self.__dict__.setdefault("_docker_mod_quarantined_targets", {})[target] = time.monotonic_ns()
+        log.warning("Docker mod runtime unverified target=%s; Game left running; reason=%s", target, failure)
         self._publish_mod_runtime_snapshot(None)
-        QMessageBox.critical(
-            self,
-            "Docker Mod Verification Failed",
-            failure
-            + "\n\nThe Game server is being stopped so it is not left "
-            "running with an unknown mod state.",
-        )
-        corrective_apply_result = None
-        if isinstance(apply_result, DockerModApplyResult):
-            try:
-                if has_pending_docker_mod_transaction(apply_result):
-                    corrective_apply_result = apply_result
-            except Exception:
-                log.exception(
-                    "Docker corrective stop could not validate pending mod transaction"
-                )
-        corrective_start_error = ""
-        try:
-            corrective_started = self._begin_docker_lifecycle(
-                DockerLifecycleAction.STOP_GAME,
-                expected_target_identity=getattr(result, "target_identity", None),
-                on_complete=self._on_docker_mod_corrective_stop_completed,
-                suppress_failure_dialog=True,
-                docker_mod_apply_result=corrective_apply_result,
-            )
-        except Exception as exc:
-            log.exception("Could not start Docker mod corrective stop worker")
-            corrective_started = False
-            corrective_start_error = str(exc) or "Unknown worker startup error."
-        if corrective_started:
-            finish_continuation(False)
-            return
         self._clear_pending_docker_mod_operation()
         self._release_mod_lifecycle_lease()
         QMessageBox.critical(
-            self,
-            "Docker Corrective Stop Failed",
-            "The launcher could not start the corrective Game stop. Check "
-            "Docker state before allowing clients to reconnect."
-            + (
-                "\n\nWorker error: " + corrective_start_error
-                if corrective_start_error
-                else ""
-            ),
+            self, "Docker Mod Verification Pending",
+            failure + "\n\nThe Game server was left running. Client launches requiring this mod state remain blocked. Retry verification, reapply Mods, or stop Game explicitly.",
         )
         finish_continuation(False)
+
+    def _retry_deferred_docker_verification(self, observation, generation=None) -> bool:
+        """Reconcile a late exact sample without another recreate or any stop."""
+        deferred = getattr(self, "_deferred_docker_mod_verification", {})
+        entry = deferred.get(observation.target_identity)
+        if not entry or not entry.get("auto_retry") or self._close_in_progress or not self._docker_mode():
+            return False
+        if (self._lifecycle_active() or getattr(self, "_mod_operation_request", None) is not None
+                or entry["settings"] != self._docker_monitor_settings_identity()
+                or observation.settings_identity != entry["settings"]
+                or observation.monitor_generation != entry["generation"]
+                or getattr(self, "_monitor_generation", 0) != entry["generation"]
+                or generation is not None and generation != entry["generation"]
+                or observation.sample_started_monotonic_ns <= entry["floor"]):
+            return False
+        result = entry["result"]
+        if observation.game is not ServiceState.ONLINE or not observation.game_identity:
+            return False
+        plan = entry["plan"]
+        if not isinstance(plan, ModRuntimePlan) and not entry.get("ordinary"):
+            return False
+        try:
+            self._mod_lifecycle_lease = acquire_mod_lifecycle_lease(str(plan.root if plan is not None else self._cfg["evejs_root"]))
+        except ModLifecycleBusyError:
+            return False
+        entry["auto_retry"] = False
+        deferred.pop(observation.target_identity, None)
+        self._docker_mod_quarantined_targets.pop(observation.target_identity, None)
+        self._pending_docker_mod_plan = plan
+        self._pending_docker_mods = entry["mods"]
+        self._pending_docker_mod_lifecycle_result = None
+        self._pending_docker_mod_apply_result = entry["apply_result"]
+
+        def verified(succeeded):
+            if entry.get("ordinary"):
+                self._clear_pending_docker_mod_operation()
+                self._release_mod_lifecycle_lease()
+                if not succeeded:
+                    deferred[observation.target_identity] = entry
+                    self._docker_mod_quarantined_targets[observation.target_identity] = time.monotonic_ns()
+                else:
+                    deferred.pop(observation.target_identity,None)
+                    self._docker_mod_quarantined_targets.pop(observation.target_identity,None)
+                self._docker_observe_requested.emit()
+            else:
+                self._on_docker_mod_recreate_completed(succeeded, entry["consent"])
+            again = deferred.get(observation.target_identity)
+            if again is not None:
+                again["auto_retry"] = False
+
+        try:
+            began = self._begin_docker_lifecycle(result.action,
+                expected_target_identity=observation.target_identity, verification_only=True,
+                on_complete=verified, suppress_failure_dialog=True)
+        except Exception:
+            self._clear_pending_docker_mod_operation()
+            self._release_mod_lifecycle_lease()
+            deferred[observation.target_identity] = entry
+            self._docker_mod_quarantined_targets[observation.target_identity] = time.monotonic_ns()
+            raise
+        if not began:
+            self._clear_pending_docker_mod_operation()
+            self._release_mod_lifecycle_lease()
+            deferred[observation.target_identity] = entry
+            self._docker_mod_quarantined_targets[observation.target_identity] = time.monotonic_ns()
+        return bool(began)
 
     def _on_docker_mod_corrective_stop_completed(self, succeeded: bool) -> None:
         """Release the mod transaction only after the corrective stop settles."""
@@ -5098,8 +5220,8 @@ class MainWindow(QMainWindow):
         ):
             return (
                 None,
-                "The selected Docker target has an unverified mod runtime. Stop "
-                "Game or reapply Mods before launching a client.",
+                "The selected Docker runtime is unverified. Retry verification "
+                "before launching a client; Server can be stopped explicitly.",
             )
         if (
             observed.target_identity is None
@@ -5197,7 +5319,7 @@ class MainWindow(QMainWindow):
     # ── Character launching ───────────────────────────────────────────
 
     def _snapshot_ready_ids(self) -> set[int]:
-        snapshots = load_overview_state().get("snapshots", {})
+        snapshots = load_overview_state(**self._overview_kwargs()).get("snapshots", {})
         result: set[int] = set()
         for key, value in snapshots.items():
             try:
@@ -5208,9 +5330,18 @@ class MainWindow(QMainWindow):
                 result.add(character_id)
         return result
 
+    def _overview_kwargs(self, *, launch=False):
+        identity = self._cfg.get("active_installation_profile", "default")
+        if identity == "default":
+            return {}
+        from .core.installation_profiles import client_profiles_root
+        base = client_profiles_root(self._cfg, Path(PROFILES_ROOT)).parent
+        return ({"state_path": base / "overview_bridge.json", "ack_dir": base / "overview_bridge" / "acks"}
+                if launch else {"path": base / "overview_bridge.json"})
+
     def _poll_overview_acks(self) -> None:
         try:
-            events = process_overview_ack_files()
+            events = process_overview_ack_files(**self._overview_kwargs(launch=True))
         except Exception:
             log.exception("Unable to process overview bridge acknowledgements")
             return
@@ -5900,7 +6031,7 @@ class MainWindow(QMainWindow):
             overview_error = ""
             if source_id is not None and result.character_id is not None:
                 try:
-                    add_pending_overview_import(result.character_id, source_id)
+                    add_pending_overview_import(result.character_id, source_id, **self._overview_kwargs())
                 except Exception as exc:
                     log.exception("Unable to persist pending overview import")
                     overview_error = str(exc) or type(exc).__name__
@@ -6063,7 +6194,7 @@ class MainWindow(QMainWindow):
             overview_state_error = ""
             if source_id is not None:
                 try:
-                    add_pending_overview_import(outcome.character_id, source_id)
+                    add_pending_overview_import(outcome.character_id, source_id, **self._overview_kwargs())
                 except Exception as exc:
                     log.exception("Unable to persist pending overview import")
                     overview_state_error = str(exc) or type(exc).__name__
@@ -6463,7 +6594,7 @@ class MainWindow(QMainWindow):
         if isinstance(outcome, CharacterDeletionResult):
             try:
                 remove_characters_from_overview_state(
-                    list(outcome.deleted_character_ids)
+                    list(outcome.deleted_character_ids), **self._overview_kwargs()
                 )
             except Exception:
                 log.exception("Unable to prune overview state after deletion")
@@ -6633,7 +6764,9 @@ class MainWindow(QMainWindow):
             self._cfg.get("auto_login_enabled", False)
         )
         docker_auto_login_probe = None
-        if auto_login_enabled and self._docker_mode():
+        new_account_requested = self._docker_mode() and not character_name and not any(
+            account.username.casefold() == username.casefold() for account in getattr(self,"_accounts",()))
+        if (auto_login_enabled or new_account_requested) and self._docker_mode():
             try:
                 target_factory = self._docker_log_target_factory()
                 runtime_snapshot = getattr(self, "_runtime_snapshot", None)
@@ -6652,11 +6785,11 @@ class MainWindow(QMainWindow):
 
         overview_bridge = None
         if character_id is not None and not self._docker_mode():
-            source_id = pending_overview_source(character_id)
+            source_id = pending_overview_source(character_id, **self._overview_kwargs())
             patch_status = inspect_overview_patch(client_path)
             if patch_status.state is OverviewPatchState.PATCHED:
                 try:
-                    overview_bridge = prepare_overview_launch(character_id)
+                    overview_bridge = prepare_overview_launch(character_id, **self._overview_kwargs(launch=True))
                 except OverviewSnapshotRequired as exc:
                     source_id = exc.source_character_id or source_id
                     source_name = next(
@@ -6697,12 +6830,15 @@ class MainWindow(QMainWindow):
             character_name=character_name,
             evejs_root=evejs_root,
             client_path=client_path,
-            profiles_root=Path(PROFILES_ROOT),
+            profiles_root=client_profiles_root(self._cfg, Path(PROFILES_ROOT)),
             launch_context=launch_context,
             character_id=character_id,
             auto_login_enabled=auto_login_enabled,
             hide_console=character_id is None,
             docker_auto_login_probe=docker_auto_login_probe,
+            require_account_creation=new_account_requested,
+            docker_mod_operation=(self._mod_coordinator._context() if getattr(self, "_mod_coordinator", None) is not None
+                                  and self._docker_managed() else None),
             overview_bridge=overview_bridge,
             client_settings_mode=settings_mode,
             shared_settings_folder=(
@@ -7719,6 +7855,7 @@ class MainWindow(QMainWindow):
     def _data_settings_identity(self) -> tuple[object, ...]:
         """Return the exact settings tuple that authorizes one data result."""
         return (
+            self._cfg.get("active_installation_profile", "default"),
             self._cfg.get("runtime_backend"),
             self._cfg.get("evejs_root"),
             self._cfg.get("docker_compose_file"),
@@ -8710,6 +8847,9 @@ class MainWindow(QMainWindow):
 
     def _apply_runtime_snapshot(self, snapshot: RuntimeSnapshot) -> None:
         """Fan one snapshot out to footer, navigation, and Home."""
+        bar = getattr(self, "_installation_bar", None)
+        if bar is not None:
+            bar.refresh()
         self._observe_character_activity(snapshot)
         self._sync_runtime_pages(snapshot)
         self._status_bar.set_server_state(
@@ -9110,7 +9250,7 @@ class MainWindow(QMainWindow):
         )
         thread = QThread(self)
         token = object()
-        worker = DockerLogWorker(self._docker_log_target_factory(), service=service, token=token)
+        worker = DockerLogWorker(self._docker_project_target_factory(), service=service, token=token)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.line.connect(self._on_docker_log_line)
@@ -9820,11 +9960,20 @@ class MainWindow(QMainWindow):
             )
         return True
 
+    def _cancel_background_views_for_close(self):
+        if hasattr(self, "_account_thread"):
+            self._cancel_data_loads()
+        portraits = getattr(getattr(self, "_characters_page", None), "cancel_portrait_loads", None)
+        if callable(portraits):
+            portraits(invalidate=True)
+
     def closeEvent(self, event) -> None:  # noqa: N802
         if self._wait_for_client_exit(event):
             return
         if getattr(self, "_mod_operation_request", None) is not None:
             self._close_in_progress = True
+            self._cancel_background_views_for_close()
+            self._shutdown_audio_for_close()
             event.ignore()
             return
         mod_coordinator = getattr(self, "_mod_coordinator", None)
@@ -9912,14 +10061,7 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
         if hasattr(self, "_account_thread"):
-            self._cancel_data_loads()
-            portrait_cancel = getattr(
-                getattr(self, "_characters_page", None),
-                "cancel_portrait_loads",
-                None,
-            )
-            if callable(portrait_cancel):
-                portrait_cancel(invalidate=True)
+            self._cancel_background_views_for_close()
             if self._background_data_active():
                 self._close_in_progress = True
                 event.ignore()

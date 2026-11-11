@@ -291,6 +291,7 @@ def test_managed_mod_apply_writes_override_then_requests_exact_recreation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(app_module.QMessageBox, "critical", lambda _parent, title, message: pytest.fail(title + ": " + message))
     _loader(tmp_path, "Fixture Mod")
     window = _window(tmp_path)
     lifecycle: list[tuple[DockerLifecycleAction, object]] = []
@@ -634,7 +635,23 @@ def test_unchanged_managed_mod_override_retries_recreation(
     assert window._mod_lifecycle_lease is None
 
 
-def test_unverified_recreation_keeps_lock_through_corrective_stop(
+def test_uncertain_recreation_never_issues_an_automatic_stop(qapp, tmp_path, monkeypatch):
+    _loader(tmp_path, "Fixture Mod")
+    window = _window(tmp_path)
+    actions = []
+    window._begin_docker_lifecycle = _record_started_lifecycle(actions)
+    monkeypatch.setattr(app_module.QMessageBox, "question", lambda *_a, **_k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(app_module.QMessageBox, "warning", lambda *_a, **_k: None)
+    monkeypatch.setattr(app_module.QMessageBox, "critical", lambda *_a, **_k: None)
+    window._on_mods_apply_restart()
+    window._pending_docker_mod_lifecycle_result = _successful_recreate_result(window)
+    actions[-1][1](False)
+    assert [action for action, _ in actions] == [DockerLifecycleAction.RECREATE_GAME]
+    assert window._mod_lifecycle_lease is None
+    assert window._pending_docker_mod_plan is None
+
+
+def test_unverified_recreation_releases_lock_without_stopping(
     qapp,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -664,23 +681,14 @@ def test_unverified_recreation_keeps_lock_through_corrective_stop(
     )
     recreate_completion(True)
 
-    assert [action for action, _callback in lifecycle] == [
-        DockerLifecycleAction.RECREATE_GAME,
-        DockerLifecycleAction.STOP_GAME,
-    ]
-    assert window._mod_lifecycle_lease is not None
-    assert window._pending_docker_mod_plan is not None
-    assert failures and "being stopped" in failures[0]
-
-    stop_completion = lifecycle[-1][1]
-    assert callable(stop_completion)
-    stop_completion(True)
-
+    assert [action for action, _callback in lifecycle] == [DockerLifecycleAction.RECREATE_GAME]
     assert window._mod_lifecycle_lease is None
     assert window._pending_docker_mod_plan is None
+    assert failures and "left running" in failures[0]
+    assert window._deferred_docker_mod_verification
 
 
-def test_corrective_stop_start_exception_releases_mod_transaction(
+def test_unverified_recreation_does_not_invoke_stop_worker_factory(
     qapp,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -718,9 +726,9 @@ def test_corrective_stop_start_exception_releases_mod_transaction(
     assert window._pending_docker_mod_plan is None
     assert window._pending_docker_mod_apply_result is None
     assert window._mod_lifecycle_lease is None
-    assert failures[0][0] == "Docker Mod Verification Failed"
-    assert failures[-1][0] == "Docker Corrective Stop Failed"
-    assert "simulated corrective QThread start failure" in failures[-1][1]
+    assert len(failures) == 1
+    assert failures[0][0] == "Docker Mod Verification Pending"
+    assert "left running" in failures[0][1]
 
 
 def test_recreate_completion_rejects_container_restarted_after_result(
@@ -772,16 +780,13 @@ def test_recreate_completion_rejects_container_restarted_after_result(
     )
     recreate_completion(True)
 
-    assert [action for action, _callback in lifecycle] == [
-        DockerLifecycleAction.RECREATE_GAME,
-        DockerLifecycleAction.STOP_GAME,
-    ]
+    assert [action for action, _callback in lifecycle] == [DockerLifecycleAction.RECREATE_GAME]
     assert window._current_mod_runtime_snapshot is None
-    assert window._mod_lifecycle_lease is not None
+    assert window._mod_lifecycle_lease is None
     assert failures and "changed before" in failures[0]
 
 
-def test_fresh_post_result_replacement_enters_corrective_stop_path(
+def test_fresh_replacement_is_not_attested_or_automatically_stopped(
     qapp,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -841,15 +846,15 @@ def test_fresh_post_result_replacement_enters_corrective_stop_path(
         window._monitor_generation,
     )
 
-    assert [action for action, _callback in lifecycle] == [
-        DockerLifecycleAction.RECREATE_GAME,
-        DockerLifecycleAction.STOP_GAME,
-    ]
+    assert not lifecycle_thread.deleted
+    assert not failures
+    window._on_docker_mod_observation_timeout(token)
+    assert [action for action, _callback in lifecycle] == [DockerLifecycleAction.RECREATE_GAME]
     assert lifecycle_thread.deleted
     assert window._current_mod_runtime_snapshot is None
-    assert window._mod_lifecycle_lease is not None
-    assert window._pending_docker_mod_plan is not None
-    assert failures and "being stopped" in failures[0]
+    assert window._mod_lifecycle_lease is None
+    assert window._pending_docker_mod_plan is None
+    assert failures and "left running" in failures[0]
 
 
 def test_unconsumed_recreate_target_failure_rolls_back_and_clears_marker(

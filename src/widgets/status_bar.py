@@ -5,6 +5,7 @@ from math import cos, pi, sin
 
 from PyQt6.QtCore import (
     QAbstractAnimation,
+    QEvent,
     QEasingCurve,
     QObject,
     QPointF,
@@ -12,6 +13,7 @@ from PyQt6.QtCore import (
     QRectF,
     QSize,
     Qt,
+    QTimer,
     pyqtSignal,
 )
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
@@ -20,8 +22,10 @@ from PyQt6.QtWidgets import (
     QFrame,
     QGraphicsOpacityEffect,
     QHBoxLayout,
+    QVBoxLayout,
     QLabel,
     QSizePolicy,
+    QStyle,
     QWidget,
 )
 
@@ -408,9 +412,19 @@ class StatusBar(QFrame):
             }
         """)
         self._build_ui()
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.timeout.connect(self._fit_footer)
 
     def _build_ui(self) -> None:
-        layout = QHBoxLayout(self)
+        self._outer_layout = QVBoxLayout(self)
+        self._outer_layout.setContentsMargins(0, 0, 0, 0)
+        self._outer_layout.setSpacing(0)
+        self._telemetry_row = QWidget(self)
+        self._telemetry_row.setFixedHeight(self.HEIGHT - 1)
+        self._outer_layout.addWidget(self._telemetry_row)
+        layout = QHBoxLayout(self._telemetry_row)
+        self._telemetry_layout = layout
         layout.setContentsMargins(14, 0, 10, 0)
         layout.setSpacing(18)
 
@@ -534,6 +548,84 @@ class StatusBar(QFrame):
         )
         layout.addWidget(self.version_label)
 
+    def set_installation_controls(self, controls: QWidget) -> None:
+        """Keep language, telemetry, world selection and version on one row."""
+        if hasattr(self, "_installation_controls"):
+            raise RuntimeError("Installation controls are already attached")
+        self._installation_controls = controls
+        self._telemetry_layout.removeWidget(self.build_label)
+        self._telemetry_layout.removeWidget(self.version_label)
+        self._telemetry_layout.setSpacing(6)
+        spacer = self._telemetry_layout.itemAt(4)
+        if spacer is not None and spacer.spacerItem() is not None:
+            self._telemetry_layout.takeAt(4)
+        self.language_combo.setFixedWidth(160)
+        for section in (self.server_section, self.market_section, self.clients_section):
+            section.setMinimumWidth(50)
+            section.layout().setContentsMargins(3, 2, 3, 2)
+            section.label.setStyleSheet(section.label.styleSheet() + "font-size: 11px; letter-spacing: 0.3px;")
+        for action in (controls.retry, controls.stop, controls.logs):
+            controls.layout().removeWidget(action)
+            action.setStyleSheet("padding: 3px 8px; font-size: 11px;")
+            self._telemetry_layout.addWidget(action)
+        self._telemetry_layout.addWidget(controls)
+        self._telemetry_layout.addWidget(self.build_label)
+        self._telemetry_layout.addWidget(self.version_label)
+        controls.logs.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
+        controls.presentation_changed.connect(self._queue_footer_fit)
+        self._queue_footer_fit()
+
+    def _queue_footer_fit(self):
+        if hasattr(self, "_fit_timer"):
+            self._fit_timer.start(0)
+
+    def event(self, event):
+        if event.type() == QEvent.Type.LayoutRequest and hasattr(self, "_installation_controls"):
+            self._queue_footer_fit()
+        return super().event(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "_installation_controls"):
+            self._fit_footer()
+
+    def _fit_footer(self):
+        controls = getattr(self, "_installation_controls", None)
+        if controls is None or getattr(self, "_fitting_footer", False):
+            return
+        signature = (self.width(), current_language(), controls.selector.currentText(),
+                     tuple((button.text(), button.isEnabled()) for button in controls.management_buttons),
+                     controls.retry.isHidden(), controls.stop.isHidden(),
+                     tuple(section.label.text() for section in (self.server_section, self.market_section, self.clients_section)))
+        if signature == getattr(self, "_footer_fit_signature", None):
+            return
+        self._footer_fit_signature = signature
+        self._fitting_footer = True
+        try:
+            controls.set_compact(False)
+            full_logs = translate_ui_phrase("Open launcher logs")
+            controls.logs.setText(full_logs)
+            controls.logs.setMinimumWidth(0)
+            controls.logs.setMaximumWidth(16777215)
+            self.build_label.show()
+            self.language_combo.setFixedWidth(160)
+            sections = (self.server_section, self.market_section, self.clients_section)
+            needed = 24 + 9 * 6 + self.language_combo.width() + controls.sizeHint().width()
+            needed += self.build_label.sizeHint().width() + self.version_label.sizeHint().width()
+            needed += sum(section.label.fontMetrics().horizontalAdvance(section.label.display_text()) + 20 for section in sections)
+            needed += sum(action.sizeHint().width() for action in (controls.retry, controls.stop, controls.logs) if not action.isHidden())
+            compact = needed > self.width()
+            controls.set_compact(compact)
+            if compact:
+                controls.logs.setText("")
+                controls.logs.setFixedWidth(28)
+                self.build_label.hide()
+                self.language_combo.setFixedWidth(160)
+            controls.logs.setAccessibleName(full_logs)
+            controls.logs.setToolTip(full_logs)
+        finally:
+            self._fitting_footer = False
+
     def _on_language_selected(self, index: int) -> None:
         code = self.language_combo.itemData(index)
         if not isinstance(code, str):
@@ -553,6 +645,7 @@ class StatusBar(QFrame):
             self.clients_section,
         ):
             section.retranslate_ui()
+        self._queue_footer_fit()
 
     # ── Event filter: forward child-label clicks to the parent section ──
     def eventFilter(self, obj: QObject, event) -> bool:  # noqa: N802
@@ -567,13 +660,16 @@ class StatusBar(QFrame):
     def set_server_state(self, state: ServiceState, pid: int | None = None, container: str | None = None,
                          error: str | None = None) -> None:
         self.server_section.set_state(state, pid=pid, container=container, error=error)
+        self._queue_footer_fit()
 
     def set_market_state(self, state: ServiceState, pid: int | None = None, container: str | None = None,
                          error: str | None = None) -> None:
         self.market_section.set_state(state, pid=pid, container=container, error=error)
+        self._queue_footer_fit()
 
     def set_client_count(self, count: int) -> None:
         self.clients_section.set_count(count)
+        self._queue_footer_fit()
 
     @property
     def animations_enabled(self) -> bool:

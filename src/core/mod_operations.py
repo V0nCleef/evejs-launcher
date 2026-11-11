@@ -27,6 +27,9 @@ class ModOperationContext:
     backend: str = "native"
     profiles_root: Path = PROFILES_ROOT
     local_appdata: Path | None = None
+    docker_target_factory: object | None = None
+    docker_target_identity: str | None = None
+    docker_base_target_factory: object | None = None
 
     def capture(self, mod: Mod) -> ModSettingsContext:
         context = ModSettingsContext(self.evejs_root, mod.path, self.client_root)
@@ -47,11 +50,67 @@ class ModOperationContext:
         return current
 
 
-def _helper_locked(mod: Mod, action: str, operation: ModOperationContext):
+def run_docker_helper_locked(descriptor, action, context, operation, *, update=None, image_prepared=False):
+    """Shared dispatch for UI, frozen client launches and durable updates."""
+    from .runtime.docker_mod_helpers import DockerModHelperController
+    from .runtime.docker_compose import ComposeInspector
+    from .runtime.docker_cli import DockerCommandRunner
+    from .service_status import DockerControlPolicy
+    from .mod_api_runtime import ModHelperResult, _settings_values
+    from .mod_api_manifest import read_api_manifest
+    from src.constants import APP_VERSION
+    spec = descriptor.docker
+    if spec is None or action not in spec.server_actions or not callable(operation.docker_target_factory):
+        raise RuntimeError("A captured declared Docker helper target is required.")
+    api = descriptor.launcher_api
+    if ("docker" not in descriptor.supported_backends or api is None or action not in api.capabilities
+            or read_api_manifest(context.evejs_root,context.mod_folder) != descriptor):
+        raise RuntimeError("The Docker lifecycle descriptor changed or does not declare this action.")
+    if tuple(map(int,api.min_launcher_version.split("."))) > tuple(map(int,APP_VERSION.split("."))):
+        raise RuntimeError(f"This mod requires launcher {api.min_launcher_version} or later.")
+    runner = DockerCommandRunner(output_limit=128 * 1024)
+    inspector = ComposeInspector(runner)
+    host = {}
+    if action in {"install", "recover", "prepare_server_start"} and "prepare_host" in spec.host_actions:
+        if context.client_root is None:
+            raise RuntimeError("Select a physical EVE client before preparing this mod.")
+        with acquire_mod_lifecycle_lock(context.client_root):
+            proof = run_mod_helper_locked(descriptor, "prepare_host", context, backend="docker").require_ready()
+            host = dict(proof.host_capabilities or {})
+    image = spec.image
+    if image is not None and not image_prepared and action in {"install", "recover", "apply_update"}:
+        from .runtime.docker_mod_images import stage_image
+        if not callable(operation.docker_base_target_factory):
+            raise RuntimeError("A captured base-image target is required.")
+        stage_image(descriptor, operation.docker_base_target_factory(), inspector, runner,
+                    **({"transaction_id":update["transactionId"]} if update is not None else {}))
+    # The saved preload/image override can intentionally describe the previous
+    # launch while a stopped world's mod switches are being edited. Cleanup
+    # runs with NODE_OPTIONS cleared and must use the captured base authority,
+    # not try to validate that obsolete loader list against the new state.
+    if (action in {"install", "recover", "prepare_disable", "prepare_remove"} or action.endswith("_update")) and callable(operation.docker_base_target_factory):
+        target, expected = operation.docker_base_target_factory(), None
+    else:
+        target, expected = operation.docker_target_factory(), operation.docker_target_identity
+    controller = DockerModHelperController(target, inspector, runner,
+        policy=DockerControlPolicy.MANAGED, expected_identity=expected)
+    request_id, value = controller.execute(descriptor, action,
+        settings=_settings_values(descriptor, context), host_capabilities=host, update=update)
+    return ModHelperResult(descriptor, context, action, request_id, value["success"], value["state"],
+        value["message"], tuple(value.get("restartRequired", ())), (), (), {}, (), None,
+        descriptor.manifest_path, value.get("clientScriptDelivery"))
+
+
+def _helper_locked(mod: Mod, action: str, operation: ModOperationContext, *, image_prepared=False):
     context = operation.capture(mod)
     descriptor = mod.api_descriptor
     if descriptor is None:
         raise RuntimeError("This mod has no public lifecycle helper.")
+    if operation.backend == "docker" and descriptor.docker is not None:
+        if action in descriptor.docker.server_actions:
+            return run_docker_helper_locked(descriptor, action, context, operation, image_prepared=image_prepared)
+        if action not in descriptor.docker.host_actions:
+            raise RuntimeError("The Docker contract has not declared this host action.")
     root = helper_coordination_root(descriptor, context, action)
     # Loader helpers can also own a client companion. Serialize their explicit
     # installation/cleanup against other roots preparing or spawning that client.
@@ -133,6 +192,18 @@ def change_mod_state(mod: Mod, desired: bool, operation: ModOperationContext) ->
     if not current.valid:
         raise RuntimeError(current.error or "This mod declaration is invalid.")
     packages = LocalModPackages(operation.evejs_root)
+    preparation = None
+    spec = getattr(current.api_descriptor,"docker",None)
+    if desired and operation.backend == "docker" and spec is not None and spec.image is not None:
+        def preparation(public_mod, enabled):
+            from .runtime.docker_mod_images import stage_image
+            from .runtime.docker_compose import ComposeInspector
+            from .runtime.docker_cli import DockerCommandRunner
+            if not callable(operation.docker_base_target_factory):
+                raise RuntimeError("A captured base-image target is required.")
+            runner = DockerCommandRunner(output_limit=128*1024)
+            stage_image(public_mod.api_descriptor,operation.docker_base_target_factory(),ComposeInspector(runner),runner)
+    prepared_args = {"preparation":preparation} if preparation is not None else {}
     if not desired and packages.can_manage(current):
         return packages.disable(current, cleanup_gate=cleanup_gate(operation))
     if current.activation_kind in {ActivationKind.CLIENT_PACKAGE, ActivationKind.PACKAGE}:
@@ -140,10 +211,10 @@ def change_mod_state(mod: Mod, desired: bool, operation: ModOperationContext) ->
         def apply(public_mod, enabled):
             api = public_mod.api_descriptor.launcher_api
             if enabled and api is not None and "install" in api.capabilities:
-                _helper_locked(public_mod, "install", operation).require_ready()
+                _helper_locked(public_mod, "install", operation, **({"image_prepared":True} if preparation else {})).require_ready()
             packages.set_enabled_locked(record.record_id, enabled, cleanup_gate=cleanup_gate(operation))
             return enabled
-        return request_mod_activation(current, desired, mutation=apply)
+        return request_mod_activation(current, desired, mutation=apply, **prepared_args)
     if not desired and current.api_descriptor is not None:
         def disable(public_mod, enabled):
             decision = cleanup_gate(operation)(CleanupRequest(
@@ -156,9 +227,9 @@ def change_mod_state(mod: Mod, desired: bool, operation: ModOperationContext) ->
     api = current.api_descriptor.launcher_api if current.api_descriptor else None
     if desired and api is not None and "install" in api.capabilities:
         def enable(public_mod, enabled):
-            _helper_locked(public_mod, "install", operation).require_ready()
+            _helper_locked(public_mod, "install", operation, **({"image_prepared":True} if preparation else {})).require_ready()
             return set_mod_active_locked(public_mod, enabled)
-        return request_mod_activation(current, desired, mutation=enable)
+        return request_mod_activation(current, desired, mutation=enable, **prepared_args)
     return request_mod_activation(current, desired)
 
 

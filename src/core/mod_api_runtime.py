@@ -55,7 +55,7 @@ MAX_HELPER_BYTES = 32 * 1024 * 1024
 DEFAULT_HELPER_TIMEOUT = 120.0
 _ACTION_TIMEOUTS = {"install": 3600.0, "recover": 3600.0, "prepare_disable": 600.0, "prepare_remove": 600.0,
                     **{action: 600.0 for action in ENABLED_UPDATE_ACTIONS}}
-_ACTIONS = {"prepare_profile", "prepare_server_start", "install", "verify", "prepare_disable", "prepare_remove", "recover"} | NOTIFICATION_ACTIONS | ENABLED_UPDATE_ACTIONS
+_ACTIONS = {"prepare_host", "prepare_profile", "prepare_server_start", "install", "verify", "prepare_disable", "prepare_remove", "recover"} | NOTIFICATION_ACTIONS | ENABLED_UPDATE_ACTIONS
 _RESTARTS = {"none", "client", "game_server", "launcher"}
 _BASES = {"mod", "evejs", "profile", "profile_settings", "client"}
 _ENVIRONMENT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
@@ -108,6 +108,7 @@ class ModHelperResult:
     request_path: Path
     client_script_delivery: str | None = None
     client_preparation: tuple[str, ...] | None = None
+    host_capabilities: Mapping | None = None
 
     def require_ready(self) -> "ModHelperResult":
         if not self.success or self.state != "ready":
@@ -179,7 +180,7 @@ def _fingerprint(path: Path) -> str:
 
 
 def helper_coordination_root(descriptor: ModApiDescriptor, context: ModSettingsContext, action: str) -> Path:
-    if action == "prepare_profile" or action in NOTIFICATION_ACTIONS or descriptor.kind == "client-package":
+    if action in {"prepare_host", "prepare_profile"} or action in NOTIFICATION_ACTIONS or descriptor.kind == "client-package":
         if context.client_root is None:
             raise ModApiRuntimeError("This helper requires the selected physical EVE client.")
         return context.client_root
@@ -198,6 +199,10 @@ def _captured_context(descriptor: ModApiDescriptor, context: ModSettingsContext,
         raise ModApiRuntimeError("The mod does not declare this helper capability.")
     if backend not in descriptor.supported_backends:
         raise ModApiRuntimeError("The mod does not support the selected backend.")
+    if backend == "docker" and descriptor.docker is not None and action not in descriptor.docker.host_actions:
+        raise ModApiRuntimeError("This Docker action must run through the captured container helper.")
+    if action == "prepare_host" and context.client_root is None:
+        raise ModApiRuntimeError("Host preparation requires a captured physical EVE client.")
     if tuple(map(int, api.min_launcher_version.split("."))) > tuple(map(int, APP_VERSION.split("."))):
         raise ModApiRuntimeError(f"This mod requires launcher {api.min_launcher_version} or later.")
     if action == "prepare_profile" or action in NOTIFICATION_ACTIONS:
@@ -432,7 +437,7 @@ def _receipt(row: object, descriptor: ModApiDescriptor, context: ModSettingsCont
 
 def validate_helper_result(payload: dict, descriptor: ModApiDescriptor, context: ModSettingsContext, action: str, request_id: str, request_path: Path) -> ModHelperResult:
     required = {"protocol", "requestId", "success", "state", "message", "restartRequired", "contributions", "environment", "arguments"}
-    if not isinstance(payload, dict) or not required <= payload.keys() or payload.keys() - required - {"receipt", "clientScriptDelivery", "clientPreparation"}:
+    if not isinstance(payload, dict) or not required <= payload.keys() or payload.keys() - required - {"receipt", "clientScriptDelivery", "clientPreparation", "hostCapabilities"}:
         raise ModApiRuntimeError("The helper reply has missing or unsupported fields.")
     if payload["protocol"] != PROTOCOL or payload["requestId"] != request_id:
         raise ModApiRuntimeError("The helper reply does not match this request and protocol.")
@@ -448,7 +453,7 @@ def validate_helper_result(payload: dict, descriptor: ModApiDescriptor, context:
     receipt = _receipt(payload["receipt"], descriptor, context) if "receipt" in payload else None
     if action in ENABLED_UPDATE_ACTIONS and (
         edits or files or payload["environment"] or payload["arguments"] or restarts
-        or any(key in payload for key in ("receipt", "clientScriptDelivery", "clientPreparation"))
+        or any(key in payload for key in ("receipt", "clientScriptDelivery", "clientPreparation", "hostCapabilities"))
     ):
         raise ModApiRuntimeError("Enabled update replies cannot request contributions, launch options or enrollment.")
     if action in NOTIFICATION_ACTIONS and (edits or payload["environment"] or payload["arguments"] or restarts or receipt):
@@ -473,16 +478,29 @@ def validate_helper_result(payload: dict, descriptor: ModApiDescriptor, context:
                 or descriptor.updates is None or context.client_root is None
                 or not {'install', 'verify', 'prepare_profile'}.issubset(descriptor.launcher_api.capabilities)):
             raise ModApiRuntimeError('Client preparation enrollment requires a completed install and declared lifecycle capabilities.')
+    host_capabilities = None
+    if "hostCapabilities" in payload:
+        host_capabilities = payload["hostCapabilities"]
+        host_action = action == "prepare_host" or (action == "prepare_profile" and descriptor.docker is not None and action in descriptor.docker.host_actions)
+        if (not host_action or not success or state != "ready" or edits or receipt
+                or payload["environment"] or payload["arguments"] or restarts
+                or not isinstance(host_capabilities, dict) or len(host_capabilities) > 16
+                or any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", str(k))
+                       or type(v) not in {str, int, bool} or (isinstance(v, str) and (len(v) > 256 or any(ord(c) < 32 for c in v)))
+                       or (type(v) is int and not -(2**53) < v < 2**53)
+                       for k, v in host_capabilities.items())):
+            raise ModApiRuntimeError("Invalid host capability preflight result.")
+        host_capabilities = MappingProxyType(dict(host_capabilities))
     return ModHelperResult(descriptor, context, action, request_id, success, state,
         _plain(payload["message"], "Helper message", 4096, empty=True), tuple(restarts), edits, files,
-        _environment(payload["environment"]), _arguments(payload["arguments"]), receipt, request_path, delivery, preparation)
+        _environment(payload["environment"]), _arguments(payload["arguments"]), receipt, request_path, delivery, preparation, host_capabilities)
 
 
 def validate_enabled_update_context(descriptor, context, update, backend):
     """Validate the same root-bound context on initial execution and recovery."""
     api = descriptor.launcher_api
     spec = api.enabled_update if api else None
-    if (spec is None or backend != "native" or not isinstance(update, dict)
+    if (spec is None or backend not in {"native", "docker"} or (backend == "docker" and descriptor.docker is None) or not isinstance(update, dict)
             or set(update) != {"protocol", "transactionId", "fromVersion", "fromModRoot", "toVersion"}
             or update["protocol"] != ENABLED_UPDATE_PROTOCOL
             or update["fromVersion"] not in spec.from_versions
@@ -679,7 +697,7 @@ def public_package_owns_legacy_folder(evejs_root: str | Path, relative_folder: s
                and mod.api_descriptor.kind == "client-package" for mod in (scan_mods(root) if mods is None else mods))
 
 
-def prepare_public_client_mods(evejs_root: str | Path, client_root: str | Path, profile_tq_path: Path, *, backend: str = "native", protected_environment: Mapping[str, str] | None = None, protected_arguments: Iterable[str] = (), runner: Callable | None = None, mods: Iterable[Mod] | None = None, client_lock_held: bool = False, profile_settings_root: Path | None = None) -> PreparedClientMods:
+def prepare_public_client_mods(evejs_root: str | Path, client_root: str | Path, profile_tq_path: Path, *, backend: str = "native", protected_environment: Mapping[str, str] | None = None, protected_arguments: Iterable[str] = (), runner: Callable | None = None, mods: Iterable[Mod] | None = None, client_lock_held: bool = False, profile_settings_root: Path | None = None, docker_operation=None) -> PreparedClientMods:
     mods = public_client_mods(evejs_root, backend=backend, mods=mods)
     if not mods:
         return PreparedClientMods(MappingProxyType({}), (), ())
@@ -698,30 +716,37 @@ def prepare_public_client_mods(evejs_root: str | Path, client_root: str | Path, 
             context = ModSettingsContext(Path(evejs_root), descriptor.folder, client, profile_id, profile, settings,
                 profile_settings_storage_root=settings if profile_settings_root is not None else local_appdata)
             capabilities = descriptor.launcher_api.capabilities if descriptor.launcher_api is not None else ()
+            def execute(action):
+                if backend == "docker" and descriptor.docker is not None and action in descriptor.docker.server_actions:
+                    if docker_operation is None:
+                        raise ModApiRuntimeError("This client companion requires its captured Managed Docker target.")
+                    from .mod_operations import run_docker_helper_locked
+                    return run_docker_helper_locked(descriptor, action, context, docker_operation)
+                return run_mod_helper_locked(descriptor, action, context, backend=backend, runner=runner)
             if enrolled(descriptor, client):
                 if not {'install', 'verify', 'prepare_profile'}.issubset(capabilities):
                     raise ModApiRuntimeError('An enrolled mod no longer declares client preparation capabilities.')
-                verified = run_mod_helper_locked(descriptor, 'verify', context, backend=backend, runner=runner)
+                verified = execute('verify')
                 if verified.contributions or verified.environment or verified.arguments:
                     raise ModApiRuntimeError('Client verification must not request mutations or launch options.')
                 if not verified.success or verified.state != 'ready':
                     if is_eve_client_running():
                         raise ModApiRuntimeError('Close EVE clients before changing shared client mod files. Retry launch afterward; installation is automatic.')
-                    installed = run_mod_helper_locked(descriptor, 'install', context, backend=backend, runner=runner).require_ready()
+                    installed = execute('install').require_ready()
                     # A pre-client install may not require restarting its server.
                     if set(installed.restart_required) - {'client', 'none'}:
                         raise ModApiRuntimeError('Client preparation requires a server or launcher restart.')
                     commit_helper_contributions_locked(installed)
                     record_preparation(installed)
                     record_delivery(installed, backend)
-                    verified = run_mod_helper_locked(descriptor, 'verify', context, backend=backend, runner=runner).require_ready()
+                    verified = execute('verify').require_ready()
                     if verified.contributions or verified.environment or verified.arguments:
                         raise ModApiRuntimeError('Client verification must not request mutations or launch options.')
                 verified.require_ready()
             if NOTIFICATION_ACTIONS.intersection(capabilities):
                 notifications.append((descriptor, context))
             if descriptor.kind == "client-package" and "verify" in capabilities:
-                verified = run_mod_helper_locked(descriptor, "verify", context, backend=backend, runner=runner).require_ready()
+                verified = execute("verify").require_ready()
                 if verified.receipt is None or verified.receipt.state != "active":
                     raise ModApiRuntimeError("The enabled client mod is not installed. Install it or disable it before launching.")
                 if verified.contributions:
@@ -730,7 +755,7 @@ def prepare_public_client_mods(evejs_root: str | Path, client_root: str | Path, 
             elif descriptor.kind == "client-package":
                 raise ModApiRuntimeError("An active client package must declare binary verification before launch.")
             if "prepare_profile" in capabilities:
-                results.append(run_mod_helper_locked(descriptor, "prepare_profile", context, backend=backend, runner=runner).require_ready())
+                results.append(execute("prepare_profile").require_ready())
         environment, arguments = merge_launch_options(results, protected_environment=protected_environment, protected_arguments=protected_arguments)
         for result in results:
             _revalidate_result(result)

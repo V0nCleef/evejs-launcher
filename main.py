@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from PyQt6.QtCore import QLocale
+from PyQt6.QtCore import QEvent, QLocale
 from PyQt6.QtGui import QColor, QFontDatabase, QPalette
 from PyQt6.QtWidgets import QApplication
 
@@ -129,11 +129,19 @@ def _initialize_ui_language(system_locale: str) -> dict:
 
 
 def main() -> int:
+    from src.core.headless_check import HeadlessCheck
+    headless = HeadlessCheck.from_argv(sys.argv[1:])
+    if headless is not None:
+        try:
+            headless.prepare()
+        except (OSError, ValueError):
+            # Invalid diagnostic storage must fail before normal APPDATA logging.
+            return 2
     from src.utils.logger import setup_logger, _LOG_FILE
     from src.constants import APP_VERSION
     setup_logger(__name__).info("Launcher startup version=%s log_file=%s", APP_VERSION, _LOG_FILE)
     handoff = _parse_update_handoff(sys.argv[1:])
-    app = QApplication([sys.argv[0]] if handoff is not None else sys.argv)
+    app = QApplication([sys.argv[0]] if handoff is not None or headless is not None else sys.argv)
     app.setApplicationName(APP_NAME)
     app.setOrganizationName("NousResearch")
 
@@ -167,9 +175,13 @@ def main() -> int:
     if not cfg.get("evejs_root"):
         from src.wizard import SetupWizard
         wizard = SetupWizard()
+        if headless is not None:
+            headless.attach_wizard(wizard)
         if wizard.exec() == 1:  # QDialog.DialogCode.Accepted
             cfg = config.load()  # re-read after wizard saved it
         # Even if cancelled, let the user configure via Settings later.
+        wizard.deleteLater()
+        wizard = None
 
     # Lazy import so any failure inside MainWindow still surfaces through
     # the fatal handler below with a full traceback.
@@ -177,8 +189,20 @@ def main() -> int:
 
     window = MainWindow()
     window.show()
-    _schedule_pending_update_cleanup()
-    return app.exec()
+    if headless is not None:
+        headless.attach(window, app)
+    else:
+        _schedule_pending_update_cleanup()
+    result = app.exec()
+    code = headless.finish(result) if headless is not None else result
+    if code == 0:
+        # Close drains the workers. Destroy the closed widget tree while its
+        # QApplication is still alive, rather than during Python frame teardown.
+        window.deleteLater()
+        app.sendPostedEvents(window, QEvent.Type.DeferredDelete)
+        if headless is not None:
+            headless.retired()
+    return code
 
 
 if __name__ == "__main__":

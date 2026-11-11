@@ -123,6 +123,17 @@ def build_docker_mod_override(
         "    environment:",
         f"      NODE_OPTIONS: {_yaml_scalar(node_options)}",
     ]
+    # Only declared container contracts opt into persistent mod storage;
+    # historical loader-only overrides retain their exact rendering.
+    from src.core.mod_api_manifest import read_api_manifest, ModApiManifestError
+    portable = False
+    for name in selected:
+        try:
+            portable |= read_api_manifest(Path(evejs_root),Path(evejs_root)/"mods"/name).docker is not None
+        except (ModApiManifestError,OSError,ValueError):
+            pass
+    if portable:
+        lines.append('      EVEJS_MOD_DATA_ROOT: "/var/lib/evejs/mods"')
     if selected:
         lines.extend(
             (
@@ -359,6 +370,7 @@ def attach_docker_mod_override(
     target: ComposeTarget,
     *,
     transaction_token: str | None = None,
+    include_images: bool = True,
 ) -> ComposeTarget:
     """Append only a safe, exact launcher-rendered mod override.
 
@@ -367,6 +379,9 @@ def attach_docker_mod_override(
     """
 
     root = _canonical_existing_root(target.project_directory)
+    if include_images:
+        from .docker_mod_images import attach_image_override
+        target = attach_image_override(target)
     override_path = docker_mod_override_path(root)
     transaction = _read_mod_transaction(root)
     content = _read_owned_override(

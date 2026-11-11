@@ -24,6 +24,7 @@ from src.core.mod_settings import ModSettingsContext, ModSettingsSession, profil
 from src.core.mod_settings_schema import parse_settings_schema
 from src.core.platform import get_eve_settings_path
 from src.core.profiles import PROFILES_ROOT
+from src.core.installation_profiles import client_profiles_root
 from src.i18n import translate_ui_phrase, format_ui_phrase
 from src.widgets.localized_dialogs import LocalizedInputDialog as QInputDialog, LocalizedMessageBox as QMessageBox, LocalizedFileDialog as QFileDialog
 from src.widgets.mod_settings_dialog import ModSettingsDialog
@@ -72,6 +73,7 @@ class ModCoordinator(QObject):
         page.recover_requested.connect(self.recover_packages)
         page.activation_requested.connect(self.activate)
         page.move_requested.connect(self.move)
+        page.sort_requested.connect(self.sort_by_dependencies)
         page.helper_requested.connect(self.public_action)
         page.remove_mod_requested.connect(self.remove)
         page.registry_relocation_requested.connect(self.register_copied_registry)
@@ -211,7 +213,16 @@ class ModCoordinator(QObject):
         root = Path(cfg["evejs_root"]).resolve(strict=True)
         client = Path(cfg["client_path"]).resolve(strict=True) if include_client and cfg.get("client_path") else None
         backend = "docker" if self.window._docker_mode() else "native"
-        context = ModOperationContext(root, client, backend)
+        base_factory = None
+        if backend == "docker":
+            from src.core.runtime.docker_setup import build_compose_target
+            from src.core.runtime.docker_mods import attach_docker_mod_override
+            draft = self.window._docker_setup_draft()
+            base_factory = lambda: build_compose_target(draft)
+        context = ModOperationContext(root, client, backend, profiles_root=client_profiles_root(cfg, PROFILES_ROOT),
+            docker_target_factory=self.window._docker_log_target_factory() if backend == "docker" else None,
+            docker_target_identity=self.window._current_observed_docker_target_identity() if backend == "docker" else None,
+            docker_base_target_factory=base_factory)
         if mod is not None:
             context.capture(mod)
         return context
@@ -649,6 +660,47 @@ class ModCoordinator(QObject):
             completed,
         )
 
+    def sort_by_dependencies(self):
+        from src.core.mod_sorting import preview_mod_sort
+        from src.widgets.mod_sort_dialog import ModSortDialog
+        try:
+            context = self._context(include_client=False)
+        except Exception as exc:
+            QMessageBox.warning(self.window, "Mod Operation", str(exc))
+            return
+
+        def present(result):
+            if not result.success:
+                self._operation_result(result)
+                return
+            dialog = ModSortDialog(result.value, self.window)
+            dialog.exec()
+            save = dialog.save_requested
+            dialog.deleteLater()
+            if save:
+                # Release the preview worker's operation reservation first.
+                QTimer.singleShot(0, lambda: self._save_sorted_order(result.value))
+
+        self.run(lambda: preview_mod_sort(context.evejs_root, backend=context.backend), present)
+
+    def _save_sorted_order(self, preview):
+        from src.core.mod_sorting import apply_mod_sort
+        try:
+            context = self._context(include_client=False)
+        except Exception as exc:
+            QMessageBox.warning(self.window, "Mod Operation", str(exc))
+            return
+
+        def completed(result):
+            self._operation_result(result)
+            if result.success and self._page is not None:
+                self._page.operation_notice.setText(translate_ui_phrase(
+                    "Mod order saved. Use Apply & Restart when you are ready."))
+                self._page.operation_notice.show()
+
+        self.run(lambda: apply_mod_sort(preview, root=context.evejs_root, backend=context.backend,
+            docker_managed=context.backend == "docker"), completed)
+
     def move(self, mod, amount):
         try:
             context = self._context(mod, include_client=False)
@@ -741,8 +793,9 @@ class ModCoordinator(QObject):
                 username, accepted = QInputDialog.getItem(self.window, "Mod Settings", "Choose a profile", names, 0, False)
                 if not accepted:
                     return
-                profile_root = PROFILES_ROOT / username
-                if profile_root.parent != PROFILES_ROOT:
+                profiles_root = client_profiles_root(self.window._cfg, PROFILES_ROOT)
+                profile_root = profiles_root / username
+                if profile_root.parent != profiles_root:
                     raise RuntimeError("The selected profile path is invalid.")
                 if any(file.base == "profile_settings" for file in schema.files):
                     if self.window._cfg.get("client_settings_mode", "separate") == "shared":
@@ -755,7 +808,7 @@ class ModCoordinator(QObject):
                         if cfg.get("runtime_backend") == "docker_compose" and target is None:
                             raise RuntimeError("Choose a character profile for the current EveJS server.")
                         source = resolve_shared_profile_source(
-                            profile_root / "tq", PROFILES_ROOT.parent / "SharedSettings",
+                            profile_root / "tq", profiles_root.parent / "SharedSettings",
                             SharedSettingsSource.from_config(cfg.get("shared_settings_source")),
                             account_id=0, character_id=0, evejs_root=cfg["evejs_root"],
                             target_identity=target, initialize=False,

@@ -343,6 +343,11 @@ class SettingsPage(QWidget):
         )
         self.docker_project_help_label.setObjectName("dockerProjectHelp")
         advanced_form.addRow("", self.docker_project_help_label)
+        self.docker_readiness_spin = ScrollSafeSpinBox()
+        self.docker_readiness_spin.setRange(30, 900)
+        self.docker_readiness_spin.setValue(180)
+        self.docker_readiness_spin.setToolTip("Health-check startup periods can extend this budget. Expiration leaves running containers unverified.")
+        advanced_form.addRow("Readiness budget (seconds):", self.docker_readiness_spin)
         docker_form.addRow("", self.docker_advanced_fields)
 
         self.test_docker_setup_btn = QPushButton("Test Docker setup")
@@ -1355,6 +1360,7 @@ class SettingsPage(QWidget):
         self.docker_compose_edit.setText(str(cfg.get("docker_compose_file", "")))
         self._set_combo_data(self.docker_policy_combo, cfg.get("docker_control_policy", "connect_only"))
         self.docker_project_edit.setText(str(cfg.get("docker_project_name", "")))
+        self.docker_readiness_spin.setValue(cfg.get("docker_readiness_timeout_sec", 180))
         self.docker_advanced_toggle.setChecked(
             bool(self.docker_project_edit.text().strip())
         )
@@ -1525,6 +1531,7 @@ class SettingsPage(QWidget):
                 self.docker_policy_combo.currentData() or "connect_only"
             ),
             "docker_project_name": self.docker_project_edit.text().strip(),
+            "docker_readiness_timeout_sec": self.docker_readiness_spin.value(),
             "docker_keep_running_on_exit": self.docker_keep_running_toggle.isChecked(),
         }
 

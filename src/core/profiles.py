@@ -139,19 +139,23 @@ def create_profile(
     # ── Bootstrap EVE settings from real client (or template fallback) ──
     try:
         if bootstrap_settings:
-            _bootstrap_settings(username, real_client_path)
+            if root == PROFILES_ROOT:
+                _bootstrap_settings(username, real_client_path)
+            else:
+                _bootstrap_settings(username, real_client_path, profiles_root=root)
     except Exception:
         pass  # non-fatal — username pre-fill will still run
 
     return profile_dir
 
 
-def _bootstrap_settings(username: str, real_client_path: str = "") -> None:
+def _bootstrap_settings(username: str, real_client_path: str = "", *, profiles_root: Path | None = None) -> None:
     """Bootstrap safe settings without copying account-private cache state."""
     import shutil
 
     try:
-        dst_dir = get_profile_settings_path(username)
+        dst_dir = (get_profile_settings_path(username) if profiles_root is None
+                   else get_profile_settings_path(username, profiles_root=profiles_root))
     except FileNotFoundError:
         return
 
@@ -206,9 +210,9 @@ def get_profile_client_path(username: str) -> Path | None:
     return junction if junction.exists() else None
 
 
-def get_profile_settings_path(username: str) -> Path:
+def get_profile_settings_path(username: str, *, profiles_root: Path | None = None) -> Path:
     """Get the expected EVE settings folder for this profile."""
-    junction = PROFILES_ROOT / username / "tq"
+    junction = (PROFILES_ROOT if profiles_root is None else Path(profiles_root)) / username / "tq"
     if not junction.exists():
         raise FileNotFoundError(f"Profile junction does not exist: {username}")
     return get_eve_settings_path(str(junction))

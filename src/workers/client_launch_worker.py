@@ -45,6 +45,8 @@ class ClientLaunchRequest:
     account_id: int | None = None
     shared_settings_source: SharedSettingsSource | None = None
     hide_console: bool = False
+    docker_mod_operation: object | None = None
+    require_account_creation: bool = False
 
 
 @dataclass(frozen=True)

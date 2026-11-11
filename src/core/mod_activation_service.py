@@ -25,12 +25,16 @@ def request_mod_activation(
     desired: bool,
     *,
     mutation: Callable[[Mod, bool], bool] | None = None,
+    preparation: Callable[[Mod, bool], None] | None = None,
 ) -> bool:
     """Durably request ``desired`` and return the verified configured state.
 
     This confirms only the on-disk configuration transaction.  The journal is
     intentionally left at ``pending_restart`` until a later Game lifecycle
     publishes matching runtime evidence.
+
+    ``preparation`` stages declared deployment inputs before intent capture;
+    it must not enable the mod. Both callbacks retain this same root lock.
 
     A public provider can supply its configuration transaction as ``mutation``.
     It runs while this service owns the lifecycle lock, so it must use locked
@@ -43,6 +47,8 @@ def request_mod_activation(
         raise TypeError("The requested mod state must be a boolean.")
     if mutation is not None and not callable(mutation):
         raise TypeError("mutation must be callable or None.")
+    if preparation is not None and not callable(preparation):
+        raise TypeError("preparation must be callable or None.")
     if mod.evejs_root is None:
         raise ModActivationError(
             f"Cannot change '{mod.name}': the mod is not bound to an EveJS root."
@@ -51,6 +57,10 @@ def request_mod_activation(
     try:
         with acquire_mod_lifecycle_lock(mod.evejs_root):
             validate_mod_change(mod, desired)
+            # Derived image inputs become part of the frozen contract before
+            # the activation intent is captured, under this same root lease.
+            if preparation is not None:
+                preparation(mod, desired)
             prepare_mod_activation(mod, desired)
             try:
                 configured = (mutation or set_mod_active_locked)(mod, desired)

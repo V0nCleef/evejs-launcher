@@ -32,6 +32,7 @@ from src.core.runtime.docker_compose import (
 )
 from src.core.service_status import DockerControlPolicy, ServiceState
 from src.core.runtime.character_display import DISPLAY_SCRIPT
+from src.core.runtime.character_roster import ROSTER_SCRIPT
 
 
 _FIXTURE_CHARACTER_ID = 900000001
@@ -105,6 +106,7 @@ def _record(raw_state: str) -> ContainerRecord:
 
 def _export_payload() -> dict[str, object]:
     return {
+        "accounts": [{"accountId": 501, "accountName": "fixture-account", "banned": False, "isGM": True}],
         "generatedAt": "2026-01-01T00:00:00.000Z",
         "paths": {
             "databasePath": "/private/container/path",
@@ -214,11 +216,11 @@ def test_running_container_read_uses_exact_allowlisted_exec(tmp_path: Path) -> N
         "exec",
         "-T",
         "-e",
-        "EVEJS_CONFIG_CLI_DOCKER_PROXY=1",
+        "NODE_OPTIONS=",
         "server",
         "node",
-        "/app/tools/ConfigEditor/config-manager-cli.js",
-        "database-export",
+        "-e",
+        ROSTER_SCRIPT,
     )
     assert runner.calls[:1] == [
         (
@@ -258,6 +260,7 @@ def test_real_runner_preserves_secret_pattern_in_valid_export_text(
 
     payload = _export_payload()
     payload["players"][0]["accountName"] = "pilot-token=CANARY_ACCOUNT_TEXT"  # type: ignore[index]
+    payload["accounts"][0]["accountName"] = "pilot-token=CANARY_ACCOUNT_TEXT"
     payload["players"][0]["privateToken"] = (  # type: ignore[index]
         "password=CANARY_PRIVATE_EXPORT_VALUE"
     )
@@ -302,11 +305,11 @@ def test_stopped_container_read_uses_exact_allowlisted_run(
         "--no-deps",
         "-T",
         "-e",
-        "EVEJS_CONFIG_CLI_DOCKER_PROXY=1",
+        "NODE_OPTIONS=",
         "server",
         "node",
-        "/app/tools/ConfigEditor/config-manager-cli.js",
-        "database-export",
+        "-e",
+        ROSTER_SCRIPT,
     )
     assert runner.calls[0][0] == _target(tmp_path).compose_args(
         runner.executable,
@@ -441,7 +444,7 @@ def test_volume_layout_never_falls_back_to_stale_host_sqlite(tmp_path: Path) -> 
 
     assert isinstance(selection.data_source, DockerExportDataSource)
     selection.data_source.load_accounts()
-    assert runner.calls[0][0][-1] == "database-export"
+    assert runner.calls[0][0][-1] == ROSTER_SCRIPT
 
 
 def test_verified_game_store_bind_uses_exact_sqlite_source(tmp_path: Path) -> None:
@@ -478,6 +481,27 @@ def test_verified_game_store_bind_uses_exact_sqlite_source(tmp_path: Path) -> No
     assert isinstance(selection.data_source, SqliteGameStoreDataSource)
     assert selection.data_source.game_store_path == game_store.resolve()
     assert runner.calls == []
+
+
+@pytest.mark.parametrize("container_mount,suffix", [
+    ("/var/lib/evejs", "gameStore"),
+    ("/var/lib", "evejs/gameStore"),
+])
+def test_parent_data_bind_resolves_container_relative_game_store(tmp_path, container_mount, suffix):
+    data = tmp_path / "authoritative data"
+    game_store = data / suffix
+    game_store.mkdir(parents=True)
+    (game_store / "gamestore.sqlite").touch()
+    # A stale database at the mount root must not shadow the selected store.
+    (data / "gamestore.sqlite").touch()
+    target = _target(tmp_path)
+    config = parse_compose_config(_config_payload([
+        {"type": "bind", "source": str(data), "target": container_mount},
+    ]))
+    selection = select_docker_data_source(target, config,
+        MappingProxyType({"server": _record("running")}), FakeRunner([]),
+        control_policy=DockerControlPolicy.CONNECT_ONLY)
+    assert selection.data_source.game_store_path == game_store.resolve()
 
 
 def test_verified_bind_reader_uses_that_game_store_for_accounts_and_detail(
@@ -539,7 +563,7 @@ def test_connect_only_export_has_no_lifecycle_or_write_command(tmp_path: Path) -
 
     argv = runner.calls[0][0]
     assert source.control_policy is DockerControlPolicy.CONNECT_ONLY
-    assert "database-export" in argv
+    assert ROSTER_SCRIPT in argv
     assert not {"up", "start", "stop", "restart", "down", "rm"}.intersection(argv)
 
 
@@ -773,7 +797,9 @@ def test_retired_character_matches_the_native_sqlite_reader(tmp_path: Path) -> N
     payload["players"] = [_retired_player()]
     runner = FakeRunner([json.dumps(payload)])
 
-    assert _source(tmp_path, "running", runner).load_accounts() == []
+    accounts = _source(tmp_path, "running", runner).load_accounts()
+    assert len(accounts) == 1 and accounts[0].username == "fixture-account"
+    assert accounts[0].characters == []
 
 
 @pytest.mark.parametrize(

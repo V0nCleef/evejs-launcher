@@ -39,6 +39,10 @@ _AUTO_LOGIN_CONFIG_PROBE_SCRIPT = (
     "const c=require('/app/server/src/config');"
     "process.stdout.write(c.devSkipPasswordValidation===true?'true\\n':'false\\n')"
 )
+_ACCOUNT_CREATION_CONFIG_PROBE_SCRIPT = (
+    "const c=require('/app/server/src/config');"
+    "process.stdout.write(c.devAutoCreateAccounts===true?'true\\n':'false\\n')"
+)
 ParsedOutput = TypeVar("ParsedOutput")
 
 
@@ -169,6 +173,7 @@ class ComposeService:
     mounts: tuple[Mount, ...]
     image: str | None = None
     pull_policy: str | None = None
+    readiness_budget_sec: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -189,6 +194,7 @@ class ComposeConfig:
     # Retain only the exact effective server NODE_OPTIONS digest for mod
     # attestation. The environment value itself may contain private material.
     server_node_options_sha256: str | None = None
+    resource_keys: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -450,6 +456,12 @@ class ComposeInspector:
         record: ContainerRecord,
         container_id: str,
     ) -> bool:
+        return self._server_boolean_setting(target,record,container_id,_AUTO_LOGIN_CONFIG_PROBE_SCRIPT)
+
+    def server_account_creation_enabled(self,target,record,container_id) -> bool:
+        return self._server_boolean_setting(target,record,container_id,_ACCOUNT_CREATION_CONFIG_PROBE_SCRIPT)
+
+    def _server_boolean_setting(self,target,record,container_id,script) -> bool:
         """Read only the effective password-bypass Boolean in a pinned server.
 
         The command has no shell, clears inherited Node preload options, and
@@ -478,7 +490,7 @@ class ComposeInspector:
                 container_id,
                 "node",
                 "-e",
-                _AUTO_LOGIN_CONFIG_PROBE_SCRIPT,
+                script,
             ),
             target,
             parser=_parse_auto_login_config_probe,
@@ -543,11 +555,8 @@ class ComposeInspector:
             and args[:3] == ("exec", "--env", "NODE_OPTIONS=")
             and isinstance(args[3], str)
             and bool(_CONTAINER_SHORT_ID.fullmatch(args[3].casefold()))
-            and args[4:] == (
-                "node",
-                "-e",
-                _AUTO_LOGIN_CONFIG_PROBE_SCRIPT,
-            )
+            and args[4:6] == ("node", "-e")
+            and args[6] in {_AUTO_LOGIN_CONFIG_PROBE_SCRIPT, _ACCOUNT_CREATION_CONFIG_PROBE_SCRIPT}
         )
         if args not in allowed and not inspect_allowed and not auto_login_probe_allowed:
             raise RuntimeError("Docker command is outside the Phase 2A read-only allowlist.")
@@ -694,6 +703,7 @@ def parse_compose_config(payload: Mapping[str, Any]) -> ComposeConfig:
             mounts,
             _string_or_none(raw.get("image")),
             _string_or_none(raw.get("pull_policy")),
+            _health_readiness_budget(healthcheck) if has_healthcheck else 0.0,
         )
         for item in raw.get("ports", []):
             publication = _parse_port(item)
@@ -719,7 +729,30 @@ def parse_compose_config(payload: Mapping[str, Any]) -> ComposeConfig:
         ComposeCapabilities("init" in services, "market-tools" in services),
         effective_config_digest,
         server_node_options_sha256,
+        _resource_keys(payload, services, publications),
     )
+
+
+def _resource_keys(payload, services, publications):
+    """Only collision identities survive parsing; never interpolated secrets."""
+    project = _string_or_none(payload.get("name")) or ""
+    result = set()
+    volumes = payload.get("volumes") or {}
+    networks = payload.get("networks") or {}
+    for service in services.values():
+        for mount in service.mounts:
+            if mount.type == "volume":
+                declaration = volumes.get(mount.source, {}) if isinstance(volumes, Mapping) else {}
+                actual = declaration.get("name") if isinstance(declaration, Mapping) else None
+                result.add(("volume", str(actual or (project + "_" + mount.source))))
+            elif mount.type == "bind" and (mount.target == "/var/lib/evejs" or mount.target.startswith("/var/lib/evejs/")):
+                result.add(("data bind", str(Path(mount.source).resolve(strict=False)).casefold()))
+    for alias, declaration in networks.items() if isinstance(networks, Mapping) else ():
+        actual = declaration.get("name") if isinstance(declaration, Mapping) else None
+        result.add(("network", str(actual or (project + "_" + str(alias)))))
+    for endpoint in publications:
+        result.add(("port", f"{endpoint.host}:{endpoint.port}/{endpoint.protocol}"))
+    return tuple(sorted(result))
 
 
 def _server_node_options_sha256(
@@ -753,6 +786,25 @@ def _server_node_options_sha256(
             "Effective server NODE_OPTIONS must resolve to a string."
         )
     return hashlib.sha256(value.encode("utf-8", errors="strict")).hexdigest()
+
+
+def _duration_seconds(value: Any, default: float = 0.0) -> float:
+    if not isinstance(value, str):
+        return default
+    parts = re.findall(r"(\d+(?:\.\d+)?)(ns|us|ms|s|m|h)", value)
+    if not parts or "".join(number + unit for number, unit in parts) != value:
+        return default
+    scale = {"ns": 1e-9, "us": 1e-6, "ms": .001, "s": 1, "m": 60, "h": 3600}
+    return min(900.0, sum(float(number) * scale[unit] for number, unit in parts))
+
+
+def _health_readiness_budget(health: Mapping) -> float:
+    retries = health.get("retries", 3)
+    if type(retries) is not int or not 1 <= retries <= 1000:
+        retries = 3
+    return min(900.0, _duration_seconds(health.get("start_period"))
+               + retries * _duration_seconds(health.get("interval"), 30.0)
+               + _duration_seconds(health.get("timeout"), 30.0) + 15.0)
 
 
 def _dependencies(value: Any) -> tuple[str, ...]:

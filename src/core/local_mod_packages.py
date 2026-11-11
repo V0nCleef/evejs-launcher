@@ -358,7 +358,8 @@ class LocalModPackages:
         except (TypeError, ValueError, KeyError) as exc:
             raise LocalModPackageError("A local mod record is invalid; keep it for recovery.") from exc
 
-    def _save(self, registry: dict, *, expected_content: bytes | None = None) -> None:
+    def _save(self, registry: dict, *, expected_content: bytes | None = None,
+              expected_absent: bool = False) -> None:
         path = self._path(REGISTRY_DIRECTORY / "registry.json")
         path.parent.mkdir(parents=True, exist_ok=True)
         self._path(REGISTRY_DIRECTORY / "registry.json")
@@ -368,6 +369,8 @@ class LocalModPackages:
                 stream.write((json.dumps(registry, indent=2, ensure_ascii=True) + "\n").encode("utf-8"))
                 stream.flush()
                 os.fsync(stream.fileno())
+            if expected_absent and os.path.lexists(path):
+                raise LocalModPackageError("The mod registry changed after preview. Review the order again.")
             if expected_content is not None:
                 _ordinary(path, directory=False)
                 if path.read_bytes() != expected_content:

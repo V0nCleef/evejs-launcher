@@ -1,0 +1,11 @@
+{
+  "version": "261108.1",
+  "source": "Existing peer-pinned native codec reference; unmodified EveJS source, matched to the local non-live EveJS-261108.1 distribution without runtime/state copy",
+  "license": "AGPL-3.0; original LICENSE retained beside this manifest",
+  "revision": "Distribution version 261108.1; this local distribution has no Git metadata. File hashes are authoritative.",
+  "files": {
+    "server/src/common/marshalStringTable.js": "03b9eca6b5aea7c03f2ab40f92df904f6c39b7cdedc485f60fbb9e8811c9d99f",
+    "server/src/network/gameFrame.js": "54d0696b6e382b6619a4885bfc11a08653fe2f5435da20e0431bf98e60b9a18a",
+    "server/src/network/tcp/utils/marshal.js": "58b4ff3cb1f814d42916f0496dcd2c07492c92781a3b2ef7f7ddc6d930f75e30"
+  }
+}

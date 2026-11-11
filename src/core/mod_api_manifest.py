@@ -17,7 +17,7 @@ NOTIFICATION_ACTIONS = frozenset({"launch_result", "client_exit"})
 SOURCE_PACKAGE_CAPABILITIES = frozenset({"install", "prepare_disable", "prepare_remove"})
 ENABLED_UPDATE_PROTOCOL = "evejs-mod-enabled-update-v1"
 ENABLED_UPDATE_ACTIONS = frozenset({"prepare_update", "apply_update", "commit_update", "rollback_update"})
-_CAPABILITIES = {"prepare_profile", "prepare_server_start", "install", "verify", "prepare_disable", "prepare_remove", "recover"} | NOTIFICATION_ACTIONS | ENABLED_UPDATE_ACTIONS
+_CAPABILITIES = {"prepare_host", "prepare_profile", "prepare_server_start", "install", "verify", "prepare_disable", "prepare_remove", "recover"} | NOTIFICATION_ACTIONS | ENABLED_UPDATE_ACTIONS
 _RESERVED = {"con", "prn", "aux", "nul", "clock$", *(f"com{i}" for i in range(1, 10)),
              *(f"lpt{i}" for i in range(1, 10))}
 
@@ -80,6 +80,7 @@ class ModApiDescriptor:
     updates: object | None = None
     evejs_versions: tuple[str, ...] | None = None
     client_menu: ClientMenuSpec | None = None
+    docker: object | None = None
 
 
 def _text(value, label: str, maximum: int = 128, *, empty: bool = False) -> str:
@@ -157,7 +158,7 @@ def read_api_manifest(root: str | Path, folder: str | Path, payload: dict | None
         raise ModApiManifestError("The public mod descriptor is unreadable or unsafe.") from exc
     payload = _keys(payload, {"schemaVersion", "id", "displayName", "version", "kind", "activation", "restart"},
                     {"description", "supportedBackends", "launcherApi", "settings",
-                     "requires", "loadBefore", "loadAfter", "conflicts", "updates", "compatibility", "clientMenu"}, "Mod descriptor")
+                     "requires", "loadBefore", "loadAfter", "conflicts", "updates", "compatibility", "clientMenu", "docker"}, "Mod descriptor")
     if type(payload["schemaVersion"]) is not int or payload["schemaVersion"] != 3:
         raise ModApiManifestError("The public mod descriptor must use schemaVersion 3.")
     mod_id = _text(payload["id"], "Mod id")
@@ -245,7 +246,8 @@ def read_api_manifest(root: str | Path, folder: str | Path, payload: dict | None
                     or any(not isinstance(value, str) for value in predecessors)
                     or len(set(predecessors)) != len(predecessors)
                     or not ENABLED_UPDATE_ACTIONS <= set(capabilities)
-                    or kind != "loader" or strategy != "loader_rename" or "native" not in backends
+                    or kind != "loader" or strategy != "loader_rename"
+                    or ("native" not in backends and not ("docker" in backends and "docker" in payload and tuple(map(int,minimum.split("."))) >= (1,0,80)))
                     or tuple(map(int, minimum.split('.'))) < (1, 0, 79)):
                 raise ModApiManifestError("Unsupported enabled update contract.")
             try:
@@ -258,8 +260,9 @@ def read_api_manifest(root: str | Path, folder: str | Path, payload: dict | None
             raise ModApiManifestError("Update helper actions require an enabledUpdate contract.")
         launcher_api = LauncherApiSpec(1, minimum, helper, tuple(capabilities), enabled_update)
         if "prepare_server_start" in capabilities and (kind not in {"loader", "source-integrated"}
-                or strategy not in {"loader_rename", "json_boolean"} or "native" not in backends):
-            raise ModApiManifestError("Server startup preparation requires a Native loader or JSON-activated source mod.")
+                or strategy not in {"loader_rename", "json_boolean"}
+                or ("native" not in backends and not ("docker" in backends and "docker" in payload and tuple(map(int,minimum.split("."))) >= (1,0,80)))):
+            raise ModApiManifestError("Server startup preparation requires a declared Native or portable Docker server contract.")
     if kind == "source-integrated" and strategy == "package" and (launcher_api is None
             or not SOURCE_PACKAGE_CAPABILITIES.issubset(launcher_api.capabilities)):
         raise ModApiManifestError("Source overlay packages must declare install, prepare_disable and prepare_remove.")
@@ -309,6 +312,21 @@ def read_api_manifest(root: str | Path, folder: str | Path, payload: dict | None
         if entrypoint.stat().st_size > 128 * 1024:
             raise ModApiManifestError("Client menu entrypoint exceeds 128 KiB.")
         client_menu = ClientMenuSpec(1, entrypoint)
+    docker = None
+    if "docker" in payload:
+        from .docker_mod_contract import parse_docker_mod_spec
+        try:
+            docker = parse_docker_mod_spec(payload["docker"], folder)
+        except (ValueError, OSError) as exc:
+            raise ModApiManifestError(str(exc)) from exc
+        if "docker" not in backends:
+            raise ModApiManifestError("A Docker contract requires declared Docker support.")
+        if launcher_api is None or not set((*docker.server_actions, *docker.host_actions)).issubset(launcher_api.capabilities):
+            raise ModApiManifestError("Docker action locations must match declared public lifecycle capabilities.")
+        if launcher_api.enabled_update is not None and "native" not in backends and not ENABLED_UPDATE_ACTIONS.issubset(docker.server_actions):
+            raise ModApiManifestError("Docker-only enabled updates require every update phase in serverHelper.actions.")
+        if "prepare_server_start" in launcher_api.capabilities and "native" not in backends and "prepare_server_start" not in docker.server_actions:
+            raise ModApiManifestError("Docker-only server preparation must declare its container action.")
     return ModApiDescriptor(mod_id, name, version, description, kind, tuple(backends), restart, strategy,
                             config_path, config_key, versions, launcher_api, settings, manifest, root, folder, identity,
-                            *relationships, updates, evejs_versions, client_menu)
+                            *relationships, updates, evejs_versions, client_menu, docker)

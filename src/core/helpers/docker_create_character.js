@@ -146,7 +146,7 @@ const BASE_REVIEWED_SOURCE_PATHS = Object.freeze([
   "space/transitions.js",
 ]);
 
-function makeReviewedImageProfile(version, sourceHashes) {
+function makeReviewedImageProfile(version, sourceHashes, rootPackageSha256 = null) {
   const expectedPaths = Object.keys(sourceHashes);
   if (
     typeof version !== "string" ||
@@ -169,11 +169,17 @@ function makeReviewedImageProfile(version, sourceHashes) {
     return Object.freeze([
       relativePath,
       expectedHash,
-      REVIEWED_SOURCE_TOKENS[relativePath],
+      version === "261108.1" && relativePath === "services/notifications/notificationState.js"
+        ? Object.freeze(["nextNotificationID: 1,", "function createNotification(", "createNotification,"])
+        : REVIEWED_SOURCE_TOKENS[relativePath],
     ]);
   });
   return Object.freeze({
     version,
+    rootPackageSha256,
+    starterSkills: version !== "0.12.5",
+    persistentMailNotification: version !== "261108.1",
+    skillPointsCeil: version === "261108.1",
     serverPackage: Object.freeze({
       name: "eve.js",
       type: "commonjs",
@@ -190,6 +196,38 @@ function makeReviewedImageProfile(version, sourceHashes) {
 }
 
 const REVIEWED_IMAGE_PROFILES = Object.freeze({
+  "0.12.9": makeReviewedImageProfile("0.12.9", {
+    "gameStore/index.js": "f0803cfaa4af0c7f5893cf44389e5106e6987055d44f7f749bac76abe6f40115",
+    "gameStore/sqliteStore.js": "c9493f26607dd5d0946f2f7d846a72fdeff928ada30f843053fa49d8d9314c6d",
+    "gameStore/tableRepository.js": "ae7bdb55fd48e0d0e3fd3c72416e511804ee4414652e4e84a139b351a62c3008",
+    "services/_shared/identityAllocator.js": "fe3c671cb0ab8c56ef90f7dad340abab2ec637ea177491ff0c0b1af6335c9654",
+    "services/account/accountRoleProfiles.js": "a259e2273407e7becf9636a9db5dc4cde5c64fc9d8bf0b91e857109b2f86959a",
+    "services/character/charService.js": "d7c6cd541d66852f132472e7938eddc5ae74f01acabcccc16114af6f3ba56aef",
+    "services/character/characterState.js": "7a6d0af5631e2127d99af41c7802b3407d68b1916e76955d3a493dd30a702f3e",
+    "services/character/characterCreationData.js": "1ce1ed87be5e76d0faa5ec580e7c6aed50d0c38ada38c2dce340e39c9f603bac",
+    "services/skills/skillState.js": "33f61bb96c94747506fd7b6b303e99987ba84c3e2cdb5cbe9556bb20e0963778",
+    "services/mail/mailState.js": "d227725bd441615fa159bfbe4a0fbba48bea7407ccb042328698bb5b62d9f180",
+    "services/notifications/notificationState.js": "f4e47f1b2622bc09351f6c2ab6dace81a8197c7b73c269302479d60a28811cef",
+    "services/ship/rookieShipRuntime.js": "0a66eb021895a7257242df9808dde4aa9b8498076ee3cce90369f1ff841b533e",
+    "space/runtime.js": "8d275805ce671041446391d96c27918fc331fc1f17c5b5bdef5e7814aa23d0a2",
+    "space/transitions.js": "35d39901b3f6f45c86b956c358b26138723871515050849bb8245ff992d8de0f"
+}, "753e75e97696f499635e3fbfba6f71b09e1f0e90b32a8eff6ff43c161b7b6ee7"),
+  "261108.1": makeReviewedImageProfile("261108.1", {
+    "gameStore/index.js": "729ba98a6e82a449fe1e629a382c67fa6d7b0da3fe55c325c506b41db062cdf1",
+    "gameStore/sqliteStore.js": "e58bef863f8362ffeb74d7cfb4e98a5b75a339f8cf2fa2d0256f3c3fa293d2ef",
+    "gameStore/tableRepository.js": "91925c582e782101c0630f9bc3567b0210576b775056862f5b9ad74d65528d09",
+    "services/_shared/identityAllocator.js": "f8941abe31d7231d047fffbdb1ba9ced880162a1552e5390e91fce165d4cc578",
+    "services/account/accountRoleProfiles.js": "6dba306c68c6f7c0c780f9f55b0663cb8716150455b0a6a803cf3a4d8102a67f",
+    "services/character/charService.js": "5128a5ebd2f233e7e7cc1260069fce790ec440e5c9ac7c55921cb75df4f0ef9f",
+    "services/character/characterState.js": "eef1b48d39aaa9f75480539de259c151aaa0eddf4865a79adcf21374e3a5ea31",
+    "services/character/characterCreationData.js": "1ce1ed87be5e76d0faa5ec580e7c6aed50d0c38ada38c2dce340e39c9f603bac",
+    "services/skills/skillState.js": "ccd6ca9bc47189673a91ec3e72dd10a65c969313e502667ed36b958f099bab73",
+    "services/mail/mailState.js": "c53ec64bc7183ea05e999b9b9a66fcab7f6c9d851d73d146f603dacf2867e885",
+    "services/notifications/notificationState.js": "c0d4d57d0160f4765071edf525ba0d6f28912b2ed4b041110b96a6df1539a531",
+    "services/ship/rookieShipRuntime.js": "6ab3eb5af12bf926909d5a0e496fd43e65ae8b0695e7f1acf07c05312e691d1e",
+    "space/runtime.js": "7e6d7d7359a533a3065db08d9ef683ed7407899dcd4efef28a85721edceb6225",
+    "space/transitions.js": "1ec465421e113c3769f5ca4b94aba30b10c46272973211694dbfa4c94ce9ee4e"
+}, "1659474ce576841d6b821ac6532b42fe7e87cdf64562991ac21d85a4a0b4ade8"),
   "0.12.5": makeReviewedImageProfile("0.12.5", {
     "gameStore/index.js": "dc474d40f02e64db715361630c1a48ac3e3de30ed77ae300d2ffd82815178421",
     "gameStore/sqliteStore.js": "c71e3a6fb0c2f3c51be2848f0842a5286775c978ad19d39c006747ef08fecc0a",
@@ -228,9 +266,17 @@ function reviewedImageProfile(version) {
     : null;
 }
 
+const SAFE_DIAGNOSTIC_CODES = new Set(["ACCOUNT_EXISTS", "ACCOUNT_ID_FAILED", "BACKUP_FAILED", "BACKUP_MISMATCH", "CHARACTER_EXISTS", "CHARACTER_ID_FAILED", "CREATION_VERIFY_FAILED", "DEPENDENCY_FAILED", "FILE_VERIFY_FAILED", "INVALID_REQUEST", "LEASE_FAILED", "NON_CANONICAL_REQUEST", "PENDING_OUTBOX", "ROLLBACK_VERIFY_FAILED", "SQLITE_DATA", "SQLITE_INTEGRITY", "STORE_UNINITIALIZED", "UNBACKED_TABLE", "UNEXPECTED_MUTATION", "UNMIGRATED_STORE", "UNSAFE_PATH", "UNSAFE_TABLE", "UNSUPPORTED_IMAGE", "UNSUPPORTED_STORE"]);
+function diagnosticCode(error) {
+  return error && SAFE_DIAGNOSTIC_CODES.has(error.code) ? error.code : "CHARACTER_CREATION_FAILED";
+}
+
 function fixedError(code, message) {
   const error = new Error(message);
   error.code = code;
+  const guard = String(error.stack || "").split("\n")[2]?.match(/docker_create_character\.js:(\d+):\d+/);
+  if (guard) error.guardLine = Number(guard[1]);
+  error.guardLines = String(error.stack || "").split("\n").slice(2,6).map(line => line.match(/docker_create_character\.js:(\d+):\d+/)).filter(Boolean).map(match => Number(match[1]));
   return error;
 }
 
@@ -384,11 +430,6 @@ function attestProductionImage(root) {
   ) {
     throw fixedError("UNSUPPORTED_IMAGE", "Docker character image is unsupported.");
   }
-  // The reviewed image deliberately has no root package; accepting one would
-  // permit a different image layout to masquerade behind the same tag.
-  if (fs.existsSync(path.join(resolvedRoot, "package.json"))) {
-    throw fixedError("UNSUPPORTED_IMAGE", "Docker character image is unsupported.");
-  }
   const serverPackage = readPackage(path.join(resolvedRoot, "server", "package.json"));
   const profile = reviewedImageProfile(serverPackage.version);
   if (
@@ -400,6 +441,15 @@ function attestProductionImage(root) {
     serverPackage.dependencies["better-sqlite3"] !==
       profile.serverPackage.dependencies["better-sqlite3"]
   ) {
+    throw fixedError("UNSUPPORTED_IMAGE", "Docker character image is unsupported.");
+  }
+  const rootPackage = path.join(resolvedRoot,"package.json");
+  if (profile.rootPackageSha256) {
+    const raw = fs.readFileSync(requireOrdinaryFile(rootPackage),"utf8").replace(/\r\n/g,"\n");
+    if (crypto.createHash("sha256").update(raw,"utf8").digest("hex") !== profile.rootPackageSha256) {
+      throw fixedError("UNSUPPORTED_IMAGE", "Docker character root package differs from the reviewed image.");
+    }
+  } else if (fs.existsSync(rootPackage)) {
     throw fixedError("UNSUPPORTED_IMAGE", "Docker character image is unsupported.");
   }
   const sqlitePackage = readPackage(
@@ -725,11 +775,10 @@ function withoutKeys(value, omitted) {
   );
 }
 
-function failCreationDependency() {
-  throw fixedError(
-    "DEPENDENCY_FAILED",
-    "Docker character dependencies are unavailable.",
-  );
+function failCreationDependency(phase = "starter_skills") {
+  const error = fixedError("DEPENDENCY_FAILED", "Docker character dependencies are unavailable.");
+  error.phase = phase;
+  throw error;
 }
 
 function deepFreezeValue(value) {
@@ -759,7 +808,7 @@ function loadStarterSkillBlueprints(
     typeof getCharacterCreationRace !== "function" ||
     typeof getSkillTypeByID !== "function"
   ) {
-    failCreationDependency();
+    failCreationDependency("starter_exports");
   }
   const raceProfile = getCharacterCreationRace(1);
   if (
@@ -771,7 +820,7 @@ function loadStarterSkillBlueprints(
     raceProfile.skills.length < 1 ||
     raceProfile.skills.length > MAX_STARTER_SKILL_COUNT
   ) {
-    failCreationDependency();
+    failCreationDependency("starter_race");
   }
   const seenTypeIds = new Set();
   const blueprints = [];
@@ -787,20 +836,20 @@ function loadStarterSkillBlueprints(
       entry.level < 0 ||
       entry.level > 5
     ) {
-      failCreationDependency();
+      failCreationDependency("starter_entry");
     }
     const key = String(entry.typeID);
-    if (seenTypeIds.has(key)) failCreationDependency();
+    if (seenTypeIds.has(key)) failCreationDependency("starter_duplicate");
     const rawSkillType = getSkillTypeByID(entry.typeID);
     if (
       !rawSkillType ||
       typeof rawSkillType !== "object" ||
       Array.isArray(rawSkillType)
     ) {
-      failCreationDependency();
+      failCreationDependency("starter_type");
     }
     const skillType = immutableJsonClone(rawSkillType);
-    if (skillType.typeID !== entry.typeID) failCreationDependency();
+    if (skillType.typeID !== entry.typeID) failCreationDependency("starter_type_id");
     seenTypeIds.add(key);
     blueprints.push(Object.freeze({
       typeID: entry.typeID,
@@ -811,14 +860,14 @@ function loadStarterSkillBlueprints(
   return Object.freeze(blueprints);
 }
 
-function isCanonicalStarterSkillRecord(record, characterId, typeId, level) {
+function isCanonicalStarterSkillRecord(record, characterId, typeId, level, profile) {
   if (!record || typeof record !== "object" || Array.isArray(record)) return false;
   const expectedItemId = characterId * 100000 + typeId;
   const expectedSkillPoints = level <= 0
     ? 0
-    : Math.round(
-      250 * record.skillRank * Math.pow(Math.sqrt(32), level - 1),
-    );
+    : profile && profile.skillPointsCeil
+      ? Math.ceil(record.skillRank * 250 * 2 ** (2.5 * (level - 1)))
+      : Math.round(250 * record.skillRank * Math.pow(Math.sqrt(32), level - 1));
   return (
     logicalEqual(Object.keys(record).sort(), [...SKILL_RECORD_KEYS].sort()) &&
     Number.isSafeInteger(expectedItemId) &&
@@ -862,6 +911,7 @@ function buildCanonicalStarterSkills(
   characterIdValue,
   blueprints,
   buildSkillRecord,
+  profile,
 ) {
   const characterId = positiveInt(characterIdValue);
   if (
@@ -893,7 +943,7 @@ function buildCanonicalStarterSkills(
     const record = immutableJsonClone(
       buildSkillRecord(characterId, blueprint.skillType, level),
     );
-    if (!isCanonicalStarterSkillRecord(record, characterId, typeId, level)) {
+    if (!isCanonicalStarterSkillRecord(record, characterId, typeId, level, profile)) {
       failCreationDependency();
     }
     skillPointTotal += record.skillPoints;
@@ -944,7 +994,7 @@ function assertV0126StarterSkillMutation(beforeValue, afterValue, expected) {
 
 function versionedEmptyPrestate(value, reviewedVersion, canonicalValue) {
   const state = requireObject(value);
-  return reviewedVersion === "0.12.6" && Object.keys(state).length === 0
+  return Boolean(reviewedImageProfile(reviewedVersion)?.starterSkills) && Object.keys(state).length === 0
     ? canonicalValue
     : state;
 }
@@ -997,7 +1047,7 @@ function assertCreationLogicalContract(beforeTables, afterTables, expected) {
   requireExactKeys(before, MUTATED_TABLES);
   requireExactKeys(after, MUTATED_TABLES);
   const reviewedVersion = expected && expected.reviewedVersion;
-  if (reviewedVersion !== "0.12.5" && reviewedVersion !== "0.12.6") {
+  if (reviewedImageProfile(reviewedVersion) === null) {
     throw fixedError("UNEXPECTED_MUTATION", "Docker character verification found an unexpected change.");
   }
 
@@ -1021,7 +1071,7 @@ function assertCreationLogicalContract(beforeTables, afterTables, expected) {
   if (!logicalEqual(after.accounts[username], expected.accountRecord)) {
     throw fixedError("UNEXPECTED_MUTATION", "Docker character verification found an unexpected change.");
   }
-  if (reviewedVersion === "0.12.6") {
+  if (Boolean(reviewedImageProfile(reviewedVersion)?.starterSkills)) {
     const createdCharacter = requireObject(after.characters[characterKey]);
     if (
       createdCharacter.raceID !== 1 ||
@@ -1032,10 +1082,14 @@ function assertCreationLogicalContract(beforeTables, afterTables, expected) {
     }
   }
 
-  const beforeIdentity = requireObject(before.identityState);
+  const rawIdentity = requireObject(before.identityState);
+  const beforeIdentity = Object.keys(rawIdentity).length === 0
+    ? {version: 1, nextAccountID: 1, nextCharacterID: 140000001, nextItemID: 1990000000}
+    : rawIdentity;
   const afterIdentity = requireObject(after.identityState);
   requireExactKeys(beforeIdentity, [
     "version", "nextAccountID", "nextCharacterID", "nextItemID",
+    ...(reviewedVersion === "261108.1" && Object.prototype.hasOwnProperty.call(beforeIdentity,"nextFleetSerial") ? ["nextFleetSerial"] : []),
   ]);
   const allocatorFields = new Set(["nextAccountID", "nextCharacterID", "nextItemID"]);
   requireExactKeys(afterIdentity, Object.keys(beforeIdentity));
@@ -1146,12 +1200,12 @@ function assertCreationLogicalContract(beforeTables, afterTables, expected) {
   const messageStatus = requireObject(mailbox.statuses[String(messageId)]);
   requireExactKeys(
     messageStatus,
-    reviewedVersion === "0.12.6"
+    Boolean(reviewedImageProfile(reviewedVersion)?.starterSkills)
       ? ["messageID", "statusMask", "labelMask"]
       : ["statusMask", "labelMask"],
   );
   if (
-    (reviewedVersion === "0.12.6" &&
+    (Boolean(reviewedImageProfile(reviewedVersion)?.starterSkills) &&
       positiveInt(messageStatus.messageID) !== messageId) ||
     Number(messageStatus.statusMask) !== 0 ||
     Number(messageStatus.labelMask) !== 1 ||
@@ -1161,6 +1215,14 @@ function assertCreationLogicalContract(beforeTables, afterTables, expected) {
     throw fixedError("UNEXPECTED_MUTATION", "Docker character verification found an unexpected change.");
   }
 
+  // Current mailSvc builds its transient notification on the client. The
+  // reviewed current server must leave the persistent notification table alone.
+  if (!reviewedImageProfile(reviewedVersion).persistentMailNotification) {
+    if (!logicalEqual(before.notifications, after.notifications)) {
+      throw fixedError("UNEXPECTED_MUTATION", "Docker character verification found an unexpected change.");
+    }
+    return;
+  }
   const beforeNotifications = versionedEmptyPrestate(
     before.notifications,
     reviewedVersion,
@@ -1824,7 +1886,7 @@ function loadProductionRuntime() {
           path.join(serverSource, "services", "character", "charService"),
         ),
       };
-      if (profile.version === "0.12.6") {
+      if (profile.starterSkills) {
         dependencies.getCharacterCreationRace = require(
           path.join(
             serverSource,
@@ -1939,7 +2001,7 @@ async function executeDockerCharacterCreation(payload, overrides = {}) {
     ) {
       throw fixedError("DEPENDENCY_FAILED", "Docker character dependencies are unavailable.");
     }
-    const starterSkillBlueprints = reviewedProfile.version === "0.12.6"
+    const starterSkillBlueprints = reviewedProfile.starterSkills
       ? loadStarterSkillBlueprints(
         getCharacterCreationRace,
         getSkillTypeByID,
@@ -2002,11 +2064,12 @@ async function executeDockerCharacterCreation(payload, overrides = {}) {
     if (!characterId) {
       throw fixedError("CHARACTER_ID_FAILED", "Docker character allocation failed.");
     }
-    const canonicalStarterSkills = reviewedProfile.version === "0.12.6"
+    const canonicalStarterSkills = reviewedProfile.starterSkills
       ? buildCanonicalStarterSkills(
         characterId,
         starterSkillBlueprints,
         buildSkillRecord,
+        reviewedProfile,
       )
       : null;
     requireSuccess(database.flushAllSync(), "CREATION_FLUSH_FAILED");
@@ -2049,7 +2112,7 @@ async function executeDockerCharacterCreation(payload, overrides = {}) {
       cleanupConfirmed,
       restartSafe: cleanupConfirmed,
     };
-  } catch (_error) {
+  } catch (error) {
     let rollbackSucceeded = false;
     let restartSafe = false;
     const backupName = safeBackupName(context);
@@ -2089,7 +2152,9 @@ async function executeDockerCharacterCreation(payload, overrides = {}) {
     return {
       ok: false,
       error: "Docker character creation failed",
-      code: "CHARACTER_CREATION_FAILED",
+      code: diagnosticCode(error),
+      ...(Number.isSafeInteger(error?.guardLine) ? {guardLine: error.guardLine, guardLines: error.guardLines} : {}),
+      ...(error && ["starter_exports","starter_race","starter_entry","starter_duplicate","starter_type","starter_type_id","starter_skills"].includes(error.phase) ? {phase: error.phase} : {}),
       backupCreated,
       ...(backupCreated ? { backupName } : {}),
       rollbackSucceeded,
@@ -2123,7 +2188,8 @@ if (require.main === module) {
         {
           ok: false,
           error: "Docker character creation failed",
-          code: "CHARACTER_CREATION_FAILED",
+          code: diagnosticCode(error),
+          ...(Number.isSafeInteger(error?.guardLine) ? {guardLine: error.guardLine, guardLines: error.guardLines} : {}),
           backupCreated: false,
           rollbackSucceeded: false,
           restartSafe: false,

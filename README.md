@@ -8,13 +8,22 @@ A Windows launcher for your local EveJS server and EVE clients. Start Game and M
 
 *Screenshots show the v1.0.56 interface with fictional demo characters and mods. Online service states and the offered mod update are examples; no game services were started for these captures. Click an image to see it at full size.*
 
-## What's new in 1.0.60
+## Changes in 1.0.80
 
-- Fixed stale ISK by reading the current personal wallet balance.
-- The whole character page now refreshes after client starts/exits and Game or Market state changes. Existing cards and the selected details update in place.
-- Personal security shows two decimals. Solar-system security appears beside the location.
-- Added official ship and system names for the selected language where available, including Chinese, Japanese and Korean. Custom names stay unchanged.
-- Translated the balance and skill-point headings and security/location tooltips. Language changes keep the selected character and displayed data intact.
+- Link several existing EveJS installations with named profiles. Each keeps its own character/client settings; switching never moves saves or starts/stops services.
+- Use portable Docker mod helpers and verified image contributions. Mods need an actual Docker implementation; editing a support list cannot port a Windows installer.
+- Review **Mods → Sort by dependencies**, then save the proposed order. It uses declared relationships, preserves unconstrained order, and blocks unresolved requirements and conflicts. Saving does not restart services.
+- Load Docker rosters independently of Config Editor's selected character. Reviewed Advanced character creation uses scoped backups and rollback; Simple creation checks the selected server's account-creation capability.
+- Keep successfully running containers alive when readiness or image verification is uncertain. Retry verification or explicitly Stop; clients requiring unverified mod changes remain blocked.
+- Click **Open launcher logs** in the bottom status area. The normal Windows log is `%APPDATA%\EveJS-Launcher\logs\launcher.log`, with up to three rotated backups.
+
+Mod authors can use the [portable Docker and login guide](docs/how-to-make-a-mod/19-portable-docker.md).
+
+Use **Installation** in the bottom status row to select a linked world. **Add**,
+**Edit**, **Rename** and **Remove** manage its launcher registration; on narrower
+windows the same actions are in the adjacent menu. Removing a registration leaves
+the installation, saves and mods in place. The launcher blocks switching during
+operations that still own the selected world.
 
 ## Install and start
 
@@ -76,6 +85,7 @@ Use **Add ZIP** or **Add Folder** to import a compatible package, or **Open Mod 
 | **Enable switch** | Changes whether the mod is configured to run. Server mods need a Game restart. |
 | **Configure** | Opens the settings form supplied by the mod. It may include switches, number fields, lists, translated labels, and settings for individual profiles. |
 | **Check mod updates** | Looks for compatible releases. Checking does not install anything. |
+| **Sort by dependencies** | Previews the declared load order. Review and save it, then apply server changes when ready. |
 | **Gold Update button** | Opens the offered version and release notes for review before installation. A gold badge on Mods shows available updates. |
 | **Actions** | Shows supported package actions, such as client preparation or removal. |
 | **Remove / Undo Removal** | Removes supported local packages and restores them from launcher recovery storage where available. |

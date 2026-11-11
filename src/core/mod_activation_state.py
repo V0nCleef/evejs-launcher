@@ -1055,6 +1055,15 @@ def _parse_json_object(content: bytes) -> dict[str, object]:
             object_pairs_hook=_unique_object,
             parse_constant=_reject_constant,
         )
+        # Some imported tools raise Python's process-wide recursion limit.
+        # Keep the state format's bound independent of that mutable setting.
+        pending = [(payload, 0)] if isinstance(payload, (dict, list)) else []
+        while pending:
+            value, depth = pending.pop()
+            if depth > 64:
+                raise ValueError("Activation state nesting exceeds 64 levels")
+            children = value.values() if isinstance(value, dict) else value
+            pending.extend((child, depth + 1) for child in children if isinstance(child, (dict, list)))
     except ModActivationStateReadError:
         raise
     except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError) as exc:

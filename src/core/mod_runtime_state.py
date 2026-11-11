@@ -50,6 +50,7 @@ DOCKER_BACKEND = "docker_compose"
 NATIVE_STATUS_EVIDENCE = "server_stdout"
 NATIVE_LOADER_EVIDENCE = "native_mode"
 DOCKER_OVERRIDE_EVIDENCE = "docker_override"
+DOCKER_IMAGE_EVIDENCE = "docker_image"
 UNVERIFIED_EVIDENCE = "unverified"
 
 _VALID_MODES = frozenset({"vanilla", "modded"})
@@ -439,7 +440,9 @@ def build_mod_runtime_plan(
         backend=normalized_backend,
     )
     if normalized_backend == DOCKER_BACKEND and any(
-        mod.activation_kind is not ActivationKind.LOADER_RENAME
+        mod.activation_kind is not ActivationKind.LOADER_RENAME and not (
+            mod.activation_kind in {ActivationKind.JSON_BOOLEAN, ActivationKind.PACKAGE} and mod.api_descriptor is not None
+            and mod.api_descriptor.docker is not None and mod.api_descriptor.docker.image is not None)
         for mod in normalized_mods
     ):
         raise ModRuntimeStateError(
@@ -634,6 +637,7 @@ def build_docker_mod_runtime_snapshot(
     runtime_identity: str,
     pid: int | None = None,
     observed_at: datetime | None = None,
+    attested_images=None,
 ) -> ModRuntimeSnapshot:
     """Attest a Docker override start against its plan and a fresh rescan."""
 
@@ -659,12 +663,14 @@ def build_docker_mod_runtime_snapshot(
         raise ModRuntimeStateError("Docker PID must be null or a positive integer.")
     selected = frozenset(plan.selected_loader_ids)
 
+    from .runtime.docker_mod_images import image_bindings
+    expected_images = image_bindings(plan.root)
+    if expected_images and any(dict(attested_images or ()).get(role) != image for role, image in expected_images.items()):
+        raise ModRuntimeStateError("The running service images do not attest the frozen mod deployment.")
     entries = [
-        _runtime_evidence_from_plan(
-            planned,
-            _entry_loader_name(planned) in selected,
-            DOCKER_OVERRIDE_EVIDENCE,
-        )
+        _runtime_evidence_from_plan(planned,
+            _entry_loader_name(planned) in selected if planned.activation_kind is ActivationKind.LOADER_RENAME else planned.configured_active,
+            DOCKER_OVERRIDE_EVIDENCE if planned.activation_kind is ActivationKind.LOADER_RENAME else DOCKER_IMAGE_EVIDENCE)
         for planned in plan.mods
     ]
     return _build_snapshot(
@@ -745,6 +751,13 @@ def _public_mod_contract_sha256(mod: Mod) -> str:
         "manifestPath": relative_manifest,
         "manifestSha256": hashlib.sha256(content).hexdigest(),
     }
+    if descriptor.docker is not None and descriptor.docker.image is not None:
+        from .runtime.docker_mod_images import _source_digest, _registry
+        metadata["dockerImageSourceSha256"] = _source_digest(descriptor.docker.image)
+        metadata["dockerImageBinding"] = _registry(root).get(descriptor.id)
+        if mod.activation_kind is ActivationKind.JSON_BOOLEAN:
+            metadata["dockerActivationFileSha256"] = hashlib.sha256(_read_stable_bounded_file(
+                mod.config_path, 2 * 1024 * 1024, label="Docker activation input", error_type=ModRuntimeStateError)).hexdigest()
     if descriptor.client_menu is not None:
         menu_source = _read_stable_bounded_file(descriptor.client_menu.entrypoint, 128 * 1024,
             label="Client menu entrypoint", error_type=ModRuntimeStateError)
@@ -1205,8 +1218,9 @@ def _validate_plan(
             raise ModRuntimeStateError("Runtime plan contract SHA-256 is invalid.")
         if entry.activation_kind is ActivationKind.LOADER_RENAME:
             loaders[_entry_loader_name(entry)] = entry
-        elif backend == DOCKER_BACKEND:
-            raise ModRuntimeStateError("Docker runtime plans may contain only loaders.")
+        elif backend == DOCKER_BACKEND and not (entry.id.startswith("path:") and
+                entry.activation_kind in {ActivationKind.JSON_BOOLEAN, ActivationKind.PACKAGE}):
+            raise ModRuntimeStateError("Docker source entries require a public image deployment contract.")
 
     selected: set[str] = set()
     selected_folded: set[str] = set()
@@ -1733,8 +1747,10 @@ def _validate_snapshot(
         ids.add(folded)
         if not isinstance(item.activation_kind, ActivationKind):
             raise ModRuntimeSnapshotError("Runtime activation kind is invalid.")
-        if backend == DOCKER_BACKEND and item.activation_kind is not ActivationKind.LOADER_RENAME:
-            raise ModRuntimeSnapshotError("Docker snapshots may contain only loaders.")
+        if backend == DOCKER_BACKEND and item.activation_kind is not ActivationKind.LOADER_RENAME and not (
+                snapshot.schema_version == 2 and item.id.startswith("path:")
+                and item.activation_kind in {ActivationKind.JSON_BOOLEAN, ActivationKind.PACKAGE}):
+            raise ModRuntimeSnapshotError("Docker source snapshots require a public image contract.")
         if not _SHA256_PATTERN.fullmatch(item.contract_sha256):
             raise ModRuntimeSnapshotError("Runtime contract fingerprint is invalid.")
         if item.effective is None and snapshot.schema_version == 2:
@@ -1808,11 +1824,7 @@ def _validate_evidence(
             else NATIVE_LOADER_EVIDENCE
         )
     else:
-        if activation_kind is not ActivationKind.LOADER_RENAME:
-            raise ModRuntimeSnapshotError(
-                "Docker snapshots cannot contain source-integrated mods."
-            )
-        expected = DOCKER_OVERRIDE_EVIDENCE
+        expected = DOCKER_OVERRIDE_EVIDENCE if activation_kind is ActivationKind.LOADER_RENAME else DOCKER_IMAGE_EVIDENCE
     if evidence != expected:
         raise ModRuntimeSnapshotError(
             f"Runtime evidence must be {expected!r} for this activation contract."

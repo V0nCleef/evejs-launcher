@@ -668,3 +668,29 @@ def test_docker_resolution_uses_which_then_desktop_fallback(monkeypatch: pytest.
     monkeypatch.setattr("src.core.runtime.docker_cli.Path.is_file", lambda _: True)
 
     assert DockerCommandRunner.resolve_executable() == DockerCommandRunner.DOCKER_DESKTOP_FALLBACK
+def test_input_parser_preserves_correlation_and_scrubs_only_its_projection(tmp_path):
+    import json
+    import subprocess
+    payload=json.dumps({"protocol":"helper_v1","requestId":"test-request","password":"PRIVATE_INPUT_CANARY"}).encode()
+    def execute(argv,cwd,timeout,input_bytes):
+        request=json.loads(input_bytes)
+        return subprocess.CompletedProcess(argv,0,json.dumps({"protocol":request["protocol"],"requestId":request["requestId"]}),"")
+    runner=DockerCommandRunner(executable="docker",execute_input=execute)
+    result=runner.run_with_input_parsed(("compose",),cwd=tmp_path,input_bytes=payload,
+        parser=lambda text,code:(json.loads(text)["protocol"],json.loads(text)["requestId"],code))
+    assert result==("helper_v1","test-request",0)
+
+
+def test_input_parser_rejects_stderr_overflow_without_retaining_raw_traceback(tmp_path):
+    import subprocess
+    from src.core.runtime.docker_cli import DockerStructuredOutputError
+    private="PRIVATE_RAW_STDOUT_CANARY"
+    runner=DockerCommandRunner(executable="docker",output_limit=64,
+        execute_input=lambda argv,*_:subprocess.CompletedProcess(argv,0,private,"x"*65))
+    with pytest.raises(DockerStructuredOutputError) as caught:
+        runner.run_with_input_parsed(("compose",),cwd=tmp_path,input_bytes=b"{}",parser=lambda text,code:True)
+    trace=caught.value.__traceback__
+    while trace:
+        if trace.tb_frame.f_code.co_name=="run_with_input_parsed":
+            assert private not in repr(trace.tb_frame.f_locals)
+        trace=trace.tb_next

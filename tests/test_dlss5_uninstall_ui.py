@@ -67,11 +67,12 @@ def ui(qapp, tmp_path, monkeypatch):
     (True, RuntimeBackend.DOCKER_COMPOSE, False),
 ])
 def test_dlss5_row_exposes_uninstall_without_generic_registry(qapp, tmp_path, monkeypatch, valid, backend, enabled):
+    from src.core import mod_inventory
     mod = replace(_mod(tmp_path), valid=valid, error=None if valid else "untrusted manager")
-    monkeypatch.setattr(page_module, "discover_dlss5_client_mod", lambda root: mod)
-    monkeypatch.setattr(page_module, "scan_mods", lambda root: [])
+    monkeypatch.setattr(mod_inventory, "discover_dlss5_client_mod", lambda root: mod)
+    monkeypatch.setattr(mod_inventory, "scan_mods", lambda root: [])
     monkeypatch.setattr(page_module.config, "CONFIG_DIR", tmp_path / "settings")
-    monkeypatch.setattr(page_module, "read_managed_mod_registration",
+    monkeypatch.setattr(mod_inventory.mod_management, "read_managed_mod_registration",
                         lambda mod: pytest.fail("client package must not use generic registry"))
     page = page_module.ModsPage()
     page._runtime_backend = backend

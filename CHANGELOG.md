@@ -2,6 +2,27 @@
 
 ## Changelog
 
+## v1.0.80 - 2026-11-11
+
+- Link existing EveJS worlds with named installation profiles and separate client settings. Switching never moves saves or starts/stops a world.
+- Retry Docker readiness and mod verification after delayed inspection; uncertain verification leaves containers running and clients requiring changed mods blocked.
+- Load Docker character rosters without Config Editor detail selection. Preserve unmatched records and empty accounts, and read authoritative wallet balances.
+- Advanced Docker character creation accepts reviewed stopped maintenance tools and explains running or unknown writers.
+- Add portable server helpers, explicit Windows client preflight, version-checked source layers and Linux market image contributions with actual image attestation.
+- Compose compatible login contributions through shared ABI v1, preserving native authentication and existing additive hooks.
+- Add Open launcher logs and a configurable Docker readiness budget.
+- Preview and save dependency-based mod order without enabling mods or restarting services. Cycles, conflicts and stale previews block saving.
+- Accept native Unicode login receipts and isolate receipt lines from unframed provider output. Client UI/RPC readiness remains a separate acknowledgement.
+- Keep explicit Stop and Docker logs available when next-start mod assets drift; recheck runtime identity after image verification.
+- Support reviewed modern character-creation layouts with scoped backups and rollback; reject destructive or ambiguous maintenance layouts.
+- Resolve parent data-directory binds to the exact game store, and preserve Qt's window method when using the installation selector.
+- Keep language, telemetry, installation controls and version on one footer row; compact installation actions into a menu when space is limited. Group dependency sorting with the other mod actions, wrapping long translated mod-action rows as needed.
+- Add explicit offscreen startup and shutdown diagnostics with fresh isolated settings for release verification.
+- Retire closed wizard and main-window widgets while QApplication is still alive, fixing an intermittent Qt teardown crash found during first-run close checks.
+- Thanks to luna and Tokeiito for the Docker reports, and Zeiro, ZephyrSouza, JcKalck, Ashimmu 9000 and Delta0070 for reporting and investigating the mod issues. 🫡
+
+See [release validation](RELEASE-VALIDATION.md) for the qualified runtime/layout boundary and coverage limits. Docker support still requires a compatible mod package; editing a Native-only declaration does not port its installer or binaries.
+
 ## v1.0.79 - 2026-11-09
 
 - GitHub update checks and downloads use native Windows certificate validation and hostname checks while retaining TLS verification.

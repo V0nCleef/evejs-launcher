@@ -1,0 +1,2 @@
+"use strict";
+console.log("[portable-helper-demo] Selected Docker preload is running.");

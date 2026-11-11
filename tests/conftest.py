@@ -21,3 +21,24 @@ def qapp() -> QApplication:
         for name in ("segoeui.ttf", "bahnschrift.ttf", "consola.ttf"):
             QFontDatabase.addApplicationFont(str(Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / name))
     return app
+
+
+@pytest.fixture
+def close_main_window(qapp):
+    """Drain the real asynchronous close before deleting a full launcher window."""
+    import time
+    from PyQt6.QtCore import QEvent, QThread
+    from PyQt6.QtTest import QTest
+
+    def close(window):
+        deadline = time.monotonic() + 10
+        accepted = window.close()
+        while not accepted or any(thread.isRunning() for thread in window.findChildren(QThread)):
+            assert time.monotonic() < deadline, 'Launcher close did not release its workers'
+            qapp.processEvents()
+            QTest.qWait(5)
+            accepted = window.close()
+        window.deleteLater()
+        qapp.sendPostedEvents(window, QEvent.Type.DeferredDelete)
+
+    return close

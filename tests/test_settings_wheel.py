@@ -25,19 +25,21 @@ def _wheel(widget, amount):
 
 
 @pytest.mark.parametrize("field", [
-    "runtime_backend_combo", "docker_policy_combo", "server_script_combo",
+    "runtime_backend_combo", "docker_policy_combo", "docker_readiness_spin",
     "stagger_delay_spin", "update_interval_spin", "music_volume_slider",
     "voice_volume_slider", "ducking_level_slider",
 ])
 @pytest.mark.parametrize("focused", [False, True])
 def test_wheel_scrolls_settings_without_changing_values(qapp, monkeypatch, field, focused):
     cfg = deepcopy(config.DEFAULT_CONFIG)
-    if field == "docker_policy_combo":
+    if field in {"docker_policy_combo", "docker_readiness_spin"}:
         cfg["runtime_backend"] = "docker_compose"
     monkeypatch.setattr(config, "load", lambda: deepcopy(cfg))
     page = SettingsPage()
     page.resize(1000, 640)
     page.show()
+    if field == "docker_readiness_spin":
+        page.docker_advanced_toggle.setChecked(True)
     widget = getattr(page, field)
     if isinstance(widget, QComboBox) and widget.count() < 2:
         widget.addItem("Another test option", "fixture")

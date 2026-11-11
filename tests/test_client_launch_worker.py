@@ -819,7 +819,7 @@ def test_perform_launch_forwards_account_and_optional_character_as_auto_login_in
             request.profiles_root / request.username
         ),
     )
-    monkeypatch.setattr(app_module, "prefill_username", lambda _username: None)
+    monkeypatch.setattr(app_module, "prefill_username", lambda _username, **_kwargs: None)
     monkeypatch.setattr(
         app_module,
         "configure_profile_game_endpoint",
@@ -912,7 +912,7 @@ def test_docker_launch_uses_only_verified_bypass_and_rechecks_before_spawn(
             request.profiles_root / request.username
         ),
     )
-    monkeypatch.setattr(app_module, "prefill_username", lambda _username: None)
+    monkeypatch.setattr(app_module, "prefill_username", lambda _username, **_kwargs: None)
     monkeypatch.setattr(
         app_module,
         "configure_profile_game_endpoint",
@@ -958,7 +958,7 @@ def test_named_character_without_id_keeps_manual_mode_argument_free(
             request.profiles_root / request.username
         ),
     )
-    monkeypatch.setattr(app_module, "prefill_username", lambda _username: None)
+    monkeypatch.setattr(app_module, "prefill_username", lambda _username, **_kwargs: None)
     monkeypatch.setattr(
         app_module,
         "configure_profile_game_endpoint",
@@ -990,7 +990,7 @@ def test_perform_launch_logs_bounded_preparation_stages(
             request.profiles_root / request.username
         ),
     )
-    monkeypatch.setattr(app_module, "prefill_username", lambda _username: None)
+    monkeypatch.setattr(app_module, "prefill_username", lambda _username, **_kwargs: None)
     monkeypatch.setattr(
         app_module,
         "configure_profile_game_endpoint",

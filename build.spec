@@ -33,7 +33,8 @@ for _guide_path in _guide_paths:
         raise ValueError(f'Unsafe or missing bundled guide file: {_guide_path}')
 _guide_data = [(str(path), str(path.parent)) for path in _guide_paths]
 _guide_data.extend((str(path), str(path.parent)) for path in (
-    Path('src/core/client/shared_menu.py'), Path('src/core/client/shared_menu_loader.cjs')))
+    Path('src/core/client/shared_menu.py'), Path('src/core/client/shared_menu_loader.cjs'),
+    Path('src/core/client/login_delivery.cjs')))
 
 # Modules to exclude — aggressive pruning
 EXCLUDES = [

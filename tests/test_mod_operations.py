@@ -316,3 +316,27 @@ def test_integrated_disable_waits_for_declared_cleanup(tmp_path, monkeypatch):
     assert json.loads(target.read_text()) == {"enabled": False, "userPreference": 27}
     assert actions == ["prepare_disable", "prepare_disable"]
     assert LocalModPackages(tmp_path).records() == ()
+
+
+@pytest.mark.parametrize("action", ["prepare_disable", "prepare_remove"])
+def test_offline_cleanup_does_not_reopen_an_obsolete_preload_override(tmp_path, monkeypatch, action):
+    from src.core.mod_operations import run_public_action
+    from src.core.runtime import docker_mod_helpers
+    mod = package(tmp_path, "Portable", helper=True)
+    document = json.loads(mod.manifest_path.read_text())
+    document["launcherApi"]["minLauncherVersion"] = "1.0.80"
+    document["docker"] = dict(schemaVersion=1, dataDirectory="portable", serverHelper=dict(
+        runtime="node", path="helper.js", actions=["prepare_disable", "prepare_remove"]), hostActions=[])
+    mod.manifest_path.write_text(json.dumps(document))
+    (mod.path/"loader.js").rename(mod.path/"loader.js.disabled")
+    base = object()
+    class Controller:
+        def __init__(self, target, *_args, **_kwargs):
+            assert target is base
+        def execute(self, descriptor, received, **_kwargs):
+            assert received == action
+            return "qa-request", dict(success=True, state="ready", message="clean", restartRequired=[])
+    monkeypatch.setattr(docker_mod_helpers, "DockerModHelperController", Controller)
+    operation = ModOperationContext(tmp_path, backend="docker", docker_base_target_factory=lambda: base,
+        docker_target_factory=lambda: pytest.fail("Disabled loader invalidates the old override"))
+    assert run_public_action(scan_mods(tmp_path)[0], action, operation).require_ready()

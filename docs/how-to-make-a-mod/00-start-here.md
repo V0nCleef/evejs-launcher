@@ -53,3 +53,5 @@ Choose a feature from the list on the left. Each page shows what it does and how
 [14. Publish a mod update](14-publish-update.md) explains the release files. [15. Example files](15-example-files.md) lets you save the working examples.
 
 16. [Add an in-game settings window](16-ingame-settings.md)
+
+[19. Portable Docker mods and safe ordering](19-portable-docker.md)

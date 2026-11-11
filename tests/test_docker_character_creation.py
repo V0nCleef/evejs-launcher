@@ -722,6 +722,32 @@ def test_additional_effective_service_blocks_character_mutation(
     assert not backup.exists()
 
 
+@pytest.mark.parametrize("service", ["market-tools", "content-tools", "maintenance"])
+@pytest.mark.parametrize("state", ["exited", "created", "absent"])
+def test_reviewed_stopped_profile_tools_do_not_block_creation(tmp_path, service, state):
+    target, helpers, backup, config, records = _fixture(tmp_path)
+    services = dict(config.services)
+    services[service] = _service(service, Mount("volume", "evejs-data", "/var/lib/evejs"))
+    config = replace(config, services=services)
+    records[service] = _record(service, None if state == "absent" else state, exists=state != "absent")
+    runner = FakeRunner(_success_output())
+    controller, _ = _controller(target, helpers, backup, config, records, runner)
+    result = controller.execute(DockerCharacterCreationRequest("captain_01", "Capsule Pilot"))
+    assert result.succeeded
+    assert len(runner.calls) == 1
+
+
+def test_running_profile_tool_is_named_and_blocks_creation_without_writes(tmp_path):
+    target, helpers, backup, config, records = _fixture(tmp_path)
+    records["market-tools"] = _record("market-tools", "running")
+    runner = FakeRunner(_success_output())
+    controller, _ = _controller(target, helpers, backup, config, records, runner)
+    result = controller.execute(DockerCharacterCreationRequest("captain_01", "Capsule Pilot"))
+    assert not result.succeeded
+    assert "market-tools" in result.error and "stopped" in result.error
+    assert not runner.calls and not backup.exists()
+
+
 def test_additional_observed_service_record_blocks_character_mutation(
     tmp_path: Path,
 ) -> None:

@@ -9,11 +9,21 @@ First inspect the mod and authorized EveJS/Launcher sources. Identify the curren
 delivery code, exact supported server/client builds, native/Docker behavior,
 receipts/backups, upgrade lifecycle and other server roots sharing the same
 physical client. Do not inspect proprietary client code without permission.
-Do not invent a generic login-payload API or assume the Launcher converts mods.
+Use the reviewed ABI v1 in `src/core/client/login_delivery.cjs` when its compiled
+native capability probe succeeds. Vendor the canonical reviewed runtime bytes;
+the global singleton lets compatible mods compose without rewriting each other's
+source. Do not invent another login API or assume the Launcher converts mods.
 
 Implement the reviewed server integration without replacing existing login
 behavior. Wait for the authenticated character and required client services.
 Handle reconnect, repeated delivery, handler cleanup, disable/remove and failures.
+An OK login receipt proves only that the initializer returned. Require a separate
+mod-specific RPC/HUD acknowledgement before marking the client companion ready.
+Test the native marshal codec's Unicode `wstring` reply as well as strings and
+bytes, unrelated output without a trailing newline, wrong/duplicate nonces and
+optional versus required provider failures. Preserve native return values and
+reply observers exactly once. Declare actual provider dependencies and manifest
+load relationships; a list sorter cannot fix legacy handshake source replacement.
 Retain a working legacy path for supported environments lacking handshake support.
 Choose the method from verified capability/build evidence, not a version label
 alone. Do not quietly fall back to writing archives during profile preparation.
@@ -37,6 +47,13 @@ disable/remove, both backends, unsupported-handshake fallback, older Launchers,
 and two server roots sharing a client. Verify no duplicate UI or handlers and no
 unrelated file/settings changes. Clearly separate synthetic checks from live
 coverage and disclose every unsupported path.
+
+For Launcher 1.0.80 container helpers, source/image contributions and enabled
+updates, include `docs/how-to-make-a-mod/reference/portable-docker.md` with this
+handoff. Server actions run as Linux Node helpers through bounded correlated stdin;
+Windows client preparation stays in the explicitly declared host actions. Keep
+durable data under the supplied persistent mod data root. Merely adding Docker
+to supportedBackends does not implement a port.
 
 Where automatic fallback is required, use the documented Launcher 1.0.61
 client-preparation-v1 contract. Enroll only exact older versions you have tested;

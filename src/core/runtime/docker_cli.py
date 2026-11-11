@@ -243,6 +243,7 @@ class DockerCommandRunner:
         cwd: Path,
         input_bytes: bytes,
         timeout: float = 10.0,
+        check: bool = True,
     ) -> DockerCommandResult:
         """Run one Docker operation with a small, non-command-line stdin payload."""
         if not args:
@@ -280,10 +281,45 @@ class DockerCommandRunner:
             stdout_truncated or stderr_truncated,
             False,
         )
-        if completed.returncode != 0:
+        if completed.returncode != 0 and check:
             safe_result = DockerCommandResult(command, completed.returncode, "", "", result.truncated, False)
             raise DockerCommandError(args[0], safe_result)
         return result
+
+    def run_with_input_parsed(
+        self, args: tuple[str, ...], *, cwd: Path, input_bytes: bytes,
+        parser: Callable[[str, int], ParsedOutput], timeout: float = 10.0,
+    ) -> ParsedOutput:
+        """Consume bounded helper output before text redaction breaks its ABI.
+
+        Only the trusted parser's privacy-safe projection may escape. Raw
+        stdout/stderr, echoed stdin and parser exceptions are never returned.
+        A correlated semantic failure may be returned on a nonzero exit.
+        """
+        if not args or not callable(parser) or timeout <= 0:
+            raise ValueError("A command, parser and positive timeout are required")
+        if not isinstance(input_bytes, bytes) or len(input_bytes) > _MAX_INPUT_BYTES:
+            raise ValueError("Helper input must be bounded bytes")
+        status, parsed = self._consume_input_parsed((self.executable,*args),cwd,timeout,input_bytes,parser)
+        if status != "ok":
+            raise DockerStructuredOutputError(status) from None
+        return cast(ParsedOutput,parsed)
+
+    def _consume_input_parsed(self, command, cwd, timeout, input_bytes, parser):
+        # Secret-bearing CompletedProcess/parser exceptions die in this private
+        # frame, as with _consume_parsed_output. Public tracebacks retain none.
+        try:
+            completed = self._execute_input(command,cwd,timeout,input_bytes)
+            raw, errors = completed.stdout, completed.stderr
+            if not isinstance(raw,str) or (errors is not None and not isinstance(errors,str)):
+                return "invalid",None
+            if max(len(raw.encode("utf-8")),len((errors or "").encode("utf-8"))) > self._output_limit:
+                return "too_large",None
+            if type(completed.returncode) is not int:
+                return "invalid",None
+            return "ok",parser(raw,completed.returncode)
+        except Exception:
+            return "invalid",None
 
     def _execute_bounded(self, argv: tuple[str, ...], cwd: Path, timeout: float) -> subprocess.CompletedProcess[str]:
         """Capture through temporary files, avoiding an unbounded PIPE in memory."""

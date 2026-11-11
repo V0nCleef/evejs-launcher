@@ -96,6 +96,21 @@ def assert_docker_auto_login_context_current(
     _inspect_selected_server(probe, launch_context, inspector or _new_inspector())
 
 
+def require_docker_account_creation(probe,launch_context,*,inspector=None) -> None:
+    """Check a new-account prerequisite without acquiring maintenance ownership."""
+    selected_inspector = inspector or _new_inspector()
+    before = _inspect_selected_server(probe,launch_context,selected_inspector)
+    try:
+        enabled = selected_inspector.server_account_creation_enabled(probe.target,before.record,before.container_id)
+    except Exception:
+        raise DockerAutoLoginContextError("Online account creation could not be verified in the selected Docker server. Check its configuration and retry.") from None
+    after = _inspect_selected_server(probe,launch_context,selected_inspector)
+    if before != after:
+        raise DockerAutoLoginContextError("The selected Docker server changed while online account creation was checked.")
+    if enabled is not True:
+        raise DockerAutoLoginContextError("Online account creation is disabled. Enable devAutoCreateAccounts in the selected server configuration and restart Game, or use Advanced character creation.")
+
+
 def _new_inspector() -> ComposeInspector:
     from src.core.runtime.docker_cli import DockerCommandRunner
 

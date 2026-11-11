@@ -56,6 +56,7 @@ from src.core.mod_inventory import ModInventory, folder_key, load_mod_inventory
 from src.core.mod_client_delivery import LEGACY_GUIDE_URL, reported_delivery
 from src.core.service_status import DockerControlPolicy, RuntimeBackend
 from src.widgets.page_header import PageHeader
+from src.widgets.flow_layout import FlowLayout
 from src.widgets.localized_dialogs import LocalizedMessageBox as QMessageBox
 from src.widgets.toggle_switch import ToggleSwitch
 from src.pages.startup_scripts_panel import StartupScriptsPanel
@@ -662,6 +663,7 @@ class ModsPage(QWidget):
     activation_requested = pyqtSignal(object, bool)
     move_requested = pyqtSignal(object, int)
     helper_requested = pyqtSignal(object, str)
+    sort_requested = pyqtSignal()
     registry_relocation_requested = pyqtSignal(object)
     forget_compatibility_requested = pyqtSignal()
 
@@ -709,6 +711,7 @@ class ModsPage(QWidget):
             "Review installed loaders and source integrations before changing server state.",
             "EXTENSION CONTROL",
             self,
+            wrap_actions=True,
         )
         self.count_label = QLabel("0 CONFIGURED ON / 0 INSTALLED")
         self.count_label.setProperty("class", "signalPill")
@@ -926,20 +929,22 @@ class ModsPage(QWidget):
         manifest_header.addWidget(self.manifest_meta_label)
         manifest_layout.addLayout(manifest_header)
 
-        package_actions = QHBoxLayout()
+        package_actions = FlowLayout(spacing=SPACING["sm"])
         self.add_zip_btn = QPushButton("Add ZIP")
         self.add_folder_btn = QPushButton("Add Folder")
         self.undo_remove_btn = QPushButton("Undo Removal")
         self.recover_mods_btn = QPushButton("Recover Interrupted Operation")
-        for button in (self.add_zip_btn, self.add_folder_btn, self.undo_remove_btn, self.recover_mods_btn):
+        self.sort_mods_btn = QPushButton("Sort by dependencies")
+        self.sort_mods_btn.setEnabled(False)
+        for button in (self.add_zip_btn, self.add_folder_btn, self.undo_remove_btn, self.sort_mods_btn, self.recover_mods_btn):
             button.setProperty("class", "signalSecondary")
             mark_translatable(button)
             package_actions.addWidget(button)
-        package_actions.addStretch()
         self.add_zip_btn.clicked.connect(lambda: self.import_requested.emit("zip"))
         self.add_folder_btn.clicked.connect(lambda: self.import_requested.emit("folder"))
         self.undo_remove_btn.clicked.connect(self.undo_requested.emit)
         self.recover_mods_btn.clicked.connect(self.recover_requested.emit)
+        self.sort_mods_btn.clicked.connect(self.sort_requested.emit)
         manifest_layout.addLayout(package_actions)
         self.operation_notice = QLabel()
         self.operation_notice.setWordWrap(True)
@@ -1253,7 +1258,9 @@ class ModsPage(QWidget):
                 )
             return True, "", ""
 
-        if mod.activation_kind is ActivationKind.JSON_BOOLEAN:
+        if mod.activation_kind is ActivationKind.JSON_BOOLEAN and not (
+                mod.api_descriptor is not None and mod.api_descriptor.docker is not None
+                and mod.api_descriptor.docker.image is not None):
             return (
                 False,
                 "Source-integrated mods are available on Native servers only.",
@@ -1445,6 +1452,7 @@ class ModsPage(QWidget):
                     (management is not None or local_removable or (
                         mod.activation_kind is ActivationKind.CLIENT_PACKAGE
                         and mod.id == "evejs-dlss5"
+                        and mod.valid
                         and mod.manager_path is not None
                         and bool(mod.manager_sha256)
                     ))
@@ -1537,6 +1545,8 @@ class ModsPage(QWidget):
             can_apply = False
         self.apply_btn.setEnabled(can_apply)
         editable = self._can_mutate() and not self._lifecycle_busy and bool(self._evejs_root)
+        self.sort_mods_btn.setEnabled(editable and len(mods) > 1 and not (
+            self._inventory.registry_error or self._inventory.recovery_pending))
         self.forget_compatibility_btn.setEnabled(not self._lifecycle_busy and bool(self._evejs_root))
         for button in (self.add_zip_btn, self.add_folder_btn):
             button.setEnabled(editable and not self._inventory.registry_error)

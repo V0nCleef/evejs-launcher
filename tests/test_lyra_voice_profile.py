@@ -43,9 +43,14 @@ def test_bundled_lyra_catalog_records_balanced_lift_provenance() -> None:
     assert processing["raw_catalog"]["path"] == (
         "scripts/voice_reference/lyra_cori_high_raw"
     )
-    assert processing["raw_catalog"]["manifest_sha256"] == _sha256(
-        RAW_ROOT / "manifest.json"
-    )
+    raw_manifest = (RAW_ROOT / "manifest.json").read_bytes()
+    # The protected processing receipt pins the original Windows CRLF bytes.
+    # Git normalizes this JSON to LF in a clean checkout. Reconstruct only the
+    # line endings; preserve every other pinned byte and the original receipt.
+    assert processing["raw_catalog"]["manifest_sha256"] in {
+        hashlib.sha256(raw_manifest).hexdigest(),
+        hashlib.sha256(raw_manifest.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")).hexdigest(),
+    }
     assert processing["output"] == "mono PCM16 WAV at 22050 Hz"
     assert processing["matched_profile_filter_template"] == (
         processor.MATCHED_FILTER_TEMPLATE

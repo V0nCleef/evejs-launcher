@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import QMainWindow, QMessageBox
 
 from src import app as app_module
 from src.app import MainWindow
-from src.core.runtime.docker_compose import ContainerRecord
+from src.core.runtime.docker_compose import ComposeTarget, ContainerRecord
 from src.core.runtime.docker_controller import (
     DockerLifecycleAction,
     DockerLifecycleResult,
@@ -313,9 +313,32 @@ def test_docker_controller_factory_shares_one_runner_and_is_deferred(qapp, monke
     assert window._begin_docker_lifecycle(DockerLifecycleAction.START_GAME)
     assert created == []
     worker = captured["worker"]
-    controller = worker._controller_factory(None)  # type: ignore[attr-defined]
+    controller = worker._controller_factory(ComposeTarget(tmp_path / "compose.yaml", tmp_path, "eve"))  # type: ignore[attr-defined]
     assert len(created) == 1
     assert controller._runner is controller._inspector._runner
+
+
+@pytest.mark.parametrize("action", [DockerLifecycleAction.STOP_GAME,
+    DockerLifecycleAction.STOP_MARKET, DockerLifecycleAction.STOP_ALL])
+def test_explicit_stop_remains_available_after_next_start_mod_drift(qapp, monkeypatch, tmp_path, action):
+    window = _bare_docker_window(tmp_path)
+    target = ComposeTarget(tmp_path / "compose.yaml", tmp_path, "fixture")
+    monkeypatch.setattr(app_module, "build_compose_target", lambda _draft: target)
+
+    def stale(*_args, **_kwargs):
+        raise ValueError("Next-start bundle drifted")
+
+    monkeypatch.setattr(app_module, "attach_docker_mod_override", stale)
+    monkeypatch.setattr("src.core.runtime.docker_mod_preparation.capture_docker_mod_preparation", stale)
+    assert window._begin_docker_lifecycle(action)
+    worker, _ = window._captured_lifecycle
+    assert worker._target_factory() == target
+    controller = worker._controller_factory(target)
+    assert controller._before_game_start is None
+    # An identity-bound maintenance action retains its stricter authority check.
+    with pytest.raises(ValueError, match="Next-start bundle drifted"):
+        window._docker_lifecycle_target_factory()()
+    window.deleteLater()
 
 
 def test_docker_close_kill_clients_rechecks_stop_on_exit_policy(qapp, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -926,6 +949,8 @@ def test_mod_recreate_rejects_post_attestation_container_replacement(
         window._monitor_generation,
     )
 
+    assert completion_outcomes == []
+    window._on_docker_mod_observation_timeout(window._pending_docker_mod_observation_token)
     assert completion_outcomes == [False]
     assert window._lifecycle_active()
     assert lifecycle_thread.deleted
@@ -1648,4 +1673,40 @@ def test_stop_on_exit_never_runs_the_docker_command_on_the_gui_thread(
 
     assert event.ignored and not event.accepted
     assert window._captured_lifecycle is not None
+    window.deleteLater()
+@pytest.mark.parametrize("diagnostic",["readiness_timeout","inspection_unavailable","image_unverified","runtime_changed"])
+def test_ordinary_unverified_start_retries_read_only_and_keeps_quarantine_on_failed_dispatch(qapp,tmp_path,monkeypatch,diagnostic):
+    window=_bare_docker_window(tmp_path,_docker_snapshot())
+    monkeypatch.setattr(app_module.QMessageBox,"critical",lambda *_:None)
+    assert window._begin_docker_lifecycle(DockerLifecycleAction.START_STACK)
+    result=DockerLifecycleResult(DockerLifecycleAction.START_STACK,False,records={
+        "server":_record("server",ServiceState.ONLINE,raw_state="running",identity="late-game",health="healthy"),
+        "market":_record("market",ServiceState.ONLINE,raw_state="running",identity="late-market",health="healthy"),
+    },target_identity="docker:late",diagnostic_code=diagnostic,error="Unverified")
+    window._on_docker_lifecycle_completed(result)
+    entry=window._deferred_docker_mod_verification["docker:late"]
+    assert window._runtime_snapshot.game is ServiceState.UNKNOWN
+    assert "docker:late" in window._docker_mod_quarantined_targets
+    observation=DockerObservation(ServiceState.ONLINE,ServiceState.ONLINE,game_identity="late-game",
+        market_identity="late-market",game_runtime_identity="b"*64,target_identity="docker:late",
+        settings_identity=entry["settings"],monitor_generation=entry["generation"],
+        sample_started_monotonic_ns=entry["floor"]+1)
+    calls=[]
+    window._begin_docker_lifecycle=lambda action,**kwargs:calls.append((action,kwargs)) or False
+    assert not window._retry_deferred_docker_verification(replace(observation,monitor_generation=1),1)
+    assert calls==[]
+    assert not window._retry_deferred_docker_verification(observation,entry["generation"])
+    assert calls[0][1]["verification_only"] is True
+    assert "docker:late" in window._docker_mod_quarantined_targets
+    entry["auto_retry"]=True
+    def complete(action,**kwargs):
+        calls.append((action,kwargs))
+        kwargs["on_complete"](True)
+        return True
+    window._begin_docker_lifecycle=complete
+    assert window._retry_deferred_docker_verification(observation,entry["generation"])
+    assert "docker:late" not in window._deferred_docker_mod_verification
+    assert "docker:late" not in window._docker_mod_quarantined_targets
+    assert all(kwargs["verification_only"] for _,kwargs in calls)
+    assert all(action not in {DockerLifecycleAction.STOP_GAME,DockerLifecycleAction.STOP_ALL} for action,_ in calls)
     window.deleteLater()

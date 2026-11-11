@@ -410,6 +410,7 @@ def launch_client(
     pre_spawn_check: Callable[[], None] | None = None,
     shared_settings: SharedClientSettings | None = None,
     hide_console: bool = False,
+    docker_mod_operation=None,
 ) -> subprocess.Popen:
     """Launch the EVE client executable from a profile junction.
 
@@ -507,6 +508,7 @@ def launch_client(
             backend="docker" if effective_context.target_identity is not None else "native",
             protected_environment=dlss5_environment, protected_arguments=arguments, mods=launch_mods, client_lock_held=True,
             **({"profile_settings_root": shared_settings.folder} if shared_settings is not None else {}),
+            **({"docker_operation": docker_mod_operation} if docker_mod_operation is not None else {}),
         )
         env.update(public_mods.environment)
         arguments += public_mods.arguments

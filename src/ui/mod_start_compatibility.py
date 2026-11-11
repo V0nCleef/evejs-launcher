@@ -300,7 +300,8 @@ def affected_mods(
     selected = []
     runtime_kinds = {ActivationKind.LOADER_RENAME, ActivationKind.JSON_BOOLEAN}
     for mod in mods:
-        if not mod.active or not mod.valid or mod.activation_kind not in runtime_kinds:
+        if not mod.active or not mod.valid or (mod.activation_kind not in runtime_kinds and not (
+                mod.api_descriptor is not None and mod.api_descriptor.docker is not None and mod.api_descriptor.docker.image is not None)):
             continue
         descriptor = mod.api_descriptor
         declared = tuple(descriptor.evejs_versions or ()) if descriptor is not None else ()

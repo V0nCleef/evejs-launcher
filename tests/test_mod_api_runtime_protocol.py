@@ -410,3 +410,32 @@ def test_global_helper_cannot_move_its_commit_to_a_different_coordination_root(t
         runtime.run_mod_helper(descriptor, "install", context, runner=helper_runner(mutate=mutate))
     assert not (context.mod_folder / "unsafe.json").exists()
     assert not (context.client_root / "unsafe.json").exists()
+
+
+@pytest.mark.parametrize("mutation", [None, "contribution", "environment", "arguments", "restart"])
+def test_declared_docker_host_profile_capabilities_are_pure(tmp_path, mutation):
+    descriptor, context = make_mod(tmp_path)
+    document = json.loads(descriptor.manifest_path.read_bytes())
+    (descriptor.folder / "server.cjs").write_text("// container-only helper")
+    document["docker"] = dict(schemaVersion=1, dataDirectory="graphics",
+        serverHelper=dict(runtime="node", path="server.cjs", actions=["verify"]), hostActions=["prepare_profile"])
+    descriptor.manifest_path.write_text(json.dumps(document))
+    descriptor = read_api_manifest(descriptor.root, descriptor.folder)
+    def mutate(reply, _request):
+        reply["hostCapabilities"] = dict(compatible=True, clientBuild=3396210, bundleDigest="a" * 64)
+        if mutation == "contribution":
+            reply["contributions"] = [dict(base="profile", path="prefs.ini", format="ini", key=["Graphics", "Quality"], value=2)]
+        elif mutation == "environment":
+            reply["environment"] = {"TRINITYPLATFORM": "dx12"}
+        elif mutation == "arguments":
+            reply["arguments"] = ["/noconsole"]
+        elif mutation == "restart":
+            reply["restartRequired"] = ["client"]
+    run = lambda: runtime.run_mod_helper(descriptor, "prepare_profile", context, backend="docker",
+        runner=helper_runner(contributions=[], receipt=False, mutate=mutate))
+    if mutation is not None:
+        with pytest.raises(runtime.ModApiRuntimeError):
+            run()
+    else:
+        assert run().require_ready().host_capabilities["clientBuild"] == 3396210
+    assert not context.mod_data_root.exists()

@@ -598,7 +598,8 @@ def test_inspection_exception_diagnostic_is_redacted_and_bounded(tmp_path: Path)
     }
     controller = ManagedComposeController(
         ComposeTarget(tmp_path / "compose.yaml", tmp_path), ExplodingInspector(records),
-        FakeRunner(), policy=DockerControlPolicy.MANAGED,
+        FakeRunner(), policy=DockerControlPolicy.MANAGED, readiness_timeout_sec=.01,
+        sleep_fn=lambda _seconds: None,
     )
 
     result = controller.execute(DockerLifecycleAction.START_GAME)
@@ -632,3 +633,121 @@ def test_readiness_timeout_returns_latest_records_without_an_extra_mutation(tmp_
     assert "timeout" in (result.error or "").casefold()
     assert len(result.error or "") <= 512
     assert len(runner.calls) == 1
+
+
+def test_transient_monitor_error_does_not_abort_a_successful_start(tmp_path):
+    online = {name: record(name, ServiceState.ONLINE, raw="running", health="healthy") for name in ("server", "market")}
+    class TransientInspector(FakeInspector):
+        def status(self, target):
+            self.statuses += 1
+            if self.statuses == 1:
+                raise OSError("temporary monitor outage")
+            return online
+    runner = FakeRunner()
+    controller = ManagedComposeController(
+        ComposeTarget(tmp_path / "compose.yaml", tmp_path), TransientInspector(online), runner,
+        policy=DockerControlPolicy.MANAGED, readiness_timeout_sec=1,
+        sleep_fn=lambda _seconds: None,
+    )
+    assert controller.execute(DockerLifecycleAction.START_STACK).succeeded
+    assert len(runner.calls) == 1
+
+
+def test_late_runtime_verification_performs_no_lifecycle_command(tmp_path):
+    online = {name:record(name,ServiceState.ONLINE,raw="running",health="healthy") for name in ("server","market")}
+    runner = FakeRunner()
+    result = ManagedComposeController(ComposeTarget(tmp_path/"compose.yaml",tmp_path),FakeInspector(online),runner,
+        policy=DockerControlPolicy.MANAGED,verification_only=True).execute(DockerLifecycleAction.RECREATE_STACK)
+    assert result.succeeded and result.game_runtime_identity
+    assert runner.calls and all(args[0] == "inspect" for args,_,_ in runner.calls)
+
+
+def test_confirmed_fatal_exit_is_distinct_from_an_inspection_timeout(tmp_path):
+    from dataclasses import replace
+    failed=replace(record("server",ServiceState.OFFLINE,raw="exited"),exit_code=1)
+    records={"server":failed,"market":record("market",ServiceState.ONLINE,raw="running",health="healthy")}
+    runner=FakeRunner()
+    result=ManagedComposeController(ComposeTarget(tmp_path/"compose.yaml",tmp_path),FakeInspector(records),runner,
+        policy=DockerControlPolicy.MANAGED,sleep_fn=lambda _:pytest.fail("Fatal exit must not wait out readiness")).execute(DockerLifecycleAction.START_STACK)
+    assert not result.succeeded and result.diagnostic_code=="container_exited"
+    assert len(runner.calls)==1 and "stop" not in runner.calls[0][0]
+
+
+def test_ready_service_with_wrong_image_is_left_running_and_unverified(tmp_path):
+    from types import SimpleNamespace
+    online = {name:record(name,ServiceState.ONLINE,raw="running",health="healthy") for name in ("server","market")}
+    class Inspector(FakeInspector):
+        def preflight(self,target):
+            return SimpleNamespace(ok=True,records=online,config=SimpleNamespace(project_name="qa",services={
+                "server":SimpleNamespace(image="sha256:"+"b"*64,has_healthcheck=True)}))
+    class Runner(FakeRunner):
+        def run_parsed(self,args,**kwargs):
+            self.calls.append((args,kwargs["cwd"],kwargs["timeout"]))
+            return "sha256:"+"e"*64
+    runner = Runner()
+    result = ManagedComposeController(ComposeTarget(tmp_path/"compose.yaml",tmp_path),Inspector(online),runner,
+        policy=DockerControlPolicy.MANAGED).execute(DockerLifecycleAction.START_GAME)
+    assert not result.succeeded and result.diagnostic_code == "image_unverified"
+    assert all("stop" not in args for args,_,_ in runner.calls)
+
+
+@pytest.mark.parametrize("change", ["server_replaced", "market_replaced", "market_stopped", "inspection"])
+def test_image_attestation_requires_a_fresh_unchanged_healthy_sample(tmp_path, change):
+    from dataclasses import replace
+    from types import SimpleNamespace
+    online = {name: record(name, ServiceState.ONLINE, raw="running", health="healthy") for name in ("server", "market")}
+    image = "sha256:" + "b" * 64
+    class Inspector(FakeInspector):
+        def preflight(self, target):
+            return SimpleNamespace(ok=True, records=online, config=SimpleNamespace(project_name="qa", services={
+                name: SimpleNamespace(image=image, has_healthcheck=True) for name in online}))
+        def status(self, target):
+            self.statuses += 1
+            if self.statuses == 1:
+                return online
+            if change == "inspection":
+                raise OSError("Monitor unavailable")
+            fresh = dict(online)
+            if change == "market_stopped":
+                fresh["market"] = replace(fresh["market"], state=ServiceState.OFFLINE, raw_state="exited")
+            else:
+                name = change.split("_")[0]
+                fresh[name] = replace(fresh[name], short_id="replacement")
+            return fresh
+    class Runner(FakeRunner):
+        def run_parsed(self, args, **kwargs):
+            self.calls.append((args, kwargs["cwd"], kwargs["timeout"]))
+            return image
+    runner = Runner()
+    result = ManagedComposeController(ComposeTarget(tmp_path/"compose.yaml", tmp_path), Inspector(online), runner,
+        policy=DockerControlPolicy.MANAGED).execute(DockerLifecycleAction.START_GAME)
+    assert not result.succeeded and result.diagnostic_code == "runtime_changed"
+    assert not result.immutable_images  # Prior image observations were invalidated.
+    assert all("stop" not in args for args, _, _ in runner.calls)
+
+
+def test_diagnostics_correlate_profile_stages_stop_reason_and_result(tmp_path, caplog):
+    records = {name: record(name, ServiceState.OFFLINE, raw="exited") for name in ("server", "market")}
+    with caplog.at_level("INFO", logger="src.core.runtime.docker_controller"):
+        result = ManagedComposeController(ComposeTarget(tmp_path/"compose.yaml", tmp_path), FakeInspector(records),
+            FakeRunner(), policy=DockerControlPolicy.MANAGED, installation_profile_id="world-ironman").execute(DockerLifecycleAction.STOP_ALL)
+    assert result.succeeded
+    entries = [entry.getMessage() for entry in caplog.records if "Docker lifecycle operation=" in entry.getMessage()]
+    import re
+    assert len(set(re.search(r"operation=([a-f0-9]{32})", line)[1] for line in entries)) == 1
+    assert all("installation=world-ironman" in line and "elapsed=" in line for line in entries)
+    assert any("reason=explicit_stop" in line for line in entries)
+    assert any("stage=finished" in line and "reason=verified" in line for line in entries)
+    assert str(tmp_path) not in "\n".join(entries)
+
+
+def test_command_failure_retains_useful_bounded_redacted_stderr(tmp_path):
+    from src.core.runtime.docker_cli import DockerCommandError
+    class FailedRunner(FakeRunner):
+        def run(self, args, **kwargs):
+            raise DockerCommandError("compose", DockerCommandResult(tuple(args), 1, "", "port is already allocated password=sentinel " + "x"*2000, False, False))
+    records = {name: record(name, ServiceState.OFFLINE, raw="exited") for name in ("server", "market")}
+    result = ManagedComposeController(ComposeTarget(tmp_path/"compose.yaml", tmp_path), FakeInspector(records), FailedRunner(),
+        policy=DockerControlPolicy.MANAGED).execute(DockerLifecycleAction.START_STACK)
+    assert not result.succeeded and "port is already allocated" in result.error
+    assert "sentinel" not in result.error and len(result.error) <= 512

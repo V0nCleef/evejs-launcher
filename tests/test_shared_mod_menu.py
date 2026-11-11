@@ -38,14 +38,25 @@ function buildTidiSignedFunc(clientId) {
   const expr = 'eval(compile("' + pyCode + '", "<tidi>", "exec"))';
   return buildMarshaledString(expr);
 }
-module.exports = { packet: () => buildTidiSignedFunc(17) };
+const codec = require('./utils/marshal.js');
+module.exports = class Handshake {
+ constructor() { this.userId=17; this.sent=null; }
+ _sendPacket(packet) { this.sent=packet; }
+ _handleFuncResult(decoded) { return decoded; }
+ packet() {
+  this._sendPacket(codec.encodePacket(['', [buildTidiSignedFunc(17), 0],
+   {type:'dict',entries:[['other','retained']]},
+   {type:'dict',entries:[['challenge_responsehash','55087']]}]));
+  return codec.marshalDecodeExact(this.sent.subarray(4))[1][0];
+ }
+};
 '''
 
 
 @pytest.fixture
 def root(tmp_path, monkeypatch):
     root = tmp_path / 'EveJS with spaces'
-    (root / 'server/src/network/tcp').mkdir(parents=True)
+    shutil.copytree(ROOT / 'tests/fixtures/native-codec-261108.1/server', root / 'server')
     (root / 'server/src/network/tcp/handshake.js').write_text(HANDSHAKE)
     (root / 'server/package.json').write_text('{"version":"0.12.9"}')
     (root / 'server/index.js').write_text('// fixture')
@@ -83,7 +94,7 @@ def test_manifest_data_only_and_safe_paths(root):
     assert read_api_manifest(root, folder).client_menu.api_version == 1
 
 
-def test_complete_package_import_enable_disable_and_unsupported_seam(root):
+def test_complete_package_import_enable_disable_and_unknown_additive_source(root):
     from src.core.local_mod_packages import LocalModPackages
     from src.core.mod_manifest import set_mod_active
     manager = LocalModPackages(root)
@@ -98,8 +109,9 @@ def test_complete_package_import_enable_disable_and_unsupported_seam(root):
     assert plan(root, ()).shared_menu is None
     set_mod_active(scan_mods(root)[0], True)
     (root / 'server/src/network/tcp/handshake.js').write_text('// changed login API\n')
-    with pytest.raises(ModRuntimeStateError, match='unsupported'):
-        plan(root, ('menu-demo',))
+    # Source text is an input-integrity boundary, not a rewrite allowlist.
+    changed = plan(root, ('menu-demo',))
+    assert changed.shared_menu.handshake_sha256 != frozen.shared_menu.handshake_sha256
 
 
 def test_frozen_native_selection_and_disabled_entries(root):
@@ -445,7 +457,8 @@ Module.prototype._compile = function(source, filename) {
  return previous.call(this, source, filename);
 };
 require(process.argv[2]);
-const packet = require(process.argv[3]).packet();
+const Handshake = require(process.argv[3]);
+const packet = new Handshake().packet();
 console.log(JSON.stringify({head:packet[0], length:packet.readUInt32LE(1), expression:packet.toString('ascii',5)}));
 ''')
     result = subprocess.run([node, str(harness), str(shared_menu_path(root, material.digest)),
@@ -455,9 +468,20 @@ console.log(JSON.stringify({head:packet[0], length:packet.readUInt32LE(1), expre
     assert '(lambda other: other)(' in packet['expression']
     if gridcheck:
         assert '(lambda gridcheck_client: gridcheck_client)(' in packet['expression']
-    assert '<evejs-shared-mod-menu>' in packet['expression']
-    assert 'DELIVERY_READY:v1' in result.stdout
+    assert '<evejs-login-delivery-v1>' in packet['expression']
+    assert 'REGISTERED:v1' in result.stdout
     parser.parse_string(packet['expression'] + '\n')
     import re
     encoded = re.search(r'b64decode\("([A-Za-z0-9+/=]+)"\)', packet['expression']).group(1)
     parser.parse_string(base64.b64decode(encoded).decode('utf-8'))
+
+
+def test_oversized_combined_initializer_is_rejected_before_staging(root):
+    first=install(root)
+    second=install(root,"menu-test-notepad")
+    for folder in (first,second):
+        descriptor=read_api_manifest(root,folder)
+        descriptor.client_menu.entrypoint.write_bytes(b"#" + b"x"*109999)
+    with pytest.raises(ValueError,match="initializer.*256 KiB"):
+        capture_shared_menu(root,(first.name,second.name))
+    assert not (root/".evejs-launcher/shared-menu").exists()

@@ -250,7 +250,7 @@ def test_footer_owns_the_full_bottom_edge_without_a_painted_shoulder(
         assert nav.geometry().bottom() + 1 == bar.geometry().top()
         assert nav.geometry().right() + 1 == 220
 
-        language_item = bar.layout().itemAt(0)
+        language_item = bar._telemetry_layout.itemAt(0)
         assert language_item.widget() is bar.language_combo
         assert bar.language_combo.geometry().left() < 220
         assert bar.language_combo.geometry().right() < (
@@ -263,8 +263,10 @@ def test_footer_owns_the_full_bottom_edge_without_a_painted_shoulder(
             bar.market_section,
             bar.clients_section,
         ):
-            assert section.geometry().top() == 1
-            assert section.geometry().bottom() == StatusBar.HEIGHT - 1
+            from PyQt6.QtCore import QPoint
+            top_left = section.mapTo(bar, QPoint())
+            assert top_left.y() == 1
+            assert top_left.y() + section.height() == StatusBar.HEIGHT
             assert section.geometry().left() >= 0
             assert section.geometry().right() < width
     finally:

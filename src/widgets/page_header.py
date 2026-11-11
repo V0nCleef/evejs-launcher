@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.constants import SPACING
+from src.widgets.flow_layout import FlowLayout
 from src.widgets.ui_translation import (
     set_translatable_accessible_description,
     set_translatable_accessible_name,
@@ -27,6 +28,8 @@ class PageHeader(QWidget):
         subtitle: str = "",
         eyebrow: str = "",
         parent: QWidget | None = None,
+        *,
+        wrap_actions: bool = False,
     ) -> None:
         super().__init__(parent)
         self.setProperty("deepSignal", True)
@@ -57,7 +60,7 @@ class PageHeader(QWidget):
         copy.addWidget(self.subtitle_label)
 
         root.addLayout(copy, 1)
-        self.action_layout = QHBoxLayout()
+        self.action_layout = FlowLayout(spacing=SPACING["sm"]) if wrap_actions else QHBoxLayout()
         self.action_layout.setContentsMargins(0, 0, 0, 0)
         self.action_layout.setSpacing(SPACING["sm"])
         self.action_layout.setAlignment(

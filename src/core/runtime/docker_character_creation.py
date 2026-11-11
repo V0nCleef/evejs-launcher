@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 import json
+import logging
 from pathlib import Path, PurePosixPath
 import re
 from typing import Any
@@ -23,6 +24,8 @@ from src.core.runtime.docker_compose import (
 from src.core.service_status import DockerControlPolicy
 
 
+log = logging.getLogger(__name__)
+
 _RESULT_PREFIX = "EVEJS_LAUNCHER_RESULT="
 _ACCOUNT_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{2,31}\Z")
 _HELPER_NAME = "docker_create_character.js"
@@ -37,6 +40,7 @@ _MAX_INPUT_BYTES = 4 * 1024
 _MAX_OUTPUT_BYTES = 16 * 1024
 _SAFE_STOPPED_STATES = frozenset({"created", "exited", "dead"})
 _REVIEWED_SERVICES = frozenset({"server", "market", "init"})
+_REVIEWED_MAINTENANCE_TOOLS = frozenset({"market-tools", "content-tools", "maintenance"})
 _EFFECTIVE_CONFIG_DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 
 
@@ -147,20 +151,10 @@ class ManagedDockerCharacterCreationController:
                 target_identity=target_identity,
             )
 
-        # This transaction is reviewed only for the ordinary supported stack.
-        # A profile/extension service that shares the selected GameStore could
-        # otherwise write behind the helper's scoped backup.  Fail closed until
-        # every effective service has its own explicit maintenance contract.
-        if set(config.services) != _REVIEWED_SERVICES:
+        maintenance_error = _maintenance_record_error(config, report.records)
+        if maintenance_error:
             return self._pre_mutation_failure(
-                "The selected Compose project has additional services; Docker "
-                "character creation is unavailable for this layout.",
-                target_identity=target_identity,
-            )
-        if set(report.records) != _REVIEWED_SERVICES:
-            return self._pre_mutation_failure(
-                "The selected Compose project has additional service records; "
-                "Docker character creation is unavailable for this layout.",
+                maintenance_error,
                 target_identity=target_identity,
             )
 
@@ -185,7 +179,7 @@ class ManagedDockerCharacterCreationController:
                 target_identity=target_identity,
             )
         frozen_records = tuple(
-            (service, report.records[service]) for service in sorted(_REVIEWED_SERVICES)
+            (service, report.records[service]) for service in sorted(report.records)
         )
         final_report = self._inspector.preflight(self._target)
         if (
@@ -207,13 +201,12 @@ class ManagedDockerCharacterCreationController:
         )
         final_record_snapshot = tuple(
             (service, final_records.get(service))
-            for service in sorted(_REVIEWED_SERVICES)
+            for service in sorted(final_records)
         )
         if (
             _valid_effective_config_digest(final_config) != effective_config_digest
             or final_identity != target_identity
-            or set(final_config.services) != _REVIEWED_SERVICES
-            or set(final_records) != _REVIEWED_SERVICES
+            or _maintenance_record_error(final_config, final_records) is not None
             or not self._supports_reviewed_contract(final_config)
             or final_record_snapshot != frozen_records
             or any(
@@ -277,6 +270,13 @@ class ManagedDockerCharacterCreationController:
                 target_identity=target_identity,
             )
         if marker.get("ok") is not True:
+            code = marker.get("code")
+            safe_code = code if isinstance(code,str) and re.fullmatch(r"[A-Z_]{1,48}",code) else "UNVERIFIED"
+            guards = marker.get("guardLines",[])
+            safe_guards = [n for n in guards if type(n) is int and 0 < n < 10000][:4] if isinstance(guards,list) else []
+            log.warning("Docker character helper failed target=%s code=%s guards=%s backup=%s rollback=%s",
+                        target_identity,safe_code,safe_guards,marker.get("backupCreated") is True,
+                        marker.get("rollbackSucceeded") is True)
             rollback = marker.get("rollbackSucceeded")
             rollback_confirmed = rollback if isinstance(rollback, bool) else None
             restart_safe = _optional_bool(marker.get("restartSafe"))
@@ -570,6 +570,21 @@ def _valid_effective_config_digest(config: ComposeConfig) -> str | None:
     if not isinstance(value, str) or not _EFFECTIVE_CONFIG_DIGEST.fullmatch(value):
         return None
     return value
+
+
+def _maintenance_record_error(config: ComposeConfig, records: Mapping) -> str | None:
+    """Inactive reviewed profile tools are records, not additional writers."""
+    unknown_services = set(config.services) - _REVIEWED_SERVICES - _REVIEWED_MAINTENANCE_TOOLS
+    unknown_records = set(records) - _REVIEWED_SERVICES - _REVIEWED_MAINTENANCE_TOOLS
+    if unknown_services or unknown_records:
+        names = ", ".join(sorted(str(name) for name in unknown_services | unknown_records))[:160]
+        kind = "additional services" if unknown_services else "additional service records"
+        return f"The selected Compose project has {kind} without a reviewed maintenance contract: {names}."
+    for name in sorted((set(config.services) | set(records)) & _REVIEWED_MAINTENANCE_TOOLS):
+        record = records.get(name, ContainerRecord.absent(name))
+        if not isinstance(record, ContainerRecord) or not _safely_stopped(record):
+            return f"Maintenance service {name} must be stopped before Docker character creation."
+    return None
 
 
 def _safely_stopped(record: ContainerRecord | None) -> bool:

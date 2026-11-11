@@ -9,6 +9,7 @@ from pathlib import Path
 import tempfile
 
 from .i18n import normalize_language
+from .core.installation_profiles import ensure_profiles, sync_active_profile, InstallationProfileError
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ DEFAULT_CONFIG = {
     "docker_control_policy": "connect_only",
     "docker_project_name": "",
     "docker_keep_running_on_exit": True,
+    "docker_readiness_timeout_sec": 180,
     "server_mode": "modded",  # legacy fallback when no StartServer*.bat exists
     "server_start_preference": "ask",  # "ask" or a filename relative to the EveJS root
     "stagger_delay_sec": 3,
@@ -168,6 +170,7 @@ def _control_policy(value: object) -> str:
 
 _INTEGER_SETTING_RANGES = {
     "game_port": (1, 65535),
+    "docker_readiness_timeout_sec": (30, 900),
     "stagger_delay_sec": (0, 30),
     # Zero predates the Settings control and disables the repeating timer.
     "update_check_interval_hours": (0, 72),
@@ -394,13 +397,35 @@ def load() -> dict:
             log.warning("Normalized persisted configuration fields: %s", ", ".join(repaired))
         cfg = _default_config()
         cfg.update(stored)
+        try:
+            cfg = ensure_profiles(cfg)
+            _normalize_settings(cfg)
+        except InstallationProfileError:
+            # Preserve the original registry for recovery, and refuse to hide
+            # its error by silently replacing the file with a fresh registry.
+            log.exception("Installation profile registry is invalid; original config preserved")
+            cfg["installation_profile_error"] = "The installation registry is invalid. Restore the configuration backup before changing profiles."
         return cfg
-    return _default_config()
+    return ensure_profiles(_default_config())
 
 
 def save(cfg: dict) -> None:
     """Atomically save config using a temporary file beside the destination."""
+    caller_cfg = cfg
+    cfg = sync_active_profile(cfg)
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if CONFIG_FILE.is_file():
+        try:
+            previous = json.loads(CONFIG_FILE.read_text(encoding="utf-8-sig"))
+            if isinstance(previous, dict) and "installation_profiles" not in previous:
+                backup = CONFIG_FILE.with_name(CONFIG_FILE.name + ".before-installation-profiles")
+                if not backup.exists():
+                    with backup.open("xb") as stream:
+                        stream.write(CONFIG_FILE.read_bytes())
+                        stream.flush()
+                        os.fsync(stream.fileno())
+        except (ValueError, UnicodeError):
+            pass
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -416,6 +441,8 @@ def save(cfg: dict) -> None:
             temporary.flush()
             os.fsync(temporary.fileno())
         os.replace(temporary_path, CONFIG_FILE)
+        caller_cfg.clear()
+        caller_cfg.update(cfg)
     finally:
         if temporary_path is not None and temporary_path.exists():
             temporary_path.unlink()

@@ -19,21 +19,11 @@ from .mod_api_manifest import API_MANIFEST_FILENAME, ModApiManifestError, read_a
 
 MAX_ENTRY_BYTES = 128 * 1024
 MAX_DELIVERY_BYTES = 1024 * 1024
+MAX_INITIALIZER_BYTES = 256 * 1024
+_BOOTSTRAP_TEMPLATE = "try:\n import sys, types, base64, json\n _delivery = json.loads(base64.b64decode('__PAYLOAD__'))\n _module = sys.modules.get('evejs_mod_menu')\n if _module is not None and getattr(_module, '_build_digest', None) != _delivery['frameworkDigest']:\n  _module.shutdown()\n  _module = None\n if _module is None:\n  _module = types.ModuleType('evejs_mod_menu')\n  _module.__dict__.update(sm=sm, session=session)\n  sys.modules['evejs_mod_menu'] = _module\n  eval(compile(base64.b64decode(_delivery['framework']), '<evejs-mod-menu-v1>', 'exec'), _module.__dict__)\n  _module._build_digest = _delivery['frameworkDigest']\n _module.bootstrap(_delivery['entries'])\nexcept:\n import traceback\n traceback.print_exc()\n print 'EVEJS_MOD_MENU:BOOTSTRAP_FAILED'\n raise\n"
 HANDSHAKE_RELATIVE = "server/src/network/tcp/handshake.js"
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 CONTAINER_PREFIX = "/app/.evejs-launcher/shared-menu/"
-# This specific local builder is the reviewed seam, not a global eval rewrite.
-_SEAM = re.compile(
-    r'function buildTidiSignedFunc\(clientId\)\s*\{\s*'
-    r'const pyCode = buildTidiSignedFuncSource\(clientId\);\s*'
-    r'''const expr = 'eval\(compile\("' \+ pyCode \+ '\", "<tidi>", "exec"\)\)';\s*'''
-    # GridCheck client-agent v1 preserves this marshaled envelope. The delivery
-    # loader composes its returned expression without discarding the hook.
-    r'(?:\s*// gridcheck:patch client-agent v1\s*'
-    r'const gridcheckClientFunc = globalThis\[Symbol\.for\("gridcheck\.clientAgent\.v1"\)\];\s*'
-    r'if \(gridcheckClientFunc\) return buildMarshaledString\(gridcheckClientFunc\.wrapLoginExpression\(expr, clientId\)\);\s*)?'
-    r'return buildMarshaledString\(expr\);\s*\}'
-)
 
 
 @dataclass(frozen=True)
@@ -110,8 +100,9 @@ def capture_shared_menu(root: str | Path, selected: tuple[str, ...]) -> SharedMe
     if len(set(ids)) != len(ids):
         raise ValueError("Shared menu mod IDs must be unique.")
     handshake = _read_safe(root, root / HANDSHAKE_RELATIVE, 2 * 1024 * 1024)
-    if len(_SEAM.findall(handshake.decode("utf-8").replace("\r\n", "\n"))) != 1:
-        raise ValueError("This EveJS login builder is unsupported by shared Mods menu API v1.")
+    # Hashes freeze inputs against launch-time drift, not other mods' source edits.
+    # Actual exported class/codec capabilities are checked by the runtime adapter.
+    handshake.decode("utf-8")
     framework = (Path(__file__).parent / "client" / "shared_menu.py").read_bytes()
     template = (Path(__file__).parent / "client" / "shared_menu_loader.cjs").read_text(encoding="utf-8")
     payload = {
@@ -121,7 +112,13 @@ def capture_shared_menu(root: str | Path, selected: tuple[str, ...]) -> SharedMe
                     for item in participants],
         "handshakeSha256": hashlib.sha256(handshake).hexdigest(),
     }
-    loader = template.replace("/*__FROZEN_PAYLOAD__*/", json.dumps(payload, sort_keys=True, ensure_ascii=True)).encode("utf-8")
+    encoded = base64.b64encode(json.dumps(payload,separators=(",", ":"),ensure_ascii=True).encode("utf-8")).decode("ascii")
+    payload["bootstrap"] = _BOOTSTRAP_TEMPLATE.replace("__PAYLOAD__",encoded)
+    if len(payload["bootstrap"].encode("utf-8")) > MAX_INITIALIZER_BYTES:
+        raise ValueError("Shared Mods menu initializer exceeds the login delivery limit of 256 KiB. Reduce the selected client menu entrypoints.")
+    runtime = (Path(__file__).parent / "client" / "login_delivery.cjs").read_text(encoding="utf-8")
+    loader = template.replace("/*__LOGIN_DELIVERY_RUNTIME__*/", runtime).replace(
+        "/*__FROZEN_PAYLOAD__*/", json.dumps(payload, sort_keys=True, ensure_ascii=True)).encode("utf-8")
     if len(loader) > MAX_DELIVERY_BYTES:
         raise ValueError("Shared menu delivery exceeds 1 MiB; keep entrypoints small.")
     return SharedMenuMaterial(tuple(participants), payload["handshakeSha256"], loader)

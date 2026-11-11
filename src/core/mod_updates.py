@@ -239,7 +239,11 @@ def recover_update(journal, operation, *, guard):
             if data['enabled'] and api and {'install', 'prepare_disable', 'prepare_remove'}.intersection(api.capabilities):
                 if 'verify' not in api.capabilities:
                     raise ModUpdateError('The unchanged original package needs its verification provider before recovery.')
-                result = run_mod_helper_locked(descriptor, 'verify', operation.capture(restored), backend=operation.backend)
+                if operation.backend == "docker":
+                    from .mod_operations import run_docker_helper_locked
+                    result = run_docker_helper_locked(descriptor, 'verify', operation.capture(restored), operation)
+                else:
+                    result = run_mod_helper_locked(descriptor, 'verify', operation.capture(restored), backend=operation.backend)
                 result.require_ready()
                 if (result.contributions or result.environment or result.arguments or result.restart_required
                         or result.client_script_delivery is not None or result.client_preparation is not None

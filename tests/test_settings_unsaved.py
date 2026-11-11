@@ -196,6 +196,10 @@ def settings_window(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> MainWindow:
+    # Settings tests exercise draft/navigation state, not the automatic mod
+    # update check queued after startup inventory finishes.
+    from src.ui.mod_update_controller import ModUpdateController
+    monkeypatch.setattr(ModUpdateController, "check", lambda self, **_kwargs: None)
     cfg = deepcopy(config.DEFAULT_CONFIG)
     cfg.update(
         {
@@ -216,6 +220,12 @@ def settings_window(
     window = MainWindow()
     window._status_timer.stop()
     window._prune_timer.stop()
+    window._mod_coordinator._updates.poll_timer.stop()
+    ready_deadline = time.monotonic() + 5.0
+    while window._mod_coordinator._token is not None and time.monotonic() < ready_deadline:
+        qapp.processEvents()
+        QTest.qWait(2)
+    assert window._mod_coordinator._token is None
     window._switch_page(int(Page.SETTINGS))
     yield window
     window._status_timer.stop()
@@ -225,10 +235,15 @@ def settings_window(
     if update_timer is not None:
         update_timer.stop()
     window._cancel_data_loads()
-    deadline = time.monotonic() + 1.0
-    while window._data_load_active() and time.monotonic() < deadline:
+    # A full MainWindow also owns asynchronous Mods work. Drain that retained
+    # operation before deleting the QObject tree, just as closeEvent does.
+    window._close_in_progress = True
+    window._mod_coordinator._updates.poll_timer.stop()
+    deadline = time.monotonic() + 5.0
+    while (window._data_load_active() or window._mod_coordinator._token is not None) and time.monotonic() < deadline:
         qapp.processEvents()
         QTest.qWait(2)
+    assert not window._data_load_active() and window._mod_coordinator._token is None
     window.deleteLater()
     QCoreApplication.sendPostedEvents(window, QEvent.Type.DeferredDelete)
     qapp.processEvents()
