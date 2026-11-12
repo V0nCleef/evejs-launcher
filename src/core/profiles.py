@@ -4,6 +4,7 @@ Each account gets a junction pointing to the real EVE client install.
 This gives each account a unique path → unique settings folder on first launch.
 """
 import ipaddress
+import hashlib
 import json
 import os
 import re
@@ -17,6 +18,21 @@ from .platform import create_directory_link, get_eve_settings_path, remove_direc
 PROFILES_ROOT = CONFIG_DIR / "Profiles"
 _REQUIRED_CORE_PUBLIC_SECTIONS = ("audio", "device", "generic", "ui")
 _ATOMIC_TEMP_CREATE_ATTEMPTS = 8
+
+
+def account_profiles_root(base_root: Path, username: str, usernames) -> Path:
+    """Separate server-exact names that Windows could map to one profile.
+
+    Normal accounts retain their existing paths. Once an isolated profile exists,
+    retain it even if its sibling account disappears from a later roster.
+    """
+    root = Path(base_root)
+    identity = username.rstrip(" .").casefold()
+    collides = any(name != username and name.rstrip(" .").casefold() == identity
+                   for name in usernames)
+    # A sibling namespace cannot collide with a legitimate username inside root.
+    scoped = root.parent / (root.name + "-exact-accounts") / hashlib.sha256(username.encode("utf-8")).hexdigest()[:32]
+    return scoped if collides or scoped.is_dir() else root
 
 
 def get_settings_key(client_path: str) -> str:

@@ -6,7 +6,7 @@ the existing SQLite reader.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import logging
@@ -18,6 +18,7 @@ from src.core import db
 from src.core.db import Account, Character
 from src.core.runtime.character_display import DISPLAY_SCRIPT
 from src.core.runtime.character_roster import ROSTER_SCRIPT
+from src.core.runtime.data_diagnostics import DataDiagnostic, value_kind
 from src.core.runtime.docker_cli import (
     DockerCommandError,
     DockerCommandRunner,
@@ -53,8 +54,9 @@ log = logging.getLogger(__name__)
 class DataSourceError(RuntimeError):
     """Private-safe runtime data failure with a stable machine-readable code."""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str, *, diagnostic: DataDiagnostic | None = None) -> None:
         self.code = code
+        self.diagnostic = diagnostic
         super().__init__(message[:160])
 
 
@@ -85,6 +87,8 @@ class _ExportProjection:
 
     status: str
     value: object | None = None
+    diagnostic: DataDiagnostic | None = None
+    warnings: tuple[DataDiagnostic, ...] = ()
 
 
 class NativeDataSource:
@@ -146,15 +150,26 @@ class DockerExportDataSource:
         self.control_policy = control_policy
         self.timeout = float(timeout)
         self.output_limit = int(output_limit)
+        self.warnings: tuple[DataDiagnostic, ...] = ()
+
+    def _warn(self, diagnostic: DataDiagnostic) -> None:
+        if diagnostic not in self.warnings and len(self.warnings) < 32:
+            self.warnings = (*self.warnings, diagnostic)
+            log.warning("Docker character data degraded %s", diagnostic.summary())
 
     def load_accounts(self) -> list[Account]:
+        self.warnings = ()
         value = self._load_export(None, _map_roster_accounts, roster=True)
         if not isinstance(value, list):
             raise DataSourceError(
                 "malformed_export",
                 "Docker character export returned an invalid account projection.",
             )
-        display = self._load_export(None, _map_display_values, display=True)
+        try:
+            display = self._load_export(None, _map_display_values, display=True)
+        except DataSourceError as error:
+            self._warn(error.diagnostic or DataDiagnostic("display", "parser_rejected"))
+            display = {}
         for account in value:
             for character in account.characters:
                 current = display.get(character.char_id, {})
@@ -164,6 +179,7 @@ class DockerExportDataSource:
         return value
 
     def get_character_detail(self, char_id: int) -> dict | None:
+        self.warnings = ()
         requested_id = _positive_id(char_id)
         value = self._load_export(
             requested_id,
@@ -175,7 +191,11 @@ class DockerExportDataSource:
                 "Docker character export returned an invalid character projection.",
             )
         if value is not None:
-            display = self._load_export(requested_id, _map_display_values, display=True)
+            try:
+                display = self._load_export(requested_id, _map_display_values, display=True)
+            except DataSourceError as error:
+                self._warn(error.diagnostic or DataDiagnostic("display", "parser_rejected"))
+                display = {}
             value.update(display.get(requested_id, {}))
         return value
 
@@ -185,6 +205,7 @@ class DockerExportDataSource:
         projector: Callable[[Mapping[str, object]], object],
         *, display: bool = False, roster: bool = False,
     ) -> object | None:
+        stage = "display" if display else "roster" if roster else "detail"
         command = self._command(char_id, display=display, roster=roster)
         args = self.target.compose_args(self.runner.executable, *command)
         self._assert_allowlisted(args, char_id, display=display, roster=roster)
@@ -196,6 +217,7 @@ class DockerExportDataSource:
                     stdout,
                     output_limit=self.output_limit,
                     projector=projector,
+                    stage=stage,
                 ),
                 timeout=self.timeout,
             )
@@ -203,40 +225,51 @@ class DockerExportDataSource:
             raise DataSourceError(
                 "docker_cli_unavailable",
                 "Docker character data is unavailable because the Docker CLI was not found.",
+                diagnostic=DataDiagnostic(stage, "command_unavailable"),
             ) from exc
         except DockerCommandError as exc:
-            raise _command_failure(exc) from exc
+            error = _command_failure(exc)
+            error.diagnostic = DataDiagnostic(stage, "command_timeout" if exc.result.timed_out else "command_failed")
+            raise error from None
         except DockerStructuredOutputError as exc:
             if exc.code == "too_large":
                 raise DataSourceError(
                     "export_too_large",
                     "Docker character export exceeded the safe response limit.",
+                    diagnostic=DataDiagnostic(stage, "too_large"),
                 ) from None
             raise DataSourceError(
                 "malformed_export",
                 "Docker character export returned malformed JSON.",
+                diagnostic=DataDiagnostic(stage, "parser_rejected"),
             ) from None
         except OSError as exc:
             raise DataSourceError(
                 "docker_cli_unavailable",
                 "Docker character data is unavailable because the Docker CLI could not start.",
+                diagnostic=DataDiagnostic(stage, "command_unavailable"),
             ) from exc
 
         if not isinstance(projection, _ExportProjection):
             raise DataSourceError(
                 "export_failed",
                 "Docker character export returned an unsupported parsed result.",
+                diagnostic=DataDiagnostic(stage, "unsupported_result"),
             )
         if projection.status == "too_large":
             raise DataSourceError(
                 "export_too_large",
                 "Docker character export exceeded the safe response limit.",
+                diagnostic=DataDiagnostic(stage, "too_large"),
             )
         if projection.status != "ok":
             raise DataSourceError(
                 "malformed_export",
-                "Docker character export returned malformed JSON.",
+                f"Docker {stage} data could not be validated ({(projection.diagnostic or DataDiagnostic()).reason}).",
+                diagnostic=(projection.diagnostic or DataDiagnostic(reason="parser_rejected")).at(stage),
             )
+        for warning in projection.warnings:
+            self._warn(warning.at(stage))
         return projection.value
 
     def _command(self, char_id: int | None, *, display: bool = False, roster: bool = False) -> tuple[str, ...]:
@@ -568,17 +601,25 @@ def _project_export_stdout(
     *,
     output_limit: int,
     projector: Callable[[Mapping[str, object]], object],
+    stage: str = "unknown",
 ) -> _ExportProjection:
     """Parse raw export JSON and release only its validated safe projection."""
 
     if len(stdout.encode("utf-8")) > output_limit:
         return _ExportProjection("too_large")
+    warnings = []
+    payload = None
     try:
         payload = _decode_export_payload(stdout)
-        value = projector(payload)
-    except DataSourceError:
-        return _ExportProjection("invalid")
-    return _ExportProjection("ok", value)
+        value = _map_roster_accounts(payload, warnings=warnings) if projector is _map_roster_accounts else projector(payload)
+    except DataSourceError as error:
+        diagnostic = error.diagnostic or DataDiagnostic(reason="invalid_collection")
+        if payload is not None:
+            diagnostic = replace(diagnostic, **{
+                key: len(payload[key]) if isinstance(payload.get(key), list) else None
+                for key in ("accounts", "players")})
+        return _ExportProjection("invalid", diagnostic=diagnostic.at(stage))
+    return _ExportProjection("ok", value, warnings=tuple(warnings))
 
 
 def _decode_export_payload(stdout: str) -> Mapping[str, object]:
@@ -601,6 +642,7 @@ def _decode_export_payload(stdout: str) -> Mapping[str, object]:
     raise DataSourceError(
         "malformed_export",
         "Docker character export returned malformed JSON.",
+        diagnostic=DataDiagnostic(reason="invalid_json"),
     )
 
 
@@ -618,14 +660,14 @@ def _parse_export_player(
         raise ValueError
     if player["accountId"] is None:
         return None
-    char_id = _positive_id(player.get("characterId"))
-    username = _required_text(player.get("accountName"))
-    account_id = _nonnegative_int(player.get("accountId"))
-    banned = _strict_bool(player.get("banned"))
-    role = "gm" if _strict_bool(player.get("isGM")) else "0"
+    char_id = _checked("characterId", player.get("characterId"), _positive_id)
+    username = _checked("accountName", player.get("accountName"), _account_name)
+    account_id = _checked("accountId", player.get("accountId"), _nonnegative_int)
+    banned = _checked("banned", player.get("banned"), _strict_bool)
+    role = "gm" if _checked("isGM", player.get("isGM"), _strict_bool) else "0"
     character = Character(
         char_id=char_id,
-        name=_required_text(player.get("characterName")),
+        name=_checked("characterName", player.get("characterName"), _required_text),
         isk=_number_as_int(player.get("balance", 0)),
         skill_points=_number_as_int(player.get("skillPoints", 0)),
         ship_name=_optional_text(player.get("shipName"), "—"),
@@ -636,22 +678,68 @@ def _parse_export_player(
     return username, account_id, role, banned, character
 
 
-def _map_roster_accounts(payload: Mapping[str, object]) -> list[Account]:
+def _invalid(reason, field="unknown", value=None):
+    raise DataSourceError("malformed_export", "Docker character data failed validation.",
+                          diagnostic=DataDiagnostic(reason=reason, field=field, value_type=value_kind(value))) from None
+
+
+def _checked(field, value, validator):
+    try:
+        return validator(value)
+    except (TypeError, ValueError, OverflowError):
+        _invalid("invalid_field", field, value)
+
+
+def _account_name(value):
+    """Validate an account key without changing the server's exact identity."""
+    if (not isinstance(value, str) or not value.strip() or len(value) > _MAX_TEXT_LENGTH
+            or any(ord(character) < 32 for character in value)):
+        raise ValueError
+    value.encode("utf-8")  # Reject malformed Unicode before profile-key hashing.
+    return value
+
+
+def _roster_display(player, warnings):
+    """Discard only unusable optional display values; never relax identities."""
+    result = dict(player)
+    for field, validator, default in (
+        ("balance", _number_as_int, 0), ("skillPoints", _number_as_int, 0),
+        ("shipTypeID", _number_as_int, 0), ("securityStatus", _finite_float, 0.0),
+        ("shipName", lambda value: _optional_text(value, "—"), "—"),
+        ("solarSystemName", lambda value: _optional_text(value, "—"), "—"),
+    ):
+        value = result.get(field, result.get("securityRating", default) if field == "securityStatus" else default)
+        try:
+            result[field] = validator(value)
+        except (ValueError, TypeError, OverflowError):
+            diagnostic = DataDiagnostic(reason="invalid_field", field=field, value_type=value_kind(value))
+            if diagnostic not in warnings and len(warnings) < 16:
+                warnings.append(diagnostic)
+            result[field] = default
+    return result
+
+
+def _map_roster_accounts(payload: Mapping[str, object], *, warnings=None, tolerate_display=True) -> list[Account]:
+    warnings = [] if warnings is None else warnings
     accounts, players = payload.get("accounts"), payload.get("players")
     if not isinstance(accounts, list) or len(accounts) > _MAX_PLAYERS or not isinstance(players, list) or len(players) > _MAX_PLAYERS:
-        raise DataSourceError("malformed_export", "Docker roster requires bounded authoritative account and character lists.")
+        _invalid("invalid_collection", "accounts" if not isinstance(accounts, list) or len(accounts) > _MAX_PLAYERS else "players")
     identities = {}
+    names = set()
     try:
         for account in accounts:
             if not isinstance(account, Mapping):
                 raise ValueError
-            identity = _nonnegative_int(account.get("accountId"))
-            name = _required_text(account.get("accountName"))
-            banned = _strict_bool(account.get("banned", False))
-            gm = _strict_bool(account.get("isGM", False))
-            role = "gm" if gm else _required_text(account.get("role", "0"))
-            if identity in identities or any(value.username.casefold() == name.casefold() for value in identities.values()):
-                raise ValueError
+            identity = _checked("accountId", account.get("accountId"), _nonnegative_int)
+            name = _checked("accountName", account.get("accountName"), _account_name)
+            banned = _checked("banned", account.get("banned", False), _strict_bool)
+            gm = _checked("isGM", account.get("isGM", False), _strict_bool)
+            role = "gm" if gm else _checked("role", account.get("role", "0"), _required_text)
+            if identity in identities:
+                _invalid("duplicate_identity", "accountId", identity)
+            if name in names:
+                _invalid("duplicate_identity", "accountName", name)
+            names.add(name)
             identities[identity] = Account(name, identity, role, banned)
         valid = []
         for player in players:
@@ -660,16 +748,18 @@ def _map_roster_accounts(payload: Mapping[str, object]) -> list[Account]:
             identity = player.get("accountId")
             if identity is None:
                 continue
-            identity = _nonnegative_int(identity)
+            identity = _checked("accountId", identity, _nonnegative_int)
             if identity not in identities:
                 continue
             account = identities[identity]
             if player.get("accountName") != account.username:
-                raise ValueError
-            if _strict_bool(player.get("banned")) is not account.banned or _strict_bool(player.get("isGM")) is not (account.role == "gm"):
-                raise ValueError
+                _invalid("account_mismatch", "accountName", player.get("accountName"))
+            for field, expected in (("banned", account.banned), ("isGM", account.role == "gm")):
+                if _checked(field, player.get(field), _strict_bool) is not expected:
+                    _invalid("account_mismatch", field, player.get(field))
             # Account membership and account flags come from the account table.
-            valid.append(dict(player, banned=account.banned, isGM=account.role == "gm"))
+            current = dict(player, banned=account.banned, isGM=account.role == "gm")
+            valid.append(_roster_display(current, warnings) if tolerate_display else current)
         mapped = _map_export_accounts({"players":valid})
         for account in mapped:
             identities[account.account_id].characters = account.characters
@@ -678,7 +768,7 @@ def _map_roster_accounts(payload: Mapping[str, object]) -> list[Account]:
             log.info("Docker roster omitted %s unmatched or retired records", skipped)
         return sorted(identities.values(),key=lambda account:account.username.casefold())
     except (TypeError, ValueError, OverflowError):
-        raise DataSourceError("malformed_export", "Docker roster contains inconsistent account identities.") from None
+        _invalid("inconsistent_identity")
 
 
 def _map_export_accounts(payload: Mapping[str, object]) -> list[Account]:
@@ -700,7 +790,7 @@ def _map_export_accounts(payload: Mapping[str, object]) -> list[Account]:
                 continue
             username, account_id, role, banned, character = parsed
             if character.char_id in character_ids:
-                raise ValueError
+                _invalid("duplicate_identity", "characterId")
             key = (username, account_id)
             account = accounts.get(key)
             if account is None:
@@ -733,26 +823,26 @@ def _map_export_accounts(payload: Mapping[str, object]) -> list[Account]:
 def _map_display_values(payload: Mapping[str, object]) -> dict[int, dict]:
     rows = payload.get("players")
     if not isinstance(rows, list) or len(rows) > _MAX_PLAYERS:
-        raise DataSourceError("malformed_export", "Invalid character display data.")
+        _invalid("invalid_collection", "players")
     result = {}
     try:
         for row in rows:
             if not isinstance(row, Mapping):
                 raise ValueError
-            char_id = _positive_id(row.get("characterId"))
+            char_id = _checked("characterId", row.get("characterId"), _positive_id)
             if char_id in result:
-                raise ValueError
+                _invalid("duplicate_identity", "characterId")
             current = {}
             for key in ("balance", "securityStatus"):
                 if key in row:
-                    current[key] = _finite_float(row[key])
+                    current[key] = _checked(key, row[key], _finite_float)
             if "solarSystemName" in row:
-                name = _required_text(row["solarSystemName"])
-                security = _finite_float(row["solarSystemSecurity"]) if "solarSystemSecurity" in row else None
+                name = _checked("solarSystemName", row["solarSystemName"], _required_text)
+                security = _checked("solarSystemSecurity", row["solarSystemSecurity"], _finite_float) if "solarSystemSecurity" in row else None
                 current["solarSystemName"] = db._location_label(name, security)
             result[char_id] = current
     except (TypeError, ValueError, OverflowError) as exc:
-        raise DataSourceError("malformed_export", "Invalid character display data.") from exc
+        _invalid("invalid_field")
     return result
 
 

@@ -2,6 +2,14 @@
 
 ## Changelog
 
+## v1.0.81
+- Restore Docker rosters containing distinct account names that differ only by case, preserving exact server identities and separate client profiles.
+- Preserve valid Docker characters when optional statistics cannot be read.
+- Report private-safe character-data stages, reasons, field names and value types.
+- Add a read-only support collector that keeps account details and saves private.
+- Verified with 4,112 passing tests, 7 skips, and packaged offscreen roster/startup/shutdown checks.
+- Thanks to JcKalck for reporting the character-list regression. 🫡
+
 ## v1.0.80 - 2026-11-11
 
 - Link existing EveJS worlds with named installation profiles and separate client settings. Switching never moves saves or starts/stops a world.

@@ -207,6 +207,7 @@ class CharactersPage(QWidget):
         self._character_creation_available = True
         self._character_creation_reason = ""
         self._data_error = ""
+        self._data_warning = ""
         self._group_state = TargetGroupState()
         self._group_launch_available = False
         self._group_launch_reason = "No visible accounts available"
@@ -1035,8 +1036,13 @@ class CharactersPage(QWidget):
         self.count_label.setProperty("state", "error" if message else "")
         self.count_label.style().unpolish(self.count_label)
         self.count_label.style().polish(self.count_label)
-        self.page_header.set_subtitle(message or _ROSTER_SUBTITLE)
+        self.page_header.set_subtitle(message or self._data_warning or _ROSTER_SUBTITLE)
         self._apply_filter(self.search_edit.text())
+
+    def set_data_warning(self, message: str) -> None:
+        """Keep valid pilots usable when optional display enrichment failed."""
+        self._data_warning = str(message or "").strip()
+        self.page_header.set_subtitle(self._data_error or self._data_warning or _ROSTER_SUBTITLE)
 
     def set_character_creation_available(
         self,
