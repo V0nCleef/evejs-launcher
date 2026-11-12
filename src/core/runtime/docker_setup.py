@@ -58,6 +58,9 @@ class DockerPreflightResult:
     request_token: int
     draft_fingerprint: str
     report: PreflightReport
+    # Non-blocking: the project itself is valid, but the launcher-owned mod
+    # override that the main screen attaches cannot be used as written.
+    mod_warning: str | None = None
 
 
 def docker_draft_fingerprint(draft: DockerSetupDraft) -> str:

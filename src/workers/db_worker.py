@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import threading
 from typing import Callable
 
@@ -13,6 +14,8 @@ from src.core.runtime.docker_cli import redact_docker_diagnostic
 
 
 DataSelectionFactory = Callable[[], RuntimeDataSelection]
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -76,6 +79,13 @@ class _DataLoader(QObject):
         else:
             code = "unexpected_error"
             message = "Character data could not be loaded safely."
+            # The GUI keeps the generic text, but the local log must name the
+            # real fault or an unexpected failure is undiagnosable.
+            log.warning(
+                "Character data worker failed with %s: %s",
+                type(error).__name__,
+                redact_docker_diagnostic(error, limit=300),
+            )
         self.failed.emit(DataLoadFailure(code, message, self._token))
 
 

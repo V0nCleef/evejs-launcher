@@ -236,6 +236,7 @@ from .core.runtime.data import (
     RuntimeDataSelection,
     docker_settings_identity,
     inspect_docker_data_source,
+    resolve_docker_data_target,
     native_data_selection,
 )
 from .core.runtime.portraits import PortraitTarget
@@ -7901,7 +7902,7 @@ class MainWindow(QMainWindow):
         settings_identity = self._docker_monitor_settings_identity()
         monitor_generation = getattr(self, "_monitor_generation", 0)
         return lambda: inspect_docker_data_source(
-            target_factory(),
+            resolve_docker_data_target(target_factory),
             control_policy=policy,
             settings_identity=settings_identity,
             monitor_generation=monitor_generation,
@@ -8024,7 +8025,11 @@ class MainWindow(QMainWindow):
             or not self._data_token_is_current(failure.token)
         ):
             return
-        log.warning("Character account load failed (%s)", failure.code)
+        log.warning(
+            "Character account load failed (%s): %s",
+            failure.code,
+            failure.message,
+        )
         self._data_selection = None
         # An empty roster caused by a read failure must not look like an empty
         # game store; keep the already-redacted reason for the Characters page.
@@ -8667,6 +8672,16 @@ class MainWindow(QMainWindow):
             if callable(portrait_invalidate):
                 portrait_invalidate()
             self._stop_docker_log_stream()
+        mod_error = getattr(observation, "mod_error", None)
+        if mod_error != getattr(self, "_docker_monitor_mod_error", None):
+            self._docker_monitor_mod_error = mod_error
+            if mod_error:
+                log.warning(
+                    "Docker status is using the project without launcher mods: %s",
+                    mod_error,
+                )
+            else:
+                log.info("Docker status is using the launcher mod override again")
         policy = DockerControlPolicy(self._cfg.get("docker_control_policy", "connect_only"))
         snapshot = RuntimeSnapshot(
             game=observation.game, market=observation.market,
@@ -9093,6 +9108,10 @@ class MainWindow(QMainWindow):
             monitor = DockerMonitor(
                 target_factory,
                 inspector_factory=lambda: ComposeInspector(DockerCommandRunner()),
+                # A drifted mod override must not hide whether the project is
+                # running; status falls back to the plain project, whose
+                # identity can never authorize a launcher lifecycle action.
+                fallback_target_factory=lambda: build_compose_target(draft),
                 interval_ms=5_000,
                 monitor_generation=generation,
                 settings_identity=self._docker_monitor_settings_identity(),

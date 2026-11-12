@@ -1687,6 +1687,11 @@ class SettingsPage(QWidget):
             self._format_docker_preflight_success(result),
             success=True,
         )
+        if getattr(result, "mod_warning", None):
+            # Valid project, but the main screen cannot attach launcher mods.
+            self.docker_preflight_result_label.setStyleSheet(
+                f"color: {COLORS['gold']}; font-size: 13px;"
+            )
         self._save_after_docker_preflight = False
         if save_after:
             self._persist_settings(self._collect_settings())
@@ -1766,14 +1771,19 @@ class SettingsPage(QWidget):
             record.exists and record.raw_state == "running"
             for record in records.values()
         )
-        return "\n".join(
-            (
-                "Docker CLI / Engine / Compose: Ready",
-                "Required services and loopback endpoints: Valid",
-                f"Data initialization: {'Initialized' if initialized else 'Not initialized yet'}",
-                f"Runtime readiness: {'Containers observed' if running else 'Valid but stopped/pristine'}",
+        lines = [
+            "Docker CLI / Engine / Compose: Ready",
+            "Required services and loopback endpoints: Valid",
+            f"Data initialization: {'Initialized' if initialized else 'Not initialized yet'}",
+            f"Runtime readiness: {'Containers observed' if running else 'Valid but stopped/pristine'}",
+        ]
+        mod_warning = getattr(result, "mod_warning", None)
+        if mod_warning:
+            lines.append(
+                f"Launcher mods: Needs attention — {mod_warning} "
+                "Open Mods and apply them again."
             )
-        )
+        return "\n".join(lines)
 
     @staticmethod
     def _set_combo_data(combo: QComboBox, value: object) -> None:

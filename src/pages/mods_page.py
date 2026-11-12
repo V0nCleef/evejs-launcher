@@ -1566,7 +1566,11 @@ class ModsPage(QWidget):
         self.undo_remove_btn.setEnabled(editable and bool(self._inventory.quarantined))
         self.recover_mods_btn.setVisible(self._inventory.recovery_pending)
         self.recover_mods_btn.setEnabled(editable)
-        notice = self._inventory.registry_error or self._inventory.state_error
+        notice = (
+            self._inventory.registry_error
+            or self._inventory.state_error
+            or getattr(self._inventory, "moved_mod_notice", "")
+        )
         self.operation_notice.setText(notice)
         self.operation_notice.setVisible(bool(notice))
 

@@ -18,6 +18,8 @@ from src.core.runtime.docker_compose import (
     preflight_failure_diagnostic,
 )
 from src.core.runtime.docker_cli import redact_docker_diagnostic
+from src.core.runtime.docker_mod_images import DockerModImageError
+from src.core.runtime.docker_mods import DockerModBridgeError
 from src.core.runtime.endpoints import (
     Endpoint,
     RuntimeEndpoints,
@@ -46,13 +48,17 @@ class DockerObservation:
     checked_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     game_runtime_identity: str | None = None
     sample_started_monotonic_ns: int = field(default_factory=time.monotonic_ns)
+    # Set when the launcher-owned mod override is unusable and this sample was
+    # taken against the plain project instead. Such a target identity never
+    # matches a launcher lifecycle result, so it cannot authorize one.
+    mod_error: str | None = None
 
     def equality_key(self) -> tuple[object, ...]:
         return (self.game, self.market, self.game_identity, self.market_identity,
                 self.game_runtime_identity,
                 self.game_health, self.market_health, self.game_error,
                 self.market_error, self.endpoints, self.target_identity,
-                self.settings_identity, self.monitor_generation)
+                self.settings_identity, self.monitor_generation, self.mod_error)
 
 
 class DockerMonitor(QObject):
@@ -63,6 +69,7 @@ class DockerMonitor(QObject):
 
     def __init__(self, target_factory: Callable[[], ComposeTarget], *,
                  inspector_factory: Callable[[], ComposeInspector],
+                 fallback_target_factory: Callable[[], ComposeTarget] | None = None,
                  endpoint_probe: Callable[[Endpoint], bool] = probe_endpoint,
                  http_probe: Callable[[Endpoint], bool] = probe_http_health,
                  interval_ms: int = 5_000,
@@ -71,6 +78,8 @@ class DockerMonitor(QObject):
                  parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._target_factory = target_factory
+        self._fallback_target_factory = fallback_target_factory
+        self._mod_error: str | None = None
         self._inspector_factory = inspector_factory
         self._endpoint_probe = endpoint_probe
         self._http_probe = http_probe
@@ -120,8 +129,15 @@ class DockerMonitor(QObject):
             return
         sample_started_monotonic_ns = time.monotonic_ns()
         try:
-            if self._target is None:
-                self._target = self._target_factory()
+            if self._target is None or self._mod_error is not None:
+                # A degraded target is retried every poll so a repaired mod
+                # override is picked up without restarting the monitor.
+                target, mod_error = self._resolve_target()
+                if target != self._target or mod_error != self._mod_error:
+                    self._target = target
+                    self._mod_error = mod_error
+                    self._preflight_ok = False
+                    self._target_identity = None
                 if isinstance(self._target, ComposeTarget):
                     if self._settings_identity is None:
                         self._settings_identity = docker_settings_identity(
@@ -189,6 +205,15 @@ class DockerMonitor(QObject):
                     sample_started_monotonic_ns=sample_started_monotonic_ns,
                 )
 
+    def _resolve_target(self) -> tuple[ComposeTarget, str | None]:
+        """Return the mod-attached target, or the plain project plus why."""
+        try:
+            return self._target_factory(), None
+        except (DockerModBridgeError, DockerModImageError) as exc:
+            if self._fallback_target_factory is None:
+                raise
+            return self._fallback_target_factory(), _mod_diagnostic(exc)
+
     def _emit_records(
         self,
         records: Mapping[str, ContainerRecord],
@@ -221,7 +246,8 @@ class DockerMonitor(QObject):
                    target_identity=self._target_identity,
                    settings_identity=self._settings_identity,
                    monitor_generation=self._monitor_generation,
-                   sample_started_monotonic_ns=sample_started_monotonic_ns))
+                   sample_started_monotonic_ns=sample_started_monotonic_ns,
+                   mod_error=self._mod_error))
 
     def _effective_service_state(
         self,
@@ -278,7 +304,8 @@ class DockerMonitor(QObject):
                    target_identity=self._target_identity,
                    settings_identity=self._settings_identity,
                    monitor_generation=self._monitor_generation,
-                   sample_started_monotonic_ns=sample_started_monotonic_ns))
+                   sample_started_monotonic_ns=sample_started_monotonic_ns,
+                   mod_error=self._mod_error))
 
     def _emit(self, observation: DockerObservation) -> None:
         if self._shutdown_requested.is_set():
@@ -308,6 +335,11 @@ class DockerMonitor(QObject):
 def _safe_diagnostic(exc: Exception) -> str:
     detail = redact_docker_diagnostic(exc, limit=160).splitlines()[0].strip()
     return "Docker observation unavailable." if not detail else f"Docker observation unavailable: {detail[:160]}"
+
+
+def _mod_diagnostic(exc: Exception) -> str:
+    detail = redact_docker_diagnostic(exc, limit=160).splitlines()[0].strip()
+    return detail or "The launcher mod configuration is unavailable."
 
 
 def _record_error(record: ContainerRecord) -> str | None:

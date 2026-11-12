@@ -12,7 +12,7 @@ import json
 import logging
 import math
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Callable, Mapping, Protocol
+from typing import Callable, Iterable, Mapping, Protocol
 
 from src.core import db
 from src.core.db import Account, Character
@@ -372,6 +372,28 @@ def select_docker_data_source(
     )
 
 
+def resolve_docker_data_target(
+    target_factory: Callable[[], ComposeTarget],
+) -> ComposeTarget:
+    """Resolve the mod-attached target, naming a stale mod state precisely.
+
+    The mod bridge fails closed on a missing loader folder or an unfinished
+    transaction.  That is a fixable mod state, not an unexpected fault, so it
+    crosses the worker boundary as its own redacted, user-actionable code.
+    """
+    from src.core.runtime.docker_cli import redact_docker_diagnostic
+    from src.core.runtime.docker_mod_images import DockerModImageError
+    from src.core.runtime.docker_mods import DockerModBridgeError
+
+    try:
+        return target_factory()
+    except (DockerModBridgeError, DockerModImageError) as exc:
+        raise DataSourceError(
+            "docker_mods_unavailable",
+            f"{redact_docker_diagnostic(exc, limit=110)} Open Mods and apply them again.",
+        ) from exc
+
+
 def inspect_docker_data_source(
     target: ComposeTarget,
     *,
@@ -650,9 +672,18 @@ def _map_roster_accounts(payload: Mapping[str, object]) -> list[Account]:
             banned = _strict_bool(account.get("banned", False))
             gm = _strict_bool(account.get("isGM", False))
             role = "gm" if gm else _required_text(account.get("role", "0"))
-            if identity in identities or any(value.username.casefold() == name.casefold() for value in identities.values()):
+            # Account ids and exact names are the server's keys. Names that
+            # differ only by case are distinct server accounts (the Native
+            # reader keeps them too), so they must not hide the whole roster.
+            if identity in identities or any(value.username == name for value in identities.values()):
                 raise ValueError
             identities[identity] = Account(name, identity, role, banned)
+        case_variants = _case_variant_account_ids(identities.values())
+        if case_variants:
+            log.warning(
+                "Docker roster has accounts whose names differ only by case (account ids %s)",
+                ", ".join(str(identity) for identity in case_variants),
+            )
         valid = []
         for player in players:
             if not isinstance(player, Mapping) or "accountId" not in player:
@@ -676,9 +707,22 @@ def _map_roster_accounts(payload: Mapping[str, object]) -> list[Account]:
         skipped = len(players) - len(valid) + _nonnegative_int(payload.get("skippedRecords", 0))
         if skipped:
             log.info("Docker roster omitted %s unmatched or retired records", skipped)
-        return sorted(identities.values(),key=lambda account:account.username.casefold())
+        return sorted(identities.values(),key=lambda account:(account.username.casefold(), account.account_id))
     except (TypeError, ValueError, OverflowError):
         raise DataSourceError("malformed_export", "Docker roster contains inconsistent account identities.") from None
+
+
+def _case_variant_account_ids(accounts: Iterable[Account]) -> list[int]:
+    """Return sorted ids of accounts sharing a name with another up to case."""
+    by_name: dict[str, list[int]] = {}
+    for account in accounts:
+        by_name.setdefault(account.username.casefold(), []).append(account.account_id)
+    return sorted(
+        identity
+        for identities in by_name.values()
+        if len(identities) > 1
+        for identity in identities
+    )
 
 
 def _map_export_accounts(payload: Mapping[str, object]) -> list[Account]:

@@ -40,6 +40,9 @@ class ModInventory:
     evejs_version: str | None = None
     relocation_preview: RegistryRelocationPreview | None = None
     updater_warning: str = ""
+    # Informational only: never blocks Apply. Names registered mods whose
+    # folder vanished while the same mod id appeared in another folder.
+    moved_mod_notice: str = ""
 
 
 def load_mod_inventory(root: str) -> ModInventory:
@@ -63,6 +66,7 @@ def load_mod_inventory(root: str) -> ModInventory:
     update_pending = False
     relocation_preview = None
     relocation_preview_error = ""
+    moved_mod_notice = ""
     try:
         from .mod_updates import pending_updates
         update_pending = bool(pending_updates(root))
@@ -93,6 +97,7 @@ def load_mod_inventory(root: str) -> ModInventory:
                  for record in records if record.status == "installed"}
         quarantined = tuple(record for record in records if record.status == "quarantined")
         pending = any(record.transaction is not None for record in records)
+        moved_mod_notice = _moved_mod_notice(root, records, mods)
         for mod in mods:
             if packages.can_manage(mod):
                 removable.add(folder_key(mod))
@@ -124,4 +129,32 @@ def load_mod_inventory(root: str) -> ModInventory:
             errors[key] = str(exc)
     return ModInventory(root, tuple(mods), state, state_error, management, errors,
                         local, frozenset(removable), quarantined, registry_error, pending, update_pending,
-                        evejs_version, relocation_preview)
+                        evejs_version, relocation_preview, moved_mod_notice=moved_mod_notice)
+
+
+def _moved_mod_notice(root: str, records, mods) -> str:
+    """Describe installed records whose mod now lives in a different folder.
+
+    A folder renamed outside the launcher (for example a versioned
+    ``Name-0.1.0`` replaced by ``Name``) leaves its registration and any
+    applied Docker loader list pointing at the old folder.
+    """
+    base = Path(root)
+    lines = []
+    for record in records:
+        if record.status != "installed" or (base / record.relative_path).exists():
+            continue
+        moved = [
+            mod for mod in mods
+            if mod.id.casefold() == record.mod_id.casefold()
+            and mod.path.resolve() != (base / record.relative_path).resolve()
+        ]
+        if not moved:
+            continue
+        current = moved[0].path.relative_to(base).as_posix() if moved[0].path.is_relative_to(base) else moved[0].path.name
+        lines.append(
+            f"{moved[0].name} is registered in {record.relative_path}, which no longer "
+            f"exists; the mod is now in {current}. Apply Mods so the server loads it "
+            "from the new folder."
+        )
+    return "\n".join(lines)
