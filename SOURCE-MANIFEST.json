@@ -1,12 +1,12 @@
 {
   "schemaVersion": 2,
   "project": "EveJS Launcher",
-  "version": "1.0.80",
-  "baseline": "bae9755ab1993a36fb3c670973abe3b94aa0f00b",
-  "scope": "Public source and build inputs for the consolidated Docker, login, installation and sorter release",
+  "version": "1.0.81",
+  "baseline": "0b58a08ebfb75ef2437318c0db295ed89fb9b5dd",
+  "scope": "Public source and build inputs for the Docker character-roster correction and safe diagnostics",
   "binary": {
     "file": "EveJS-Launcher-V1.exe",
-    "sha256": "0d594b40bb4a9284cd22ce593c7b980b15342aeccbad556f1c27b452e113f143"
+    "sha256": "6c8209268b1e222811cbcb3b50c579c9e45e80786e912b8dc0db796ab9c5c209"
   },
   "manifestSelfExcluded": true,
   "files": {
@@ -19,12 +19,12 @@
       "sha256": "fd1e4fd1294624c507bc4f8bd931da6722110bc6f62f423a8b7834fe9c377266"
     },
     "BUILDING.md": {
-      "bytes": 2049,
-      "sha256": "6d77192275db08f50a3dae5d2d3f44d1c88b952e51aa8b63abae594038994716"
+      "bytes": 2226,
+      "sha256": "b4fc8a47a9faad9bcb3687653bf6630a12caa91aaec0b53a0710efbc51c393c5"
     },
     "CHANGELOG.md": {
-      "bytes": 89628,
-      "sha256": "c35ed273e4ae5a9b5e7e1df215f8aac6b845deef7fb9bc5cb540a5a76f6bfe32"
+      "bytes": 90210,
+      "sha256": "d5ca0ca73ebecc839c0d156de10d59ec34e9fba78dbc39989231a16bf9d2bad5"
     },
     "EveJS-Launcher/config.json": {
       "bytes": 578,
@@ -39,16 +39,16 @@
       "sha256": "872b45aac50be696ac3e01a7c115255f3addcb21c6184bcefedf80a71f820e91"
     },
     "RELEASE-VALIDATION.md": {
-      "bytes": 4783,
-      "sha256": "8a80b61ff13f4aa14ac798562fdfc4db2984f5363031c525a8aae0f5418cdaab"
+      "bytes": 8201,
+      "sha256": "e09a57e0ac3b31340e64390a86c77d427ea21bb50027aac765dae7e9caf47c24"
     },
     "THIRD_PARTY_NOTICES.md": {
       "bytes": 4907,
-      "sha256": "b86357e66d5d2d55883855399586460249b021175505c0c7e09ecd4a79cf8231"
+      "sha256": "4db524df98a065f268b78447b220f568267a2e6b9f575fab95d54096d1eee9ec"
     },
     "VERSION": {
       "bytes": 8,
-      "sha256": "c0412049de993516127b7c3b1b580504a1c2afea8c68290ff4ff6163bcc35a7a"
+      "sha256": "686408e913ffa0da4b8070858bdb738e905c32ad6c114775d4b35219b29f23bd"
     },
     "assets/audio/music/celestial_transit.wav": {
       "bytes": 9676844,
@@ -834,6 +834,10 @@
       "bytes": 24918,
       "sha256": "900b46b56a68337104dff265cb312a69e5c7e0e8f62c4a40acfa40ed05118e79"
     },
+    "licenses/PYTHON-3.12.txt": {
+      "bytes": 24918,
+      "sha256": "900b46b56a68337104dff265cb312a69e5c7e0e8f62c4a40acfa40ed05118e79"
+    },
     "licenses/QT-LGPL-3.0.txt": {
       "bytes": 7761,
       "sha256": "2a85364fd07782fa2fe78028e66f9235317218925ca469f65c738fb4e5b0e2d3"
@@ -851,8 +855,8 @@
       "sha256": "db296f2f7f35bca3a174efb0eb392b3b17bd94b341851429a3dff411b1c2fc73"
     },
     "main.py": {
-      "bytes": 8062,
-      "sha256": "d8ae8a7785e83346631b20c6781938f3a13b6f83d670b902706eeebf7fe36875"
+      "bytes": 8480,
+      "sha256": "93a818678da11e01ae6f30c09099ac70a714bf8a15e3f2e90e40ce5e46e7f188"
     },
     "requirements-build.txt": {
       "bytes": 453,
@@ -1047,8 +1051,8 @@
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "src/app.py": {
-      "bytes": 441934,
-      "sha256": "bb0e037a71cb82c7edf46f85d4b704c5b56222b99fce7c9a6739032597358dd8"
+      "bytes": 443035,
+      "sha256": "ffd1fa41e0355fd1e2867c1915cbabd51ef311735f33be69c3ec1834eea82053"
     },
     "src/audio/__init__.py": {
       "bytes": 506,
@@ -1163,8 +1167,8 @@
       "sha256": "764198371e069f873add39535afe39933b423198b250e7df19dc129d03022b41"
     },
     "src/core/headless_check.py": {
-      "bytes": 8840,
-      "sha256": "70f70e443f42095dbd36b9c85a6ffd2df7706c18da931d262bd3de0e04590fb1"
+      "bytes": 12078,
+      "sha256": "ffaff6a96191bdd90691d2347713cb4bc6abb8b5bc5d5aab1c669b9245c39414"
     },
     "src/core/helpers/create_character.js": {
       "bytes": 4596,
@@ -1347,8 +1351,8 @@
       "sha256": "4ef837895dab8bfebd7b65807fc2bd40b8f3720de6d2dad3b58fc8d9f018217d"
     },
     "src/core/profiles.py": {
-      "bytes": 24557,
-      "sha256": "fbe011802efe721532006e1b973b9ec392e1f8fecdb15d818f27b28814aa74f8"
+      "bytes": 25348,
+      "sha256": "7450e880777a76056cc851cf942eabaa791b8827ac938039597d62077a78867b"
     },
     "src/core/runtime/__init__.py": {
       "bytes": 265,
@@ -1363,8 +1367,12 @@
       "sha256": "3ce13944e2ed0c852b6c388bf074db220457094e21124448751a82a2e41b3ed6"
     },
     "src/core/runtime/data.py": {
-      "bytes": 32630,
-      "sha256": "58a5f58b770dae8a5457d36038cba4bb6cd7721f2f7ba500f827a27e64c01c2e"
+      "bytes": 37724,
+      "sha256": "3149f8947827df74fa5b3e652f174e76b20e0b5ed5a277c82d05edc69b02744d"
+    },
+    "src/core/runtime/data_diagnostics.py": {
+      "bytes": 2260,
+      "sha256": "117583717902866cbac1ea5d07c7f439d5a5eb01e4902dba6a175182af7aef08"
     },
     "src/core/runtime/docker_autologin.py": {
       "bytes": 8972,
@@ -1422,6 +1430,10 @@
       "bytes": 16852,
       "sha256": "7612c4c5ffe4ff04252712533f1a20c4f03b60b16c5e1b48cfffd243da325424"
     },
+    "src/core/runtime/roster_diagnostic_collector.py": {
+      "bytes": 6778,
+      "sha256": "83bc0ea9fe5ad585f61ab55432a34d25b929fd72a863ccd22927f216f6f0917e"
+    },
     "src/core/server_launcher.py": {
       "bytes": 38809,
       "sha256": "7157844d4baad44e266c1c7067c8798afcdeee4addeab2f37fb853ce9563bfd9"
@@ -1475,8 +1487,8 @@
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "src/pages/characters_page.py": {
-      "bytes": 57135,
-      "sha256": "81e6dd075c586f087c93818844e2be74fb92e5a24f1843aa3d652759cb5956ee"
+      "bytes": 57478,
+      "sha256": "729049df4342d0a8c3485a613847b2be9c0c0e6971f2babee0bc06e940a27df0"
     },
     "src/pages/home_page.py": {
       "bytes": 44542,
@@ -1823,8 +1835,8 @@
       "sha256": "8fc33251f11dc6e24d39d6557e8ae46f4d422b8b0f93b69bf79572bc1a6583e5"
     },
     "src/workers/db_worker.py": {
-      "bytes": 4374,
-      "sha256": "a1a4e498d13e5bf4844860f159f5eb0085a310c39a00cb5d5f02aa65c9bbad61"
+      "bytes": 4672,
+      "sha256": "e4106e9c3d0f069bdc7b43a6811f25a03366fd7f6599f9c9643b23abe64a90ba"
     },
     "src/workers/dlss5_uninstall_worker.py": {
       "bytes": 1404,
@@ -2107,8 +2119,8 @@
       "sha256": "b8f10904ea1dd0d2dfc2c9fa6af30ccd23b83586a36d20ada3532bebbc38e680"
     },
     "tests/test_console_panel_interaction.py": {
-      "bytes": 8009,
-      "sha256": "4396d95672cd59e3a35f33a979cab4dd12d369c8f6f69a2d3f7e1846bc4b1e35"
+      "bytes": 7993,
+      "sha256": "320cd2c7e895332619ff9d554bf88ce71069973cf0efab2afd6d6fc6f47b40b0"
     },
     "tests/test_copied_root_start.py": {
       "bytes": 4181,
@@ -2614,6 +2626,18 @@
       "bytes": 719,
       "sha256": "4c0728858abf2bd370ef3998e2595d181197b8095e916d058b2db941eab959c9"
     },
+    "tests/test_roster_diagnostic_collector.py": {
+      "bytes": 5240,
+      "sha256": "2dce73696c831e71686228ea9b9041e0038ed9a1bc90a63af1761482cde0a24b"
+    },
+    "tests/test_roster_exact_account_identity.py": {
+      "bytes": 6303,
+      "sha256": "5acb15f95eba831e2a11ae5fb77144ed9f060ee167f6a09037073547d5af4bf9"
+    },
+    "tests/test_roster_recovery_diagnostics.py": {
+      "bytes": 6627,
+      "sha256": "ad291fcbb3a25e0cd7dbf141644d57d519e27a040e0f89e3a43a806dcd7c8298"
+    },
     "tests/test_runtime_endpoints.py": {
       "bytes": 1797,
       "sha256": "a0ae67a4d768ddabe515bc7640dbf6d3dbfd6426fc77714767835bc007e47408"
@@ -2806,6 +2830,26 @@
       "bytes": 5603,
       "sha256": "bf3929a06f52f381e85d121ab49d1a583a1c21af3330aab2fb3bdf987e9a7c75"
     },
+    "tools/support/Collect-Roster-Diagnostics.cmd": {
+      "bytes": 127,
+      "sha256": "cde9c6b35c606fb55ddc018304f538f0c49f552745b656a58d4ba3986cd6a75d"
+    },
+    "tools/support/Collect-Roster-Diagnostics.ps1": {
+      "bytes": 3128,
+      "sha256": "712a65f11577a9e0f5221d317745ff43f83b66396c710f3e0062d0dc2338097b"
+    },
+    "tools/support/README.txt": {
+      "bytes": 1066,
+      "sha256": "19b90888ac31b9a3dadf783f427364bd89cc05661b9d42ad45e6c8e3e7e0b760"
+    },
+    "tools/support/collector.spec": {
+      "bytes": 824,
+      "sha256": "c9c5f16ce9bc4bf32760ff487028063a7be88091577caeec690b8e9db3681ecc"
+    },
+    "tools/support/collector_entry.py": {
+      "bytes": 352,
+      "sha256": "f957cf8f99a96121a813697e98500dd098872ab27a1ab455b55f8ae5bdc05801"
+    },
     "update_helper.bat": {
       "bytes": 1114,
       "sha256": "1bc74b461e39d41857dfcb715b882c2116be2734394eaaae0fcd21bf952bf8aa"
@@ -2820,13 +2864,16 @@
     }
   },
   "validation": {
-    "testFiles": 211,
+    "testFiles": 214,
     "totals": {
-      "passed": 4066,
+      "passed": 4112,
       "failed": 0,
       "skipped": 7
     },
-    "frozenOffscreenRuns": 19,
-    "desktopControlUsed": false
+    "frozenOffscreenRuns": 3,
+    "qtIsolatedRounds": 5,
+    "desktopControlUsed": false,
+    "liveInstallationOperationsPerformed": false,
+    "reporterInstallationRetested": false
   }
 }

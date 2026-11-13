@@ -1,3 +1,59 @@
+# Launcher 1.0.81 validation
+
+Validated on Windows x64 against the published 1.0.80 source. The final complete
+suite ran every test file in its own process with private APPDATA and LOCALAPPDATA:
+**4,112 passed, zero failed, 7 skipped across 214 files**. This is one complete
+pass, without substituting results from earlier reruns. The existing Windows
+file/symlink skips remain explicit. Three earlier Qt failure cases passed five
+consecutive isolated rounds before this final suite (27 checks in each round).
+Foundation smoke, the separate bundled-image check, Python compilation,
+dependency checks and version agreement also passed. Earlier restricted-process and disposable-fixture setup failures
+are retained separately from this final result.
+
+## Roster correction and diagnostics
+
+The Docker validator previously trimmed and case-folded distinct server account
+keys. EveJS uses exact account keys. Regression controls preserve case-distinct,
+Unicode-distinct and whitespace-distinct identities while still rejecting true
+duplicate IDs/names and inconsistent character membership. An 11-account,
+12-character SQLite fixture exercises the actual read-only Node projection and
+matches the Native reader without changing the database bytes. Windows-aliased
+accounts receive separate stable client-profile roots.
+
+Optional roster statistics and display enrichment can fail without erasing valid
+accounts or characters. The packaged offscreen roster mode exercises the real
+worker and Characters page, keeps both case-distinct accounts, shows a bounded
+warning and clears it on recovery. Normal startup and immediate close checks
+also exit zero, retire their widgets and leave no running QThreads.
+
+The collector uses the production validators and allowlisted read-only Docker
+queries. Six controlled real Windows CLI-process cases cover healthy data,
+case-distinct accounts, invalid statistics, invalid display data, invalid
+identity and a stopped server. They verify that private sentinel values and
+container identities stay out of the shareable JSON and that normal Launcher
+configuration/logging is untouched. These controls use a local Docker CLI fixture;
+they do not claim a new real-daemon or retail-client run for 1.0.81.
+
+All 199 packaged application modules plus the main entry point, 169 public data
+files and 67 dependency binaries match the reviewed source and approved build
+roots. The complete onedir ZIP is checked for CRC, version, layout and every-file
+hash equality. SOURCE-MANIFEST.json records the corresponding public inputs and
+final executable. Publishing includes a fresh download and verification of the
+GitHub asset, latest-release metadata and tag/commit; upload alone is insufficient.
+
+JcKalck's first anonymous report identifies the rejected roster stage and account
+identity field. No second report from his installation has been collected; the
+maintainer chose to release based on the reproduced regression and verified fix.
+This release does not claim confirmation on that installation.
+
+The maintainer's live installation, ordinary Launcher settings and running
+services were not changed. No desktop input or computer use was performed.
+
+## Previous release evidence
+
+The following 1.0.80 record remains historical evidence for unchanged components.
+Its test counts and integration coverage are not new 1.0.81 runtime claims.
+
 # Launcher 1.0.80 validation
 
 Validated on Windows x64 against clean 1.0.79 source. The final complete suite

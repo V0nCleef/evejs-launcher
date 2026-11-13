@@ -1,4 +1,4 @@
-# Build Launcher 1.0.80
+# Build Launcher 1.0.81
 
 Use Windows x64, CPython 3.12.14 and requirements-build.txt. The recorded builder
 used PyInstaller 6.21.0. In a fresh environment, install requirements-build.txt:
@@ -25,10 +25,12 @@ files and empty synthetic installation roots. Automatic updates, audio and servi
 startup are disabled. The diagnostic uses Qt's offscreen platform and never sends
 desktop input. It does not reuse an existing launcher configuration or installation.
 
-Modes are `immediate`, `normal`, `profiles`, `updater` and `wizard`. They exercise
+Modes are `immediate`, `normal`, `profiles`, `updater`, `wizard` and `roster`. They exercise
 the common entry point and close handling, a two-profile round trip, a deliberately
 delayed update-check response, and cancellation of the first-run wizard. The updater
 mode substitutes metadata locally; it does not contact GitHub or install an update.
+The roster mode verifies case-distinct accounts through the real data worker and
+Characters page, including unavailable statistics and recovery, using local fixtures.
 Read `run-<id>\result.json` and require both `status: passed` and process exit code 0.
 Failures or a 35-second watchdog return a nonzero exit code. Invalid arguments fail
 before normal launcher logging. Remove only the diagnostic directories you created

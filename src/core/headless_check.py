@@ -14,7 +14,7 @@ import threading
 import time
 import uuid
 
-MODES = ('immediate', 'normal', 'profiles', 'updater', 'wizard')
+MODES = ('immediate', 'normal', 'profiles', 'updater', 'wizard', 'roster')
 
 
 class HeadlessCheck:
@@ -104,12 +104,74 @@ class HeadlessCheck:
         self.result.update(platform=app.platformName(), frozen=bool(getattr(sys, 'frozen', False)),
                            mainWindowConstructed=True, mainWindowShownOffscreen=window.isVisible())
         self.shown = time.monotonic()
-        if self.mode == 'profiles':
+        if self.mode == 'roster':
+            QTimer.singleShot(0, self._roster)
+        elif self.mode == 'profiles':
             QTimer.singleShot(0, self._profiles)
         elif self.mode == 'updater':
             QTimer.singleShot(0, self._start_updater)
         else:
             QTimer.singleShot(1200 if self.mode == 'normal' else 0, self._close)
+
+    def _roster(self):
+        """Exercise the real data worker, parser, GUI warning and recovery."""
+        import subprocess
+        from src.core.runtime.character_display import DISPLAY_SCRIPT
+        from src.core.runtime.data import DockerExportDataSource, RuntimeDataSelection
+        from src.core.runtime.docker_cli import DockerCommandRunner
+        from src.core.runtime.docker_compose import ComposeTarget, ContainerRecord
+        from src.core.service_status import DockerControlPolicy, ServiceState
+        self.roster_phase = 0
+        account = dict(accountId=1, accountName='fixture-account', banned=False, isGM=False)
+        exported = dict(accounts=[account], players=[dict(
+            characterId='140000001', characterName='Fixture Pilot', **account)])
+        second = dict(account, accountId=2, accountName='Fixture-Account')
+        exported['accounts'].append(second)
+        exported['players'].append(dict(
+            characterId='140000002', characterName='Fixture Second', **second))
+        def execute(argv, cwd, timeout):
+            output = ('invalid JSON' if self.roster_phase == 0 else '{"players":[]}')
+            if DISPLAY_SCRIPT not in argv:
+                output = json.dumps(exported)
+            return subprocess.CompletedProcess(argv, 0, output, '')
+        provider = DockerExportDataSource(
+            ComposeTarget(self.state/'compose.yaml', self.state, 'fixture-world'),
+            ContainerRecord('server', 'fixture-server-1', '0123456789ab',
+                            ServiceState.ONLINE, 'healthy', 0, (), True, 'running'),
+            DockerCommandRunner(executable='docker.exe', execute=execute),
+            'docker:fixture', control_policy=DockerControlPolicy.MANAGED)
+        self.window._make_data_selection_factory = lambda: lambda: RuntimeDataSelection(
+            provider, None, 'native:fixture-roster')
+        self.window._refresh_characters()
+        self._check_roster()
+
+    def _check_roster(self):
+        from PyQt6.QtCore import QTimer
+        window = self.window
+        if window._account_thread is not None:
+            QTimer.singleShot(10, self._check_roster)
+            return
+        page = window._characters_page
+        if (len(window._accounts) != 2 or len(page._cards) != 2 or window._data_load_error
+                or {(a.username, a.account_id) for a in window._accounts}
+                != {('fixture-account', 1), ('Fixture-Account', 2)}):
+            self.fail('roster_not_preserved')
+            return
+        if self.roster_phase == 0:
+            if not page._data_warning:
+                self.fail('roster_warning_missing')
+                return
+            self.result['validRosterPreservedDuringDisplayFailure'] = True
+            self.result['caseDistinctAccountsRetained'] = True
+            self.roster_phase = 1
+            window._refresh_characters()
+            QTimer.singleShot(10, self._check_roster)
+        else:
+            if page._data_warning:
+                self.fail('roster_warning_not_cleared')
+                return
+            self.result['rosterWarningClearedAfterRecovery'] = True
+            self._close()
 
     def _close(self):
         self.result['closeRequestedAfterShowMs'] = round((time.monotonic() - self.shown) * 1000, 2)

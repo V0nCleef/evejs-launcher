@@ -6766,7 +6766,7 @@ class MainWindow(QMainWindow):
         )
         docker_auto_login_probe = None
         new_account_requested = self._docker_mode() and not character_name and not any(
-            account.username.casefold() == username.casefold() for account in getattr(self,"_accounts",()))
+            account.username == username for account in getattr(self,"_accounts",()))
         if (auto_login_enabled or new_account_requested) and self._docker_mode():
             try:
                 target_factory = self._docker_log_target_factory()
@@ -6826,12 +6826,17 @@ class MainWindow(QMainWindow):
             "separate" if character_id is None
             else str(self._cfg.get("client_settings_mode", "separate"))
         )
+        from .core.profiles import account_profiles_root
+        profile_root = account_profiles_root(
+            client_profiles_root(self._cfg, Path(PROFILES_ROOT)), username,
+            (account.username for account in getattr(self, "_accounts", ())),
+        )
         return ClientLaunchRequest(
             username=username,
             character_name=character_name,
             evejs_root=evejs_root,
             client_path=client_path,
-            profiles_root=client_profiles_root(self._cfg, Path(PROFILES_ROOT)),
+            profiles_root=profile_root,
             launch_context=launch_context,
             character_id=character_id,
             auto_login_enabled=auto_login_enabled,
@@ -8009,6 +8014,10 @@ class MainWindow(QMainWindow):
             return
         self._data_selection = result.selection
         self._clear_data_load_error()
+        self._data_load_warning = (
+            "Characters loaded; some display statistics are unavailable. See launcher logs."
+            if result.warnings else ""
+        )
         self._accounts = list(result.accounts)
         settings_page = getattr(self, "_settings_page", None)
         set_profiles = getattr(settings_page, "set_shared_profile_accounts", None)
@@ -8025,15 +8034,19 @@ class MainWindow(QMainWindow):
             or not self._data_token_is_current(failure.token)
         ):
             return
-        log.warning(
-            "Character account load failed (%s): %s",
-            failure.code,
-            failure.message,
-        )
+        diagnostic = getattr(failure, "diagnostic", None)
+        from src.core.runtime.data_diagnostics import DataDiagnostic
+        # The message is already redacted; it carries the actionable reason
+        # for failures that have no structured diagnostic (e.g. mod drift).
+        log.warning("Character account load failed (%s) %s: %s", failure.code,
+                    diagnostic.summary() if isinstance(diagnostic, DataDiagnostic)
+                    else "stage=unknown reason=unknown",
+                    failure.message)
         self._data_selection = None
         # An empty roster caused by a read failure must not look like an empty
         # game store; keep the already-redacted reason for the Characters page.
         self._data_load_error = failure.message or "Character data could not be loaded."
+        self._data_load_warning = ""
         self._accounts = []
         self._refresh_character_views()
 
@@ -8279,6 +8292,9 @@ class MainWindow(QMainWindow):
         error_setter = getattr(self._characters_page, "set_data_error", None)
         if callable(error_setter):
             error_setter(self._data_load_error)
+        warning_setter = getattr(self._characters_page, "set_data_warning", None)
+        if callable(warning_setter):
+            warning_setter(getattr(self, "_data_load_warning", ""))
 
         try:
             self._characters_page.refresh(
@@ -8409,6 +8425,10 @@ class MainWindow(QMainWindow):
     def _clear_data_load_error(self) -> None:
         """Retire a roster failure when its data authority is no longer current."""
         self._data_load_error = ""
+        self._data_load_warning = ""
+        warning_setter = getattr(self.__dict__.get("_characters_page"), "set_data_warning", None)
+        if callable(warning_setter):
+            warning_setter("")
         setter = getattr(
             self.__dict__.get("_characters_page"),
             "set_data_error",

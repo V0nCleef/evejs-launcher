@@ -33,7 +33,7 @@ def _player(char_id: str, account_id: int, account_name: str) -> dict:
     )
 
 
-def test_roster_keeps_accounts_whose_names_differ_only_by_case(caplog) -> None:
+def test_roster_keeps_an_empty_account_whose_name_differs_only_by_case() -> None:
     payload = {
         "accounts": [
             {"accountId": 1, "accountName": "Fixture"},
@@ -42,15 +42,13 @@ def test_roster_keeps_accounts_whose_names_differ_only_by_case(caplog) -> None:
         ],
         "players": [_player("10", 1, "Fixture"), _player("11", 3, "other")],
     }
-    with caplog.at_level(logging.WARNING, logger="src.core.runtime.data"):
-        accounts = _map_roster_accounts(payload)
+    accounts = _map_roster_accounts(payload)
 
-    assert [(a.account_id, a.username, [c.char_id for c in a.characters]) for a in accounts] == [
+    assert sorted((a.account_id, a.username, [c.char_id for c in a.characters]) for a in accounts) == [
         (1, "Fixture", [10]),
         (2, "fixture", []),
         (3, "other", [11]),
     ]
-    assert "account ids 1, 2" in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -92,6 +90,7 @@ def test_mod_override_drift_becomes_an_actionable_data_error() -> None:
         resolve_docker_data_target(factory)
 
     assert caught.value.code == "docker_mods_unavailable"
+    assert caught.value.diagnostic.reason == "mods_unavailable"
     assert "Fixture-0.1.0" in str(caught.value)
     assert "apply them again" in str(caught.value)
 

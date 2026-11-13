@@ -31,6 +31,7 @@ def _window_config() -> dict:
 def console_window(
     qapp: QApplication,
     monkeypatch: pytest.MonkeyPatch,
+    close_main_window,
 ) -> MainWindow:
     cfg = _window_config()
     monkeypatch.setattr(config, "load", lambda: deepcopy(cfg))
@@ -52,9 +53,7 @@ def console_window(
     yield window
 
     window._console_panel.stop()
-    window.close()
-    qapp.processEvents()
-    window.deleteLater()
+    close_main_window(window)
 
 
 def _outside_button(window: MainWindow) -> QPushButton:

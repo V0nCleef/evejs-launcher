@@ -11,6 +11,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 from src.core.db import Account
 from src.core.runtime.data import DataSourceError, RuntimeDataSelection
 from src.core.runtime.docker_cli import redact_docker_diagnostic
+from src.core.runtime.data_diagnostics import DataDiagnostic
 
 
 DataSelectionFactory = Callable[[], RuntimeDataSelection]
@@ -25,6 +26,7 @@ class AccountLoadResult:
     selection: RuntimeDataSelection
     accounts: tuple[Account, ...]
     token: object | None = None
+    warnings: tuple[DataDiagnostic, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -44,6 +46,7 @@ class DataLoadFailure:
     code: str
     message: str
     token: object | None = None
+    diagnostic: DataDiagnostic | None = None
 
 
 class _DataLoader(QObject):
@@ -86,7 +89,8 @@ class _DataLoader(QObject):
                 type(error).__name__,
                 redact_docker_diagnostic(error, limit=300),
             )
-        self.failed.emit(DataLoadFailure(code, message, self._token))
+        diagnostic = error.diagnostic if isinstance(error, DataSourceError) else None
+        self.failed.emit(DataLoadFailure(code, message, self._token, diagnostic))
 
 
 class AccountLoader(_DataLoader):
@@ -104,7 +108,7 @@ class AccountLoader(_DataLoader):
             accounts = selection.data_source.load_accounts()
             if not self._cancelled():
                 self.completed.emit(
-                    AccountLoadResult(selection, tuple(accounts), self._token)
+                    AccountLoadResult(selection, tuple(accounts), self._token, getattr(selection.data_source, "warnings", ()))
                 )
         except (DataSourceError, OSError, ValueError) as exc:
             self._emit_failure(exc)

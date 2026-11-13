@@ -129,6 +129,13 @@ def _initialize_ui_language(system_locale: str) -> dict:
 
 
 def main() -> int:
+    if any(flag in sys.argv[1:] for flag in (
+        "--collect-roster-diagnostics", "--list-roster-diagnostic-targets",
+    )):
+        # Exit before logger setup, APPDATA/config access, QApplication or any
+        # lifecycle/update cleanup. The collector owns only its explicit report.
+        from src.core.runtime.roster_diagnostic_collector import main as collect_main
+        return collect_main(sys.argv[1:])
     from src.core.headless_check import HeadlessCheck
     headless = HeadlessCheck.from_argv(sys.argv[1:])
     if headless is not None:
