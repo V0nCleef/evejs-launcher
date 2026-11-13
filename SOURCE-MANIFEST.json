@@ -1,12 +1,19 @@
 {
   "schemaVersion": 2,
   "project": "EveJS Launcher",
-  "version": "1.0.81",
-  "baseline": "0b58a08ebfb75ef2437318c0db295ed89fb9b5dd",
-  "scope": "Public source and build inputs for the Docker character-roster correction and safe diagnostics",
+  "version": "1.0.82",
+  "releaseStatus": "unreleased",
+  "baseline": "9e7bfd63e2493bdf2d39df652edf6dac34cba31d",
+  "scope": "Selective adoption and hardening of Docker mod-drift improvements",
+  "upstreamPullRequest": {
+    "url": "https://github.com/V0nCleef/evejs-launcher/pull/4",
+    "author": "Tokeiito",
+    "head": "a3dc00265e27d77a8f80a9f67f33b00b785183fd",
+    "adoption": "Selected diagnostics, notices and observational fallback; unsafe exception logging omitted"
+  },
   "binary": {
     "file": "EveJS-Launcher-V1.exe",
-    "sha256": "6c8209268b1e222811cbcb3b50c579c9e45e80786e912b8dc0db796ab9c5c209"
+    "sha256": "7f83ce9dfadde1953bb25f0e309a8863a2abd0485e696ac1741ee4308bc27539"
   },
   "manifestSelfExcluded": true,
   "files": {
@@ -19,12 +26,12 @@
       "sha256": "fd1e4fd1294624c507bc4f8bd931da6722110bc6f62f423a8b7834fe9c377266"
     },
     "BUILDING.md": {
-      "bytes": 2226,
-      "sha256": "b4fc8a47a9faad9bcb3687653bf6630a12caa91aaec0b53a0710efbc51c393c5"
+      "bytes": 2405,
+      "sha256": "bcb5789d53cb607061a9c41b0d9126bf588c711a972dbdd15d5848509826ef8d"
     },
     "CHANGELOG.md": {
-      "bytes": 90210,
-      "sha256": "d5ca0ca73ebecc839c0d156de10d59ec34e9fba78dbc39989231a16bf9d2bad5"
+      "bytes": 90988,
+      "sha256": "58115b3db671d62246f41610f8d56ac36700aebeb26e6f223cfbaf698a7f8a49"
     },
     "EveJS-Launcher/config.json": {
       "bytes": 578,
@@ -39,16 +46,16 @@
       "sha256": "872b45aac50be696ac3e01a7c115255f3addcb21c6184bcefedf80a71f820e91"
     },
     "RELEASE-VALIDATION.md": {
-      "bytes": 8201,
-      "sha256": "e09a57e0ac3b31340e64390a86c77d427ea21bb50027aac765dae7e9caf47c24"
+      "bytes": 11243,
+      "sha256": "532f6ef1d0a750ddd6b087ed12a94644e927d4e83740566477595515188bbb86"
     },
     "THIRD_PARTY_NOTICES.md": {
       "bytes": 4907,
-      "sha256": "4db524df98a065f268b78447b220f568267a2e6b9f575fab95d54096d1eee9ec"
+      "sha256": "a430ea552f63626eaa328a98ff25f3014c57686a9962f8a135dec4351a558198"
     },
     "VERSION": {
       "bytes": 8,
-      "sha256": "686408e913ffa0da4b8070858bdb738e905c32ad6c114775d4b35219b29f23bd"
+      "sha256": "41b8c6c0d478adc2b420515aa1a561f043460fedcbb30dfda9b72e0dd81245a7"
     },
     "assets/audio/music/celestial_transit.wav": {
       "bytes": 9676844,
@@ -1051,8 +1058,8 @@
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "src/app.py": {
-      "bytes": 443035,
-      "sha256": "ffd1fa41e0355fd1e2867c1915cbabd51ef311735f33be69c3ec1834eea82053"
+      "bytes": 445267,
+      "sha256": "6c104e32b7acf7d22a8a84c0bbc184d36cfc716aa799ff34be01b030e1e3f406"
     },
     "src/audio/__init__.py": {
       "bytes": 506,
@@ -1167,8 +1174,8 @@
       "sha256": "764198371e069f873add39535afe39933b423198b250e7df19dc129d03022b41"
     },
     "src/core/headless_check.py": {
-      "bytes": 12078,
-      "sha256": "ffaff6a96191bdd90691d2347713cb4bc6abb8b5bc5d5aab1c669b9245c39414"
+      "bytes": 13965,
+      "sha256": "ef6832fc618942e86ad0c0c37e2bb5f76363885e7117d4944c5aca7650dd1726"
     },
     "src/core/helpers/create_character.js": {
       "bytes": 4596,
@@ -1259,8 +1266,8 @@
       "sha256": "50d6dac5b87a3780fbe3704a1cb08fd86da59b5a39659c583ac32544fc214db3"
     },
     "src/core/mod_inventory.py": {
-      "bytes": 5416,
-      "sha256": "59135e951ae4596444fc194f53a05e82e69d0c13164c2e4cb5d5bf8664fdc39c"
+      "bytes": 7512,
+      "sha256": "5d2059e39d00dd184cea925391cdeb95f52da7722caa05d06ab91f85e8e69f9f"
     },
     "src/core/mod_lifecycle_lock.py": {
       "bytes": 6704,
@@ -1367,12 +1374,12 @@
       "sha256": "3ce13944e2ed0c852b6c388bf074db220457094e21124448751a82a2e41b3ed6"
     },
     "src/core/runtime/data.py": {
-      "bytes": 37724,
-      "sha256": "3149f8947827df74fa5b3e652f174e76b20e0b5ed5a277c82d05edc69b02744d"
+      "bytes": 38696,
+      "sha256": "d71770942967d4487bdb2d9ec2921af1078f98e48cf7a26573f3d7a8e80280dd"
     },
     "src/core/runtime/data_diagnostics.py": {
-      "bytes": 2260,
-      "sha256": "117583717902866cbac1ea5d07c7f439d5a5eb01e4902dba6a175182af7aef08"
+      "bytes": 2437,
+      "sha256": "13a3832f5a2ffdcf749b960e522c3944d1341ee7c2b1d621b6ba0b74208b77b3"
     },
     "src/core/runtime/docker_autologin.py": {
       "bytes": 8972,
@@ -1411,8 +1418,8 @@
       "sha256": "d3156d2ade7a49b2cd428cb72538b1275ffe852c5e43686646b443b4161ebd7a"
     },
     "src/core/runtime/docker_setup.py": {
-      "bytes": 3307,
-      "sha256": "4b735921d8142eb9ad6b15f00a53cb26f55ae4525273d206c8e2aa4aeb83b422"
+      "bytes": 3490,
+      "sha256": "3517068e45a99bdf57fd8f2e52e4c171461b21e54b42658f25dc2ba0780694a6"
     },
     "src/core/runtime/docker_tools.py": {
       "bytes": 9240,
@@ -1443,8 +1450,8 @@
       "sha256": "4d2580fc132f17ca2d27312d941ff392b19af888519a3db541e3c1361a7f53cd"
     },
     "src/core/service_status.py": {
-      "bytes": 3611,
-      "sha256": "69823d95d22b94b6628ce301391b1255e013c52dd248ba00c95a2c8af77a52c4"
+      "bytes": 3802,
+      "sha256": "e7454c3bb620e8f8be497408facd0456214f9173bb74ae20d7a386c71f68ecf7"
     },
     "src/core/shared_client_settings.py": {
       "bytes": 13481,
@@ -1491,16 +1498,16 @@
       "sha256": "729049df4342d0a8c3485a613847b2be9c0c0e6971f2babee0bc06e940a27df0"
     },
     "src/pages/home_page.py": {
-      "bytes": 44542,
-      "sha256": "ef4ee988ccf65ee851444ec8d7d9dce883b639b5acd2c99bd27eee0637598b27"
+      "bytes": 45069,
+      "sha256": "5c3149bdbf9f1f4a511dc315ad284e4ec3257246ec5fb61048039d6ad8ff0b1b"
     },
     "src/pages/mods_page.py": {
-      "bytes": 70117,
-      "sha256": "d9efa4a223bb8780cba57cd81ace4b1ab7c0f29c23a3cbf6c32817e253edb9b1"
+      "bytes": 70217,
+      "sha256": "aac17157c00aca63b7aae591954a6a8941c96c7bbb875312cc8b247e1ebbdd1a"
     },
     "src/pages/settings_page.py": {
-      "bytes": 82868,
-      "sha256": "3a632e9e812b54f12258e7a796bb1c11c0b3c8b3755ced88a6931024b144de64"
+      "bytes": 83373,
+      "sha256": "697bb7f413460020b376ea06b51ace288d7240d63aed442174c8990c43491f52"
     },
     "src/pages/startup_scripts_panel.py": {
       "bytes": 13997,
@@ -1855,12 +1862,12 @@
       "sha256": "6a1256a600de3613d06f7e78e0e615a1968c34cfcb1a2924960d2c149b3ea33c"
     },
     "src/workers/docker_monitor.py": {
-      "bytes": 13426,
-      "sha256": "397be8427da357cf7ba1f3166f306af173f10cb84059fddf6f93e12d9851c026"
+      "bytes": 15107,
+      "sha256": "23283bfc497fe6e290922fa8e54eb862561da9dc031b1112475b497530b42b7b"
     },
     "src/workers/docker_preflight_worker.py": {
-      "bytes": 2470,
-      "sha256": "696a2597e05c612d99a7b8dd11948d423053ff62103cd8a0991da6e96aa34901"
+      "bytes": 3161,
+      "sha256": "039d63748efe0d0d13603d402c4beb96710430b407666f282b729e36b3467626"
     },
     "src/workers/docker_tool_worker.py": {
       "bytes": 3039,
@@ -2245,6 +2252,10 @@
     "tests/test_docker_mod_contract.py": {
       "bytes": 7251,
       "sha256": "1dafe3b5e4712df6f9101c730d4c7e4163a88c7bdfa64971709cc0113dccdca3"
+    },
+    "tests/test_docker_mod_drift_hardening.py": {
+      "bytes": 22834,
+      "sha256": "22b5d0cb68c78f0ec0bc8b34b8c3a3646583bc4c0a885fcef9fc9e361ac231a4"
     },
     "tests/test_docker_mod_images.py": {
       "bytes": 9810,
@@ -2864,16 +2875,16 @@
     }
   },
   "validation": {
-    "testFiles": 214,
+    "testFiles": 215,
     "totals": {
-      "passed": 4112,
+      "passed": 4139,
       "failed": 0,
       "skipped": 7
     },
+    "newRegressionCases": 27,
     "frozenOffscreenRuns": 3,
-    "qtIsolatedRounds": 5,
     "desktopControlUsed": false,
     "liveInstallationOperationsPerformed": false,
-    "reporterInstallationRetested": false
+    "realDockerUsedForNewChecks": false
   }
 }

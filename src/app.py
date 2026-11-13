@@ -236,9 +236,11 @@ from .core.runtime.data import (
     RuntimeDataSelection,
     docker_settings_identity,
     inspect_docker_data_source,
+    resolve_docker_data_target,
     native_data_selection,
 )
 from .core.runtime.portraits import PortraitTarget
+from .core.runtime.data_diagnostics import DOCKER_MODS_UNAVAILABLE_MESSAGE
 from .core.tool_catalog import (
     ResolvedTool,
     ResolvedToolAction,
@@ -2172,6 +2174,9 @@ class MainWindow(QMainWindow):
         generation: int | None = None,
     ) -> None:
         """Consume only a monitor poll that began after the recreate result."""
+
+        if getattr(observation, "mod_error", None):
+            return
 
         token = getattr(self, "_pending_docker_mod_observation_token", None)
         quarantined_targets = getattr(
@@ -4834,6 +4839,8 @@ class MainWindow(QMainWindow):
 
     def _retry_deferred_docker_verification(self, observation, generation=None) -> bool:
         """Reconcile a late exact sample without another recreate or any stop."""
+        if getattr(observation, "mod_error", None):
+            return False
         deferred = getattr(self, "_deferred_docker_mod_verification", {})
         entry = deferred.get(observation.target_identity)
         if not entry or not entry.get("auto_retry") or self._close_in_progress or not self._docker_mode():
@@ -5213,6 +5220,8 @@ class MainWindow(QMainWindow):
             or observed.backend is not RuntimeBackend.DOCKER_COMPOSE
         ):
             return None, "Docker client endpoints have not been observed yet."
+        if getattr(observed, "docker_mod_error", None):
+            return None, DOCKER_MODS_UNAVAILABLE_MESSAGE
         if observed.target_identity in getattr(
             self,
             "_docker_mod_quarantined_targets",
@@ -7906,7 +7915,7 @@ class MainWindow(QMainWindow):
         settings_identity = self._docker_monitor_settings_identity()
         monitor_generation = getattr(self, "_monitor_generation", 0)
         return lambda: inspect_docker_data_source(
-            target_factory(),
+            resolve_docker_data_target(target_factory),
             control_policy=policy,
             settings_identity=settings_identity,
             monitor_generation=monitor_generation,
@@ -7937,6 +7946,7 @@ class MainWindow(QMainWindow):
         if (
             snapshot is None
             or snapshot.backend is not RuntimeBackend.DOCKER_COMPOSE
+            or getattr(snapshot, "docker_mod_error", None)
             or snapshot.settings_identity != self._docker_monitor_settings_identity()
             or snapshot.monitor_generation
             != getattr(self, "_monitor_generation", 0)
@@ -8550,6 +8560,10 @@ class MainWindow(QMainWindow):
         self, observation: DockerObservation, generation: int | None = None
     ) -> None:
         """Adapt read-only container state into the existing snapshot fan-out."""
+        mod_error = (
+            DOCKER_MODS_UNAVAILABLE_MESSAGE
+            if getattr(observation, "mod_error", None) else None
+        )
         pending_observation_token = getattr(
             self,
             "_pending_docker_mod_observation_token",
@@ -8612,7 +8626,10 @@ class MainWindow(QMainWindow):
         target_changed = (
             previous_snapshot is not None
             and previous_snapshot.backend is RuntimeBackend.DOCKER_COMPOSE
-            and previous_snapshot.target_identity != observation.target_identity
+            and (
+                previous_snapshot.target_identity != observation.target_identity
+                or bool(getattr(previous_snapshot, "docker_mod_error", None)) != bool(mod_error)
+            )
         )
         previous_image = (
             previous_snapshot.endpoints.image
@@ -8656,7 +8673,8 @@ class MainWindow(QMainWindow):
             isinstance(current_mod_snapshot, ModRuntimeSnapshot)
             and current_mod_snapshot.backend == DOCKER_BACKEND
             and (
-                observation.target_identity
+                mod_error is not None
+                or observation.target_identity
                 != getattr(self, "_attested_docker_target_identity", None)
                 or observation.game_identity
                 != getattr(self, "_attested_docker_container_id", None)
@@ -8688,11 +8706,19 @@ class MainWindow(QMainWindow):
             if callable(portrait_invalidate):
                 portrait_invalidate()
             self._stop_docker_log_stream()
+        if mod_error != getattr(self, "_docker_monitor_mod_error", None):
+            self._docker_monitor_mod_error = mod_error
+            if mod_error:
+                log.warning(
+                    "Docker status fallback (stage=mods reason=mods_unavailable)"
+                )
+            else:
+                log.info("Docker status is using the launcher mod override again")
         policy = DockerControlPolicy(self._cfg.get("docker_control_policy", "connect_only"))
         snapshot = RuntimeSnapshot(
             game=observation.game, market=observation.market,
             running_clients=self._tracker.running_count,
-            game_error=observation.game_error, market_error=observation.market_error,
+            game_error=observation.game_error or mod_error, market_error=observation.market_error,
             backend=RuntimeBackend.DOCKER_COMPOSE, docker_control_policy=policy,
             game_container=observation.game_identity, market_container=observation.market_identity,
             game_health=observation.game_health, market_health=observation.market_health,
@@ -8701,6 +8727,7 @@ class MainWindow(QMainWindow):
             settings_identity=observation.settings_identity,
             monitor_generation=observation.monitor_generation,
             game_runtime_identity=observation.game_runtime_identity,
+            docker_mod_error=mod_error,
         )
         self._runtime_snapshot = snapshot
         if portrait_context_changed:
@@ -8961,6 +8988,11 @@ class MainWindow(QMainWindow):
                 ServiceState.FAILED, ServiceState.UNKNOWN,
             }
             market_enabled = managed and not market_busy and not market_blocked
+            mods_unavailable = bool(getattr(snapshot, "docker_mod_error", None))
+            if mods_unavailable:
+                # Keep explicit Stop available for an observed online service.
+                game_enabled = game_enabled and snapshot.game is ServiceState.ONLINE
+                market_enabled = market_enabled and snapshot.market is ServiceState.ONLINE
             self._nav.btn_server.setEnabled(game_enabled)
             self._nav.btn_market.setEnabled(market_enabled)
             if not managed:
@@ -8975,6 +9007,11 @@ class MainWindow(QMainWindow):
                 self._nav.btn_market.setToolTip(
                     translate_service_tooltip("Stop Server first")
                 )
+            if managed and mods_unavailable:
+                if not game_enabled:
+                    self._nav.btn_server.setToolTip(DOCKER_MODS_UNAVAILABLE_MESSAGE)
+                if not market_enabled and not market_blocked:
+                    self._nav.btn_market.setToolTip(DOCKER_MODS_UNAVAILABLE_MESSAGE)
             self._nav.btn_characters.setEnabled(True)
             self._nav.btn_characters.setToolTip("")
             set_character_launch = getattr(
@@ -9114,6 +9151,10 @@ class MainWindow(QMainWindow):
             monitor = DockerMonitor(
                 target_factory,
                 inspector_factory=lambda: ComposeInspector(DockerCommandRunner()),
+                # A drifted mod override must not hide whether the project is
+                # running; status falls back to the plain project, whose
+                # mod readiness is unavailable until attachment is repaired.
+                fallback_target_factory=lambda: build_compose_target(draft),
                 interval_ms=5_000,
                 monitor_generation=generation,
                 settings_identity=self._docker_monitor_settings_identity(),

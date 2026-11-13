@@ -171,7 +171,40 @@ class HeadlessCheck:
                 self.fail('roster_warning_not_cleared')
                 return
             self.result['rosterWarningClearedAfterRecovery'] = True
+            self._check_mod_warning_presentation()
             self._close()
+
+    def _check_mod_warning_presentation(self):
+        """Check frozen Home presentation and the client guard without Docker."""
+        from dataclasses import replace
+        from types import SimpleNamespace
+        from src.core.runtime.data_diagnostics import DOCKER_MODS_UNAVAILABLE_MESSAGE
+        from src.core.service_status import DockerControlPolicy, RuntimeBackend, RuntimeSnapshot, ServiceState
+        degraded = RuntimeSnapshot(
+            ServiceState.ONLINE, ServiceState.ONLINE, 0,
+            backend=RuntimeBackend.DOCKER_COMPOSE,
+            docker_control_policy=DockerControlPolicy.MANAGED,
+            target_identity='docker:fixture', settings_identity='fixture-settings',
+            monitor_generation=7, docker_mod_error=DOCKER_MODS_UNAVAILABLE_MESSAGE)
+        home = self.window._home_page
+        home.apply_runtime_snapshot(degraded)
+        if 'MODS' not in home.overall_status_label.text().upper():
+            self.fail('degraded_mods_reported_nominal')
+            return
+        target = SimpleNamespace(
+            _docker_mode=lambda: True, _lifecycle_active=lambda: False,
+            _runtime_snapshot=degraded, _monitor_generation=7,
+            _docker_monitor_settings_identity=lambda: 'fixture-settings')
+        context, reason = type(self.window)._resolve_client_launch_context(target)
+        if context is not None or reason != DOCKER_MODS_UNAVAILABLE_MESSAGE:
+            self.fail('degraded_mods_authorized_client')
+            return
+        self.result['degradedModsBlockClientContext'] = True
+        home.apply_runtime_snapshot(replace(degraded, docker_mod_error=None))
+        if 'NOMINAL' not in home.overall_status_label.text().upper():
+            self.fail('home_mod_warning_not_cleared')
+            return
+        self.result['homeModWarningClearedAfterRecovery'] = True
 
     def _close(self):
         self.result['closeRequestedAfterShowMs'] = round((time.monotonic() - self.shown) * 1000, 2)

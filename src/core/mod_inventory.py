@@ -40,6 +40,9 @@ class ModInventory:
     evejs_version: str | None = None
     relocation_preview: RegistryRelocationPreview | None = None
     updater_warning: str = ""
+    # Informational only: never blocks Apply. Names registered mods whose
+    # folder vanished while the same mod id appeared in another folder.
+    moved_mod_notice: str = ""
 
 
 def load_mod_inventory(root: str) -> ModInventory:
@@ -63,6 +66,7 @@ def load_mod_inventory(root: str) -> ModInventory:
     update_pending = False
     relocation_preview = None
     relocation_preview_error = ""
+    moved_mod_notice = ""
     try:
         from .mod_updates import pending_updates
         update_pending = bool(pending_updates(root))
@@ -93,6 +97,7 @@ def load_mod_inventory(root: str) -> ModInventory:
                  for record in records if record.status == "installed"}
         quarantined = tuple(record for record in records if record.status == "quarantined")
         pending = any(record.transaction is not None for record in records)
+        moved_mod_notice = _moved_mod_notice(root, records, mods)
         for mod in mods:
             if packages.can_manage(mod):
                 removable.add(folder_key(mod))
@@ -124,4 +129,42 @@ def load_mod_inventory(root: str) -> ModInventory:
             errors[key] = str(exc)
     return ModInventory(root, tuple(mods), state, state_error, management, errors,
                         local, frozenset(removable), quarantined, registry_error, pending, update_pending,
-                        evejs_version, relocation_preview)
+                        evejs_version, relocation_preview, moved_mod_notice=moved_mod_notice)
+
+
+def _moved_mod_notice(root: str, records, mods) -> str:
+    """Explain missing registrations without guessing or changing ownership."""
+    base = Path(root).resolve()
+    mods_root = base / "mods"
+    lines = []
+    def label(value):
+        text = "".join(" " if ch.isspace() else ch for ch in str(value))
+        return text[:160] + ("..." if len(text) > 160 else "")
+    for record in records:
+        if record.status != "installed":
+            continue
+        try:
+            original = base / record.relative_path
+            if (not original.resolve().is_relative_to(mods_root)
+                    or original.exists() or original.is_symlink() or original.is_junction()):
+                continue
+            if len(lines) == 5:
+                lines.append("More missing registered folders need review.")
+                break
+            moved = set()
+            for mod in mods:
+                if mod.id.casefold() != record.mod_id.casefold() or not getattr(mod, "valid", True):
+                    continue
+                path = mod.path.resolve()
+                if path.is_relative_to(mods_root) and path.is_dir():
+                    moved.add(path.relative_to(base).as_posix())
+        except (OSError, RuntimeError):
+            # This optional notice must not turn an inventory read into failure.
+            continue
+        message = f"Registered folder {label(record.relative_path)} is missing. "
+        if len(moved) == 1:
+            message += f"The same mod ID is present in {label(next(iter(moved)))}. "
+        # Legacy loader IDs change with their folder name; a missing-folder
+        # notice still helps without inventing a mapping to another package.
+        lines.append(message + "Review the mod setup before applying.")
+    return "\n".join(lines)

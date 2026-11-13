@@ -405,6 +405,29 @@ def select_docker_data_source(
     )
 
 
+def resolve_docker_data_target(
+    target_factory: Callable[[], ComposeTarget],
+) -> ComposeTarget:
+    """Resolve the mod-attached target, naming a stale mod state precisely.
+
+    The mod bridge fails closed on a missing loader folder or an unfinished
+    transaction.  That is a fixable mod state, not an unexpected fault, so it
+    crosses the worker boundary as its own redacted, user-actionable code.
+    """
+    from src.core.runtime.data_diagnostics import DOCKER_MODS_UNAVAILABLE_MESSAGE
+    from src.core.runtime.docker_mod_images import DockerModImageError
+    from src.core.runtime.docker_mods import DockerModBridgeError
+
+    try:
+        return target_factory()
+    except (DockerModBridgeError, DockerModImageError):
+        raise DataSourceError(
+            "docker_mods_unavailable",
+            DOCKER_MODS_UNAVAILABLE_MESSAGE,
+            diagnostic=DataDiagnostic(stage="mods", reason="mods_unavailable"),
+        ) from None
+
+
 def inspect_docker_data_source(
     target: ComposeTarget,
     *,

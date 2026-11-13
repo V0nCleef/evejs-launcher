@@ -1,3 +1,55 @@
+# Launcher 1.0.82 candidate validation (unreleased)
+
+This candidate selectively adopts Tokeiito's PR #4 at upstream commit
+a3dc00265e27d77a8f80a9f67f33b00b785183fd, based on published 1.0.81.
+It has not been published or installed into the maintainer's live setup.
+
+The final complete regression pass is **4,139 passed, zero failed, 7 skipped
+across 215 test files**, each in a fresh process with private application state.
+The 27 new controls cover the selected contribution and its safety adaptations.
+Adjacent regressions, the separate bundled-image check, Foundation smoke,
+Python compilation, dependency checks, and version agreement also passed.
+
+The actual packaged application passes roster, normal startup and immediate
+close checks using Qt's offscreen platform. It keeps case-distinct pilots through
+statistics failure/recovery, renders and clears the degraded-mod warning, rejects
+client context from that degraded state, exits zero and retires its windows and
+threads. A minimum Home viewport check caught clipped warning text; the corrected
+533-pixel line fits its 708-pixel area at the 756-pixel viewport. The final suite,
+build, parity and offscreen checks follow that correction.
+
+All 199 application modules plus main, 169 public data files and 67 dependency
+binaries match the reviewed source and approved build roots. The candidate ZIP
+contains the complete onedir runtime; CRC, version, layout and every-file hashes
+are checked. SOURCE-MANIFEST.json records the matching source and final executable.
+
+## Selective adoption and limits
+
+Kept: typed mod-setup diagnostics, a non-blocking warning in Test Docker setup,
+missing/relocated-folder notices, read-only status fallback and repair recovery.
+Dropped: arbitrary unexpected exception-text logging and its required positive
+logging test. Regression controls prove synthetic account/password JSON does not
+enter the new diagnostics. The production data worker remains unchanged.
+
+Adapted: detect drift after startup, keep fallback status separate from mod/client/
+data authority, suppress deferred mod verification from degraded observations,
+make Home display Mods need attention, and preserve explicit Stop for an observed
+online service. Existing Connect-only and fresh-preflight mutation guards pass.
+Folder notices are bounded, cover legacy IDs that change after rename, and never
+guess a new owner, rewrite a registry or repair files automatically.
+
+New Docker coverage uses controlled inspectors and real disposable filesystem
+overrides/registries. It proves launcher behavior and command boundaries, not a
+new real-Docker or retail-client run. Broken mod attachment still blocks character
+data until repaired; status fallback does not bypass that requirement.
+
+The maintainer's live installation, settings, mods, clients and services remain
+untouched. No computer use or desktop input was performed.
+
+## Published baseline evidence
+
+The following records remain historical evidence for the published baseline.
+
 # Launcher 1.0.81 validation
 
 Validated on Windows x64 against the published 1.0.80 source. The final complete

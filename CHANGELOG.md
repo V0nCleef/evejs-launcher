@@ -2,6 +2,14 @@
 
 ## Changelog
 
+## v1.0.82 (unreleased)
+- Keep Docker server status visible when missing mod folders make the launcher override unusable, and recover after repair without restarting the launcher.
+- Explain missing mod setup in character loading and Test Docker setup while keeping valid setup changes saveable.
+- Show bounded notices for missing registered mod folders without guessing ownership or changing files.
+- Mark fallback status as degraded and keep it separate from client, data and mod-readiness authority. Connect-only controls remain read-only; explicit Stop remains available for an observed online service.
+- Keep diagnostics private-safe without logging arbitrary exception text.
+- Thanks to Tokeiito for the mod-folder drift report and the useful parts of PR #4. 🫡
+
 ## v1.0.81
 - Restore Docker rosters containing distinct account names that differ only by case, preserving exact server identities and separate client profiles.
 - Preserve valid Docker characters when optional statistics cannot be read.

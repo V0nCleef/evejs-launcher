@@ -1,12 +1,17 @@
 """Allowlisted data diagnostics: never retain values, identifiers or exceptions."""
 from dataclasses import dataclass, replace
 
-_STAGES = {"unknown", "roster", "display", "detail"}
+DOCKER_MODS_UNAVAILABLE_MESSAGE = (
+    "The Docker mod setup needs attention. Open Mods to review missing folders "
+    "or unfinished changes."
+)
+
+_STAGES = {"unknown", "roster", "display", "detail", "mods"}
 _REASONS = {
     "unknown", "invalid_json", "invalid_collection", "invalid_field",
     "duplicate_identity", "account_mismatch", "command_failed",
     "command_timeout", "command_unavailable", "too_large", "parser_rejected",
-    "unsupported_result", "inconsistent_identity",
+    "unsupported_result", "inconsistent_identity", "mods_unavailable",
 }
 _FIELDS = {
     "unknown", "accounts", "players", "accountId", "accountName", "role",

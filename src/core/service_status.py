@@ -69,6 +69,9 @@ class RuntimeSnapshot:
     # Privacy-safe SHA-256 of Docker's full container ID plus StartedAt.
     # Raw container identity/timestamps never cross the inspection boundary.
     game_runtime_identity: str | None = None
+    # Status may remain observable while the selected mod setup is unusable.
+    # Such an observation is presentation, not mod/client/data authority.
+    docker_mod_error: str | None = None
 
 
 def derive_service_state(

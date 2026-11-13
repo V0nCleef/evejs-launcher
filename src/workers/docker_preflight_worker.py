@@ -6,10 +6,16 @@ from collections.abc import Callable
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
 from src.core.runtime.docker_cli import DockerCommandRunner
+from src.core.runtime.data_diagnostics import DOCKER_MODS_UNAVAILABLE_MESSAGE
 from src.core.runtime.docker_compose import (
     ComposeInspector,
     PreflightFailureKind,
     PreflightReport,
+)
+from src.core.runtime.docker_mod_images import DockerModImageError
+from src.core.runtime.docker_mods import (
+    DockerModBridgeError,
+    attach_docker_mod_override,
 )
 from src.core.runtime.docker_setup import (
     DockerPreflightRequest,
@@ -41,12 +47,15 @@ class DockerPreflightWorker(QObject):
     @pyqtSlot()
     def run(self) -> None:
         """Emit exactly one immutable, bounded, private-safe result."""
+        mod_warning = None
         try:
             target = build_compose_target(self._request.draft)
             inspector = self._inspector_factory()
             report = inspector.preflight(target)
             if not isinstance(report, PreflightReport):
                 raise TypeError("Docker inspector returned an invalid result.")
+            if report.ok:
+                mod_warning = _mod_override_warning(target)
         except FileNotFoundError:
             report = PreflightReport.failed(PreflightFailureKind.CLI_MISSING)
         except Exception:  # noqa: BLE001 - isolate local and runtime boundaries
@@ -64,6 +73,7 @@ class DockerPreflightWorker(QObject):
                             PreflightFailureKind.COMPOSE_CONFIG_INVALID
                         ),
                     ),
+                    mod_warning,
                 )
             )
             self.cleanup.emit()
@@ -72,3 +82,12 @@ class DockerPreflightWorker(QObject):
         if not self._emitted:
             self._emitted = True
             self.completed.emit(result)
+
+
+def _mod_override_warning(target) -> str | None:
+    """Check the same mod attachment the main screen uses; never write."""
+    try:
+        attach_docker_mod_override(target)
+    except (DockerModBridgeError, DockerModImageError):
+        return DOCKER_MODS_UNAVAILABLE_MESSAGE
+    return None

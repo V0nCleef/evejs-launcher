@@ -954,6 +954,11 @@ class HomePage(QWidget):
                 "A service failed. Open its telemetry row for diagnostics.",
                 "failed",
             )
+        elif (snapshot.backend is RuntimeBackend.DOCKER_COMPOSE
+              and getattr(snapshot, "docker_mod_error", None)):
+            label, detail, state = (
+                "MODS NEED ATTENTION", "Open Mods to review the Docker mod setup.", "degraded",
+            )
         elif ServiceState.UNKNOWN in states:
             label, detail, state = (
                 "TELEMETRY DEGRADED",
@@ -1020,6 +1025,9 @@ class HomePage(QWidget):
             elif ServiceState.ONLINE in states:
                 label, enabled, tooltip = "Stop Stack", True, "Stop all Docker Compose services"
                 self._stack_action = "stop"
+            elif getattr(snapshot, "docker_mod_error", None):
+                from src.core.runtime.data_diagnostics import DOCKER_MODS_UNAVAILABLE_MESSAGE
+                label, enabled, tooltip = "Review Mods", False, DOCKER_MODS_UNAVAILABLE_MESSAGE
             elif ServiceState.FAILED in states:
                 label, enabled, tooltip = "Retry Stack", True, "Retry failed services"
                 self._stack_action = "start"

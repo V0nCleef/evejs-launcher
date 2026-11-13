@@ -1,4 +1,4 @@
-# Build Launcher 1.0.81
+# Build Launcher 1.0.82 candidate (unreleased)
 
 Use Windows x64, CPython 3.12.14 and requirements-build.txt. The recorded builder
 used PyInstaller 6.21.0. In a fresh environment, install requirements-build.txt:
@@ -38,3 +38,6 @@ when their reports are no longer needed.
 
 These checks cover the actual frozen Qt application without a desktop window.
 They do not claim native window-manager, rendering or retail-gameplay coverage.
+
+The roster mode also checks the degraded-mod Home warning and client-context guard
+with local fixtures. It does not require Docker or control the desktop.
