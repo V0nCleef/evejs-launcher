@@ -2,7 +2,7 @@
 
 ## Changelog
 
-## v1.0.82 (unreleased)
+## v1.0.82 - 2026-11-13
 - Keep Docker server status visible when missing mod folders make the launcher override unusable, and recover after repair without restarting the launcher.
 - Explain missing mod setup in character loading and Test Docker setup while keeping valid setup changes saveable.
 - Show bounded notices for missing registered mod folders without guessing ownership or changing files.

@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "project": "EveJS Launcher",
   "version": "1.0.82",
-  "releaseStatus": "unreleased",
+  "releaseStatus": "released",
   "baseline": "9e7bfd63e2493bdf2d39df652edf6dac34cba31d",
   "scope": "Selective adoption and hardening of Docker mod-drift improvements",
   "upstreamPullRequest": {
@@ -26,12 +26,12 @@
       "sha256": "fd1e4fd1294624c507bc4f8bd931da6722110bc6f62f423a8b7834fe9c377266"
     },
     "BUILDING.md": {
-      "bytes": 2405,
-      "sha256": "bcb5789d53cb607061a9c41b0d9126bf588c711a972dbdd15d5848509826ef8d"
+      "bytes": 2382,
+      "sha256": "3889af293e5f6fb088992622b24d8ee71212c6385f65f36a2b9aee055e4f4dbf"
     },
     "CHANGELOG.md": {
       "bytes": 90988,
-      "sha256": "58115b3db671d62246f41610f8d56ac36700aebeb26e6f223cfbaf698a7f8a49"
+      "sha256": "869996b09b85580b77d650459a81084cf1c1e4ace38c5c0c5981e515a16aaa28"
     },
     "EveJS-Launcher/config.json": {
       "bytes": 578,
@@ -46,8 +46,8 @@
       "sha256": "872b45aac50be696ac3e01a7c115255f3addcb21c6184bcefedf80a71f820e91"
     },
     "RELEASE-VALIDATION.md": {
-      "bytes": 11243,
-      "sha256": "532f6ef1d0a750ddd6b087ed12a94644e927d4e83740566477595515188bbb86"
+      "bytes": 11584,
+      "sha256": "3c780ef672d9c441dbc4c05264667d880adafbbd302b5584959473b2b863225e"
     },
     "THIRD_PARTY_NOTICES.md": {
       "bytes": 4907,
@@ -2885,6 +2885,7 @@
     "frozenOffscreenRuns": 3,
     "desktopControlUsed": false,
     "liveInstallationOperationsPerformed": false,
-    "realDockerUsedForNewChecks": false
+    "realDockerUsedForNewChecks": false,
+    "releasePromotion": "Documentation and bundled changelog only; application source and executable unchanged"
   }
 }

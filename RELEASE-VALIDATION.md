@@ -1,8 +1,8 @@
-# Launcher 1.0.82 candidate validation (unreleased)
+# Launcher 1.0.82 validation
 
-This candidate selectively adopts Tokeiito's PR #4 at upstream commit
+This release selectively adopts Tokeiito's PR #4 at upstream commit
 a3dc00265e27d77a8f80a9f67f33b00b785183fd, based on published 1.0.81.
-It has not been published or installed into the maintainer's live setup.
+The maintainer's live installation was not changed during release preparation.
 
 The final complete regression pass is **4,139 passed, zero failed, 7 skipped
 across 215 test files**, each in a fresh process with private application state.
@@ -19,9 +19,15 @@ threads. A minimum Home viewport check caught clipped warning text; the correcte
 build, parity and offscreen checks follow that correction.
 
 All 199 application modules plus main, 169 public data files and 67 dependency
-binaries match the reviewed source and approved build roots. The candidate ZIP
+binaries match the reviewed source and approved build roots. The release ZIP
 contains the complete onedir runtime; CRC, version, layout and every-file hashes
 are checked. SOURCE-MANIFEST.json records the matching source and final executable.
+
+Only release documentation, the source manifest and the bundled changelog changed
+after candidate validation. Application source and executable bytes are unchanged.
+Release metadata, package parity and packaged offscreen checks are repeated
+for the release archive; the complete regression result above is from the
+unchanged application and test sources.
 
 ## Selective adoption and limits
 
