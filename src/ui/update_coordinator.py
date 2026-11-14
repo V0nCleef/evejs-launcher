@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import QApplication, QDialog
 
 from .. import config
 from ..core.platform import hard_exit
+from ..core.runtime_handoff import prepare_runtime_handoff, cancel_runtime_handoff
 from ..updater.checker import UpdateChecker
 from ..updater.dialog import UpdateDialog
 from ..updater.installer import UpdateInstallWorker
@@ -63,7 +64,7 @@ def _on_update_clicked(self) -> None:
 
 def _begin_update_install(self) -> None:
     """Show progress before downloading, then retain the worker through teardown."""
-    from ..core.application_operations import running_runtime_components, update_active, update_blocked
+    from ..core.application_operations import update_active, update_blocked
     if update_active(self):
         return
     if update_blocked(self):
@@ -72,18 +73,22 @@ def _begin_update_install(self) -> None:
             "Wait for the active operation to finish before installing a launcher update.",
         )
         return
-    if running_runtime_components(self):
-        QMessageBox.information(
-            self, "Runtime Still Running",
-            "Stop Game and Market and close EVE clients before installing a launcher update. "
-            "Stop externally managed services from their original console.",
-        )
-        return
     if not self._latest_download_url:
         QMessageBox.warning(
             self,
             "Update Unavailable",
             "This release does not include a downloadable launcher package.",
+        )
+        return
+
+    try:
+        self._update_runtime_ticket = prepare_runtime_handoff(self, sys.executable)
+    except (OSError, ValueError, TypeError, AttributeError):
+        log.exception("Could not prepare the update runtime checkpoint")
+        QMessageBox.warning(
+            self, "Update Unavailable",
+            "Running services or clients could not be safely prepared for this update. "
+            "Check the launcher logs and try again.",
         )
         return
 
@@ -112,6 +117,8 @@ def _begin_update_install(self) -> None:
     try:
         worker.start()
     except Exception as exc:
+        cancel_runtime_handoff(getattr(self, "_update_runtime_ticket", None))
+        self._update_runtime_ticket = None
         self._update_install_worker = None
         worker.deleteLater()
         self._set_operation_controls_busy(False)
@@ -149,6 +156,8 @@ def _finish_update_install_if_ready(self) -> None:
 
     dialog = self._update_progress_dialog
     if not success:
+        cancel_runtime_handoff(getattr(self, "_update_runtime_ticket", None))
+        self._update_runtime_ticket = None
         self._set_operation_controls_busy(False)
         if dialog is not None:
             dialog.show_error(error)

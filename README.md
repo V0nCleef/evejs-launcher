@@ -8,6 +8,15 @@ A Windows launcher for your local EveJS server and EVE clients. Start Game and M
 
 *Screenshots show the v1.0.56 interface with fictional demo characters and mods. Online service states and the offered mod update are examples; no game services were started for these captures. Click an image to see it at full size.*
 
+## Changes in 1.0.84
+
+- Update the launcher while stable Native servers, Docker containers and EVE clients keep running.
+- Recover verified Native server controls, client tracking and console output after the launcher restarts.
+- Observe Docker afresh without restarting or recreating containers. Externally managed services stay externally managed.
+- Keep active service, character and mod operations protected. If an update cannot be prepared, keep the current launcher available to retry.
+
+**Upgrading from 1.0.83:** stop services once to install this release. Updates started from 1.0.84 onward can keep your setup running.
+
 ## Changes in 1.0.80
 
 - Link several existing EveJS installations with named profiles. Each keeps its own character/client settings; switching never moves saves or starts/stops services.
@@ -181,6 +190,8 @@ Control music and voice independently, including their volume. The title bar pro
 The launcher checks GitHub Releases when automatic checks are enabled. You can also check manually in Settings. The update window shows download and installation progress, then restarts the launcher.
 
 The updater replaces the launcher executable and its `_internal` folder. Your launcher configuration lives separately in `%APPDATA%\EveJS-Launcher`; updating the launcher does not migrate or replace your EveJS game data.
+
+Launcher updates can keep stable servers and EVE clients running. The restarted launcher restores verified Native process ownership and client tracking, while Docker is observed afresh without restarting containers. Externally started services remain externally managed. Wait for active service, character or mod operations to finish before updating. An older launcher that still requires stopped services keeps that restriction for the one-time upgrade to this behavior.
 
 <details>
 <summary>Local files and defaults</summary>

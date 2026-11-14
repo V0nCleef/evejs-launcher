@@ -137,6 +137,10 @@ def main() -> int:
         from src.core.runtime.roster_diagnostic_collector import main as collect_main
         return collect_main(sys.argv[1:])
     from src.core.headless_check import HeadlessCheck
+    from src.core.runtime_update_check import RuntimeUpdateCheck
+    runtime_check = RuntimeUpdateCheck.from_argv(sys.argv[1:])
+    if runtime_check is not None:
+        runtime_check.prepare()
     headless = HeadlessCheck.from_argv(sys.argv[1:])
     if headless is not None:
         try:
@@ -148,7 +152,7 @@ def main() -> int:
     from src.constants import APP_VERSION
     setup_logger(__name__).info("Launcher startup version=%s log_file=%s", APP_VERSION, _LOG_FILE)
     handoff = _parse_update_handoff(sys.argv[1:])
-    app = QApplication([sys.argv[0]] if handoff is not None or headless is not None else sys.argv)
+    app = QApplication([sys.argv[0]] if handoff is not None or headless is not None or runtime_check is not None else sys.argv)
     app.setApplicationName(APP_NAME)
     app.setOrganizationName("NousResearch")
 
@@ -195,7 +199,14 @@ def main() -> int:
     from src.app import MainWindow
 
     window = MainWindow()
+    from src.core.runtime_handoff import resume_runtime_handoff
+    recovered = resume_runtime_handoff(window, sys.executable)
+    if recovered.game or recovered.market or recovered.clients:
+        window._update_status_bar()
+        window._refresh_characters()
     window.show()
+    if runtime_check is not None:
+        runtime_check.attach(window, app, recovered)
     if headless is not None:
         headless.attach(window, app)
     else:

@@ -2,6 +2,14 @@
 
 ## Changelog
 
+## v1.0.84 - 2026-11-14
+- Allow launcher updates while stable Native servers, Docker containers, externally managed services and EVE clients remain running. Active service, character and mod operations still finish first.
+- Restore verified Native process ownership and client tracking after the launcher restarts. Preserve console output and resume Native mod-status evidence across the update gap.
+- Reject altered, expired or mismatched recovery checkpoints. Keep externally managed services observational and refresh Docker state without restarting or recreating containers.
+- Preserve the selected launcher environment when the updated application starts.
+- Upgrading from 1.0.83 still requires stopping services once because that version enforces the old update guard. Updates started from 1.0.84 onward use the new keep-running behavior.
+- Thanks to Tokeiito for questioning the unnecessary server-stop requirement. 🫡
+
 ## v1.0.83 - 2026-11-14
 - Prevent duplicate ownership records when importing or restoring a mod into a missing but still-registered folder. Validate folder ownership before saving registry changes.
 - Explain ownership conflicts on the Mods page instead of presenting affected mods as ordinary external packages. Block Apply and mod changes until ownership is resolved.

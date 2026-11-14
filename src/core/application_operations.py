@@ -34,7 +34,15 @@ def active_mutations(owner: object, *, exclude: tuple[str, ...] = ()) -> tuple[s
 
 
 def update_blocked(owner: object) -> bool:
-    return bool(vars(owner).get("_close_in_progress") or active_mutations(owner))
+    from .service_status import ServiceState
+    state = vars(owner)
+    snapshot = state.get("_runtime_snapshot")
+    transitional = {ServiceState.STARTING, ServiceState.STOPPING}
+    return bool(
+        state.get("_close_in_progress") or active_mutations(owner)
+        or any(getattr(snapshot, service, None) in transitional for service in ("game", "market"))
+        or state.get("_server_intent") in transitional or state.get("_market_intent") in transitional
+    )
 
 
 def running_runtime_components(owner: object) -> tuple[str, ...]:

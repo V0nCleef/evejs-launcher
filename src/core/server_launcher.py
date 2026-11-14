@@ -68,6 +68,7 @@ class NativeModRuntimeLaunchReceipt:
     plan_sha256: str
     runtime_identity: str
     status_log_path: Path
+    console_start_offset: int | None = None
 
 
 def get_server_log_path(evejs_root: str | Path) -> Path:
@@ -288,6 +289,27 @@ def _copy_console_slice_to_file(
                     time.sleep(poll_interval_sec)
     except (OSError, ValueError):
         pass  # process exit or log teardown can close either file
+
+
+def resume_native_console_evidence(process: object) -> None:
+    """Resume the derivative status log after the outgoing copier has exited."""
+    receipt = getattr(process, "mod_runtime_receipt", None)
+    if not isinstance(receipt, NativeModRuntimeLaunchReceipt):
+        return
+    offset = receipt.console_start_offset
+    if type(offset) is not int or offset < 0:
+        return
+    # The old GUI is gone before this is called. Existing derivative bytes
+    # therefore define the exact resume boundary, including the updater gap.
+    destination_size = receipt.status_log_path.stat().st_size
+    start = offset + destination_size
+    if start > SERVER_CONSOLE_LOG.stat().st_size:
+        return  # a truncated/replaced console cannot supply current evidence
+    threading.Thread(
+        target=_copy_console_slice_to_file,
+        args=(SERVER_CONSOLE_LOG, receipt.status_log_path, start, process),
+        daemon=True, name="resumed-native-mod-evidence",
+    ).start()
 
 
 # ── Mod discovery ──────────────────────────────────────────────────────
@@ -863,6 +885,7 @@ def start_game_server(
                 plan_sha256=mod_runtime_plan.plan_sha256,
                 runtime_identity=mod_runtime_plan.runtime_identity,
                 status_log_path=mod_status_log,
+                console_start_offset=console_spawn_offset,
             ),
         )
 

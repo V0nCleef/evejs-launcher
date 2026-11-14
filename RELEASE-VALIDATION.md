@@ -1,3 +1,65 @@
+# Launcher 1.0.84 validation
+
+Validated on Windows x64 against published 1.0.83. The reviewed implementation
+passed **4,235 tests, zero failures and 7 existing skips across 217 test files**,
+using a fresh process and private application/temporary state for each file.
+The release reruns that suite after the version and documentation changes and
+requires the same test source hashes and successful process exits.
+
+## Runtime-preserving launcher updates
+
+The complete packaged download, apply and restart path passed with disposable
+Native and external service/client processes, real Managed and Connect-only
+Docker containers, and an invalid download. HTTP requests continued through the
+handoff; Native PIDs and Docker IDs/start times/restart counts stayed unchanged.
+The new launcher recovered Native control and client tracking. The production
+stop sequence worked after reconnection. Invalid downloads kept the old launcher
+running and revoked its transfer checkpoint. Active lifecycle, character, mod,
+settings and client-launch operations still exclude an update.
+
+Checks reject changed process creation time/image, altered or expired encrypted
+checkpoints, changed installation/backend/profile/ports, duplicate records and
+exited children. A retained handle to an exited parent reproduces the Windows
+image-query failure and verifies the fixed wait-before-query order. Native
+runtime snapshots and exact missing console bytes survive a complete checkpoint
+round trip, without duplicate evidence. External services never gain ownership.
+
+## Exact candidate and release package
+
+The user accepted the exact development executable in a private copy of the
+current Native setup. Its SHA-256 remains
+`580d730e4abfe58f7ae8305d291efb9aa3c244573994fc78b60c2bf91374c25b`.
+Release promotion preserves that executable and all application bytecode.
+Only bundled VERSION, CHANGELOG.md and README.md differ from the accepted
+candidate. All 205 application modules plus main, 169 public data files and
+67 dependency binaries are checked against source and the approved build roots.
+The onedir archive contains 400 files and is checked for CRC, version and every
+file hash. The source archive must match all 723 files at the release commit.
+
+All seven release offscreen modes must pass: ownership, roster, normal,
+immediate, profiles, updater and wizard. They use private state and require
+exit zero, retired widgets and no retained running QThreads. Foundation smoke,
+the separate image check, compilation, dependency checks and version agreement
+also pass. The normal updater must discover the public release from 1.0.83.
+Publication is verified by downloading all assets and comparing hosted digests,
+archive contents, source membership, remote main and release tag.
+
+## Boundaries and upgrade note
+
+The runtime checks use synthetic HTTP services/client processes and real Docker
+containers; no retail EVE gameplay or long soak is claimed. The legacy combined
+Qt suite also crashes on untouched 1.0.83, so release regression checks use the
+established fresh-process-per-test-file method. Timer-owning Home fixtures are
+retired explicitly and Settings draft fixtures do not observe host services.
+
+No desktop control or live installation changes are used to publish 1.0.84.
+Upgrading from 1.0.83 still requires one stop because the old launcher enforces
+that guard. Updates started from 1.0.84 onward use the new keep-running behavior.
+
+## Published baseline evidence
+
+The following records remain historical evidence for previous releases.
+
 # Launcher 1.0.83 validation
 
 Validated on Windows x64 against published 1.0.82. The final complete suite ran

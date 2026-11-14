@@ -216,6 +216,9 @@ def settings_window(
         lambda updated: persisted.clear() or persisted.update(deepcopy(updated)),
     )
     monkeypatch.setattr(app_module, "load_accounts", lambda _root: [])
+    # This fixture tests draft/navigation behavior. A real service on the host
+    # must not make a synthetic backend switch appear to target a live runtime.
+    monkeypatch.setattr(app_module, "is_server_running", lambda **_kwargs: False)
 
     window = MainWindow()
     window._status_timer.stop()

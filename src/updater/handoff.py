@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ctypes
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -195,9 +196,15 @@ def apply_staged_update(
 
 
 def launch_installed_launcher(exe_path: Path) -> None:
-    """Launch through Explorer to isolate the fresh PyInstaller process."""
+    """Start an independent bootloader while preserving the user's environment.
+
+    Explorer would discard an isolated APPDATA and other inherited settings.
+    The supported PyInstaller reset flag makes the new process independent.
+    """
     subprocess.Popen(
-        ["explorer.exe", str(exe_path)],
+        [str(exe_path)],
+        cwd=str(exe_path.parent),
+        env={**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"},
         creationflags=subprocess.DETACHED_PROCESS,
         close_fds=True,
     )

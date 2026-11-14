@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QCoreApplication, QEvent, Qt
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 import pytest
@@ -11,6 +11,17 @@ import pytest
 from src.constants import COLORS
 from src.core.service_status import RuntimeSnapshot, ServiceState
 from src.pages.home_page import HomePage
+
+
+@pytest.fixture(autouse=True)
+def retire_home_pages(qapp):
+    """Retire timer-owning widgets before QApplication/native teardown."""
+    yield
+    for page in list(qapp.topLevelWidgets()):
+        if isinstance(page, HomePage):
+            page.close()
+            page.deleteLater()
+            QCoreApplication.sendPostedEvents(page, QEvent.Type.DeferredDelete)
 
 
 def test_services_card_renders_game_and_market_independently(
