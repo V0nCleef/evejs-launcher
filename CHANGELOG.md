@@ -2,6 +2,14 @@
 
 ## Changelog
 
+## v1.0.83 - 2026-11-14
+- Prevent duplicate ownership records when importing or restoring a mod into a missing but still-registered folder. Validate folder ownership before saving registry changes.
+- Explain ownership conflicts on the Mods page instead of presenting affected mods as ordinary external packages. Block Apply and mod changes until ownership is resolved.
+- Add Review repair for verified redundant ownership records. Keep an exact backup, the matching owner, mod order, enabled states and all unrelated records. Mod files, settings and saved data are unchanged.
+- Leave ambiguous ownership, changed package files and pending transactions untouched for review. Recheck the selected installation, runtime and reviewed registry before repair.
+- Keep automatic mod checks from interrupting a repair confirmation, and translate the repair controls into every supported language.
+- Thanks to VitalConflict and JcKalck for reporting and investigating the duplicate-record problem. 🫡
+
 ## v1.0.82 - 2026-11-13
 - Keep Docker server status visible when missing mod folders make the launcher override unusable, and recover after repair without restarting the launcher.
 - Explain missing mod setup in character loading and Test Docker setup while keeping valid setup changes saveable.

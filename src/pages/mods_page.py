@@ -201,6 +201,7 @@ class ModRow(QFrame):
         cleanup: dict | None = None,
         client_script_delivery: str | None = None,
         copied_registry_root: str | None = None,
+        ownership_error: str = "",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -218,6 +219,7 @@ class ModRow(QFrame):
         self._cleanup = cleanup
         self._client_script_delivery = client_script_delivery
         self._copied_registry_root = copied_registry_root
+        self._ownership_error = ownership_error
         self._can_show_repair = management is None and bool(management_error)
         self._operation_error = ""
         self._lifecycle_busy = False
@@ -378,6 +380,11 @@ class ModRow(QFrame):
             )
             set_translatable_accessible_description(self.remove_btn, uninstall_reason)
             set_translatable_tooltip(self.remove_btn, uninstall_reason)
+        elif self._ownership_error:
+            self.remove_btn.setProperty("managementRole", "ownership")
+            self.remove_btn.setText("OWNERSHIP")
+            set_translatable_accessible_description(self.remove_btn, self._ownership_error)
+            set_translatable_tooltip(self.remove_btn, self._ownership_error)
         elif management is not None:
             self.remove_btn.setProperty("managementRole", "remove")
             self.remove_btn.setText("REMOVE")
@@ -620,7 +627,7 @@ class ModRow(QFrame):
 
     def set_lifecycle_busy(self, busy: bool) -> None:
         """Temporarily lock mutation without changing backend capability."""
-        self._lifecycle_busy = bool(busy)
+        self._lifecycle_busy = bool(busy or self._ownership_error)
         self.configure_btn.setEnabled(not self._lifecycle_busy)
         self.helper_btn.setEnabled(not self._lifecycle_busy and self._can_toggle)
         self.update_btn.setEnabled(not self._lifecycle_busy and self._can_toggle)
@@ -665,6 +672,7 @@ class ModsPage(QWidget):
     helper_requested = pyqtSignal(object, str)
     sort_requested = pyqtSignal()
     registry_relocation_requested = pyqtSignal(object)
+    registry_repair_requested = pyqtSignal(object)
     forget_compatibility_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None, *, defer_inventory: bool = False) -> None:
@@ -776,11 +784,7 @@ class ModsPage(QWidget):
             "Register this copied EveJS folder after confirmation. Existing mod files and enabled states stay as they are, and a backup is kept.",
         )
         mark_translatable(self.register_mods_btn)
-        self.register_mods_btn.clicked.connect(
-            lambda _checked=False: self.registry_relocation_requested.emit(
-                self._inventory.relocation_preview
-            )
-        )
+        self.register_mods_btn.clicked.connect(self._request_registry_action)
         registry_banner_layout.addWidget(self.register_mods_btn)
         root.addWidget(self.registry_banner)
 
@@ -1463,6 +1467,12 @@ class ModsPage(QWidget):
                         management_error = (
                             "Managed mod removal is available from the Native backend only."
                         )
+                ownership_error = ""
+                if inventory.registry_conflict:
+                    ownership_error = "Review mod ownership using the banner above before changing mods."
+                    can_toggle = can_remove = False
+                    disabled_reason = ownership_error
+                    disabled_state = "REPAIR REQUIRED"
                 row = ModRow(
                     mod,
                     client_script_delivery=reported_delivery(mod, config.get_setting("client_path") or None,
@@ -1476,14 +1486,15 @@ class ModsPage(QWidget):
                     management_error=management_error,
                     can_remove=can_remove,
                     local_removable=local_removable,
+                    ownership_error=ownership_error,
                     copied_registry_root=(
                         inventory.relocation_preview.saved_root
                         if inventory.relocation_preview is not None
                         else None
                     ),
                     delegated_activation=self._refresh_handler is not None,
-                    can_move_up=key in loader_keys and loader_keys.index(key) > 0,
-                    can_move_down=key in loader_keys and loader_keys.index(key) < len(loader_keys) - 1,
+                    can_move_up=not inventory.registry_conflict and key in loader_keys and loader_keys.index(key) > 0,
+                    can_move_down=not inventory.registry_conflict and key in loader_keys and loader_keys.index(key) < len(loader_keys) - 1,
                     cleanup=(inventory.local_records[key].cleanup if key in inventory.local_records else None),
                     parent=self._list_container,
                 )
@@ -1504,6 +1515,13 @@ class ModsPage(QWidget):
 
     def _restore_scroll(self):
         self._scroll.verticalScrollBar().setValue(self._restore_scroll_position)
+
+    def _request_registry_action(self):
+        if self._inventory.registry_conflict:
+            if self._inventory.registry_repair_preview is not None:
+                self.registry_repair_requested.emit(self._inventory.registry_repair_preview)
+        else:
+            self.registry_relocation_requested.emit(self._inventory.relocation_preview)
 
     def _update_summary_and_actions(self) -> None:
         """Refresh count and Apply capability after an in-row mutation."""
@@ -1541,7 +1559,7 @@ class ModsPage(QWidget):
             can_apply = False
         if self._lifecycle_busy:
             can_apply = False
-        if self._activation_state_error:
+        if self._activation_state_error or self._inventory.registry_error:
             can_apply = False
         self.apply_btn.setEnabled(can_apply)
         editable = self._can_mutate() and not self._lifecycle_busy and bool(self._evejs_root)
@@ -1551,17 +1569,39 @@ class ModsPage(QWidget):
         for button in (self.add_zip_btn, self.add_folder_btn):
             button.setEnabled(editable and not self._inventory.registry_error)
         preview = self._inventory.relocation_preview
-        self.registry_banner.setVisible(preview is not None)
+        repair = self._inventory.registry_repair_preview
+        conflict = self._inventory.registry_conflict
+        self.registry_banner.setVisible(preview is not None or conflict)
+        set_translatable_text(self.registry_banner_title,
+                              "Mod ownership needs repair" if conflict else "Finish setting up mods for this folder")
+        set_translatable_text(self.registry_banner_description, (
+            "Duplicate records claim the same mod folder. Review a verified repair before applying mods. Your mod files and enabled states stay as they are."
+            if conflict and repair is not None else
+            "Duplicate records claim the same mod folder, but a safe repair could not be verified. Keep the registry for individual review."
+            if conflict else
+            "This EveJS folder looks like it was copied or moved. Register it here so the launcher can recognize the mods it manages. Existing mod files and enabled states stay as they are."
+        ))
+        set_translatable_text(self.register_mods_btn, "Review repair" if conflict else "Register mods here")
+        set_translatable_accessible_description(self.register_mods_btn,
+            "Review a verified repair of duplicate mod ownership. An exact backup is kept."
+            if conflict else
+            "Register this copied EveJS folder after confirmation. Existing mod files and enabled states stay as they are, and a backup is kept.")
         register_reason = (
             "Register this folder with one confirmation. A backup is kept and existing mod files are unchanged."
         )
+        if conflict:
+            register_reason = (
+                "Review a verified repair of duplicate mod ownership. An exact backup is kept."
+                if repair is not None else
+                "A safe ownership repair could not be verified. Keep the registry for individual review."
+            )
         if not self._can_mutate():
             register_reason = self._disabled_reason()
         elif self._lifecycle_busy:
             register_reason = "Wait for the active server lifecycle operation to finish."
         set_translatable_tooltip(self.register_mods_btn, register_reason)
         self.register_mods_btn.setEnabled(
-            preview is not None and editable and not self._inventory.registry_error
+            editable and (repair is not None if conflict else preview is not None and not self._inventory.registry_error)
         )
         self.undo_remove_btn.setEnabled(editable and bool(self._inventory.quarantined))
         self.recover_mods_btn.setVisible(self._inventory.recovery_pending)

@@ -14,7 +14,7 @@ import threading
 import time
 import uuid
 
-MODES = ('immediate', 'normal', 'profiles', 'updater', 'wizard', 'roster')
+MODES = ('immediate', 'normal', 'profiles', 'updater', 'wizard', 'roster', 'ownership')
 
 
 class HeadlessCheck:
@@ -61,6 +61,8 @@ class HeadlessCheck:
         folder = self.state / 'appdata/EveJS-Launcher'
         folder.mkdir()
         (folder / 'config.json').write_text(json.dumps(cfg), encoding='utf-8')
+        if self.mode == 'ownership':
+            self._seed_ownership()
         self.result['stateDirectory'] = str(self.state)
         self._write()
         self._saved_excepthook = sys.excepthook
@@ -104,7 +106,9 @@ class HeadlessCheck:
         self.result.update(platform=app.platformName(), frozen=bool(getattr(sys, 'frozen', False)),
                            mainWindowConstructed=True, mainWindowShownOffscreen=window.isVisible())
         self.shown = time.monotonic()
-        if self.mode == 'roster':
+        if self.mode == 'ownership':
+            QTimer.singleShot(0, self._ownership_start)
+        elif self.mode == 'roster':
             QTimer.singleShot(0, self._roster)
         elif self.mode == 'profiles':
             QTimer.singleShot(0, self._profiles)
@@ -112,6 +116,86 @@ class HeadlessCheck:
             QTimer.singleShot(0, self._start_updater)
         else:
             QTimer.singleShot(1200 if self.mode == 'normal' else 0, self._close)
+
+    def _seed_ownership(self):
+        from .local_mod_packages import LocalModPackages
+        from .mod_manifest import MANIFEST_FILENAME, scan_mods
+        root = self.state / 'world-one'
+        folder = root / 'mods/OwnershipExample'
+        folder.mkdir(parents=True)
+        (folder / 'loader.js.disabled').write_bytes(b'module.exports = {};\n')
+        (folder / MANIFEST_FILENAME).write_text(json.dumps({
+            'schemaVersion': 3, 'id': 'fixture.ownership', 'displayName': 'Ownership Example',
+            'version': '1.0.0', 'kind': 'loader', 'restart': 'game_server',
+            'activation': {'strategy': 'loader_rename'},
+        }), encoding='utf-8')
+        packages = LocalModPackages(root)
+        record = packages.adopt(scan_mods(root)[0])
+        registry = json.loads(packages.registry_path.read_bytes())
+        duplicate = dict(registry['records'][record.record_id], record_id='f' * 32, fingerprint='0' * 64)
+        registry['records'][duplicate['record_id']] = duplicate
+        self.ownership_original = json.dumps(registry, indent=3).encode('utf-8')
+        # Deliberately damaged metadata exists only in this explicit private fixture.
+        packages.registry_path.write_bytes(self.ownership_original)
+        self.ownership_files = {p.name: p.read_bytes() for p in folder.iterdir() if p.is_file()}
+
+    def _ownership_start(self):
+        from PyQt6.QtCore import QTimer
+        page, coordinator = self.window._mods_page, self.window._mod_coordinator
+        if coordinator._token is not None:
+            QTimer.singleShot(10, self._ownership_start)
+            return
+        if not page._inventory.registry_conflict:
+            self.fail('ownership_conflict_not_detected')
+        if (page.register_mods_btn.isHidden() or not page.register_mods_btn.isEnabled()
+                or len(page._rows) != 1 or page._rows[0].remove_btn.text() != 'OWNERSHIP'
+                or page._rows[0].toggle.isEnabled() or page.apply_btn.isEnabled()):
+            self.fail('ownership_warning_or_guard_missing')
+        self.result['conflictingActionsBlocked'] = True
+        self.ownership_confirmed = self.ownership_notified = False
+        self.ownership_dialog_timer = QTimer(self.window)
+        self.ownership_dialog_timer.timeout.connect(self._ownership_dialog)
+        self.ownership_dialog_timer.start(10)
+        page.register_mods_btn.click()
+        QTimer.singleShot(10, self._ownership_finish)
+
+    def _ownership_dialog(self):
+        from PyQt6.QtWidgets import QApplication, QMessageBox
+        dialog = QApplication.activeModalWidget()
+        if dialog is None:
+            return
+        if not isinstance(dialog, QMessageBox):
+            self.fail('unexpected_ownership_dialog')
+        if dialog.windowTitle() == 'Repair Mod Ownership':
+            if 'Verified redundant records: 1' not in dialog.text() or 'mods/ownershipexample' not in dialog.text():
+                self.fail('ownership_review_not_concrete')
+            self.ownership_confirmed = True
+            dialog.button(QMessageBox.StandardButton.Yes).click()
+        elif dialog.windowTitle() == 'Mod Ownership Repaired':
+            self.ownership_notified = True
+            dialog.button(QMessageBox.StandardButton.Ok).click()
+        else:
+            self.fail('unexpected_ownership_message')
+
+    def _ownership_finish(self):
+        from PyQt6.QtCore import QTimer
+        from .local_mod_packages import LocalModPackages
+        page, coordinator = self.window._mods_page, self.window._mod_coordinator
+        if coordinator._token is not None or page._inventory.registry_conflict or not self.ownership_notified:
+            QTimer.singleShot(10, self._ownership_finish)
+            return
+        packages = LocalModPackages(self.state / 'world-one')
+        folder = self.state / 'world-one/mods/OwnershipExample'
+        backups = list(packages.registry_path.parent.glob('registry.before-duplicate-repair-*.json'))
+        if (not self.ownership_confirmed or len(packages.records()) != 1 or len(backups) != 1
+                or backups[0].read_bytes() != self.ownership_original
+                or self.ownership_files != {p.name: p.read_bytes() for p in folder.iterdir() if p.is_file()}
+                or not page.registry_banner.isHidden() or page._rows[0].remove_btn.text() != 'REMOVE'):
+            self.fail('ownership_repair_not_preserved')
+        self.ownership_dialog_timer.stop()
+        self.result.update(registryRepairedAfterConfirmation=True, registryBackupMatchesOriginal=True,
+                           packageFilesPreserved=True, ownershipBannerCleared=True)
+        self._close()
 
     def _roster(self):
         """Exercise the real data worker, parser, GUI warning and recovery."""

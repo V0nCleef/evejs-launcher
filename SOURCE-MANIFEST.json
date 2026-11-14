@@ -1,19 +1,17 @@
 {
   "schemaVersion": 2,
   "project": "EveJS Launcher",
-  "version": "1.0.82",
+  "version": "1.0.83",
   "releaseStatus": "released",
-  "baseline": "9e7bfd63e2493bdf2d39df652edf6dac34cba31d",
-  "scope": "Selective adoption and hardening of Docker mod-drift improvements",
-  "upstreamPullRequest": {
-    "url": "https://github.com/V0nCleef/evejs-launcher/pull/4",
-    "author": "Tokeiito",
-    "head": "a3dc00265e27d77a8f80a9f67f33b00b785183fd",
-    "adoption": "Selected diagnostics, notices and observational fallback; unsafe exception logging omitted"
-  },
+  "baseline": "5b44935cd7d9309f8c2ba5566a7895f241ecc0de",
+  "scope": "Prevent duplicate mod ownership and provide reviewed exact-backup repair",
+  "reporters": [
+    "VitalConflict",
+    "JcKalck"
+  ],
   "binary": {
     "file": "EveJS-Launcher-V1.exe",
-    "sha256": "7f83ce9dfadde1953bb25f0e309a8863a2abd0485e696ac1741ee4308bc27539"
+    "sha256": "0b2089bb6aa7b43078f7cf191b03ca12912f3d40d222d0a854d5907825cb2415"
   },
   "manifestSelfExcluded": true,
   "files": {
@@ -26,12 +24,12 @@
       "sha256": "fd1e4fd1294624c507bc4f8bd931da6722110bc6f62f423a8b7834fe9c377266"
     },
     "BUILDING.md": {
-      "bytes": 2382,
-      "sha256": "3889af293e5f6fb088992622b24d8ee71212c6385f65f36a2b9aee055e4f4dbf"
+      "bytes": 2643,
+      "sha256": "3280f12362cb5ff399fc351a5809aebb1e5cac5369970cd87892fa2702710904"
     },
     "CHANGELOG.md": {
-      "bytes": 90988,
-      "sha256": "869996b09b85580b77d650459a81084cf1c1e4ace38c5c0c5981e515a16aaa28"
+      "bytes": 91990,
+      "sha256": "54b15e6dfcbb28353f7956ce1b355594eb8c035cd789c7582e41160cedf012df"
     },
     "EveJS-Launcher/config.json": {
       "bytes": 578,
@@ -46,8 +44,8 @@
       "sha256": "872b45aac50be696ac3e01a7c115255f3addcb21c6184bcefedf80a71f820e91"
     },
     "RELEASE-VALIDATION.md": {
-      "bytes": 11584,
-      "sha256": "3c780ef672d9c441dbc4c05264667d880adafbbd302b5584959473b2b863225e"
+      "bytes": 15374,
+      "sha256": "9f0c978f2117370b138d31fb08822c10f49f01ec87cf73df292ad89b80b74e0d"
     },
     "THIRD_PARTY_NOTICES.md": {
       "bytes": 4907,
@@ -55,7 +53,7 @@
     },
     "VERSION": {
       "bytes": 8,
-      "sha256": "41b8c6c0d478adc2b420515aa1a561f043460fedcbb30dfda9b72e0dd81245a7"
+      "sha256": "1c175e1e0a7ca463fa886b292dfec27159fb9701cd10659619e22abccdb3b888"
     },
     "assets/audio/music/celestial_transit.wav": {
       "bytes": 9676844,
@@ -1174,8 +1172,8 @@
       "sha256": "764198371e069f873add39535afe39933b423198b250e7df19dc129d03022b41"
     },
     "src/core/headless_check.py": {
-      "bytes": 13965,
-      "sha256": "ef6832fc618942e86ad0c0c37e2bb5f76363885e7117d4944c5aca7650dd1726"
+      "bytes": 18769,
+      "sha256": "dcd7d2b5040e549d4be5d53794d38f1ffad512b35ca180a09a53c385a9777ddc"
     },
     "src/core/helpers/create_character.js": {
       "bytes": 4596,
@@ -1210,8 +1208,8 @@
       "sha256": "9d3d17cc313638e3278548d6df914fa9664aaa19f40183a2c40a3e7573e8f6a3"
     },
     "src/core/local_mod_packages.py": {
-      "bytes": 54838,
-      "sha256": "fb25abda5b8b93ca608ab3d016bcfbebe651e831bf6140e60e4a3984b8417516"
+      "bytes": 57294,
+      "sha256": "1a3b3f2f75a628c78971ee931c447ac11f5a585069138fac22b14d073541df1a"
     },
     "src/core/mod_activation_service.py": {
       "bytes": 4394,
@@ -1266,8 +1264,8 @@
       "sha256": "50d6dac5b87a3780fbe3704a1cb08fd86da59b5a39659c583ac32544fc214db3"
     },
     "src/core/mod_inventory.py": {
-      "bytes": 7512,
-      "sha256": "5d2059e39d00dd184cea925391cdeb95f52da7722caa05d06ab91f85e8e69f9f"
+      "bytes": 8419,
+      "sha256": "f53725f85fa8fbb6b9d13b92d0170b976ea6dacdf00ab8f772e24fdb2f8cbb62"
     },
     "src/core/mod_lifecycle_lock.py": {
       "bytes": 6704,
@@ -1292,6 +1290,10 @@
     "src/core/mod_operations.py": {
       "bytes": 14221,
       "sha256": "f8c3e23ddad47dfed21967214d1b3ff78f46a774f3b59daa0dbcc4cab9c305da"
+    },
+    "src/core/mod_registry_repair.py": {
+      "bytes": 6993,
+      "sha256": "aa124d3af089397f303ad92482f768981b47f5fe7ca27dd74811f39489789b38"
     },
     "src/core/mod_relationships.py": {
       "bytes": 5070,
@@ -1486,8 +1488,8 @@
       "sha256": "dfc2978fcadf408a5495110b93b2523ce29ba3a091509f7641bc91fbbefaeb4a"
     },
     "src/i18n.py": {
-      "bytes": 52751,
-      "sha256": "3d563aff308b6f8086c7314ae0f2cb73661c8e99eabfa167310091ea3f1ba783"
+      "bytes": 53080,
+      "sha256": "6c27499549b9031e1d9aa729aafa075456e5de61dd196d65c92053cfa37135aa"
     },
     "src/pages/__init__.py": {
       "bytes": 0,
@@ -1502,8 +1504,8 @@
       "sha256": "5c3149bdbf9f1f4a511dc315ad284e4ec3257246ec5fb61048039d6ad8ff0b1b"
     },
     "src/pages/mods_page.py": {
-      "bytes": 70217,
-      "sha256": "aac17157c00aca63b7aae591954a6a8941c96c7bbb875312cc8b247e1ebbdd1a"
+      "bytes": 73186,
+      "sha256": "f82b963e7609c0bbe37584e47d39b6698589bddab225132d3d90d4a2eba36b62"
     },
     "src/pages/settings_page.py": {
       "bytes": 83373,
@@ -1561,6 +1563,10 @@
       "bytes": 7004,
       "sha256": "81d1497b2887d4f6b9e7c16916352777574e458d5885ddaa6c1d5e59f2d74bc6"
     },
+    "src/translations_mod_ownership.py": {
+      "bytes": 15126,
+      "sha256": "aabbf1bf748c1fac6e2b9c4f07e7106902601416d508d8f28f84052122d2c764"
+    },
     "src/translations_mod_settings.py": {
       "bytes": 40230,
       "sha256": "0d6bef8726094522bb551efb7a847c41ebaffded281dd3ec3c7a2612f48320b9"
@@ -1606,16 +1612,16 @@
       "sha256": "8ae3610f14f8c120548e8a01196c2badf29510d4d7c492a9b4ce1eab030b72d2"
     },
     "src/ui/mod_coordinator.py": {
-      "bytes": 43011,
-      "sha256": "bee8debc8a0eb277ddeba5a9e1a582b90cc266d3ec26e503b1f891391096a296"
+      "bytes": 47667,
+      "sha256": "b2ebc0565156a7d87e83a2d1509ea82f8d22a5bc2790e1ef4cbfa51d681f1c76"
     },
     "src/ui/mod_start_compatibility.py": {
       "bytes": 12961,
       "sha256": "6e296d327fff5115b2be59656d7cb54f49ce079253b3a224b2f0e320cf73a386"
     },
     "src/ui/mod_update_controller.py": {
-      "bytes": 7834,
-      "sha256": "b569aefad9c0f2637dbed21cc2b2f7a6bc0131d7093f56ef4e735e9c1193b37e"
+      "bytes": 8096,
+      "sha256": "8bc2a6e908074b8b27407c9ec8e4de532f7ce2f0e6324146f23056a73fc5c4ed"
     },
     "src/ui/motion.py": {
       "bytes": 5095,
@@ -2298,8 +2304,8 @@
       "sha256": "71585f47a0dbc4e9679573ad0fd0b67bb49210762f3e7abf9662546802348a7c"
     },
     "tests/test_enabled_mod_updates.py": {
-      "bytes": 19081,
-      "sha256": "0ab7c7474ba2f50944b33ccd04bbbeb1e482e5978089519f4d63831bcb68b8e4"
+      "bytes": 19279,
+      "sha256": "a92701b09d8726e988f73634adaa22a091383beec8152ca7fa120374a3c77a4e"
     },
     "tests/test_evejs_calendar_release.py": {
       "bytes": 8194,
@@ -2318,8 +2324,8 @@
       "sha256": "275b14a65a9e9f861902317592e15dddfd36c8498a94e85fc3e59bc9cfa17941"
     },
     "tests/test_headless_check.py": {
-      "bytes": 3532,
-      "sha256": "d21cdbb4902ee6707f6fa331031b39d6b032bc1eb6e09256ab2f8a79888a7aa4"
+      "bytes": 3833,
+      "sha256": "b6d1a32015203f1c0e0c913f343483f460f93465f3f4889918760c60c6d6c85b"
     },
     "tests/test_home_actions.py": {
       "bytes": 11861,
@@ -2492,6 +2498,10 @@
     "tests/test_mod_registration_legacy.py": {
       "bytes": 1498,
       "sha256": "295d087a0b6e74302b74945fb36efdd14f29fdf638c1c062d9d92ea1cf266adf"
+    },
+    "tests/test_mod_registry_ownership.py": {
+      "bytes": 24675,
+      "sha256": "9e2523bc0ceeab57ff9609b2c89e27dffb5e39a0326926a3018ed1a5410c0b82"
     },
     "tests/test_mod_relationships.py": {
       "bytes": 4483,
@@ -2875,17 +2885,17 @@
     }
   },
   "validation": {
-    "testFiles": 215,
+    "testFiles": 216,
     "totals": {
-      "passed": 4139,
+      "passed": 4189,
       "failed": 0,
       "skipped": 7
     },
-    "newRegressionCases": 27,
-    "frozenOffscreenRuns": 3,
-    "desktopControlUsed": false,
+    "newOwnershipCases": 49,
+    "frozenOffscreenRuns": 7,
+    "nativeDesktopCheck": "passed",
+    "desktopControlUsed": true,
     "liveInstallationOperationsPerformed": false,
-    "realDockerUsedForNewChecks": false,
-    "releasePromotion": "Documentation and bundled changelog only; application source and executable unchanged"
+    "realDockerUsedForNewChecks": false
   }
 }

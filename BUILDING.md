@@ -1,4 +1,4 @@
-# Build Launcher 1.0.82
+# Build Launcher 1.0.83
 
 Use Windows x64, CPython 3.12.14 and requirements-build.txt. The recorded builder
 used PyInstaller 6.21.0. In a fresh environment, install requirements-build.txt:
@@ -25,7 +25,7 @@ files and empty synthetic installation roots. Automatic updates, audio and servi
 startup are disabled. The diagnostic uses Qt's offscreen platform and never sends
 desktop input. It does not reuse an existing launcher configuration or installation.
 
-Modes are `immediate`, `normal`, `profiles`, `updater`, `wizard` and `roster`. They exercise
+Modes are `immediate`, `normal`, `profiles`, `updater`, `wizard`, `roster` and `ownership`. They exercise
 the common entry point and close handling, a two-profile round trip, a deliberately
 delayed update-check response, and cancellation of the first-run wizard. The updater
 mode substitutes metadata locally; it does not contact GitHub or install an update.
@@ -41,3 +41,7 @@ They do not claim native window-manager, rendering or retail-gameplay coverage.
 
 The roster mode also checks the degraded-mod Home warning and client-context guard
 with local fixtures. It does not require Docker or control the desktop.
+
+The ownership mode seeds duplicate records only in its private fixture. It verifies
+the real repair confirmation, background worker, exact backup, preserved package
+files and recovered ownership UI, then closes with no running worker threads.

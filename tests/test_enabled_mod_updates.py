@@ -314,7 +314,9 @@ def test_recovery_refuses_drift_before_native_rollback(producer, monkeypatch, dr
         packages = LocalModPackages(f.root)
         registry = packages._load()
         registry["records"][data["recordId"]]["archive_path"] = "changed-owner"
-        packages._save(registry)
+        # Deliberately corrupt historical bytes. The production save boundary
+        # now rejects this invalid ownership before it can reach disk.
+        packages.registry_path.write_text(json.dumps(registry), encoding="utf-8")
     before = list(f.calls)
     with pytest.raises(ModUpdateError):mod_updates.recover_update(journal, f.operation, guard=lambda: None)
     assert f.calls == before

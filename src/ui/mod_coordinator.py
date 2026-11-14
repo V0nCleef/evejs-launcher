@@ -13,7 +13,7 @@ from PyQt6 import sip
 from src.core.application_operations import active_mutations
 from src.core.local_mod_packages import (
     ImportPreview, LocalModPackageError, LocalModPackages,
-    RegistryRelocationPreview,
+    RegistryRelocationPreview, RegistryRepairPreview,
 )
 from src.core.mod_contributions import ContributionStore, ConfigurationReview, ContributionConflict
 from src.core.mod_inventory import ModInventory, load_mod_inventory, folder_key
@@ -77,6 +77,7 @@ class ModCoordinator(QObject):
         page.helper_requested.connect(self.public_action)
         page.remove_mod_requested.connect(self.remove)
         page.registry_relocation_requested.connect(self.register_copied_registry)
+        page.registry_repair_requested.connect(self.repair_registry)
         page.forget_compatibility_requested.connect(self.forget_compatibility_approvals)
         page.set_refresh_handler(self.refresh)
 
@@ -659,6 +660,91 @@ class ModCoordinator(QObject):
             lambda: LocalModPackages(captured_root).relocate_registry(preview.registry_sha256),
             completed,
         )
+
+    def repair_registry(self, preview):
+        """Confirm the frozen metadata-only repair, then use the normal worker."""
+        page = self._page
+        if page is None or not isinstance(preview, RegistryRepairPreview):
+            return
+        if (self._guided_import_pending is not None or page._lifecycle_busy
+                or self._token is not None or active_mutations(self.window)):
+            QMessageBox.information(self.window, "Operation In Progress",
+                                    "Wait for the active server or mod operation to finish before repairing ownership.")
+            return
+        signature = self._import_runtime_signature()
+
+        def current_target():
+            if getattr(self.window, "_close_in_progress", False) or not page._can_mutate():
+                return None
+            configured_root = self.window._cfg.get("evejs_root", "")
+            if not isinstance(configured_root, str) or not configured_root.strip():
+                return None
+            try:
+                configured = Path(configured_root).resolve(strict=True)
+                displayed = Path(page._evejs_root).resolve(strict=True)
+                expected = Path(preview.root).resolve(strict=True)
+            except (OSError, TypeError, ValueError):
+                return None
+            if (configured != displayed or configured != expected
+                    or page._inventory.registry_repair_preview != preview
+                    or self._import_runtime_signature() != signature):
+                return None
+            return configured
+
+        root = current_target()
+        if root is None:
+            QMessageBox.warning(self.window, "Repair Mod Ownership",
+                                "The selected folder, runtime or repair preview changed. Nothing was changed; refresh Mods.")
+            return
+        names = [folder[:96] for folder, _fingerprint in preview.package_fingerprints]
+        folders = "\n".join(names[:6])
+        if len(names) > 6:
+            folders += "\n" + format_ui_phrase("Additional folders: {count}", count=len(names) - 6)
+        message = format_ui_phrase(
+            "Repair duplicate mod records?\n\nFolders: {folders}\n\nVerified redundant records: {count}\n\n"
+            "Keep the matching owner, current mod order and enabled states. An exact backup is kept. "
+            "Mod files, settings and saved data are not changed.",
+            folders=folders, count=len(preview.removed_record_ids),
+        )
+        # A modal runs a nested event loop. Reserve this operation before
+        # entering it so automatic inventory refreshes cannot steal the slot.
+        review_token = object()
+        self.window._mod_operation_request = review_token
+        accepted = False
+        try:
+            answer = QMessageBox.question(self.window, "Repair Mod Ownership", message,
+                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                                          QMessageBox.StandardButton.Cancel)
+            accepted = answer == QMessageBox.StandardButton.Yes
+            target_is_current = (
+                current_target() == root and not page._lifecycle_busy and self._token is None
+                and not active_mutations(self.window, exclude=("mod_operation",))
+                and self.window._mod_operation_request is review_token
+                and self._guided_import_pending is None
+            )
+        finally:
+            if self.window._mod_operation_request is review_token:
+                self.window._mod_operation_request = None
+            if self._refresh_pending:
+                self._refresh_timer.start(0)
+        if not accepted:
+            return
+        if not target_is_current:
+            QMessageBox.warning(self.window, "Repair Mod Ownership",
+                                "The selected folder, runtime or repair preview changed. Nothing was changed; refresh Mods.")
+            return
+
+        def completed(result):
+            self._refresh_pending = True
+            if current_target() != root:
+                return
+            if result.success:
+                QMessageBox.information(self.window, "Mod Ownership Repaired",
+                                        format_ui_phrase("Duplicate ownership records were repaired.\n\nBackup: {path}", path=str(result.value)))
+            else:
+                QMessageBox.warning(self.window, "Repair Mod Ownership", result.error)
+
+        self.run(lambda: LocalModPackages(root).repair_registry(preview), completed)
 
     def sort_by_dependencies(self):
         from src.core.mod_sorting import preview_mod_sort

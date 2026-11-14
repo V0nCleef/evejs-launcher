@@ -40,6 +40,13 @@ class LocalModPackageError(ModManagerError):
     """An import, ownership check or reversible transaction could not complete."""
 
 
+class LocalModRegistryConflict(LocalModPackageError):
+    """Installed folder ownership is ambiguous; ordinary readers stay strict."""
+
+    def __init__(self) -> None:
+        super().__init__("More than one record claims the same installed folder.")
+
+
 @dataclass(frozen=True)
 class PackageLimits:
     max_files: int = 20_000
@@ -90,6 +97,16 @@ class RegistryRelocationPreview:
     current_root: str
     registry_sha256: str
     record_count: int
+
+
+@dataclass(frozen=True)
+class RegistryRepairPreview:
+    root: str
+    registry_sha256: str
+    removed_record_ids: tuple[str, ...]
+    retained_record_ids: tuple[str, ...]
+    duplicate_folder_count: int
+    package_fingerprints: tuple[tuple[str, str], ...]
 
 
 @dataclass(frozen=True)
@@ -281,7 +298,8 @@ class LocalModPackages:
             raise LocalModPackageError("The path escapes the selected EveJS root.") from exc
         return path
 
-    def _read_registry(self, *, allow_foreign_root: bool) -> tuple[dict, bool, bytes | None]:
+    def _read_registry(self, *, allow_foreign_root: bool,
+                       allow_duplicate_folders: bool = False) -> tuple[dict, bool, bytes | None]:
         path = self._path(REGISTRY_DIRECTORY / "registry.json")
         if not path.exists():
             return ({"schemaVersion": REGISTRY_VERSION, "root": str(self.root), "order": [], "records": {}}, True, None)
@@ -292,6 +310,12 @@ class LocalModPackages:
         if len(content) > 8 * 1024 ** 2:
             raise LocalModPackageError("The local mod registry is too large.")
         value = _json(content)
+        owns_root = self._validate_registry(value, allow_foreign_root=allow_foreign_root,
+                                            allow_duplicate_folders=allow_duplicate_folders)
+        return value, owns_root, content
+
+    def _validate_registry(self, value: dict, *, allow_foreign_root: bool = False,
+                           allow_duplicate_folders: bool = False) -> bool:
         if (set(value) != {"schemaVersion", "root", "order", "records"}
                 or type(value["schemaVersion"]) is not int or value["schemaVersion"] != REGISTRY_VERSION
                 or not isinstance(value["root"], str) or not value["root"]
@@ -307,11 +331,11 @@ class LocalModPackages:
         for key, row in value["records"].items():
             record = self._record(key, row)
             if record.status == "installed":
-                identity = record.relative_path.casefold()
-                if identity in installed:
-                    raise LocalModPackageError("More than one record claims the same installed folder.")
+                identity = _relative(record.relative_path).as_posix().casefold()
+                if identity in installed and not allow_duplicate_folders:
+                    raise LocalModRegistryConflict()
                 installed.add(identity)
-        return value, owns_root, content
+        return owns_root
 
     def _load(self) -> dict:
         """Load registry metadata only when it belongs to this exact root."""
@@ -360,6 +384,8 @@ class LocalModPackages:
 
     def _save(self, registry: dict, *, expected_content: bytes | None = None,
               expected_absent: bool = False) -> None:
+        # Validate before creating a directory or publishing any new bytes.
+        self._validate_registry(registry)
         path = self._path(REGISTRY_DIRECTORY / "registry.json")
         path.parent.mkdir(parents=True, exist_ok=True)
         self._path(REGISTRY_DIRECTORY / "registry.json")
@@ -381,9 +407,11 @@ class LocalModPackages:
         finally:
             temporary.unlink(missing_ok=True)
 
-    @staticmethod
-    def _put(registry: dict, record: LocalModRecord) -> None:
-        registry["records"][record.record_id] = dict(vars(record))
+    def _put(self, registry: dict, record: LocalModRecord) -> None:
+        row = dict(vars(record))
+        candidate = {**registry, "records": {**registry["records"], record.record_id: row}}
+        self._validate_registry(candidate)
+        registry["records"][record.record_id] = row
 
     def records(self) -> tuple[LocalModRecord, ...]:
         return tuple(self._record(key, row) for key, row in self._load()["records"].items())
@@ -472,12 +500,14 @@ class LocalModPackages:
             record_count=len(registry["records"]),
         )
 
-    def _backup_registry(self, content: bytes) -> Path:
+    def _backup_registry(self, content: bytes, *, purpose: str = "relocation") -> Path:
+        if purpose not in {"relocation", "duplicate-repair"}:
+            raise LocalModPackageError("Unsupported mod registry backup purpose.")
         directory = self._path(REGISTRY_DIRECTORY)
         _ordinary(directory, directory=True)
         for _ in range(8):
             suffix = uuid.uuid4().hex
-            backup = self._path(REGISTRY_DIRECTORY / f"registry.before-relocation-{suffix}.json")
+            backup = self._path(REGISTRY_DIRECTORY / f"registry.before-{purpose}-{suffix}.json")
             temporary = self._path(REGISTRY_DIRECTORY / f".registry-backup-{suffix}.tmp")
             created_temporary = False
             try:
@@ -494,12 +524,22 @@ class LocalModPackages:
                 continue
             except OSError as exc:
                 raise LocalModPackageError(
-                    "Could not create an atomic backup of the copied mod registry; it was not registered."
+                    "Could not create an atomic backup of the mod registry; it was not changed."
                 ) from exc
             finally:
                 if created_temporary:
                     temporary.unlink(missing_ok=True)
         raise LocalModPackageError("Could not allocate a unique backup path; the copied registry was not registered.")
+
+    def registry_repair_preview(self) -> RegistryRepairPreview:
+        """Read-only review of proven redundant ownership; never guesses by age."""
+        from .mod_registry_repair import registry_repair_preview
+        return registry_repair_preview(self)
+
+    def repair_registry(self, preview: RegistryRepairPreview) -> Path:
+        """Apply a reviewed, backed-up repair under the existing root lease."""
+        from .mod_registry_repair import repair_registry
+        return repair_registry(self, preview)
 
     def relocate_registry(self, expected_sha256: str) -> Path:
         """Register a reviewed copied registry to this root, retaining its exact prior bytes."""
@@ -687,14 +727,22 @@ class LocalModPackages:
                     continue
                 if entry.name.casefold() == folder_name.casefold():
                     raise LocalModPackageError("A mod folder with this name already exists; nothing was replaced.")
-        if allow_duplicate_id:
-            return
+        destination = (PurePosixPath("mods") / folder_name).as_posix().casefold()
+        excluded = exclude.relative_to(self.root).as_posix().casefold() if exclude is not None else None
         for key, row in self._load()["records"].items():
             record = self._record(key, row)
-            if record.status != "installed" or (exclude is not None and self.root / record.relative_path == exclude):
+            installed_folder = _relative(record.relative_path).as_posix().casefold()
+            if record.status != "installed" or installed_folder == excluded:
                 continue
-            if record.mod_id.casefold() == mod_id.casefold():
+            if installed_folder == destination:
+                raise LocalModPackageError(
+                    "This mod folder is still registered, even though its files are missing. "
+                    "Restore the registered folder or choose a different folder name."
+                )
+            if not allow_duplicate_id and record.mod_id.casefold() == mod_id.casefold():
                 raise LocalModPackageError("Another installed package already uses this identity.")
+        if allow_duplicate_id:
+            return
         for mod in scan_mods(self.root):
             if exclude is not None and mod.path == exclude:
                 continue
@@ -704,7 +752,7 @@ class LocalModPackages:
     def _existing(self, mod: Mod, registry: dict) -> LocalModRecord | None:
         self.mod_key(mod)
         return next((self._record(key, row) for key, row in registry["records"].items()
-                     if row["relative_path"].casefold() == mod.path.relative_to(self.root).as_posix().casefold()
+                     if _relative(row["relative_path"]).as_posix().casefold() == mod.path.relative_to(self.root).as_posix().casefold()
                      and row["status"] == "installed"), None)
 
     def _standalone_mod(self, mod: Mod, registry: dict) -> LocalModRecord | None:

@@ -1,3 +1,66 @@
+# Launcher 1.0.83 validation
+
+Validated on Windows x64 against published 1.0.82. The final complete suite ran
+all 216 test files in fresh processes with private application and temporary
+state: **4,189 passed, zero failed, 7 unchanged platform skips**. All test source
+hashes match this release. The 49 new ownership controls and one added entry-point
+case exercise the reported regression, prevention, refusal and recovery paths.
+Foundation smoke, the separate bundled-image check, Python compilation,
+dependency checks and version agreement also passed.
+
+## Ownership prevention and recovery
+
+A real public-package import reproduced duplicate installed-folder claims when
+the old folder had been moved aside. The importer and restore path now check
+registry folder claims independently of public display IDs; distinct folders
+may still share a public ID. Both in-memory record insertion and the atomic
+save boundary reject invalid or duplicate ownership before persisting it.
+
+Recovery is explicit and metadata-only. It verifies current package identity,
+configured state and complete folder fingerprint, keeps an existing matching
+owner, and first publishes an exact original-byte backup. Package files, settings,
+saved data, mod order and unrelated records are preserved. Missing or changed
+packages, conflicting identities/states, cleanup/archive information and pending
+transactions or updates block automatic repair. Copied registries do not gain
+ownership of another root. A deleted-registry fixture also verifies idempotent
+registration of remaining packages without changing their files or enabled state;
+this cannot reconstruct deleted recovery history.
+
+Controls cover canonical path aliases, import and restore collisions, equivalent
+records, stale review and package bytes, backup and atomic write failure,
+changes during backup, existing lifecycle locks, and registry/inventory/runtime
+freeze recovery. The real Qt coordinator tests cancellation, Connect-only,
+installation/backend/preview changes, a retained confirmation reservation and
+automatic update checks. The new controls and confirmation copy have reviewed
+translations in all eight supported languages.
+
+## Packaged and native application checks
+
+All seven modes of the exact release executable pass: ownership, roster, normal,
+immediate, profiles, updater and wizard. The ownership mode exercises the real
+MainWindow, visible repair framing, confirmation, worker, exact backup, preserved
+package files and recovered ownership display in a private offscreen fixture.
+Every mode exits zero, retires its widgets and leaves no running QThreads.
+The native desktop checks recorded alongside the release use a private world,
+application profile and test process. They do not use the maintainer's launcher
+configuration, client profiles, mods or saves.
+
+All 201 application modules plus main, 169 public data files and 67 dependency
+binaries match reviewed source and approved build roots. The complete onedir
+archive is verified for CRC, layout, version and every-file hash. The attached
+source archive is checked against all 718 files at the release commit. Publishing
+requires a fresh download, matching GitHub digests, matching tag/main commit and
+successful public updater discovery; upload alone is not verification.
+
+No new real-Docker stack or retail EVE-client run is claimed. The defect occurs
+at launcher ownership validation before container recreation. Core, Docker freeze
+and UI coverage use disposable files and controlled runtime targets. No live EVE
+installation, settings, mods, saves, clients or services are changed by validation.
+
+## Published baseline evidence
+
+The following records remain historical evidence for previous releases.
+
 # Launcher 1.0.82 validation
 
 This release selectively adopts Tokeiito's PR #4 at upstream commit

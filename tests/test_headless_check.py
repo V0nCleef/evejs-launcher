@@ -50,7 +50,7 @@ def test_prepare_uses_unique_state_and_does_not_replace_existing_config(tmp_path
         sys.excepthook = saved_hook
 
 
-@pytest.mark.parametrize('mode', ['immediate', 'normal', 'profiles', 'updater', 'wizard'])
+@pytest.mark.parametrize('mode', ['immediate', 'normal', 'profiles', 'updater', 'wizard', 'ownership'])
 def test_real_entry_point_closes_in_isolated_offscreen_process(tmp_path, mode):
     root = Path(__file__).resolve().parents[1]
     state = tmp_path / mode
@@ -75,3 +75,9 @@ def test_real_entry_point_closes_in_isolated_offscreen_process(tmp_path, mode):
     if mode == 'wizard':
         assert report['wizardConstructed']
         assert report['wizardRetired']
+    if mode == 'ownership':
+        assert report['conflictingActionsBlocked']
+        assert report['registryRepairedAfterConfirmation']
+        assert report['registryBackupMatchesOriginal']
+        assert report['packageFilesPreserved']
+        assert report['ownershipBannerCleared']

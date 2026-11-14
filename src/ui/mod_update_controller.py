@@ -6,6 +6,7 @@ import time
 from PyQt6.QtCore import QObject, QTimer
 from PyQt6.QtWidgets import QDialog
 from src.i18n import translate_ui_phrase as tr
+from src.core.application_operations import active_mutations
 from src.core.mod_update_source import check_update
 from src.core.mod_evejs_compatibility import installed_evejs_version
 from src.core.mod_updates import install_release, pending_updates, recover_update
@@ -61,7 +62,10 @@ class ModUpdateController(QObject):
 
     def check(self, *, manual=False):
         host, page = self.host, self.host._page
-        if host._token is not None or not page or not page._evejs_root:
+        if (host._token is not None or not page or not page._evejs_root
+                or active_mutations(host.window)
+                or getattr(host, '_guided_import_pending', None) is not None
+                or getattr(host.window, '_close_in_progress', False)):
             return
         mods = [mod for mod in page.mods() if mod.valid and mod.api_descriptor and mod.api_descriptor.updates]
         # Descriptor contains author dictionaries, so use an immutable repr key.

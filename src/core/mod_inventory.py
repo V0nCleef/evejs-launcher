@@ -6,7 +6,8 @@ from pathlib import Path
 
 from .dlss5 import discover_dlss5_client_mod
 from .local_mod_packages import (
-    LocalModPackages, LocalModRecord, RegistryRelocationPreview,
+    LocalModPackages, LocalModRecord, LocalModRegistryConflict,
+    RegistryRelocationPreview, RegistryRepairPreview,
 )
 from .mod_activation_state import ModActivationState, read_mod_activation_state
 from .mod_api_runtime import public_package_owns_legacy_folder
@@ -43,6 +44,9 @@ class ModInventory:
     # Informational only: never blocks Apply. Names registered mods whose
     # folder vanished while the same mod id appeared in another folder.
     moved_mod_notice: str = ""
+    registry_conflict: bool = False
+    registry_repair_preview: RegistryRepairPreview | None = None
+    registry_repair_error: str = ""
 
 
 def load_mod_inventory(root: str) -> ModInventory:
@@ -66,7 +70,11 @@ def load_mod_inventory(root: str) -> ModInventory:
     update_pending = False
     relocation_preview = None
     relocation_preview_error = ""
+    relocation_conflict = False
     moved_mod_notice = ""
+    registry_conflict = False
+    registry_repair_preview = None
+    registry_repair_error = ""
     try:
         from .mod_updates import pending_updates
         update_pending = bool(pending_updates(root))
@@ -82,6 +90,7 @@ def load_mod_inventory(root: str) -> ModInventory:
             # copies all continue through the normal strict ownership path.
             relocation_preview = None
             relocation_preview_error = str(exc)
+            relocation_conflict = isinstance(exc, LocalModRegistryConflict)
         if relocation_preview is None:
             mods = packages.sort_mods(mods)
         else:
@@ -113,6 +122,12 @@ def load_mod_inventory(root: str) -> ModInventory:
         details = [message for message in (registry_error, failure) if message]
         registry_error = "\n".join(dict.fromkeys(details))
         relocation_preview = None
+        if isinstance(exc, LocalModRegistryConflict) or relocation_conflict:
+            registry_conflict = True
+            try:
+                registry_repair_preview = packages.registry_repair_preview()
+            except (OSError, ValueError, RuntimeError) as repair_exc:
+                registry_repair_error = str(repair_exc)
     for mod in mods:
         key = folder_key(mod)
         if mod.activation_kind is ActivationKind.CLIENT_PACKAGE:
@@ -129,7 +144,9 @@ def load_mod_inventory(root: str) -> ModInventory:
             errors[key] = str(exc)
     return ModInventory(root, tuple(mods), state, state_error, management, errors,
                         local, frozenset(removable), quarantined, registry_error, pending, update_pending,
-                        evejs_version, relocation_preview, moved_mod_notice=moved_mod_notice)
+                        evejs_version, relocation_preview, moved_mod_notice=moved_mod_notice,
+                        registry_conflict=registry_conflict, registry_repair_preview=registry_repair_preview,
+                        registry_repair_error=registry_repair_error)
 
 
 def _moved_mod_notice(root: str, records, mods) -> str:
