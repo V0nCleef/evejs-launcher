@@ -53,6 +53,7 @@ def _minimal_window_config() -> dict:
             "client_path": "",
             "update_auto_check": False,
             "update_check_interval_hours": 0,
+            "audio_master_muted": True,  # Lifecycle fixtures do not test playback.
         }
     )
     return cfg
@@ -2500,6 +2501,7 @@ def test_show_event_defers_service_monitor_start_until_the_gui_event_loop(
         assert starts == ["start"]
     finally:
         window.hide()
+        window._shutdown_audio_for_close()
         window.deleteLater()
         qapp.processEvents()
 
@@ -2527,6 +2529,7 @@ def test_close_before_deferred_start_cancels_service_monitor_creation(
     finally:
         if window.isVisible():
             window.hide()
+        window._shutdown_audio_for_close()
         window.deleteLater()
         qapp.processEvents()
 

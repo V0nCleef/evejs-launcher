@@ -91,6 +91,8 @@ from .core.groups import (
     TargetGroupState,
     find_relink_candidates,
     load_target_groups,
+    installation_group_identity,
+    load_installation_groups,
     prune_deleted_characters,
     resolve_group,
     save_target_groups,
@@ -726,6 +728,7 @@ class MainWindow(QMainWindow):
         self._data_selection: RuntimeDataSelection | None = None
         self._data_load_error: str = ""
         self._group_target_identity: str | None = None
+        self._group_storage_identity: str | None = None
         self._group_state = TargetGroupState()
         self._launch_queue_group_name: str | None = None
         self._launch_queue_skipped_running = 0
@@ -890,6 +893,9 @@ class MainWindow(QMainWindow):
         self._update_status_bar()
         self._refresh_characters()
         self._retranslate_application_ui()
+
+        from .ui.tray_controller import LauncherTray
+        self._tray_controller = LauncherTray(self)
 
     # ── UI Construction ────────────────────────────────────────────────
 
@@ -1072,7 +1078,8 @@ class MainWindow(QMainWindow):
         if kind == "page" and target is not None:
             self._switch_page_now(target)
         elif kind == "close":
-            QTimer.singleShot(0, self.close)
+            tray = self.__dict__.get("_tray_controller")
+            QTimer.singleShot(0, tray.request_quit if tray is not None else self.close)
 
     def _on_page_changed(self, index: int) -> None:
         """Side effects when the active page changes."""
@@ -6617,7 +6624,7 @@ class MainWindow(QMainWindow):
                 )
                 if updated_groups != current_groups:
                     try:
-                        save_target_groups(target_identity, updated_groups)
+                        save_target_groups(self.__dict__.get("_group_storage_identity") or target_identity, updated_groups)
                         self._group_state = updated_groups
                     except (OSError, GroupValidationError):
                         group_cleanup_error = True
@@ -7352,14 +7359,19 @@ class MainWindow(QMainWindow):
         # Some attribution tests intentionally construct an uninitialized Qt
         # wrapper; consult the instance dictionary so SIP does not route a
         # missing attribute through QObject's uninitialized fallback.
-        if target_identity == self.__dict__.get("_group_target_identity"):
+        selection = self.__dict__.get("_data_selection")
+        storage_identity = installation_group_identity(self.__dict__.get("_cfg", {}), selection) if selection is not None else target_identity
+        if (target_identity == self.__dict__.get("_group_target_identity")
+                and storage_identity == self.__dict__.get("_group_storage_identity")):
             return
         try:
-            state = load_target_groups(target_identity)
+            state = (load_target_groups(target_identity) if storage_identity == target_identity
+                     else load_installation_groups(storage_identity, target_identity))
         except (OSError, GroupValidationError):
             log.exception("Unable to load character groups")
             state = TargetGroupState()
         self._group_target_identity = target_identity
+        self._group_storage_identity = storage_identity
         self._group_state = state
 
     def _on_group_selection_changed(self, group_id: object = None) -> None:
@@ -7373,7 +7385,7 @@ class MainWindow(QMainWindow):
         if updated == current:
             return
         try:
-            save_target_groups(target_identity, updated)
+            save_target_groups(self.__dict__.get("_group_storage_identity") or target_identity, updated)
         except (OSError, GroupValidationError) as exc:
             log.exception("Unable to save selected character group")
             QMessageBox.warning(
@@ -7416,7 +7428,7 @@ class MainWindow(QMainWindow):
         )
         try:
             relink_candidates = find_relink_candidates(
-                target_identity,
+                self.__dict__.get("_group_storage_identity") or target_identity,
                 self._accounts,
             )
         except (OSError, GroupValidationError):
@@ -7446,7 +7458,7 @@ class MainWindow(QMainWindow):
             return
         updated = dialog.group_state
         try:
-            save_target_groups(target_identity, updated)
+            save_target_groups(self.__dict__.get("_group_storage_identity") or target_identity, updated)
         except (OSError, GroupValidationError) as exc:
             log.exception("Unable to save character groups")
             QMessageBox.critical(
@@ -7848,6 +7860,7 @@ class MainWindow(QMainWindow):
             self._clear_data_load_error()
             self._accounts = []
             self._group_target_identity = None
+            self._group_storage_identity = None
             self._group_state = TargetGroupState()
             self._refresh_character_views()
             return
@@ -9938,6 +9951,7 @@ class MainWindow(QMainWindow):
             self._clear_data_load_error()
             self._accounts = []
             self._group_target_identity = None
+            self._group_storage_identity = None
             self._group_state = TargetGroupState()
             portrait_invalidate = getattr(
                 getattr(self, "_characters_page", None),
@@ -10030,6 +10044,19 @@ class MainWindow(QMainWindow):
             portraits(invalidate=True)
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        tray = self.__dict__.get("_tray_controller")
+        if tray is not None and tray.intercept_close(event):
+            return
+        close_launcher = getattr(self, "_close_launcher", None)
+        if close_launcher is None:
+            MainWindow._close_launcher(self, event)
+        else:
+            close_launcher(event)
+        if tray is not None:
+            tray.close_finished(event)
+
+    def _close_launcher(self, event) -> None:
+        """The existing guarded real shutdown, independent of X-to-tray."""
         if self._wait_for_client_exit(event):
             return
         if getattr(self, "_mod_operation_request", None) is not None:

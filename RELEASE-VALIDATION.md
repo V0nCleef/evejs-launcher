@@ -1,3 +1,52 @@
+# Launcher 1.0.85 validation
+
+This release adds the remembered close-button preference, tray
+controls and character-group persistence. The user accepted the Windows tray
+and group management in an isolated mirror of their settings, mods and data.
+The accepted executable is preserved byte-for-byte; release promotion changes
+only bundled VERSION, CHANGELOG.md and README.md. All application bytecode
+continues to match the reviewed source.
+
+The final complete regression passed 4,295 tests with zero failures and seven
+existing skips across 219 test files, each in a fresh process with private
+application/temp state. This was a single clean full run after the version
+and bundled release-data changes, superseding the earlier file-access failure.
+All seven packaged offscreen modes passed: ownership, roster, normal,
+immediate, profiles, updater and wizard. Compilation, Foundation, images,
+dependency/version agreement, privacy and onedir integrity are separate gates.
+
+Tray coverage includes the real first-close dialog, cancellation, persisted
+Settings, draft preservation, hide/restore, explicit/deferred exit, missing tray,
+active operations, update handoff, stale menu targets and all eight languages.
+Native ownership, external services and Docker connect-only restrictions remain
+in force. Automated routing/state checks are distinct from the user's Windows
+tray acceptance; a claim that every manual substep was observed is not made.
+
+Group checks cover Native root upgrades, Docker image/preload changes against
+the same persistent store, distinct volumes/binds/profiles/backends, retained
+legacy entries, authoritative empty scopes, reviewed recovery, exact member IDs
+and actual MainWindow save paths. Runtime mutation identities remain unchanged.
+Already-detached groups are offered for explicit reviewed recovery, never merged
+automatically by matching names or IDs across unrelated worlds.
+
+The seven frozen checks and complete module/data inventory passed after
+metadata promotion. A fresh complete packaged Native update using synthetic
+services and a fake client preserved their PIDs and all 606 health requests
+through download, replacement and restart. An invalid download retained the
+old launcher and revoked its checkpoint, with 45 uninterrupted health requests.
+Current group/Docker cases use structured
+fixtures and production methods. No new real-Docker lifecycle, retail gameplay
+or long soak is claimed for this change. Earlier accepted 1.0.84 runtime-update
+evidence is historical and is not presented as newly performed testing.
+
+The user's live launcher, configuration, groups, mods and client files remain
+untouched. Validation uses private roots and does not interrupt live services.
+The authorized publication uses this exact validated Windows package. Hosted
+downloads, remote source/tag/main and updater discovery are independently
+verified as part of publication, with private receipts retained separately.
+
+## Previous release evidence
+
 # Launcher 1.0.84 validation
 
 Validated on Windows x64 against published 1.0.83. The reviewed implementation

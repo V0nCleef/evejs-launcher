@@ -38,6 +38,7 @@ DEFAULT_CONFIG = {
     "stagger_delay_sec": 3,
     "auto_login_enabled": True,
     "theme": "dark",
+    "close_behavior": "ask",  # First X chooses exit or tray; launcher-wide.
     "language": "en",
     "hidden_characters": [],  # list of character names hidden from UI
     "hide_test_characters": True,  # auto-hide characters belonging to test/GM accounts
@@ -115,6 +116,9 @@ def normalize_shared_settings_source(value: object) -> dict:
 def _migrate(stored: dict) -> dict:
     """Migrate known settings while retaining unrelated persisted preferences."""
     migrated = dict(stored)
+    migrated["close_behavior"] = (
+        migrated.get("close_behavior") if migrated.get("close_behavior") in ("ask", "exit", "tray") else "ask"
+    )
     migrated["client_settings_mode"] = (
         "shared" if migrated.get("client_settings_mode") == "shared" else "separate"
     )

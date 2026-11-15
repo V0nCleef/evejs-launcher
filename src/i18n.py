@@ -14,6 +14,7 @@ from .translations_installations import SOURCE_PHRASES as INSTALLATION_SOURCE_PH
 from .translations_mod_sorting import SOURCE_PHRASES as MOD_SORTING_SOURCE_PHRASES, UI_PHRASES_BY_LANGUAGE as MOD_SORTING_UI_PHRASES
 from .translations_mod_ownership import SOURCE_PHRASES as MOD_OWNERSHIP_SOURCE_PHRASES, UI_PHRASES_BY_LANGUAGE as MOD_OWNERSHIP_UI_PHRASES
 from .translations_runtime_update import SOURCE_PHRASES as RUNTIME_UPDATE_SOURCE_PHRASES, UI_PHRASES_BY_LANGUAGE as RUNTIME_UPDATE_UI_PHRASES
+from .translations_tray import SOURCE_PHRASES as TRAY_SOURCE_PHRASES, UI_PHRASES_BY_LANGUAGE as TRAY_UI_PHRASES
 from .translations_character_setup import (
     SOURCE_PHRASES as CHARACTER_SETUP_SOURCE_PHRASES,
     UI_PHRASES_BY_LANGUAGE as CHARACTER_SETUP_UI_PHRASES,
@@ -60,12 +61,15 @@ for _language, _catalog in MOD_OWNERSHIP_UI_PHRASES.items():
     UI_PHRASES_BY_LANGUAGE[_language] = {**UI_PHRASES_BY_LANGUAGE[_language], **_catalog}
 for _language, _catalog in RUNTIME_UPDATE_UI_PHRASES.items():
     UI_PHRASES_BY_LANGUAGE[_language] = {**UI_PHRASES_BY_LANGUAGE[_language], **_catalog}
+for _language, _catalog in TRAY_UI_PHRASES.items():
+    UI_PHRASES_BY_LANGUAGE[_language] = {**UI_PHRASES_BY_LANGUAGE[_language], **_catalog}
 
 # A few feature catalogs register phrases after the exact-key legacy catalogs
 # load, so those older catalogs can keep enforcing their own source parity.
 SOURCE_PHRASES = tuple(
     sorted(set(_CANONICAL_SOURCE_PHRASES) | set(AUTO_LOGIN_SOURCE_PHRASES) | set(STARTUP_SCRIPT_SOURCE_PHRASES) | set(SHARED_SETTINGS_SOURCE_PHRASES) | set(CHARACTER_SETUP_SOURCE_PHRASES) | set(MOD_APPROVAL_SOURCE_PHRASES) | set(INSTALLATION_SOURCE_PHRASES) | set(MOD_SORTING_SOURCE_PHRASES) | set(MOD_OWNERSHIP_SOURCE_PHRASES) | set(RUNTIME_UPDATE_SOURCE_PHRASES))
 )
+SOURCE_PHRASES = tuple(sorted(set(SOURCE_PHRASES) | set(TRAY_SOURCE_PHRASES)))
 SOURCE_PHRASE_SET = frozenset(SOURCE_PHRASES)
 
 

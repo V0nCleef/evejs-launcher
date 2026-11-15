@@ -2,6 +2,11 @@
 
 ## Changelog
 
+## v1.0.85 - 2026-11-15
+- Choose once whether the close button exits the launcher or minimizes it to the system tray; change the preference in Settings.
+- Restore or exit from the tray menu and manage the selected installation's stack, server and market through the existing guarded controls.
+- Keep character groups associated with the selected installation across Native EveJS folder updates and Docker image/mod configuration changes. Preserve original group entries and reviewed recovery for older installations.
+
 ## v1.0.84 - 2026-11-14
 - Allow launcher updates while stable Native servers, Docker containers, externally managed services and EVE clients remain running. Active service, character and mod operations still finish first.
 - Restore verified Native process ownership and client tracking after the launcher restarts. Preserve console output and resume Native mod-status evidence across the update gap.

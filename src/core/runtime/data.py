@@ -79,6 +79,7 @@ class RuntimeDataSelection:
     target_identity: str
     settings_identity: str | None = None
     monitor_generation: int | None = None
+    group_identity: str | None = None
 
 
 @dataclass(frozen=True)
@@ -402,6 +403,7 @@ def select_docker_data_source(
         identity,
         settings_identity,
         monitor_generation,
+        config.game_store_identity,
     )
 
 

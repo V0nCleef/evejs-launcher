@@ -191,6 +191,12 @@ class SettingsPage(QWidget):
         general_form = QFormLayout(general_box)
         general_form.setSpacing(10)
 
+        self.close_behavior_combo = ScrollSafeComboBox()
+        self.close_behavior_combo.addItem("Ask on first close", "ask")
+        self.close_behavior_combo.addItem("Exit launcher", "exit")
+        self.close_behavior_combo.addItem("Minimize to system tray", "tray")
+        general_form.addRow("Close button:", self.close_behavior_combo)
+
         self.evejs_root_edit = QLineEdit()
         self.evejs_root_edit.editingFinished.connect(self._on_evejs_root_edited)
         general_form.addRow("EveJS Root:", self._with_browse(self.evejs_root_edit, directory=True))
@@ -1293,6 +1299,7 @@ class SettingsPage(QWidget):
     def load_settings(self) -> None:
         """Populate the form from the persisted config."""
         cfg = config.load()
+        self._set_combo_data(self.close_behavior_combo, cfg.get("close_behavior", "ask"))
 
         self.evejs_root_edit.setText(str(cfg.get("evejs_root", "")))
         raw_client_path = str(cfg.get("client_path", ""))
@@ -1501,6 +1508,7 @@ class SettingsPage(QWidget):
     def _form_state(self) -> dict[str, object]:
         """Project only persisted form values for dirty-state comparison."""
         return {
+            "close_behavior": self.close_behavior_combo.currentData() or "ask",
             "evejs_root": self.evejs_root_edit.text().strip(),
             "client_path": self.client_path_edit.text().strip(),
             "client_settings_mode": self.client_settings_mode_combo.currentData() or "separate",
@@ -1534,6 +1542,13 @@ class SettingsPage(QWidget):
             "docker_readiness_timeout_sec": self.docker_readiness_spin.value(),
             "docker_keep_running_on_exit": self.docker_keep_running_toggle.isChecked(),
         }
+
+    def set_close_behavior(self, behavior: str) -> None:
+        """Apply a first-close choice without erasing other unsaved form edits."""
+        self._set_combo_data(self.close_behavior_combo, behavior)
+        if self._settings_baseline is not None:
+            self._settings_baseline["close_behavior"] = behavior
+        self._sync_save_enabled()
 
     def _collect_settings(self) -> dict:
         """Return a complete settings draft without writing configuration."""

@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from enum import Enum
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 from types import MappingProxyType
@@ -195,6 +196,8 @@ class ComposeConfig:
     # attestation. The environment value itself may contain private material.
     server_node_options_sha256: str | None = None
     resource_keys: tuple[tuple[str, str], ...] = ()
+    # Stable character-group scope: actual game-store storage, not image/config.
+    game_store_identity: str | None = None
 
 
 @dataclass(frozen=True)
@@ -730,7 +733,32 @@ def parse_compose_config(payload: Mapping[str, Any]) -> ComposeConfig:
         effective_config_digest,
         server_node_options_sha256,
         _resource_keys(payload, services, publications),
+        _game_store_identity(payload, services),
     )
+
+
+def _game_store_identity(payload, services):
+    server = services.get("server")
+    if server is None:
+        return None
+    try:
+        mount = resolve_mount(server.mounts, "/var/lib/evejs/gameStore")
+    except ValueError:
+        return None
+    if mount is None:
+        return None
+    suffix = str(PurePosixPath("/var/lib/evejs/gameStore").relative_to(mount.target))
+    if mount.type == "volume":
+        volumes = payload.get("volumes") or {}
+        declaration = volumes.get(mount.source, {}) if isinstance(volumes, Mapping) else {}
+        name = declaration.get("name") if isinstance(declaration, Mapping) else None
+        source = str(name or (str(payload.get("name") or "") + "_" + mount.source))
+    elif mount.type == "bind":
+        source = os.path.normcase(str(Path(mount.source).resolve(strict=False)))
+    else:
+        return None
+    material = json.dumps([mount.type, source, suffix], separators=(",", ":")).encode()
+    return "docker-game-store:" + hashlib.sha256(material).hexdigest()
 
 
 def _resource_keys(payload, services, publications):

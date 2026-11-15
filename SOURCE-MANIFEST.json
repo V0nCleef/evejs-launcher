@@ -1,16 +1,13 @@
 {
   "schemaVersion": 2,
   "project": "EveJS Launcher",
-  "version": "1.0.84",
+  "version": "1.0.85",
   "releaseStatus": "released",
-  "baseline": "32ad7d7f075c1f304531fc60f5e30e08f0f5efb8",
-  "scope": "Preserve running services and client tracking across launcher updates",
-  "reporters": [
-    "Tokeiito"
-  ],
+  "baseline": "664f53ee74ea5a5cea614f4096433dd0289144e1",
+  "scope": "Remembered close preference, system tray controls and persistent installation character groups",
   "binary": {
     "file": "EveJS-Launcher-V1.exe",
-    "sha256": "580d730e4abfe58f7ae8305d291efb9aa3c244573994fc78b60c2bf91374c25b"
+    "sha256": "425afbfd89af4c60e963d17fa8ee0e87442132badabab9451cb8eb9637f762ea"
   },
   "manifestSelfExcluded": true,
   "files": {
@@ -24,11 +21,11 @@
     },
     "BUILDING.md": {
       "bytes": 2643,
-      "sha256": "afb095a86c1230fdc5189d50a0f95caaf63bbeac6b5c8afd6acb15d95660138f"
+      "sha256": "a11a9d391a2333ae697c5fe1ae19850cda328fe7922c10bfa17ca7885c896065"
     },
     "CHANGELOG.md": {
-      "bytes": 92927,
-      "sha256": "84dec3427b51f36330eedaafb9554fe502a0fdc8544e3488822f6c863b6475ff"
+      "bytes": 93450,
+      "sha256": "7802099e07bd9b6ca8fa26a6fbb2b72984a45237ce4acc660c42226cf5dae5dd"
     },
     "EveJS-Launcher/config.json": {
       "bytes": 578,
@@ -39,12 +36,12 @@
       "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
     },
     "README.md": {
-      "bytes": 21750,
-      "sha256": "fc80f41ed3f973a6d9c0d6a4da254596d7825a36acca2b759e30c7c426ca3ebc"
+      "bytes": 22493,
+      "sha256": "4848d595190425df1d27345c39e503e8cab02b1bb23c6ee8b97afb2127612687"
     },
     "RELEASE-VALIDATION.md": {
-      "bytes": 18971,
-      "sha256": "0266a4259ff7f44a62a3dc81acef497328f99a8b0e5aa67d1ce3dc9ed10f48c3"
+      "bytes": 21996,
+      "sha256": "8746c43c783efe2d4019bbf458dbeb83b1f6cdc2dcc948a5b85481a945751e35"
     },
     "THIRD_PARTY_NOTICES.md": {
       "bytes": 4907,
@@ -52,7 +49,7 @@
     },
     "VERSION": {
       "bytes": 8,
-      "sha256": "1496a32a4eec51fcc1a700f250b9104960a1fa22f44db4a588a952f60ca0c1b9"
+      "sha256": "dd6cfdc226e2b89ffb701c2371f8cd68e699ff79e5c6a9930c700211face77cd"
     },
     "assets/audio/music/celestial_transit.wav": {
       "bytes": 9676844,
@@ -1055,8 +1052,8 @@
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "src/app.py": {
-      "bytes": 445267,
-      "sha256": "6c104e32b7acf7d22a8a84c0bbc184d36cfc716aa799ff34be01b030e1e3f406"
+      "bytes": 446899,
+      "sha256": "ee19004b16c3ea09dc6e9147a96386450b6d48e3135e97fdbc701afc011ba081"
     },
     "src/audio/__init__.py": {
       "bytes": 506,
@@ -1087,8 +1084,8 @@
       "sha256": "f4fd6486cd153b079c09b3f5d0b60093c7a27be5a4aa955651fa1b0087279870"
     },
     "src/config.py": {
-      "bytes": 19666,
-      "sha256": "a751b81d0d0635e62f3cf14a34895bcd38fdbe388144e27009a4d053a4dc457f"
+      "bytes": 19895,
+      "sha256": "e5b1f56a1d2fee541458ecaf0124d372a653581ed230f50f138988fd3efa7b22"
     },
     "src/constants.py": {
       "bytes": 5209,
@@ -1099,8 +1096,8 @@
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "src/core/application_operations.py": {
-      "bytes": 3071,
-      "sha256": "6dd5ea15711db945c38cf650eb3d37075a458729fcbc08cc39b80977d8dce0e1"
+      "bytes": 3127,
+      "sha256": "129dfa84dd032249f4724335114224bc561e8d46ceec1309ed84ddaf17967c6e"
     },
     "src/core/character_creation.py": {
       "bytes": 16451,
@@ -1167,8 +1164,8 @@
       "sha256": "11d09be2b17f67df53530732c04fa205df4be6d3d1ef93007c7efc81049058ee"
     },
     "src/core/groups.py": {
-      "bytes": 18694,
-      "sha256": "764198371e069f873add39535afe39933b423198b250e7df19dc129d03022b41"
+      "bytes": 20744,
+      "sha256": "2706c4bdda1aeaae5d53d0c5ea50018088ee369818e0f97b68abb623b5e08114"
     },
     "src/core/headless_check.py": {
       "bytes": 18769,
@@ -1379,8 +1376,8 @@
       "sha256": "3ce13944e2ed0c852b6c388bf074db220457094e21124448751a82a2e41b3ed6"
     },
     "src/core/runtime/data.py": {
-      "bytes": 38696,
-      "sha256": "d71770942967d4487bdb2d9ec2921af1078f98e48cf7a26573f3d7a8e80280dd"
+      "bytes": 38772,
+      "sha256": "00ff2e282971194675a51394d4c2f8fc57a24daa244c5203a7df966fed5a98c6"
     },
     "src/core/runtime/data_diagnostics.py": {
       "bytes": 2437,
@@ -1399,8 +1396,8 @@
       "sha256": "16832b1907d34e9fd134a2af64f625de5d861ae79d6e66eb0e1fa8b9b1a949a6"
     },
     "src/core/runtime/docker_compose.py": {
-      "bytes": 36010,
-      "sha256": "8266cdd59b99f4e43e076fd22ef43556ba025cedc1becdd38936d0aca15b1075"
+      "bytes": 37212,
+      "sha256": "ef530064b166608a62723d613dae767aceddb62407acc6cb9a5e330d3966371b"
     },
     "src/core/runtime/docker_controller.py": {
       "bytes": 28008,
@@ -1499,8 +1496,8 @@
       "sha256": "dfc2978fcadf408a5495110b93b2523ce29ba3a091509f7641bc91fbbefaeb4a"
     },
     "src/i18n.py": {
-      "bytes": 53414,
-      "sha256": "b348aa5de7c3a6a4348c07b07d37743de8982c6b271a60d8f707ddd0603a20b2"
+      "bytes": 53751,
+      "sha256": "6e88f563411f56df547506dc8936fd73bcfe91323ab5cdc3ae4fe67c0baf131d"
     },
     "src/pages/__init__.py": {
       "bytes": 0,
@@ -1519,8 +1516,8 @@
       "sha256": "f82b963e7609c0bbe37584e47d39b6698589bddab225132d3d90d4a2eba36b62"
     },
     "src/pages/settings_page.py": {
-      "bytes": 83373,
-      "sha256": "697bb7f413460020b376ea06b51ace288d7240d63aed442174c8990c43491f52"
+      "bytes": 84242,
+      "sha256": "efe370483819c30e5b3f45e18b3f8cf9c3907c5d72088e2736cb318a8557a235"
     },
     "src/pages/startup_scripts_panel.py": {
       "bytes": 13997,
@@ -1610,6 +1607,10 @@
       "bytes": 11228,
       "sha256": "f786a210eaf27f07dbfce0d701b2ed935129108dcb7a785171cc51d42b3e358c"
     },
+    "src/translations_tray.py": {
+      "bytes": 8937,
+      "sha256": "a6ea59dae563c81f997c2a6d2a0461a43cfb1fa95cb89bd88a7fc28fcf4f2e2b"
+    },
     "src/translations_zh_cn.py": {
       "bytes": 6784,
       "sha256": "60b4f1feb3f49703a20074adb34346908954525246f2908dc7c38959f39c50a3"
@@ -1653,6 +1654,10 @@
     "src/ui/scene_timeline.py": {
       "bytes": 5745,
       "sha256": "7d0851a7c19c3f92a46faf4c984f9d6e54d841b0163a437686936625b077c8d0"
+    },
+    "src/ui/tray_controller.py": {
+      "bytes": 12054,
+      "sha256": "2e0df19d05ce1f94e61b0f26b2ebdf2e420031ea1602eaaf1dd6fe43af0814a4"
     },
     "src/ui/update_coordinator.py": {
       "bytes": 9772,
@@ -2043,8 +2048,8 @@
       "sha256": "7465b9720a8b139538736711eed87d40a24d27b2ef27376546315b24023a4a3e"
     },
     "tests/test_app_server_start_paths.py": {
-      "bytes": 83054,
-      "sha256": "bf8579f90ebab56bf5daff4a85497d4aff9ca57c2c4baec15a6a93d79f960b88"
+      "bytes": 83224,
+      "sha256": "8cc5d543125cab951884a49e1b1b859dc6a7ebbcdd057a628c17cd9d26594396"
     },
     "tests/test_app_tools_page.py": {
       "bytes": 14207,
@@ -2333,6 +2338,10 @@
     "tests/test_game_store_maintenance.py": {
       "bytes": 22261,
       "sha256": "2c435eef1c09661f9ddebb0e88825ec3ba8489cf2197858f542767367942e3f5"
+    },
+    "tests/test_group_upgrade_persistence.py": {
+      "bytes": 8425,
+      "sha256": "b4365b360544ac9a40c6257fe1f7481554000c87cbed3020883eed354207c351"
     },
     "tests/test_guided_mod_import.py": {
       "bytes": 11514,
@@ -2735,8 +2744,8 @@
       "sha256": "4e82fc0af2e12218b99cd3e70395fd2818101219f87a215cb443bf2c1ac55bd8"
     },
     "tests/test_settings_unsaved.py": {
-      "bytes": 15499,
-      "sha256": "1045522ba4f1423f3bfe6bb08c5399c78798e4305078360e52fb076ba16e9d57"
+      "bytes": 15897,
+      "sha256": "76189f3dbbeea432e2283a6928d63931454ad9dde664c1fbc338325be48494d2"
     },
     "tests/test_settings_wheel.py": {
       "bytes": 4600,
@@ -2822,6 +2831,10 @@
       "bytes": 5010,
       "sha256": "b601326ebc2a56fbdca7c2f504e1cb19a78a5874d54f7db9f4e9c4089ca31da2"
     },
+    "tests/test_tray_controller.py": {
+      "bytes": 15755,
+      "sha256": "d9942646a59ec8df0be896da50d1ef4c7f99082263a61510310906cf2997e611"
+    },
     "tests/test_ui_translation.py": {
       "bytes": 6971,
       "sha256": "95b06f0716aad11efd9e9fdf5d4722f93ba5d9e75d9135c5a9ff3c01412648c3"
@@ -2904,18 +2917,21 @@
     }
   },
   "validation": {
-    "testFiles": 217,
+    "testFiles": 219,
+    "manualCandidateAccepted": true,
+    "manualAcceptanceScope": "Windows tray and group management in private mirror",
+    "realDockerLifecycleForThisChangeClaimed": false,
+    "retailGameplayOrSoakClaimed": false,
+    "liveInstallationOperationsPerformed": false,
     "totals": {
-      "passed": 4235,
+      "passed": 4295,
       "failed": 0,
       "skipped": 7
     },
     "frozenOffscreenRuns": 7,
-    "acceptedPackagedUpdateCycles": 5,
-    "realDisposableDockerUsed": true,
-    "retailGameplayOrSoakClaimed": false,
-    "manualCandidateAccepted": true,
-    "releaseDesktopControlUsed": false,
-    "liveInstallationOperationsPerformed": false
+    "singleFullRunCompletelyGreen": true,
+    "syntheticNativeUpdateHealthRequests": 606,
+    "invalidDownloadHealthRequests": 45,
+    "releaseDesktopControlUsed": false
   }
 }

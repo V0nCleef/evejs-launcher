@@ -1,16 +1,18 @@
 """Versioned character groups for safe one-click multi-launch.
 
-Groups are launcher-owned metadata. They are scoped to the private-safe
-runtime target identity already used by the Native/Docker data layer and
-refer to exact account/character IDs rather than mutable display names.
+Groups are launcher-owned metadata with stable installation/storage scopes.
+Legacy runtime-target entries remain available for migration and reviewed
+recovery. Members use exact account/character IDs, never mutable display names.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+import hashlib
 import json
 import logging
 import os
+import re
 from pathlib import Path
 import tempfile
 from typing import Iterable, Mapping
@@ -258,6 +260,47 @@ def load_target_groups(
     return _parse_target_state(targets.get(target_identity))
 
 
+def installation_group_identity(cfg: Mapping[str, object], selection: object) -> str:
+    """Scope metadata to a logical installation, not its changing build inputs.
+
+    Native profiles deliberately survive server-root edits. Docker additionally
+    binds groups to the actual persistent game store, never to an image or mod
+    override. Legacy consumers without installation metadata keep their key.
+    """
+    runtime = getattr(selection, "target_identity", "")
+    profile = cfg.get("active_installation_profile")
+    backend = cfg.get("runtime_backend", "native")
+    if not isinstance(profile, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", profile):
+        return runtime
+    if backend not in ("native", "docker_compose"):
+        return runtime
+    storage = getattr(selection, "group_identity", None) if backend == "docker_compose" else "native"
+    if not isinstance(storage, str) or not storage:
+        return runtime
+    digest = hashlib.sha256(json.dumps([profile, backend, storage], separators=(",", ":")).encode()).hexdigest()
+    return "installation-groups:" + digest
+
+
+def load_installation_groups(storage_identity: str, runtime_identity: str, *, path: Path | None = None) -> TargetGroupState:
+    """Copy an exact legacy binding once; never guess from matching names/IDs.
+
+    Existing empty scopes are authoritative too. Retain the original entry so
+    rollback and explicit recovery of pre-upgrade roots remain possible.
+    """
+    document = _load_document(_groups_path(path))
+    targets = document.get("targets")
+    if not isinstance(targets, Mapping):
+        return TargetGroupState()
+    if storage_identity in targets:
+        return _parse_target_state(targets[storage_identity])
+    if runtime_identity not in targets:
+        return TargetGroupState()
+    state = _parse_target_state(targets[runtime_identity])
+    if storage_identity != runtime_identity:
+        save_target_groups(storage_identity, state, path=path)
+    return state
+
+
 def find_relink_candidates(
     target_identity: str,
     accounts: Iterable[Account],
@@ -292,7 +335,7 @@ def find_relink_candidates(
             for group in state.groups
             for member in group.members
         }
-        if members and members.issubset(available):
+        if members and members.issubset(available) and state not in candidates:
             candidates.append(state)
     candidates.sort(
         key=lambda state: (

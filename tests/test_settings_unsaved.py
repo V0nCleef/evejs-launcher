@@ -206,6 +206,9 @@ def settings_window(
             "evejs_root": str(tmp_path),
             "update_auto_check": False,
             "update_check_interval_hours": 0,
+            # Draft/navigation tests do not own native audio playback. Keep
+            # multimedia callbacks out of Qt object-tree teardown/capture.
+            "audio_master_muted": True,
         }
     )
     persisted = deepcopy(cfg)
@@ -238,6 +241,7 @@ def settings_window(
     if update_timer is not None:
         update_timer.stop()
     window._cancel_data_loads()
+    window._shutdown_audio_for_close()
     # A full MainWindow also owns asynchronous Mods work. Drain that retained
     # operation before deleting the QObject tree, just as closeEvent does.
     window._close_in_progress = True
@@ -411,6 +415,9 @@ def test_close_save_waits_for_success_before_reentering_close(
         accepted = False
         ignored = False
 
+        def isAccepted(self) -> bool:
+            return self.accepted
+
         def accept(self) -> None:
             self.accepted = True
 
@@ -439,7 +446,7 @@ def test_close_save_waits_for_success_before_reentering_close(
     assert event.accepted is False
     assert settings_window._settings_page.is_dirty() is False
     assert config.load()["proxy_url"] == "http://127.0.0.1:26099"
-    assert scheduled == [settings_window.close]
+    assert scheduled == [settings_window._tray_controller.request_quit]
 
 
 def test_close_cancel_with_dirty_settings_has_no_shutdown_side_effects(
@@ -449,6 +456,9 @@ def test_close_cancel_with_dirty_settings_has_no_shutdown_side_effects(
     class CloseEvent:
         accepted = False
         ignored = False
+
+        def isAccepted(self) -> bool:
+            return self.accepted
 
         def accept(self) -> None:
             self.accepted = True
