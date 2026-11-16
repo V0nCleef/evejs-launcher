@@ -63,10 +63,15 @@ def test_calendar_metadata_and_manifest_preserve_exact_release_identity(tmp_path
     assert installed_evejs_version(root) is None
 
 
-def test_calendar_layout_uses_current_logs_certs_and_config_validator(tmp_path):
+@pytest.mark.parametrize("version", ["261018.1", "261108.1", "261115.2"])
+def test_calendar_layout_uses_current_logs_certs_and_config_validator(tmp_path, version):
     root = _calendar_install(tmp_path)
+    for relative in ("package.json", "config/version.json", "server/package.json",
+                     "server/src/config/manager.js"):
+        path = root / relative
+        path.write_text(path.read_text().replace("261018.1", version), encoding="utf-8")
     layout = inspect_evejs_runtime(root)
-    assert layout.evejs_version == "261018.1"
+    assert layout.evejs_version == version
     assert layout.metadata_status == "valid"
     assert layout.log_directory == root / "_local/logs"
     assert layout.node_report_directories == (root / "_local/logs/node-reports", root / "server/logs/node-reports")
@@ -134,15 +139,46 @@ def test_explicit_data_root_moves_certificate_location_with_logs(tmp_path):
     assert layout.log_directory == root / "server/operator-data/logs"
 
 
-def test_calendar_native_config_validation_is_read_only(tmp_path):
+@pytest.mark.parametrize("version", ["261018.1", "261108.1", "261115.2"])
+def test_calendar_native_config_validation_is_read_only(tmp_path, version):
     _require_node()
     root = tmp_path / "native-validator"
     _write_fixture_install(root)
     for path in (root / "server/package.json", root / "server/src/config/manager.js"):
-        path.write_text(path.read_text().replace("0.12.9", "261018.1"), encoding="utf-8")
+        path.write_text(path.read_text().replace("0.12.9", version), encoding="utf-8")
     before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
     result = native_config_preflight.validate_native_server_config(root)
     assert result.supported and result.valid is True
+    assert {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
+
+
+def test_261115_invalid_config_is_reported_without_writing_or_bootstrapping(tmp_path, monkeypatch):
+    _require_node()
+    root = tmp_path / "updated-install"
+    config_file = _write_fixture_install(root)
+    config_file.write_text('{"network":{"serverPort":"invalid-port"}}\n', encoding="utf-8")
+    for relative in ("server/package.json", "server/src/config/manager.js"):
+        path = root / relative
+        text = path.read_text().replace("0.12.9", "261115.2")
+        if path.name == "manager.js":
+            condition = 'raw.presence && Object.prototype.hasOwnProperty.call(raw.presence, "localChatAuthorityEnabled")'
+            assert condition in text
+            text = text.replace(
+                condition,
+                "raw.network && !Number.isInteger(raw.network.serverPort)",
+            ).replace(
+                'server.json contains unknown setting "presence.localChatAuthorityEnabled".',
+                "server.json network.serverPort: expected an integer.",
+            )
+        path.write_text(text, encoding="utf-8")
+    marker = tmp_path / "must-not-bootstrap"
+    monkeypatch.setenv("BOOTSTRAP_MARKER", str(marker))
+    before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    with pytest.raises(native_config_preflight.NativeConfigPreflightError) as caught:
+        native_config_preflight.validate_native_server_config(root)
+    assert caught.value.valid is False
+    assert "network.serverPort" in caught.value.message
+    assert not marker.exists()
     assert {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
 
 
