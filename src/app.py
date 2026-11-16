@@ -280,6 +280,7 @@ from .workers.docker_monitor import DockerMonitor, DockerObservation
 from .workers.docker_preflight_worker import DockerPreflightWorker
 from .workers.docker_tool_worker import DockerToolWorker
 from .workers.mod_management_worker import ManagedModRemovalWorker
+from .workers.lifecycle import move_worker_to_thread
 from .workers.dlss5_uninstall_worker import DLSS5UninstallWorker
 from .workers.db_worker import (
     AccountLoadResult,
@@ -3188,14 +3189,9 @@ class MainWindow(QMainWindow):
             else DockerPreflightWorker(request)
         )
         thread = QThread(self)
-        worker.moveToThread(thread)
+        move_worker_to_thread(worker, thread)
         thread.started.connect(worker.run)
         worker.completed.connect(self._on_docker_preflight_completed)
-        worker.cleanup.connect(
-            worker.deleteLater,
-            Qt.ConnectionType.DirectConnection,
-        )
-        worker.destroyed.connect(thread.quit)
         thread.finished.connect(
             self._on_docker_preflight_thread_finished,
             Qt.ConnectionType.QueuedConnection,
@@ -3252,20 +3248,10 @@ class MainWindow(QMainWindow):
         if update_active(self):
             raise RuntimeError("Wait for the launcher update to finish before changing the runtime.")
         thread = QThread(self)
-        worker.moveToThread(thread)
+        move_worker_to_thread(worker, thread)
         thread.started.connect(worker.run)  # type: ignore[attr-defined]
         worker.completed.connect(completed_handler)  # type: ignore[attr-defined]
-        if isinstance(
-            worker,
-            (DockerLifecycleWorker, DockerToolWorker, DockerCharacterCreationWorker,
-             DLSS5UninstallWorker),
-        ):
-            # QObject deletion must be delivered in its owning worker thread.
-            # Deletion then tears down the dedicated event loop; connecting
-            # thread.finished -> worker.deleteLater is too late and leaks.
-            worker.cleanup.connect(worker.deleteLater, Qt.ConnectionType.DirectConnection)
-            worker.destroyed.connect(thread.quit)
-        else:
+        if not hasattr(worker, "cleanup"):
             worker.completed.connect(thread.quit)  # type: ignore[attr-defined]
             thread.finished.connect(worker.deleteLater)
         thread.finished.connect(
@@ -5490,12 +5476,10 @@ class MainWindow(QMainWindow):
             else OverviewPatchWorker(action, client_path)
         )
         thread = QThread(self)
-        worker.moveToThread(thread)
+        move_worker_to_thread(worker, thread)
         thread.started.connect(worker.run)
         worker.completed.connect(self._on_overview_patch_completed)
         worker.failed.connect(self._on_overview_patch_failed)
-        worker.cleanup.connect(worker.deleteLater, Qt.ConnectionType.DirectConnection)
-        worker.destroyed.connect(thread.quit)
         thread.finished.connect(
             self._on_overview_patch_thread_finished,
             Qt.ConnectionType.QueuedConnection,
@@ -6145,12 +6129,10 @@ class MainWindow(QMainWindow):
             else CharacterCreationWorker(request)
         )
         thread = QThread(self)
-        worker.moveToThread(thread)
+        move_worker_to_thread(worker, thread)
         thread.started.connect(worker.run)
         worker.completed.connect(self._on_character_creation_completed)
         worker.failed.connect(self._on_character_creation_failed)
-        worker.cleanup.connect(worker.deleteLater, Qt.ConnectionType.DirectConnection)
-        worker.destroyed.connect(thread.quit)
         thread.finished.connect(
             self._on_character_creation_thread_finished,
             Qt.ConnectionType.QueuedConnection,
@@ -6546,12 +6528,10 @@ class MainWindow(QMainWindow):
             else CharacterDeletionWorker(request)
         )
         thread = QThread(self)
-        worker.moveToThread(thread)
+        move_worker_to_thread(worker, thread)
         thread.started.connect(worker.run)
         worker.completed.connect(self._on_character_deletion_completed)
         worker.failed.connect(self._on_character_deletion_failed)
-        worker.cleanup.connect(worker.deleteLater, Qt.ConnectionType.DirectConnection)
-        worker.destroyed.connect(thread.quit)
         thread.finished.connect(
             self._on_character_deletion_thread_finished,
             Qt.ConnectionType.QueuedConnection,
@@ -6973,15 +6953,10 @@ class MainWindow(QMainWindow):
             else ClientLaunchWorker(request, _perform_client_launch)
         )
         thread = QThread(self)
-        worker.moveToThread(thread)
+        move_worker_to_thread(worker, thread)
         thread.started.connect(worker.run)
         worker.completed.connect(self._on_client_launch_completed)
         worker.failed.connect(self._on_client_launch_failed)
-        worker.cleanup.connect(
-            worker.deleteLater,
-            Qt.ConnectionType.DirectConnection,
-        )
-        worker.destroyed.connect(thread.quit)
         thread.finished.connect(
             self._on_client_launch_thread_finished,
             Qt.ConnectionType.QueuedConnection,
@@ -7995,15 +7970,10 @@ class MainWindow(QMainWindow):
 
         thread = QThread(self)
         worker = AccountLoader(selection_factory, token=token)
-        worker.moveToThread(thread)
+        move_worker_to_thread(worker, thread)
         thread.started.connect(worker.run)
         worker.completed.connect(self._on_account_load_completed)
         worker.failed.connect(self._on_account_load_failed)
-        worker.cleanup.connect(
-            worker.deleteLater,
-            Qt.ConnectionType.DirectConnection,
-        )
-        worker.destroyed.connect(thread.quit)
         thread.finished.connect(
             self._on_account_thread_finished,
             Qt.ConnectionType.QueuedConnection,
@@ -8140,15 +8110,10 @@ class MainWindow(QMainWindow):
             token.character_id,
             token=token,
         )
-        worker.moveToThread(thread)
+        move_worker_to_thread(worker, thread)
         thread.started.connect(worker.run)
         worker.completed.connect(self._on_character_detail_completed)
         worker.failed.connect(self._on_character_detail_failed)
-        worker.cleanup.connect(
-            worker.deleteLater,
-            Qt.ConnectionType.DirectConnection,
-        )
-        worker.destroyed.connect(thread.quit)
         thread.finished.connect(
             self._on_detail_thread_finished,
             Qt.ConnectionType.QueuedConnection,
@@ -9326,12 +9291,10 @@ class MainWindow(QMainWindow):
         thread = QThread(self)
         token = object()
         worker = DockerLogWorker(self._docker_project_target_factory(), service=service, token=token)
-        worker.moveToThread(thread)
+        move_worker_to_thread(worker, thread, finish_signal="terminal")
         thread.started.connect(worker.run)
         worker.line.connect(self._on_docker_log_line)
         worker.diagnostic.connect(self._on_docker_log_diagnostic)
-        worker.terminal.connect(worker.deleteLater, Qt.ConnectionType.DirectConnection)
-        worker.terminal.connect(thread.quit, Qt.ConnectionType.DirectConnection)
         thread.finished.connect(self._on_docker_log_thread_finished)
         self._docker_log_thread = thread
         self._docker_log_worker = worker

@@ -45,6 +45,19 @@ class SignalButton(QPushButton):
         self._busy = bool(busy)
         self._motion_gate.sync()
 
+    @property
+    def accent_color(self):
+        return self._accent.name()
+
+    def set_accent(self, color):
+        """Keep the hover and pending-operation light in the current state colour."""
+        color = QColor(color)
+        if not color.isValid():
+            raise ValueError("Signal button accent must be a valid colour")
+        if color != self._accent:
+            self._accent = color
+            self.update()
+
     def _set_scan(self, value):
         self._scan = float(value)
         self.update()

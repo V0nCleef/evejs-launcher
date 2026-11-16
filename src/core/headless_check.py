@@ -232,7 +232,9 @@ class HeadlessCheck:
     def _check_roster(self):
         from PyQt6.QtCore import QTimer
         window = self.window
-        if window._account_thread is not None:
+        if (window._account_thread is not None
+                or window._pending_account_request is not None
+                or window._account_start_scheduled):
             QTimer.singleShot(10, self._check_roster)
             return
         page = window._characters_page

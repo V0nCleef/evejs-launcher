@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.constants import COLORS
+from src.constants import COLORS, STATUS_COLORS
 from src.core.groups import TargetGroupState
 from src.core.service_status import (
     DockerControlPolicy,
@@ -682,7 +682,7 @@ class HomePage(QWidget):
         actions.setContentsMargins(0, 0, 0, 0)
         actions.setSpacing(10)
 
-        self.btn_start_servers = SignalButton("Start Stack", accent=COLORS["gold"])
+        self.btn_start_servers = SignalButton("Start Stack", accent=COLORS["teal"])
         self.btn_start_servers.setProperty("class", "secondary")
         self.btn_start_servers.setProperty("deepRole", "launchStack")
         self.btn_start_servers.setFixedHeight(70)
@@ -1005,6 +1005,7 @@ class HomePage(QWidget):
 
     def _update_stack_action(self, snapshot: RuntimeSnapshot) -> None:
         """Describe the next safe stack operation from the shared snapshot."""
+        self._update_stack_colour(snapshot)
         self.btn_start_servers.set_busy(any(
             state in {ServiceState.STARTING, ServiceState.STOPPING}
             for state in (snapshot.game, snapshot.market)
@@ -1096,6 +1097,33 @@ class HomePage(QWidget):
         set_translatable_text(self.btn_start_servers, label)
         self.btn_start_servers.setEnabled(enabled)
         set_translatable_tooltip(self.btn_start_servers, tooltip)
+
+    def _update_stack_colour(self, snapshot: RuntimeSnapshot) -> None:
+        states = {snapshot.game, snapshot.market}
+        if ServiceState.FAILED in states:
+            state = "failed"
+        elif (snapshot.backend is RuntimeBackend.DOCKER_COMPOSE
+              and getattr(snapshot, "docker_mod_error", None)):
+            state = "degraded"
+        elif ServiceState.STARTING in states:
+            state = "starting"
+        elif ServiceState.STOPPING in states:
+            state = "stopping"
+        elif ServiceState.UNKNOWN in states:
+            state = "unknown"
+        elif states == {ServiceState.ONLINE}:
+            state = "online"
+        elif ServiceState.ONLINE in states:
+            state = "degraded"
+        else:
+            state = "ready"
+        button = self.btn_start_servers
+        button.set_accent(STATUS_COLORS[state])
+        if button.property("statusState") != state:
+            button.setProperty("statusState", state)
+            button.style().unpolish(button)
+            button.style().polish(button)
+            button.update()
 
     def retranslate_ui(self) -> None:
         """Refresh dynamic controls that contain retained group/user values."""

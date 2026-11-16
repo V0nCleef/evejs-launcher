@@ -303,6 +303,52 @@ def test_stack_action_emits_start_or_stop_for_the_rendered_operation(
     assert emitted == ["start", "stop"]
 
 
+@pytest.mark.parametrize("docker", [False, True])
+def test_stack_button_colours_clear_after_lifecycle_and_restart(qapp, docker):
+    from PyQt6.QtGui import QPalette
+    from src import theme
+    from src.core.service_status import DockerControlPolicy, RuntimeBackend
+
+    original_style = qapp.styleSheet()
+    qapp.setStyleSheet(theme.build_qss(theme.load_fonts()))
+    page = HomePage()
+    backend = RuntimeBackend.DOCKER_COMPOSE if docker else RuntimeBackend.NATIVE
+    phases = [
+        (ServiceState.OFFLINE, ServiceState.OFFLINE, "ready", "teal"),
+        (ServiceState.STARTING, ServiceState.OFFLINE, "starting", "gold"),
+        (ServiceState.ONLINE, ServiceState.OFFLINE, "degraded", "gold"),
+        (ServiceState.ONLINE, ServiceState.ONLINE, "online", "green"),
+        (ServiceState.STOPPING, ServiceState.ONLINE, "stopping", "gold"),
+        (ServiceState.OFFLINE, ServiceState.OFFLINE, "ready", "teal"),
+        (ServiceState.FAILED, ServiceState.OFFLINE, "failed", "red"),
+        (ServiceState.ONLINE, ServiceState.ONLINE, "online", "green"),
+    ]
+    try:
+        for game, market, state, colour in phases:
+            page.apply_runtime_snapshot(RuntimeSnapshot(
+                game, market, 0, game_owned=True, market_owned=True, backend=backend,
+                docker_control_policy=DockerControlPolicy.MANAGED,
+            ))
+            button = page.btn_start_servers
+            button.ensurePolished()
+            assert button.property("statusState") == state
+            assert button.accent_color == COLORS[colour].lower()
+            assert button.palette().color(QPalette.ColorRole.ButtonText).name() == COLORS[colour].lower()
+            assert button._busy is (state in {"starting", "stopping"})
+
+        # A reopened launcher derives its first colour from the live snapshot,
+        # without retaining a previous process's pending state.
+        reopened = HomePage()
+        reopened.apply_runtime_snapshot(RuntimeSnapshot(
+            ServiceState.ONLINE, ServiceState.ONLINE, 0, game_owned=False, market_owned=False,
+            backend=backend, docker_control_policy=DockerControlPolicy.MANAGED,
+        ))
+        assert reopened.btn_start_servers.property("statusState") == "online"
+        assert reopened.btn_start_servers.accent_color == COLORS["green"].lower()
+    finally:
+        qapp.setStyleSheet(original_style)
+
+
 def test_stack_action_does_not_promise_shutdown_of_external_services(
     qapp: QApplication,
 ) -> None:

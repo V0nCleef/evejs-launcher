@@ -465,17 +465,17 @@ QLabel[class="overallSignal"][state="degraded"] {{ color: {s['warning']}; }}
 QLabel[class="overallSignal"][state="failed"] {{ color: {s['danger']}; }}
 
 QPushButton[class="secondary"][deepRole="launchStack"] {{
-    background-color: rgba(105, 72, 0, 224);
-    border: 1px solid {s['warning']};
+    background-color: rgba(4, 21, 32, 208);
+    border: 1px solid {s['accent']};
     border-radius: 4px;
-    color: #FFE39A;
+    color: {s['accent']};
     font-family: '{header}';
     font-size: 17px;
     font-weight: 600;
 }}
 QPushButton[class="secondary"][deepRole="launchStack"]:hover {{
-    background-color: {s['warning']};
-    border-color: #FFE39A;
+    background-color: {s['accent']};
+    border-color: #7EEFFF;
     color: {s['background']};
 }}
 QPushButton[deepRole="launchGroup"] {{
@@ -497,6 +497,25 @@ QPushButton[deepRole="launchGroup"]:disabled {{
     background-color: rgba(11, 21, 31, 205);
     border-color: {s['border']};
     color: {s['text_muted']};
+}}
+
+QPushButton[class="secondary"][deepRole="launchStack"][statusState="starting"],
+QPushButton[class="secondary"][deepRole="launchStack"][statusState="stopping"],
+QPushButton[class="secondary"][deepRole="launchStack"][statusState="degraded"],
+QPushButton[class="secondary"][deepRole="launchStack"][statusState="unknown"] {{
+    background-color: rgba(105, 72, 0, 224);
+    border-color: {s['warning']};
+    color: {s['warning']};
+}}
+QPushButton[class="secondary"][deepRole="launchStack"][statusState="online"] {{
+    background-color: rgba(10, 44, 27, 224);
+    border-color: {s['success']};
+    color: {s['success']};
+}}
+QPushButton[class="secondary"][deepRole="launchStack"][statusState="failed"] {{
+    background-color: rgba(61, 24, 26, 224);
+    border-color: {s['danger']};
+    color: {s['danger']};
 }}
 
 QLabel[class="pageEyebrow"] {{

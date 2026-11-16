@@ -84,6 +84,7 @@ from src.widgets.ui_translation import (
     set_translatable_tooltip,
 )
 from src.workers.portrait_worker import PortraitLoadFailure, PortraitLoader
+from src.workers.lifecycle import move_worker_to_thread
 
 GRID_COLUMNS = 6
 GRID_SPACING = 10
@@ -781,15 +782,10 @@ class CharactersPage(QWidget):
 
         thread = QThread(self)
         loader = PortraitLoader(target, request)
-        loader.moveToThread(thread)
+        move_worker_to_thread(loader, thread)
         thread.started.connect(loader.run)
         loader.loaded.connect(self._on_portrait_loaded)
         loader.failed.connect(self._on_portrait_failed)
-        loader.cleanup.connect(
-            loader.deleteLater,
-            Qt.ConnectionType.DirectConnection,
-        )
-        loader.destroyed.connect(thread.quit)
         thread.finished.connect(
             self._on_portrait_thread_finished,
             Qt.ConnectionType.QueuedConnection,

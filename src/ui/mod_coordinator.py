@@ -30,6 +30,7 @@ from src.widgets.localized_dialogs import LocalizedInputDialog as QInputDialog, 
 from src.widgets.mod_settings_dialog import ModSettingsDialog
 from src.widgets.mod_conflict_dialog import ModConflictDialog
 from src.workers.mod_operation_worker import ModOperationResult, ModOperationWorker
+from src.workers.lifecycle import move_worker_to_thread
 
 log = logging.getLogger(__name__)
 
@@ -142,11 +143,9 @@ class ModCoordinator(QObject):
         token = object()
         thread = QThread(self)
         worker = ModOperationWorker(token, operation)
-        worker.moveToThread(thread)
+        move_worker_to_thread(worker, thread)
         thread.started.connect(worker.run)
         worker.completed.connect(self._completed)
-        worker.cleanup.connect(worker.deleteLater, Qt.ConnectionType.DirectConnection)
-        worker.destroyed.connect(thread.quit)
         thread.finished.connect(self._thread_finished, Qt.ConnectionType.QueuedConnection)
         self._token, self._thread, self._worker = token, thread, worker
         self._callback, self._result, self._finished = callback, None, False

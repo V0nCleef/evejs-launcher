@@ -47,6 +47,7 @@ from .core.runtime.docker_setup import (
     docker_draft_fingerprint,
 )
 from .workers.docker_preflight_worker import DockerPreflightWorker
+from .workers.lifecycle import move_worker_to_thread
 from .widgets.deep_signal_background import DeepSignalBackground
 from .widgets.glass_panel import GlassPanel
 from .widgets.localized_dialogs import LocalizedFileDialog as QFileDialog
@@ -1157,14 +1158,9 @@ class SetupWizard(QDialog):
             else DockerPreflightWorker(request)
         )
         thread = QThread(self)
-        worker.moveToThread(thread)
+        move_worker_to_thread(worker, thread)
         thread.started.connect(worker.run)
         worker.completed.connect(self._on_docker_preflight_completed)
-        worker.cleanup.connect(
-            worker.deleteLater,
-            Qt.ConnectionType.DirectConnection,
-        )
-        worker.destroyed.connect(thread.quit)
         thread.finished.connect(
             self._on_docker_preflight_thread_finished,
             Qt.ConnectionType.QueuedConnection,
