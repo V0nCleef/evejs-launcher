@@ -845,6 +845,8 @@ class MainWindow(QMainWindow):
 
         self._settings_page.settings_update_check.connect(self._on_manual_update_check)
         self._settings_page.settings_saved.connect(self._on_settings_saved)
+        from .ui.drone_recovery import open_recovery
+        self._settings_page.drone_recovery_requested.connect(lambda: open_recovery(self, Path(PROFILES_ROOT)))
         self._settings_page.voice_preview_requested.connect(
             self._preview_shipboard_voice
         )
@@ -2425,6 +2427,7 @@ class MainWindow(QMainWindow):
             getattr(self, "_lifecycle_thread", None) is not None
             or update_active(self)
             or getattr(self, "_mod_operation_request", None) is not None
+            or getattr(self, "_drone_recovery_request", None) is not None
         )
 
     def _update_allows_mutation(self) -> bool:
@@ -9771,6 +9774,8 @@ class MainWindow(QMainWindow):
     def _settings_save_rejection(self, draft: dict) -> str | None:
         """Reject unsafe Native endpoint changes before Settings writes disk."""
         from .core.application_operations import update_active
+        if getattr(self, "_drone_recovery_request", None) is not None:
+            return "Wait for the active operation to finish before recovering drone groups."
         if update_active(self):
             return "Wait for the launcher update to finish before saving settings."
         proposed = dict(self._cfg)
@@ -10034,6 +10039,9 @@ class MainWindow(QMainWindow):
 
     def _close_launcher(self, event) -> None:
         """The existing guarded real shutdown, independent of X-to-tray."""
+        if getattr(self, "_drone_recovery_request", None) is not None:
+            event.ignore()
+            return
         if self._wait_for_client_exit(event):
             return
         if getattr(self, "_mod_operation_request", None) is not None:

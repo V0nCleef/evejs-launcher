@@ -1,13 +1,20 @@
 {
   "schemaVersion": 2,
   "project": "EveJS Launcher",
-  "version": "1.0.85",
-  "releaseStatus": "released",
-  "baseline": "664f53ee74ea5a5cea614f4096433dd0289144e1",
-  "scope": "Remembered close preference, system tray controls and persistent installation character groups",
+  "version": "1.0.86",
+  "releaseStatus": "validated-for-release",
+  "baseline": "d9f889d89debeb7b1bd224eb380af18757164af8",
+  "scope": "Worker retirement, Stack status colours, EveJS261115.2 Native configuration and generic personal drone-group preservation/recovery",
   "binary": {
     "file": "EveJS-Launcher-V1.exe",
-    "sha256": "425afbfd89af4c60e963d17fa8ee0e87442132badabab9451cb8eb9637f762ea"
+    "sha256": "67c3207dc839e3b6c3999abc63507cdaea8c0059ec765dbb03c5180e1bbe5e71"
+  },
+  "archive": {
+    "bytes": 57239307,
+    "sha256": "f227b85f354d0876394d95944a3112684fbe62aa895bfb410aa9233b06e100a9",
+    "entries": 456,
+    "version": "1.0.86",
+    "zip_integrity": "passed"
   },
   "manifestSelfExcluded": true,
   "files": {
@@ -24,8 +31,8 @@
       "sha256": "a11a9d391a2333ae697c5fe1ae19850cda328fe7922c10bfa17ca7885c896065"
     },
     "CHANGELOG.md": {
-      "bytes": 93450,
-      "sha256": "7802099e07bd9b6ca8fa26a6fbb2b72984a45237ce4acc660c42226cf5dae5dd"
+      "bytes": 94486,
+      "sha256": "bebe24e95e2d150cfeda6ac32594d327ab0dace38a3e13d80c889a6db351e5e8"
     },
     "EveJS-Launcher/config.json": {
       "bytes": 578,
@@ -36,12 +43,12 @@
       "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
     },
     "README.md": {
-      "bytes": 22493,
-      "sha256": "4848d595190425df1d27345c39e503e8cab02b1bb23c6ee8b97afb2127612687"
+      "bytes": 22512,
+      "sha256": "e84b2739b9019594f74ebf62c6b3c16cb680d44b586814639096062f0014399e"
     },
     "RELEASE-VALIDATION.md": {
-      "bytes": 21996,
-      "sha256": "8746c43c783efe2d4019bbf458dbeb83b1f6cdc2dcc948a5b85481a945751e35"
+      "bytes": 24580,
+      "sha256": "0e1c9603a6a14931fd29940b138c74656e9e9fbfb146e48c7ae71e5bcd0b4e86"
     },
     "THIRD_PARTY_NOTICES.md": {
       "bytes": 4907,
@@ -49,7 +56,7 @@
     },
     "VERSION": {
       "bytes": 8,
-      "sha256": "dd6cfdc226e2b89ffb701c2371f8cd68e699ff79e5c6a9930c700211face77cd"
+      "sha256": "6fa88a27c79b822164a0ff78616bc72b2383858003dc7e21b4556594358c5a6d"
     },
     "assets/audio/music/celestial_transit.wav": {
       "bytes": 9676844,
@@ -1052,8 +1059,8 @@
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "src/app.py": {
-      "bytes": 446899,
-      "sha256": "ee19004b16c3ea09dc6e9147a96386450b6d48e3135e97fdbc701afc011ba081"
+      "bytes": 446741,
+      "sha256": "22ae54c54528274b789f1405d5cdd453ec4c966c5dab10d33e6670c9a74a68ea"
     },
     "src/audio/__init__.py": {
       "bytes": 506,
@@ -1096,8 +1103,8 @@
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "src/core/application_operations.py": {
-      "bytes": 3127,
-      "sha256": "129dfa84dd032249f4724335114224bc561e8d46ceec1309ed84ddaf17967c6e"
+      "bytes": 3179,
+      "sha256": "b509e6cbfc4d06eb1a858d965a8bb56b9e9e7cb03bf69fca80d1025c3e1472e0"
     },
     "src/core/character_creation.py": {
       "bytes": 16451,
@@ -1159,17 +1166,29 @@
       "bytes": 6982,
       "sha256": "c7415e26f409b15bce0f49ce0a57ad92b6cb1c9ed99108fedfb7aa7a899e3a18"
     },
+    "src/core/drone_group_recovery.py": {
+      "bytes": 8628,
+      "sha256": "7184006b507e5e26eb4b5168dbd852369d6c0ca08f5316fd228547b0f8543b43"
+    },
+    "src/core/drone_recovery_batch.py": {
+      "bytes": 9932,
+      "sha256": "d809dfce4617e294f1ad4a36785273700855d6b61a1497ddbb3593e06ee3c569"
+    },
+    "src/core/drone_recovery_catalog.py": {
+      "bytes": 11735,
+      "sha256": "2bc9f56d8250ab5479975a428eab1c44e7a0525c32e7d897b800f1fff36d0b11"
+    },
     "src/core/evejs_compatibility.py": {
-      "bytes": 9571,
-      "sha256": "11d09be2b17f67df53530732c04fa205df4be6d3d1ef93007c7efc81049058ee"
+      "bytes": 9583,
+      "sha256": "318396f7d93e3fea817b6fba305957ebdc3fb6afc098d1f63a35f40c1a96740f"
     },
     "src/core/groups.py": {
       "bytes": 20744,
       "sha256": "2706c4bdda1aeaae5d53d0c5ea50018088ee369818e0f97b68abb623b5e08114"
     },
     "src/core/headless_check.py": {
-      "bytes": 18769,
-      "sha256": "dcd7d2b5040e549d4be5d53794d38f1ffad512b35ca180a09a53c385a9777ddc"
+      "bytes": 18885,
+      "sha256": "4513f7d00e5f41221845c6a68d6e7afb8af0173e1a5726b3ccbad878a7bee504"
     },
     "src/core/helpers/create_character.js": {
       "bytes": 4596,
@@ -1324,8 +1343,12 @@
       "sha256": "d0a7b8a331e9d65aa0c953abf2982e086eda1a81bc485f30b6e796e61531d4ad"
     },
     "src/core/native_config_preflight.py": {
-      "bytes": 14963,
-      "sha256": "5f2fd443e7b7b251155fff9b61d298cc128eef769fb2a15aa2e9f0f9dec675b4"
+      "bytes": 14981,
+      "sha256": "2076e8dd502c02da6a40b540b751111ab4f04e6675a04a2707a5613deb1b0846"
+    },
+    "src/core/native_drone_profiles.py": {
+      "bytes": 9068,
+      "sha256": "9ffc17477cf4a235820c1e87ccf546639bcd11b11d3a2269107d529e18abfc2a"
     },
     "src/core/native_maintenance.py": {
       "bytes": 18114,
@@ -1468,16 +1491,16 @@
       "sha256": "26c923789f2e64432981ec357f4843371488eb005cbc5468c2f32fc375933e6d"
     },
     "src/core/shared_drone_settings.py": {
-      "bytes": 9317,
-      "sha256": "4ad9ed55ad6e77b45abe8b90968d91317617897203472309b9d4b633f2ab66ae"
+      "bytes": 9663,
+      "sha256": "904d351d3caaf467000f910605ac15f872d701dc663b25725330af04fdcb332c"
     },
     "src/core/shared_mod_menu.py": {
       "bytes": 8921,
       "sha256": "d35858ec5a6f83dfd3460cd23a4d7683632d2e8301ee6f3fbecb557d94df5762"
     },
     "src/core/shared_settings_profile.py": {
-      "bytes": 22752,
-      "sha256": "4ca0e20e8d435ca70ebdd13fcd6afd4452e8f3674305f8480605e208877616dc"
+      "bytes": 29353,
+      "sha256": "3465be0b8a8917e3e9a8e2725eab42b25cda886137f47af20a1c7a86b1240abc"
     },
     "src/core/startup_scripts.py": {
       "bytes": 10728,
@@ -1496,28 +1519,28 @@
       "sha256": "dfc2978fcadf408a5495110b93b2523ce29ba3a091509f7641bc91fbbefaeb4a"
     },
     "src/i18n.py": {
-      "bytes": 53751,
-      "sha256": "6e88f563411f56df547506dc8936fd73bcfe91323ab5cdc3ae4fe67c0baf131d"
+      "bytes": 54154,
+      "sha256": "56dfb0f9a7e846e367809986740b584aa0fe63a33d5fb20747f28caecc23ae52"
     },
     "src/pages/__init__.py": {
       "bytes": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "src/pages/characters_page.py": {
-      "bytes": 57478,
-      "sha256": "729049df4342d0a8c3485a613847b2be9c0c0e6971f2babee0bc06e940a27df0"
+      "bytes": 57376,
+      "sha256": "a3fc154dbc0ba1d253acfecba65bd31c1210f515d76ae1bd744d97af148b6044"
     },
     "src/pages/home_page.py": {
-      "bytes": 45069,
-      "sha256": "5c3149bdbf9f1f4a511dc315ad284e4ec3257246ec5fb61048039d6ad8ff0b1b"
+      "bytes": 46208,
+      "sha256": "4ce917da3571dc8e6bf51d45dee5c4aa13a190b420c8a0c013ff2d6e84eba3cd"
     },
     "src/pages/mods_page.py": {
       "bytes": 73186,
       "sha256": "f82b963e7609c0bbe37584e47d39b6698589bddab225132d3d90d4a2eba36b62"
     },
     "src/pages/settings_page.py": {
-      "bytes": 84242,
-      "sha256": "efe370483819c30e5b3f45e18b3f8cf9c3907c5d72088e2736cb318a8557a235"
+      "bytes": 84793,
+      "sha256": "afa0fdcea531328560489292e2c31e5f157f64e67df40d6968ea1d24b07be1a4"
     },
     "src/pages/startup_scripts_panel.py": {
       "bytes": 13997,
@@ -1528,8 +1551,8 @@
       "sha256": "97b980ba98b5a452c0813380047aafbf4be41c09ff57dbff9d866f1726c9be88"
     },
     "src/theme.py": {
-      "bytes": 36192,
-      "sha256": "8f85d8df926fc68ce0b198ba5439d5965408804a773588e0b3d7cac393491897"
+      "bytes": 37002,
+      "sha256": "3795709607f9ccf55fffbd4d552b3cf1d2a225e2ac62ed865a17cdd17bc9eb2d"
     },
     "src/translations_auto_login.py": {
       "bytes": 1454,
@@ -1542,6 +1565,10 @@
     "src/translations_character_setup.py": {
       "bytes": 7221,
       "sha256": "8c3e1d43e2c2dcdb3e2578cf63ff256cf0c910b00ae534e88d5497ab5bd1d4d2"
+    },
+    "src/translations_drone_recovery.py": {
+      "bytes": 14077,
+      "sha256": "e45527213a0523e0338a0bf12a3fff83ed12cdb7c7ed9f3588696fd6d5956017"
     },
     "src/translations_eu.py": {
       "bytes": 241883,
@@ -1623,13 +1650,17 @@
       "bytes": 181,
       "sha256": "4b5af70de043588d015145f4da4a7a94bda6ab31f3b40881fa94bd685400590e"
     },
+    "src/ui/drone_recovery.py": {
+      "bytes": 13794,
+      "sha256": "3a9338168e823671d91588d688f39b52e373504b84697e93dc8939b6791bf29a"
+    },
     "src/ui/installation_coordinator.py": {
       "bytes": 10339,
       "sha256": "8ae3610f14f8c120548e8a01196c2badf29510d4d7c492a9b4ce1eab030b72d2"
     },
     "src/ui/mod_coordinator.py": {
-      "bytes": 47667,
-      "sha256": "b2ebc0565156a7d87e83a2d1509ea82f8d22a5bc2790e1ef4cbfa51d681f1c76"
+      "bytes": 48210,
+      "sha256": "2805657c96d467377cfe7eefd98a3a089e2977a854f636200f2c24ffde2a8568"
     },
     "src/ui/mod_start_compatibility.py": {
       "bytes": 12961,
@@ -1808,8 +1839,8 @@
       "sha256": "a44c82efe3ae7c88f20f55c4aa50aa48bbff5a2258de77e8d757032291d94438"
     },
     "src/widgets/signal_button.py": {
-      "bytes": 3515,
-      "sha256": "0e789f85b88e6befc4ae61b634159fd1d328902d55dac4a94d0db594f1a0065a"
+      "bytes": 3944,
+      "sha256": "4dcf8cacc161cac67eff595fa7828842989f85121a8f7db3f64311d21a224d8e"
     },
     "src/widgets/skeleton_card.py": {
       "bytes": 4407,
@@ -1848,8 +1879,8 @@
       "sha256": "1d1d780a16927926c410a07e6b8298bc0a5007889fcf5c801443dd2f6e80b96f"
     },
     "src/wizard.py": {
-      "bytes": 52322,
-      "sha256": "afaa2a58d3e0ff45b9e3b081122867010a25b5ddc81e478f2da4bf7a4f4e9a4c"
+      "bytes": 52217,
+      "sha256": "32d4eda476a1270607a864e0d406f5c27f33b03f8ddede31df2f5a79a1ff25a0"
     },
     "src/workers/__init__.py": {
       "bytes": 349,
@@ -1864,8 +1895,8 @@
       "sha256": "57ada89e390dc8283cba01b929c57fe996a82ded1771404516aff3b9913f17ce"
     },
     "src/workers/client_launch_worker.py": {
-      "bytes": 3223,
-      "sha256": "8fc33251f11dc6e24d39d6557e8ae46f4d422b8b0f93b69bf79572bc1a6583e5"
+      "bytes": 3332,
+      "sha256": "67610be87883e00e7da3af52fc127a1ad273a81d05235c6e1e38da24e826d28b"
     },
     "src/workers/db_worker.py": {
       "bytes": 4672,
@@ -1898,6 +1929,10 @@
     "src/workers/docker_tool_worker.py": {
       "bytes": 3039,
       "sha256": "d505320c2f2f483334db45bf5380e78843b7f38f73834b61b52a27195d4c2285"
+    },
+    "src/workers/lifecycle.py": {
+      "bytes": 1880,
+      "sha256": "257017eabee33e692a3ec4a16510aba1aa30394bd2e76f3bb96c102605e5b5c7"
     },
     "src/workers/mod_management_worker.py": {
       "bytes": 1687,
@@ -2323,13 +2358,25 @@
       "bytes": 5843,
       "sha256": "71585f47a0dbc4e9679573ad0fd0b67bb49210762f3e7abf9662546802348a7c"
     },
+    "tests/test_drone_group_recovery.py": {
+      "bytes": 6541,
+      "sha256": "d9fcccac16a97a0889ccb5ed2935f4b3828b602f553b966ab1ac5e39b57d9845"
+    },
+    "tests/test_drone_recovery_batch.py": {
+      "bytes": 16118,
+      "sha256": "617b2755b139eaace177be9c767c4f7682931b939894f560719aa6633a375fb5"
+    },
+    "tests/test_drone_recovery_ui.py": {
+      "bytes": 6936,
+      "sha256": "8935be74ad79e1033f7525b9b75bdfa1afaa08a634b061a0b5be4e9d2c28c137"
+    },
     "tests/test_enabled_mod_updates.py": {
       "bytes": 19279,
       "sha256": "a92701b09d8726e988f73634adaa22a091383beec8152ca7fa120374a3c77a4e"
     },
     "tests/test_evejs_calendar_release.py": {
-      "bytes": 8194,
-      "sha256": "19c0e03cb8dfd05c009d906aac9bb0164f21751c634180ae6fe94b89c6ce4ad0"
+      "bytes": 10237,
+      "sha256": "32943d609d25db5557201f1ab7fc55f1d8f9261f5c1336c08591958fa4807b80"
     },
     "tests/test_evejs_compatibility.py": {
       "bytes": 7636,
@@ -2348,12 +2395,12 @@
       "sha256": "275b14a65a9e9f861902317592e15dddfd36c8498a94e85fc3e59bc9cfa17941"
     },
     "tests/test_headless_check.py": {
-      "bytes": 3833,
-      "sha256": "b6d1a32015203f1c0e0c913f343483f460f93465f3f4889918760c60c6d6c85b"
+      "bytes": 3843,
+      "sha256": "50966dc85501f4b2684583988a18fc716a37e88dca3d23a549fe313d0c0c7d01"
     },
     "tests/test_home_actions.py": {
-      "bytes": 12254,
-      "sha256": "271a0b6a17777107d7da1bac7bf7663acdcd0a3232b87448016eabe97f642863"
+      "bytes": 14623,
+      "sha256": "6ff635623495b1352cca2372589b8dbd7bdb07f3f5f192c6f1484a922fda7a26"
     },
     "tests/test_home_layout.py": {
       "bytes": 6237,
@@ -2472,8 +2519,8 @@
       "sha256": "46b925c4a5fe169a644828be126604a3aef380a44934929ef3f79e8c7d77fd92"
     },
     "tests/test_mod_coordinator_settings.py": {
-      "bytes": 8324,
-      "sha256": "f028978d4f9eaa1b7571b439e34faeadf60bfff3097f66e47e6e65cde6f9dceb"
+      "bytes": 8882,
+      "sha256": "987069cde420121acabc8a2d63d03265feef87b5d8cc5bda3dae34f9201602d6"
     },
     "tests/test_mod_evejs_updates.py": {
       "bytes": 4405,
@@ -2607,6 +2654,10 @@
       "bytes": 8837,
       "sha256": "b181f99483531c80bbb0f3d8cd75473c777677700c1ba40b4061676bb4051530"
     },
+    "tests/test_native_drone_profiles.py": {
+      "bytes": 3480,
+      "sha256": "b428016be38a34ea08f2e5df0a0701e2388c1c35a99158c747268d2ca21e2ef6"
+    },
     "tests/test_native_fresh_setup_message.py": {
       "bytes": 2983,
       "sha256": "0d9562e270694e8e7dbad7e64fc91b59cada49bdea4bf3d3e32bc068868bb088"
@@ -2676,8 +2727,8 @@
       "sha256": "2dce73696c831e71686228ea9b9041e0038ed9a1bc90a63af1761482cde0a24b"
     },
     "tests/test_roster_exact_account_identity.py": {
-      "bytes": 6303,
-      "sha256": "5acb15f95eba831e2a11ae5fb77144ed9f060ee167f6a09037073547d5af4bf9"
+      "bytes": 8242,
+      "sha256": "c3b6041fb72e2b596b2fb4bd093f64f29ed03dd019cb78e708506e0eb1315e38"
     },
     "tests/test_roster_recovery_diagnostics.py": {
       "bytes": 6627,
@@ -2756,16 +2807,16 @@
       "sha256": "90f665d0d2abc62bf7d8bbf47e9f7047fa1e8d54d95f9df73db2272d5cc59480"
     },
     "tests/test_shared_drone_settings.py": {
-      "bytes": 7688,
-      "sha256": "9bb9b07015069f3af25cb4068ffbf665cdcea80b7e177ccc5d25cf0e76ad8e64"
+      "bytes": 13942,
+      "sha256": "a5d166e0bd94bf227e4053931dbcbbcf6657dd060fd27669cd00060675c198f9"
     },
     "tests/test_shared_mod_menu.py": {
       "bytes": 23575,
       "sha256": "b5e69976aecb7d321536d8791bf40206630cb546698099d098538f25a82dc5be"
     },
     "tests/test_shared_settings_profile.py": {
-      "bytes": 17415,
-      "sha256": "18a1d81def7d48127741188c66648560eea14cc8a7b8bb9677713230f2327079"
+      "bytes": 19972,
+      "sha256": "eac4257e0287393b19e858070a59fb8d7673d98de6ab7248a7371ca14c498dfa"
     },
     "tests/test_shared_settings_ui.py": {
       "bytes": 12133,
@@ -2871,6 +2922,10 @@
       "bytes": 12133,
       "sha256": "d1d44c2ec3a848bea89cadbd7817bf20375aa455f5fc4646970d5c7acf6595b6"
     },
+    "tests/test_worker_retirement.py": {
+      "bytes": 3141,
+      "sha256": "dc54bd9db1645a005fb6dbe01d0bc27044df7f197c3d864e1e472f686a85a2b6"
+    },
     "tools/build_mod_guide.py": {
       "bytes": 2075,
       "sha256": "96579fc1c9e95d398c81896873f02f13a38c37fc1df6248febdf6fabd1b84b71"
@@ -2917,21 +2972,23 @@
     }
   },
   "validation": {
-    "testFiles": 219,
+    "focusedRegressionChecks": 210,
+    "affectedEdgeRerun": 31,
+    "finalUiLanguageChecks": 8,
+    "overlappingRunsNotAdded": true,
+    "frozenOffscreenRuns": 5,
+    "embeddedSourceModulesMatched": 214,
     "manualCandidateAccepted": true,
-    "manualAcceptanceScope": "Windows tray and group management in private mirror",
-    "realDockerLifecycleForThisChangeClaimed": false,
-    "retailGameplayOrSoakClaimed": false,
-    "liveInstallationOperationsPerformed": false,
-    "totals": {
-      "passed": 4295,
-      "failed": 0,
-      "skipped": 7
+    "manualAcceptanceScope": "User confirmed the installed final pair with two separate characters",
+    "genericBatchReplay": {
+      "characters": 6,
+      "groups": 12,
+      "drones": 60
     },
-    "frozenOffscreenRuns": 7,
-    "singleFullRunCompletelyGreen": true,
-    "syntheticNativeUpdateHealthRequests": 606,
-    "invalidDownloadHealthRequests": 45,
-    "releaseDesktopControlUsed": false
+    "realDockerGameplayForThisChangeClaimed": false,
+    "volumeOnlyHistoricalRecoverySupported": false,
+    "authorizedLocalTestApplicationPerformed": true,
+    "releaseOperationLiveInstallationChanges": false,
+    "broadGameplaySoakClaimed": false
   }
 }

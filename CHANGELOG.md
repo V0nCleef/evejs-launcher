@@ -2,6 +2,15 @@
 
 ## Changelog
 
+## v1.0.86 - 2026-11-16
+- Fix a worker-shutdown deadlock that could leave the launcher window unresponsive.
+- Make Start Stack follow the current ready, starting, running and failed service colours.
+- Recognize the reviewed EveJS 261115.2 Native configuration layout.
+- Keep each character's native drone groups separate from the shared layout source, including across EveJS upgrades and source-character changes. New followers no longer inherit another pilot's drone memberships.
+- Add Settings → Recover drone groups to review and restore verified historical memberships for all affected characters together. Check exact drone identities and current ownership, preserve existing choices, and skip conflicting history. Close EVE clients before recovery.
+- Recovery scans support Native installations and verified Docker database binds. Volume-only Docker recovery requires a supported inventory export; the launcher does not substitute host data.
+- Thanks to Burning Avatar for reporting the Start Stack colour issue. 🫡
+
 ## v1.0.85 - 2026-11-15
 - Choose once whether the close button exits the launcher or minimizes it to the system tray; change the preference in Settings.
 - Restore or exit from the tray menu and manage the selected installation's stack, server and market through the existing guarded controls.

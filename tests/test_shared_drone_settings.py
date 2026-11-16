@@ -219,7 +219,7 @@ def test_different_installations_never_inherit_each_others_scoped_drone_groups(w
     other = profile.prepare_shared_profile_launch(current, source, account_id=12,
         character_id=102, evejs_root=source.evejs_root,
         storage_identity='installation-groups:' + 'b' * 64, storage_root=storage)
-    assert members((other.folder / 'core_user_12.dat').read_bytes()) == [1001]
+    assert codec.entries(value((other.folder / 'core_user_12.dat').read_bytes(),'droneBlah2')) == []
 
 
 def test_existing_empty_scoped_groups_remain_authoritative_over_legacy_groups(world):

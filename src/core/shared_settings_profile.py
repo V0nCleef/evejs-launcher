@@ -343,6 +343,11 @@ def prepare_shared_character_profile(
             files, manifest = snapshot
             source_folder = folder
         try:
+            if ((account_id,character_id)!=(source.account_id,source.character_id)
+                    and (personal_account_settings is None or not shared_drone_settings.has_drone_settings(personal_account_settings))
+                    and shared_drone_settings.has_drone_settings(files['account.dat'])):
+                # Shared layout does not assign another pilot's drones.
+                personal_account_settings=shared_drone_settings.empty_personal()
             account_settings = shared_drone_settings.merge(files["account.dat"], personal_account_settings)
         except (ValueError, UnicodeError, RecursionError) as exc:
             raise SharedSettingsError("The shared character settings could not be verified.") from exc
@@ -362,7 +367,8 @@ def prepare_shared_character_profile(
             # Preserve the chosen source in the managed folder, so changes it
             # saves there become the next snapshot after all clients close.
             changes[folder / f"core_char_{source.character_id}.dat"] = files["character.dat"]
-            changes[folder / f"core_user_{source.account_id}.dat"] = files["account.dat"]
+            changes[folder / f"core_user_{source.account_id}.dat"] = (
+                account_settings if destination==folder and account_id==source.account_id else files['account.dat'])
             for name in ("core_public__.yaml", "core_public__.dat"):
                 if name in files:
                     changes[folder / name] = files[name]
@@ -409,9 +415,14 @@ def prepare_shared_profile_launch(
         _safe_storage(destination)
         legacy_mains = (_legacy_main_folders(profile_tq, source, evejs_root, target_identity, storage_root)
                         if storage_identity is not None else ())
-        personal = None if is_source else _previous_drone_settings(
-            storage, profile_tq, main, source, account_id, character_id,
-            legacy_storages=tuple(path.parent for path in legacy_mains))
+        personal = None
+        if storage_identity is not None:
+            from .native_drone_profiles import read_personal_settings
+            personal=read_personal_settings(_storage_root(profile_tq,storage_root),storage_identity,account_id,character_id)
+        if personal is None and not is_source:
+            personal = _previous_drone_settings(
+                storage, profile_tq, main, source, account_id, character_id,
+                legacy_storages=tuple(path.parent for path in legacy_mains))
         prepare_shared_character_profile(profile_tq, main, source, account_id=account_id,
             character_id=character_id, evejs_root=evejs_root, target_identity=target_identity,
             automatic_source=requested is None, destination_folder=destination,
@@ -428,6 +439,10 @@ def prepare_shared_profile_launch(
                 "schemaVersion": 1, "accountID": account_id, "characterID": character_id,
                 "session": destination.name,
             }))
+        if storage_identity is not None:
+            from .native_drone_profiles import remember_personal_settings
+            remember_personal_settings(_storage_root(profile_tq,storage_root),storage_identity,
+                                       account_id,character_id,destination)
         return result
 
 

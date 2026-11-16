@@ -239,3 +239,11 @@ def merge(template: bytes, personal: bytes | None) -> bytes:
     if signature(result) != signature(personal):
         raise SettingsFormatError("Drone settings did not survive merge")
     return result
+
+
+def empty_personal() -> bytes:
+    """An explicit empty personal grouping, without another account's favourites."""
+    text = lambda value: Value(0x2e,value.encode('utf-8'))
+    setting = Value(0x2c,children=[Value(0x08),Value(0x16)])
+    ui = Value(0x16,children=[setting,text(GROUPS)])
+    return dumps(Value(0x16,children=[ui,text('ui')]))

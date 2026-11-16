@@ -8,12 +8,12 @@ A Windows launcher for your local EveJS server and EVE clients. Start Game and M
 
 *Screenshots show the v1.0.56 interface with fictional demo characters and mods. Online service states and the offered mod update are examples; no game services were started for these captures. Click an image to see it at full size.*
 
-## Changes in 1.0.85
+## Changes in 1.0.86
 
-- Choose whether X exits the launcher or minimizes it to the system tray. The first close asks; change the choice in Settings.
-- Right-click the tray icon to reopen the launcher, open Settings, exit, or use the selected installation's stack, server and market controls.
-- Keep character groups when updating EveJS within the same installation profile. Docker groups follow the persistent game store across image and mod changes.
-- Recover previously detached groups with **Manage Groups → Restore Previous**, review the selection, then **Save Groups**. Separate worlds retain separate groups.
+- Fix a launcher freeze during background-worker retirement and show the correct Start Stack status colours.
+- Support the reviewed EveJS 261115.2 Native configuration layout.
+- Preserve each character's personal drone groups when updating EveJS or changing the shared layout source.
+- For older missing memberships, close EVE, open **Settings → Recover drone groups**, choose the saved source installation and review the batch before restoring. Recovery uses exact saved drone identities and current ownership. Native and verified Docker database binds are supported; volume-only recovery needs an inventory export.
 
 **Close behavior:** minimizing keeps monitoring and your setup running. Exit uses your existing shutdown settings.
 

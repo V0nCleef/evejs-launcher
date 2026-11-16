@@ -1,4 +1,44 @@
-# Launcher 1.0.85 validation
+# Launcher 1.0.86 validation
+
+The accepted Windows candidate fixes background-worker retirement, Start Stack
+status colours and the reviewed EveJS 261115.2 Native configuration preflight.
+It separates personal native drone memberships from the shared layout source
+and adds a reviewed batch recovery for all affected characters.
+
+The focused regression run passed 210 checks for recovery, profile handoff,
+worker retirement, service status, update ownership, tray and installation
+selection. After additional corruption/metadata guards, the affected 31 checks
+passed; the final language sweep passed eight UI/catalog checks. These overlap
+and are not presented as an added total or a fresh complete legacy suite.
+Compilation, Foundation smoke and dependency checks passed separately.
+
+The final packaged executable passed five isolated offscreen modes: profiles,
+roster, updater, ownership and ordinary startup/shutdown. Thirteen embedded
+modules were compared with the tested source. A sandbox restriction on NTFS
+hard links was reproduced; the unchanged ownership check passed on the host.
+The accepted executable is retained byte-for-byte for publication. Only its
+bundled changelog receives the final contributor credit; source line endings
+retain their existing convention and compile to the same embedded code.
+
+A private replay of production recovery and ordinary launch preparation used
+actual saved preferences with read-only current inventory: twelve groups for
+six characters, representing sixty drones. Ownership, native singleton and
+stacked inventory, conflicting history, current assignments, explicit empty
+groups, same-account characters, source changes, stale review, client-closed
+guards and rollback are covered. Original profiles and game data were verified
+unchanged. The user approved application through the ordinary generic batch
+and then confirmed the installed Launcher 1.0.86 / AutoMining 1.2.30 pair works
+with two separate characters. This is user-reported native acceptance; every
+individual manual action was not independently observed.
+
+The release operation does not change the installed copies or restart services.
+Native and verified Docker database-bind recovery have provider checks. Volume-only
+Docker historical recovery remains explicitly unavailable without an exact
+inventory export. No fresh Docker gameplay or broad gameplay soak is claimed.
+Public packaging, source manifest, exact tag/main binding, hosted ZIP verification
+and updater discovery are checked separately during publication.
+
+## Previous release evidence: 1.0.85
 
 This release adds the remembered close-button preference, tray
 controls and character-group persistence. The user accepted the Windows tray

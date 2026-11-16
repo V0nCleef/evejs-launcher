@@ -132,6 +132,7 @@ class SettingsPage(QWidget):
     settings_update_check = pyqtSignal()
     docker_preflight_requested = pyqtSignal(object)
     voice_preview_requested = pyqtSignal()
+    drone_recovery_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -241,6 +242,12 @@ class SettingsPage(QWidget):
             "Close all EVE clients before changing the shared profile."
         )
         client_form.addRow("", client_help)
+        self.drone_recovery_btn = QPushButton("Recover drone groups")
+        self.drone_recovery_btn.clicked.connect(self.drone_recovery_requested.emit)
+        self.drone_recovery_btn.setToolTip(
+            "Restore verified drone memberships for all characters from saved launcher profiles. Close EVE clients first."
+        )
+        client_form.addRow("", self.drone_recovery_btn)
         self.client_settings_mode_combo.currentIndexChanged.connect(self._sync_client_settings_controls)
         root.addWidget(client_box)
 
@@ -1196,6 +1203,7 @@ class SettingsPage(QWidget):
         shared = self.client_settings_mode_combo.currentData() == "shared"
         self.shared_profile_source_combo.setVisible(shared)
         self.shared_profile_source_label.setVisible(shared)
+        self.drone_recovery_btn.setVisible(shared)
 
     @staticmethod
     def _normalized_shared_profile_source(value: object) -> dict[str, object]:
@@ -1743,6 +1751,7 @@ class SettingsPage(QWidget):
         self.save_btn.setEnabled(
             not self._lifecycle_busy and self._pending_docker_request is None
         )
+        self.drone_recovery_btn.setEnabled(not self._lifecycle_busy)
 
     def _reject_lifecycle_busy_save(self) -> None:
         """Reject even programmatic Save attempts at the persistence boundary."""
