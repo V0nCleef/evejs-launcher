@@ -424,10 +424,13 @@ def _prepare_and_spawn_client(request: ClientLaunchRequest) -> LaunchedProcess:
     shared_settings = None
     settings_options = {}
     if shared:
+        storage_options = ({"storage_identity": request.shared_settings_storage_identity,
+                            "storage_root": request.shared_settings_storage_root}
+                           if request.shared_settings_storage_identity is not None else {})
         shared_settings = prepare_shared_profile_launch(profile_path, request.shared_settings_source,
             account_id=request.account_id, character_id=request.character_id, evejs_root=request.evejs_root,
             host=request.launch_context.game_host, target_identity=request.launch_context.target_identity,
-            legacy_folder=request.shared_settings_folder)
+            legacy_folder=request.shared_settings_folder, **storage_options)
         settings_options = {"settings_dir": shared_settings.folder}
         prefill_username(request.username, **settings_options, update_username=True)
     else:
@@ -6826,6 +6829,12 @@ class MainWindow(QMainWindow):
             client_profiles_root(self._cfg, Path(PROFILES_ROOT)), username,
             (account.username for account in getattr(self, "_accounts", ())),
         )
+        settings_storage_identity = None
+        selection = getattr(self, "_data_selection", None)
+        if settings_mode == "shared" and selection is not None:
+            identity = installation_group_identity(self._cfg, selection)
+            if identity.startswith("installation-groups:"):
+                settings_storage_identity = identity
         return ClientLaunchRequest(
             username=username,
             character_name=character_name,
@@ -6851,6 +6860,11 @@ class MainWindow(QMainWindow):
             shared_settings_source=(
                 SharedSettingsSource.from_config(self._cfg.get("shared_settings_source"))
                 if settings_mode == "shared" else None
+            ),
+            shared_settings_storage_identity=settings_storage_identity,
+            shared_settings_storage_root=(
+                client_profiles_root(self._cfg, Path(PROFILES_ROOT)).parent / "SharedProfiles"
+                if settings_storage_identity is not None else None
             ),
         )
 

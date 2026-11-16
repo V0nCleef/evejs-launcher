@@ -888,6 +888,12 @@ class ModCoordinator(QObject):
                             SharedSettingsSource, resolve_shared_profile_source, shared_profile_main_folder,
                         )
                         cfg = self.window._cfg
+                        from src.core.groups import installation_group_identity
+                        selection = getattr(self.window, "_data_selection", None)
+                        storage_identity = installation_group_identity(cfg, selection) if selection is not None else ""
+                        storage_options = ({"storage_identity": storage_identity,
+                                            "storage_root": profiles_root.parent / "SharedProfiles"}
+                                           if storage_identity.startswith("installation-groups:") else {})
                         target = (self.window._current_observed_docker_target_identity()
                                   if cfg.get("runtime_backend") == "docker_compose" else None)
                         if cfg.get("runtime_backend") == "docker_compose" and target is None:
@@ -896,10 +902,10 @@ class ModCoordinator(QObject):
                             profile_root / "tq", profiles_root.parent / "SharedSettings",
                             SharedSettingsSource.from_config(cfg.get("shared_settings_source")),
                             account_id=0, character_id=0, evejs_root=cfg["evejs_root"],
-                            target_identity=target, initialize=False,
+                            target_identity=target, initialize=False, **storage_options,
                         )
                         settings_root = shared_profile_main_folder(profile_root / "tq", source,
-                            evejs_root=cfg["evejs_root"], target_identity=target)
+                            evejs_root=cfg["evejs_root"], target_identity=target, **storage_options)
                         settings_anchor = settings_root
                     else:
                         settings_root = get_eve_settings_path(str(profile_root / "tq"))

@@ -163,3 +163,108 @@ def test_invalid_personal_pointer_is_rejected_without_replacing_a_prior_profile(
     with pytest.raises(SharedSettingsError, match='could not be verified'):
         launch()
     assert (first.folder / 'core_user_12.dat').read_bytes() == previous
+
+
+def test_drone_groups_survive_server_upgrade_and_account_path_isolation(world, tmp_path):
+    from dataclasses import replace
+
+    current, source, _, _ = world
+    scope = 'installation-groups:' + 'a' * 64
+    storage = current.parent.parent.parent / 'SharedProfiles'
+    options = dict(storage_identity=scope, storage_root=storage)
+    first = profile.prepare_shared_profile_launch(current, source, account_id=12,
+        character_id=102, evejs_root=source.evejs_root, **options)
+    personal = account((2001, 2002), 'personal-group')
+    (first.folder / 'core_user_12.dat').write_bytes(personal)
+
+    # A server upgrade and a case-collision profile migration may happen on the
+    # same launch. Neither changes the pilot's logical installation or IDs.
+    upgraded = replace(source, evejs_root=str(tmp_path / 'new-server'))
+    isolated = current.parent.parent.parent / 'Profiles-exact-accounts' / ('b' * 32) / 'anna/tq'
+    isolated.mkdir(parents=True)
+    again = profile.prepare_shared_profile_launch(isolated, upgraded, account_id=12,
+        character_id=102, evejs_root=upgraded.evejs_root, **options)
+    assert codec.signature((again.folder / 'core_user_12.dat').read_bytes()) == codec.signature(personal)
+    assert members((again.folder / 'core_user_12.dat').read_bytes()) == [2001, 2002]
+    assert (first.folder / 'core_user_12.dat').read_bytes() == personal
+
+
+def test_scoped_profile_imports_current_legacy_groups_and_layout_without_editing_them(world):
+    current, source, _, launch = world
+    legacy = launch()
+    personal = account((2001, 2002), 'personal-group')
+    (legacy.folder / 'core_user_12.dat').write_bytes(personal)
+    old_main = profile.shared_profile_main_folder(current, source, evejs_root=source.evejs_root)
+    updated_master = account((1001,), 'main-group', 'latest-master-layout')
+    (old_main / 'core_user_11.dat').write_bytes(updated_master)
+    before = {p: p.read_bytes() for p in legacy.folder.parent.parent.rglob('*') if p.is_file()}
+
+    result = profile.prepare_shared_profile_launch(current, source, account_id=12,
+        character_id=102, evejs_root=source.evejs_root,
+        storage_identity='installation-groups:' + 'a' * 64,
+        storage_root=current.parent.parent.parent / 'SharedProfiles')
+    actual = (result.folder / 'core_user_12.dat').read_bytes()
+    assert codec.signature(actual) == codec.signature(personal)
+    assert value(actual, 'layout').text() == 'latest-master-layout'
+    assert all(p.read_bytes() == data for p, data in before.items())
+
+
+def test_different_installations_never_inherit_each_others_scoped_drone_groups(world):
+    current, source, _, _ = world
+    storage = current.parent.parent.parent / 'SharedProfiles'
+    first = profile.prepare_shared_profile_launch(current, source, account_id=12,
+        character_id=102, evejs_root=source.evejs_root,
+        storage_identity='installation-groups:' + 'a' * 64, storage_root=storage)
+    (first.folder / 'core_user_12.dat').write_bytes(account((2001,), 'first-world-group'))
+    other = profile.prepare_shared_profile_launch(current, source, account_id=12,
+        character_id=102, evejs_root=source.evejs_root,
+        storage_identity='installation-groups:' + 'b' * 64, storage_root=storage)
+    assert members((other.folder / 'core_user_12.dat').read_bytes()) == [1001]
+
+
+def test_existing_empty_scoped_groups_remain_authoritative_over_legacy_groups(world):
+    current, source, _, launch = world
+    legacy = launch()
+    (legacy.folder / 'core_user_12.dat').write_bytes(account((2001,), 'old-personal-group'))
+    options = dict(storage_identity='installation-groups:' + 'a' * 64,
+                   storage_root=current.parent.parent.parent / 'SharedProfiles')
+    first = profile.prepare_shared_profile_launch(current, source, account_id=12,
+        character_id=102, evejs_root=source.evejs_root, **options)
+    empty = codec.loads(account())
+    codec.get(codec.get(empty, 'ui'), 'droneBlah2').children[1] = dictionary({})
+    (first.folder / 'core_user_12.dat').write_bytes(codec.dumps(empty))
+    again = profile.prepare_shared_profile_launch(current, source, account_id=12,
+        character_id=102, evejs_root=source.evejs_root, **options)
+    assert codec.entries(value((again.folder / 'core_user_12.dat').read_bytes(), 'droneBlah2')) == []
+
+
+def test_scoped_migration_imports_an_isolated_legacy_pilot_into_the_canonical_store(world):
+    current, source, source_tq, _ = world
+    canonical = current.parent.parent.parent / 'SharedProfiles'
+    isolated = current.parent.parent.parent / 'Profiles-exact-accounts' / ('b' * 32) / 'anna/tq'
+    isolated.mkdir(parents=True)
+    # Seed the old isolated namespace from the explicit selected source folder.
+    legacy = profile.prepare_shared_profile_launch(isolated, source, account_id=12,
+        character_id=102, evejs_root=source.evejs_root,
+        legacy_folder=str(platform.get_eve_settings_path(str(source_tq))))
+    personal = account((2001,), 'isolated-personal')
+    (legacy.folder / 'core_user_12.dat').write_bytes(personal)
+    result = profile.prepare_shared_profile_launch(isolated, source, account_id=12,
+        character_id=102, evejs_root=source.evejs_root,
+        storage_identity='installation-groups:' + 'a' * 64, storage_root=canonical)
+    assert result.folder.is_relative_to(canonical)
+    assert members((result.folder / 'core_user_12.dat').read_bytes()) == [2001]
+    assert (legacy.folder / 'core_user_12.dat').read_bytes() == personal
+
+
+def test_first_scoped_launch_waits_for_running_clients_before_copying_preferences(world, monkeypatch):
+    current, source, _, launch = world
+    legacy = launch()
+    before = {p: p.read_bytes() for p in legacy.folder.parent.parent.rglob('*') if p.is_file()}
+    monkeypatch.setattr('src.core.overview_patch.is_eve_client_running', lambda: True)
+    with pytest.raises(SharedSettingsError, match='Close EVE clients'):
+        profile.prepare_shared_profile_launch(current, source, account_id=12,
+            character_id=102, evejs_root=source.evejs_root,
+            storage_identity='installation-groups:' + 'a' * 64,
+            storage_root=current.parent.parent.parent / 'SharedProfiles')
+    assert all(p.read_bytes() == data for p, data in before.items())

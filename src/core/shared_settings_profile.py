@@ -7,7 +7,7 @@ Anonymous caches, prefs.ini, credentials, and launch arguments are never copied.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import os
@@ -75,6 +75,53 @@ def _json_bytes(value: object) -> bytes:
     return (json.dumps(value, sort_keys=True, indent=2) + "\n").encode("utf-8")
 
 
+def _profile_identity(source: SharedSettingsSource, evejs_root: str,
+                      target_identity: str | None, storage_identity: str | None) -> dict:
+    if (SharedSettingsSource.from_config(source.as_dict()) != source
+            or os.path.normcase(str(Path(source.evejs_root).resolve())) != os.path.normcase(str(Path(evejs_root).resolve()))):
+        raise SharedSettingsError("Choose a character profile for the current EveJS server.")
+    if storage_identity is None:
+        return {"source": source.as_dict(), "serverRoot": os.path.normcase(str(Path(evejs_root).resolve())),
+                "targetIdentity": target_identity}
+    _check_storage_identity(storage_identity)
+    return {"source": {"username": source.username, "account_id": source.account_id,
+                       "character_id": source.character_id}, "storageIdentity": storage_identity}
+
+
+def _check_storage_identity(value: str) -> None:
+    if not isinstance(value, str) or not re.fullmatch(r"installation-groups:[0-9a-f]{64}", value):
+        raise SharedSettingsError("The shared character settings could not be verified.")
+
+
+def _storage_root(profile_tq: Path, requested: Path | None) -> Path:
+    return Path(requested) if requested is not None else profile_tq.parent.parent.parent / "SharedProfiles"
+
+
+def _legacy_storage_roots(profile_tq: Path, requested: Path | None) -> tuple[Path, ...]:
+    roots = [profile_tq.parent.parent.parent / "SharedProfiles"]
+    if requested is not None:
+        root = Path(requested)
+        roots.extend((root, root.parent / "Profiles-exact-accounts" / "SharedProfiles"))
+    return tuple(dict.fromkeys(roots))
+
+
+def _legacy_main_folders(profile_tq: Path, source: SharedSettingsSource, evejs_root: str,
+                         target_identity: str | None, storage_root: Path | None) -> tuple[Path, ...]:
+    """Only import the exact current runtime's legacy namespaces, never guessed worlds."""
+    identity = _profile_identity(source, evejs_root, target_identity, None)
+    folders = []
+    for base in _legacy_storage_roots(profile_tq, storage_root):
+        path = base / _digest(_json_bytes(identity)) / "main"
+        if not path.exists():
+            continue
+        if (_is_directory_link(path) or os.path.normcase(str(path.resolve())) != os.path.normcase(str(path.absolute()))):
+            raise SharedSettingsError("The shared profile backup folder is redirected.")
+        if all((path / name).is_file() for name in
+               (f"core_user_{source.account_id}.dat", f"core_char_{source.character_id}.dat")):
+            folders.append(path)
+    return tuple(folders)
+
+
 def _safe_storage(path: Path) -> None:
     if _path_entry_exists(path) and _is_directory_link(path):
         raise SharedSettingsError("The shared profile backup folder is redirected.")
@@ -87,6 +134,7 @@ def resolve_shared_profile_source(
     profile_tq: Path, settings_folder: Path, requested: SharedSettingsSource | None,
     *, account_id: int, character_id: int, evejs_root: str, custom_folder: bool = False,
     target_identity: str | None = None, initialize: bool = True,
+    storage_identity: str | None = None, storage_root: Path | None = None,
 ) -> SharedSettingsSource:
     """Persist the first launched character as the automatic managed source."""
     from .overview_patch import is_eve_client_running
@@ -98,7 +146,11 @@ def resolve_shared_profile_source(
     identity = {"settingsFolder": os.path.normcase(str(settings_folder.resolve())),
                 "serverRoot": os.path.normcase(str(Path(evejs_root).resolve())),
                 "targetIdentity": target_identity}
-    storage = profile_tq.parent.parent.parent / "SharedProfiles"
+    if storage_identity is not None:
+        _check_storage_identity(storage_identity)
+        identity = {"settingsFolder": os.path.normcase(str(settings_folder.resolve())),
+                    "storageIdentity": storage_identity}
+    storage = _storage_root(profile_tq, storage_root)
     with platform.serialize_evejs_client_trust_and_spawn():
         _safe_storage(storage)
         marker = storage / ("automatic-source-" + _digest(_json_bytes(identity)) + ".json")
@@ -108,14 +160,38 @@ def resolve_shared_profile_source(
                 source = SharedSettingsSource.from_config(data.get("source"))
                 if data.get("schemaVersion") != 1 or data.get("identity") != identity or source is None:
                     raise ValueError("invalid automatic source")
-                return source
+                return replace(source, evejs_root=evejs_root) if storage_identity is not None else source
             except (OSError, ValueError, TypeError, AttributeError) as exc:
                 raise SharedSettingsError("The saved shared character profile could not be verified.") from exc
+        legacy_source = None
+        if storage_identity is not None:
+            for legacy in _legacy_storage_roots(profile_tq, storage_root):
+                old_identity = {"settingsFolder": os.path.normcase(str((legacy.parent / "SharedSettings").resolve())),
+                                "serverRoot": os.path.normcase(str(Path(evejs_root).resolve())),
+                                "targetIdentity": target_identity}
+                old_marker = legacy / ("automatic-source-" + _digest(_json_bytes(old_identity)) + ".json")
+                if not old_marker.exists():
+                    continue
+                try:
+                    if os.path.normcase(str(legacy.resolve())) != os.path.normcase(str(legacy.absolute())):
+                        raise ValueError("redirected automatic source")
+                    data = json.loads(_read_file(old_marker))
+                    saved = SharedSettingsSource.from_config(data.get("source"))
+                    if (data.get("schemaVersion") != 1 or data.get("identity") != old_identity or saved is None
+                            or os.path.normcase(str(Path(saved.evejs_root).resolve())) != old_identity["serverRoot"]):
+                        raise ValueError("invalid automatic source")
+                    if legacy_source is not None and legacy_source != saved:
+                        raise ValueError("ambiguous automatic source")
+                    legacy_source = saved
+                except (OSError, ValueError, TypeError, AttributeError) as exc:
+                    raise SharedSettingsError("The saved shared character profile could not be verified.") from exc
+        if legacy_source is not None and not initialize:
+            return legacy_source
         if not initialize:
             raise SharedSettingsError("Choose a character profile for the current EveJS server.")
         if is_eve_client_running():
             raise SharedSettingsError("Close EVE clients before applying the selected shared character profile.")
-        source = SharedSettingsSource.from_config({"username": profile_tq.parent.name,
+        source = legacy_source or SharedSettingsSource.from_config({"username": profile_tq.parent.name,
             "account_id": account_id, "character_id": character_id, "evejs_root": evejs_root})
         if source is None:
             raise SharedSettingsError("Choose a character profile for the current EveJS server.")
@@ -204,6 +280,7 @@ def prepare_shared_character_profile(
     target_identity: str | None = None, automatic_source: bool = False,
     destination_folder: Path | None = None, import_folder: str = "",
     personal_account_settings: bytes | None = None,
+    storage_identity: str | None = None, storage_root: Path | None = None,
 ) -> tuple[str, ...]:
     """Apply a stable source snapshot before this account's client is spawned.
 
@@ -218,10 +295,9 @@ def prepare_shared_character_profile(
         raise SharedSettingsError("Choose a character profile for the current EveJS server.")
     folder = settings_folder.resolve(strict=True)
     destination = destination_folder.resolve(strict=True) if destination_folder is not None else folder
-    identity = {"source": source.as_dict(), "settingsFolder": os.path.normcase(str(folder)),
-                "serverRoot": os.path.normcase(str(Path(evejs_root).resolve())),
-                "targetIdentity": target_identity}
-    storage = profile_tq.parent.parent.parent / "SharedProfiles" / _digest(_json_bytes(identity))
+    identity = {**_profile_identity(source, evejs_root, target_identity, storage_identity),
+                "settingsFolder": os.path.normcase(str(folder))}
+    storage = _storage_root(profile_tq, storage_root) / _digest(_json_bytes(identity))
     with platform.serialize_evejs_client_trust_and_spawn():
         _safe_storage(storage)
         snapshot = _load_snapshot(storage, identity)
@@ -299,20 +375,18 @@ def prepare_shared_character_profile(
 def shared_profile_main_folder(
     profile_tq: Path, source: SharedSettingsSource, *, evejs_root: str,
     target_identity: str | None = None,
+    storage_identity: str | None = None, storage_root: Path | None = None,
 ) -> Path:
     """Resolve the same persistent source folder for launches and mod settings."""
-    if (SharedSettingsSource.from_config(source.as_dict()) != source
-            or os.path.normcase(str(Path(source.evejs_root).resolve())) != os.path.normcase(str(Path(evejs_root).resolve()))):
-        raise SharedSettingsError("Choose a character profile for the current EveJS server.")
-    identity = {"source": source.as_dict(), "serverRoot": os.path.normcase(str(Path(evejs_root).resolve())),
-                "targetIdentity": target_identity}
-    return profile_tq.parent.parent.parent / "SharedProfiles" / _digest(_json_bytes(identity)) / "main"
+    identity = _profile_identity(source, evejs_root, target_identity, storage_identity)
+    return _storage_root(profile_tq, storage_root) / _digest(_json_bytes(identity)) / "main"
 
 
 def prepare_shared_profile_launch(
     profile_tq: Path, requested: SharedSettingsSource | None,
     *, account_id: int, character_id: int, evejs_root: str, host: str = "127.0.0.1",
     target_identity: str | None = None, legacy_folder: str = "",
+    storage_identity: str | None = None, storage_root: Path | None = None,
 ) -> SharedClientSettings:
     """Give the source a persistent profile and followers a fresh shared layout.
 
@@ -321,23 +395,28 @@ def prepare_shared_profile_launch(
     no follower can write the baseline.
     """
     with platform.serialize_evejs_client_trust_and_spawn():
-        managed = profile_tq.parent.parent.parent / "SharedSettings"
+        managed = _storage_root(profile_tq, storage_root).parent / "SharedSettings"
         _safe_storage(managed)
         source = resolve_shared_profile_source(profile_tq, managed, requested, account_id=account_id,
-            character_id=character_id, evejs_root=evejs_root, target_identity=target_identity)
+            character_id=character_id, evejs_root=evejs_root, target_identity=target_identity,
+            storage_identity=storage_identity, storage_root=storage_root)
         main = shared_profile_main_folder(profile_tq, source, evejs_root=evejs_root,
-            target_identity=target_identity)
+            target_identity=target_identity, storage_identity=storage_identity, storage_root=storage_root)
         storage = main.parent
         _safe_storage(main)
         is_source = (source.account_id, source.character_id) == (account_id, character_id)
         destination = main if is_source else storage / "sessions" / uuid.uuid4().hex
         _safe_storage(destination)
+        legacy_mains = (_legacy_main_folders(profile_tq, source, evejs_root, target_identity, storage_root)
+                        if storage_identity is not None else ())
         personal = None if is_source else _previous_drone_settings(
-            storage, profile_tq, main, source, account_id, character_id)
+            storage, profile_tq, main, source, account_id, character_id,
+            legacy_storages=tuple(path.parent for path in legacy_mains))
         prepare_shared_character_profile(profile_tq, main, source, account_id=account_id,
             character_id=character_id, evejs_root=evejs_root, target_identity=target_identity,
             automatic_source=requested is None, destination_folder=destination,
-            import_folder=legacy_folder or str(managed), personal_account_settings=personal)
+            import_folder=str(legacy_mains[0]) if legacy_mains else legacy_folder or str(managed),
+            personal_account_settings=personal, storage_identity=storage_identity, storage_root=storage_root)
         # A different destination gets a different alias, avoiding live rebinding
         # when other accounts (or another character on this account) are running.
         name = "EveJSLauncherShared_" + _digest(os.path.normcase(str(destination)).encode("utf-8"))[:16]
@@ -353,7 +432,8 @@ def prepare_shared_profile_launch(
 
 
 def _previous_drone_settings(storage: Path, profile_tq: Path, main: Path,
-                             source: SharedSettingsSource, account_id: int, character_id: int) -> bytes | None:
+                             source: SharedSettingsSource, account_id: int, character_id: int,
+                             *, legacy_storages: tuple[Path, ...] = (), include_separate: bool = True) -> bytes | None:
     """Read the pilot's prior file without writing a closed or running session.
 
     A small pointer makes normal relaunch O(1). On the first fixed launch,
@@ -385,6 +465,14 @@ def _previous_drone_settings(storage: Path, profile_tq: Path, main: Path,
         except (OSError, ValueError, KeyError, TypeError) as exc:
             raise SharedSettingsError("The shared character settings could not be verified.") from exc
 
+    for legacy in legacy_storages:
+        if legacy == storage:
+            continue
+        data = _previous_drone_settings(legacy, profile_tq, legacy / "main", source,
+                                       account_id, character_id, include_separate=False)
+        if data is not None:
+            return data
+
     sessions = storage / "sessions"
     if _path_entry_exists(sessions) and _is_directory_link(sessions):
         raise SharedSettingsError("The shared profile backup folder is redirected.")
@@ -400,7 +488,7 @@ def _previous_drone_settings(storage: Path, profile_tq: Path, main: Path,
                     and (previous / user_name).is_file()):
                 candidates.append(previous / user_name)
     separate = platform.get_eve_settings_path(str(profile_tq)) / user_name
-    if separate.is_file() and not _is_directory_link(separate):
+    if include_separate and separate.is_file() and not _is_directory_link(separate):
         candidates.append(separate)
     candidates.sort(key=lambda path: path.stat().st_mtime_ns, reverse=True)
     template_file = main / f"core_user_{source.account_id}.dat"

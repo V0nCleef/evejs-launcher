@@ -44,6 +44,8 @@ class ClientLaunchRequest:
     shared_settings_folder: str = ""
     account_id: int | None = None
     shared_settings_source: SharedSettingsSource | None = None
+    shared_settings_storage_identity: str | None = None
+    shared_settings_storage_root: Path | None = None
     hide_console: bool = False
     docker_mod_operation: object | None = None
     require_account_creation: bool = False

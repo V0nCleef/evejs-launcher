@@ -183,7 +183,8 @@ def test_source_config_migrates_and_survives_save(tmp_path, monkeypatch):
     assert config.load()["shared_settings_source"] == source
 
 
-def test_actual_launch_preparation_keeps_two_distinct_auto_login_targets(world, monkeypatch):
+@pytest.mark.parametrize('scoped', [False, True])
+def test_actual_launch_preparation_keeps_two_distinct_auto_login_targets(world, monkeypatch, scoped):
     from types import SimpleNamespace
     from src import app as application
     from src.core import profiles, shared_client_settings
@@ -206,7 +207,9 @@ def test_actual_launch_preparation_keeps_two_distinct_auto_login_targets(world, 
         request = ClientLaunchRequest(username, f"Character {number}", source.evejs_root, str(client),
             current.parent.parent, ClientLaunchContext.native(), character_id=90000001 + number,
             auto_login_enabled=True, client_settings_mode="shared", account_id=11 + number,
-            shared_settings_source=source)
+            shared_settings_source=source,
+            shared_settings_storage_identity='installation-groups:' + 'a' * 64 if scoped else None,
+            shared_settings_storage_root=current.parent.parent.parent / 'SharedProfiles' if scoped else None)
         application._perform_client_launch(request)
         monkeypatch.setattr("src.core.overview_patch.is_eve_client_running", lambda: True)
     assert [(item["auto_login"].username, item["auto_login"].character_id) for item in captured] == [
@@ -236,6 +239,42 @@ def test_automatic_source_cannot_be_claimed_while_another_client_runs(world, mon
         profile.resolve_shared_profile_source(current, folder, None, account_id=12,
             character_id=90000002, evejs_root=source.evejs_root)
     assert not list((current.parent.parent.parent / "SharedProfiles").glob("automatic-source-*.json"))
+
+
+def test_automatic_source_is_imported_then_retained_across_a_server_root_upgrade(world, tmp_path):
+    current, source, _, folder = world
+    source_tq = current.parent.parent / source.username / 'tq'
+    previous = profile.resolve_shared_profile_source(source_tq, folder, None,
+        account_id=source.account_id, character_id=source.character_id, evejs_root=source.evejs_root)
+    options = dict(storage_identity='installation-groups:' + 'a' * 64,
+                   storage_root=current.parent.parent.parent / 'SharedProfiles')
+    imported = profile.resolve_shared_profile_source(current, folder, None,
+        account_id=12, character_id=90000002, evejs_root=source.evejs_root, **options)
+    assert imported == previous
+    next_root = str(tmp_path / 'upgraded-server')
+    upgraded = profile.resolve_shared_profile_source(current, folder, None,
+        account_id=12, character_id=90000002, evejs_root=next_root, initialize=False, **options)
+    assert (upgraded.username, upgraded.account_id, upgraded.character_id) == (
+        source.username, source.account_id, source.character_id)
+    assert upgraded.evejs_root == next_root
+
+
+def test_scoped_storage_tracks_docker_data_identity_and_keeps_runtime_root_validation(world):
+    from dataclasses import replace
+
+    current, source, _, _ = world
+    options = dict(evejs_root=source.evejs_root,
+                   storage_root=current.parent.parent.parent / 'SharedProfiles')
+    first = profile.shared_profile_main_folder(current, source,
+        target_identity='old-image-target', storage_identity='installation-groups:' + 'a' * 64, **options)
+    updated_image = profile.shared_profile_main_folder(current, source,
+        target_identity='new-image-target', storage_identity='installation-groups:' + 'a' * 64, **options)
+    different_data = profile.shared_profile_main_folder(current, source,
+        target_identity='new-image-target', storage_identity='installation-groups:' + 'b' * 64, **options)
+    assert first == updated_image and first != different_data
+    with pytest.raises(SharedSettingsError, match='current EveJS server'):
+        profile.shared_profile_main_folder(current, replace(source, evejs_root='C:/Fixture/another-world'),
+            storage_identity='installation-groups:' + 'a' * 64, **options)
 
 
 def test_only_source_edits_persist_even_with_public_preferences_and_same_account_characters(world, monkeypatch):

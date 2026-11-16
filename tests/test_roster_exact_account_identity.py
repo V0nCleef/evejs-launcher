@@ -114,6 +114,36 @@ def test_launch_request_preserves_exact_username_account_and_profile_scope(tmp_p
     assert requests[0].profiles_root != requests[1].profiles_root
 
 
+def test_shared_launch_captures_common_storage_despite_account_isolation_and_server_upgrade(tmp_path, monkeypatch):
+    from src import app as application
+    from src.app import MainWindow
+    from src.core.launcher import ClientLaunchContext
+    from src.core.runtime.data import native_data_selection
+
+    monkeypatch.setattr(application, 'PROFILES_ROOT', tmp_path / 'Profiles')
+    monkeypatch.setattr(application, 'pending_overview_source', lambda *_args, **_kwargs: None)
+    client = tmp_path / 'client'
+    client.mkdir()
+    window = SimpleNamespace(
+        _cfg=dict(active_installation_profile='default', runtime_backend='native',
+                  evejs_root=str(tmp_path / 'old-world'), client_path=str(client),
+                  client_settings_mode='shared', auto_login_enabled=False),
+        _resolve_client_launch_context=lambda: (ClientLaunchContext.native(), ''),
+        _resolve_configured_client_path=lambda *_: client,
+        _tracker=SimpleNamespace(is_account_running=lambda _: False),
+        _pending_client_launches=set(), _docker_mode=lambda: False, _overview_kwargs=lambda: {},
+        _accounts=[Account('Pilot', 1, '0', False), Account('pilot', 2, '0', False)])
+    window._data_selection = native_data_selection(window._cfg['evejs_root'])
+    first = MainWindow._make_client_launch_request(window, 'Pilot', 'Fixture', 101)
+    window._cfg['evejs_root'] = str(tmp_path / 'new-world')
+    window._data_selection = native_data_selection(window._cfg['evejs_root'])
+    second = MainWindow._make_client_launch_request(window, 'pilot', 'Fixture Other', 102)
+    assert first.profiles_root != second.profiles_root
+    assert first.shared_settings_storage_identity == second.shared_settings_storage_identity
+    assert first.shared_settings_storage_identity.startswith('installation-groups:')
+    assert first.shared_settings_storage_root == second.shared_settings_storage_root == tmp_path / 'SharedProfiles'
+
+
 @pytest.mark.parametrize("name", ["\nPilot", "Pilot\t", "Pilot" + " " * 256, "Pilot\ud800"])
 def test_preserving_exact_keys_does_not_accept_controls_or_oversized_names(name):
     exported = reported_shape()

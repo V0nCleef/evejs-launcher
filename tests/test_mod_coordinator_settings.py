@@ -131,7 +131,8 @@ def test_terminal_ui_nested_loop_does_not_release_operation_early(qapp):
 
 @pytest.mark.parametrize("automatic", [False, True])
 @pytest.mark.parametrize("target", [None, "verified-docker-target"])
-def test_shared_mod_settings_use_the_launchers_persistent_source(qapp, tmp_path, monkeypatch, automatic, target):
+@pytest.mark.parametrize("scoped", [False, True])
+def test_shared_mod_settings_use_the_launchers_persistent_source(qapp, tmp_path, monkeypatch, automatic, target, scoped):
     from src.ui import mod_coordinator
     from src.core.shared_settings_profile import (
         SharedSettingsSource, resolve_shared_profile_source, shared_profile_main_folder,
@@ -152,6 +153,13 @@ def test_shared_mod_settings_use_the_launchers_persistent_source(qapp, tmp_path,
         "shared_settings_source": {} if automatic else source.as_dict(),
         "runtime_backend": "docker_compose" if target else "native"}
     owner._current_observed_docker_target_identity = lambda: target
+    storage_options = {}
+    if scoped:
+        from src.core.groups import installation_group_identity
+        owner._cfg['active_installation_profile'] = 'default'
+        owner._data_selection = SimpleNamespace(target_identity=target or 'native:fixture', group_identity='data:fixture')
+        storage_options = dict(storage_identity=installation_group_identity(owner._cfg, owner._data_selection),
+                               storage_root=profiles.parent / 'SharedProfiles')
     owner._accounts = [SimpleNamespace(username="account-a")]
     schema = {"schemaVersion": 1,
         "files": [{"id": "c", "base": "profile_settings", "path": "core_public__.yaml", "format": "yaml"}],
@@ -160,7 +168,7 @@ def test_shared_mod_settings_use_the_launchers_persistent_source(qapp, tmp_path,
     mod = SimpleNamespace(name="Example", path=root / "mods/Example", evejs_root=root,
         settings_schema=schema, manifest_path=root / "manifest.json")
     mod.path.mkdir(parents=True)
-    expected = shared_profile_main_folder(tq, source, evejs_root=str(root), target_identity=target)
+    expected = shared_profile_main_folder(tq, source, evejs_root=str(root), target_identity=target, **storage_options)
     expected.mkdir(parents=True)
     monkeypatch.setattr(mod_coordinator, "PROFILES_ROOT", profiles)
     monkeypatch.setattr("src.core.overview_patch.is_eve_client_running", lambda: False)
