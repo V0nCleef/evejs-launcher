@@ -5,6 +5,11 @@ import pytest
 from src.updater import checker
 
 
+@pytest.fixture(autouse=True)
+def windows_release_contract(monkeypatch):
+    monkeypatch.setattr(checker, "release_package_name", lambda: "EveJS-Launcher-V1.zip")
+
+
 SOURCE = {
     "name": "EveJS-Launcher-Source-1.0.62.zip",
     "browser_download_url": "https://example.invalid/source.zip",

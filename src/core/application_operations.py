@@ -7,6 +7,7 @@ from __future__ import annotations
 
 
 MUTATION_FIELDS = {
+    "linux_maintenance": ("_linux_maintenance_dialog",),
     "close_preference": ("_close_preference_request",),
     "services": ("_lifecycle_thread", "_mod_lifecycle_lease"),
     "character_create": ("_character_creation_thread", "_character_creation_request", "_docker_character_request"),

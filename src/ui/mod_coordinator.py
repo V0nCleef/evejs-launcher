@@ -83,7 +83,8 @@ class ModCoordinator(QObject):
         page.set_refresh_handler(self.refresh)
 
     def refresh(self):
-        if self._page is None or getattr(self.window, "_close_in_progress", False):
+        if (self._page is None or getattr(self.window, "_close_in_progress", False)
+                or vars(self.window).get("_runtime_startup_deferred", False)):
             return
         if self._guided_import_pending is not None:
             self._refresh_pending = True

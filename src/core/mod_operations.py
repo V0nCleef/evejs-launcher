@@ -32,6 +32,10 @@ class ModOperationContext:
     docker_base_target_factory: object | None = None
 
     def capture(self, mod: Mod) -> ModSettingsContext:
+        from .mod_host import mod_unavailable_reason
+        reason = mod_unavailable_reason(mod)
+        if reason:
+            raise RuntimeError(reason)
         context = ModSettingsContext(self.evejs_root, mod.path, self.client_root)
         if mod.evejs_root is None or mod.evejs_root.resolve() != context.evejs_root:
             raise RuntimeError("The mod belongs to a different EveJS installation. Refresh Mods.")

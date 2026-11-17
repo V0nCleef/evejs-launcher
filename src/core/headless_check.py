@@ -52,14 +52,17 @@ class HeadlessCheck:
             (self.state / name).mkdir()
         os.environ.update(APPDATA=str(self.state / 'appdata'), LOCALAPPDATA=str(self.state / 'localappdata'),
                           TEMP=str(self.state / 'temp'), TMP=str(self.state / 'temp'), QT_QPA_PLATFORM='offscreen')
+        if sys.platform.startswith('linux'):
+            os.environ.update(XDG_CONFIG_HOME=str(self.state / 'config'), XDG_STATE_HOME=str(self.state / 'state'))
         cfg = {'evejs_root': '' if self.mode == 'wizard' else str(self.state / 'world-one'),
                'client_path': '', 'runtime_backend': 'native', 'game_port': 47881,
                'proxy_url': 'http://127.0.0.1:47882', 'auto_start_server': False,
                'auto_start_market': False, 'update_auto_check': False, 'update_check_interval_hours': 0,
                'audio_master_muted': True, 'audio_music_enabled': False, 'audio_voice_enabled': False,
                'animations_enabled': False, 'language': 'en'}
-        folder = self.state / 'appdata/EveJS-Launcher'
-        folder.mkdir()
+        from .host import config_directory
+        folder = config_directory()
+        folder.mkdir(parents=True)
         (folder / 'config.json').write_text(json.dumps(cfg), encoding='utf-8')
         if self.mode == 'ownership':
             self._seed_ownership()

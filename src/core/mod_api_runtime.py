@@ -229,8 +229,16 @@ def _settings_values(descriptor: ModApiDescriptor, context: ModSettingsContext) 
 
 def _command(descriptor: ModApiDescriptor, request: Path, result: Path) -> tuple[list[str], dict[str, str]]:
     helper = descriptor.launcher_api.helper
-    environment = dict(os.environ)
+    from .mod_host import helper_unavailable_reason
+    reason = helper_unavailable_reason(helper)
+    if reason:
+        raise ModApiRuntimeError(reason)
+    from .host import external_process_environment
+    environment = external_process_environment()
     environment[FEATURE_ENV] = FEATURE + ',' + PREPARATION_FEATURE
+    from .host import IS_LINUX
+    if IS_LINUX:
+        environment[FEATURE_ENV] += ',native-linux-market-runtime-v1'
     if helper.runtime == "powershell":
         windows = environment.get("SystemRoot") or environment.get("WINDIR")
         if not windows:
@@ -245,11 +253,18 @@ def _command(descriptor: ModApiDescriptor, request: Path, result: Path) -> tuple
         command = [str(executable), "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(helper.path), "-RequestPath", str(request), "-ResultPath", str(result)]
     else:
         if helper.runtime == "node":
-            node = shutil.which("node")
+            from .host import IS_LINUX
+            if IS_LINUX and (descriptor.root / '.evejs-linux.conf').is_file():
+                from .native_runtime import node_executable
+                node = node_executable(str(descriptor.root))
+                environment['PATH'] = str(Path(node).parent) + os.pathsep + environment.get('PATH', '')
+            else:
+                node = shutil.which("node")
             if not node:
                 raise ModApiRuntimeError("The mod helper requires Node.js on PATH.")
             command = [str(Path(node).resolve(strict=True)), str(helper.path)]
             environment.pop("NODE_OPTIONS", None)
+            environment.pop("NODE_PATH", None)
         else:
             command = [str(helper.path)]
         command += ["--request", str(request), "--result", str(result)]
@@ -265,12 +280,18 @@ def run_helper_process(command: list[str], *, cwd: Path, environment: dict[str, 
             stdout=stdout, stderr=stderr, env=environment, **platform_api.get_suspended_hidden_process_flags())
         job = None
         try:
-            handle = getattr(process, "_handle", None)
-            if not isinstance(handle, int) or handle <= 0:
-                raise ModApiRuntimeError("The helper process handle is unavailable.")
-            job = platform_api.create_kill_on_close_job(handle)
-            if job is None or not platform_api.resume_process(handle):
-                raise ModApiRuntimeError("The helper process tree could not be contained and started.")
+            from .host import IS_LINUX
+            if IS_LINUX:
+                from .linux_process import OwnedServiceProcess
+                process = OwnedServiceProcess(process)
+                job = process
+            else:
+                handle = getattr(process, "_handle", None)
+                if not isinstance(handle, int) or handle <= 0:
+                    raise ModApiRuntimeError("The helper process handle is unavailable.")
+                job = platform_api.create_kill_on_close_job(handle)
+                if job is None or not platform_api.resume_process(handle):
+                    raise ModApiRuntimeError("The helper process tree could not be contained and started.")
             deadline = time.monotonic() + timeout
             while True:
                 if sum(os.fstat(stream.fileno()).st_size for stream in (stdout, stderr)) > MAX_OUTPUT_BYTES:
@@ -706,7 +727,8 @@ def prepare_public_client_mods(evejs_root: str | Path, client_root: str | Path, 
     profile_id = profile_identity(profile)
     settings = (profile_settings_root.resolve(strict=True) if profile_settings_root is not None
                 else platform_api.get_eve_settings_path(str(profile_tq_path)))
-    local_appdata = Path(os.environ["LOCALAPPDATA"]).resolve(strict=True)
+    from .host import IS_LINUX
+    local_appdata = settings if IS_LINUX else Path(os.environ["LOCALAPPDATA"]).resolve(strict=True)
     results, notifications = [], []
     # launch_client retains this same lease through process creation. Direct
     # callers still acquire it here. Installation never runs as prepare_profile.

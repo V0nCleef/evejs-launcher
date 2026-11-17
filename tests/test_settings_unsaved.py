@@ -446,7 +446,11 @@ def test_close_save_waits_for_success_before_reentering_close(
     assert event.accepted is False
     assert settings_window._settings_page.is_dirty() is False
     assert config.load()["proxy_url"] == "http://127.0.0.1:26099"
-    assert scheduled == [settings_window._tray_controller.request_quit]
+    # A queued account refresh can arrive while Save completes. It must not
+    # obscure the one close continuation this assertion is concerned with.
+    close_callbacks = [callback for callback in scheduled
+                       if callback != settings_window._start_pending_account_load]
+    assert close_callbacks == [settings_window._tray_controller.request_quit]
 
 
 def test_close_cancel_with_dirty_settings_has_no_shutdown_side_effects(

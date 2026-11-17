@@ -4,6 +4,7 @@ import locale
 import os
 import re
 from pathlib import Path
+from .host import IS_LINUX
 
 from .evejs_compatibility import inspect_evejs_runtime
 from .server_selection import discover_server_scripts
@@ -14,6 +15,13 @@ def validate_evejs_root(path: str) -> tuple[bool, str]:
 
     Returns (is_valid, error_message).
     """
+    if IS_LINUX:
+        from .linux_installation import LinuxInstallation
+        try:
+            LinuxInstallation.load(path)
+        except (OSError, ValueError, RuntimeError) as exc:
+            return False, str(exc)
+        return True, ""
     p = Path(path)
     if not p.exists():
         return False, f"Path does not exist: {path}"
@@ -164,6 +172,12 @@ def resolve_client_tq_path(
 
 def find_client_path(evejs_root: str) -> str | None:
     """Extract and canonicalize the copied EVE client path from its batch config."""
+    if IS_LINUX:
+        from .linux_installation import LinuxInstallation
+        try:
+            return str(LinuxInstallation.load(evejs_root).client)
+        except (OSError, ValueError, RuntimeError):
+            return None
     cfg = _client_config_path(evejs_root)
     if not cfg.exists():
         return None

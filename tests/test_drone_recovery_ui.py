@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import time
 
 import pytest
+import os
 from PyQt6.QtCore import QEvent, QTimer
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QDialog
@@ -38,7 +39,7 @@ def test_async_review_and_all_character_apply(qapp,recovery_world):
         assert dialog.model.rowCount()==2
         assert dialog.model.data(dialog.model.index(0,0))=='Character 101'
         assert dialog.model.data(dialog.model.index(0,2))=='6'
-        assert dialog.sources.currentData()==str(old).lower()
+        assert dialog.sources.currentData()==os.path.normcase(str(old))
         assert dialog.restore.isEnabled()
         dialog.restore.click()
         assert dialog.busy and not dialog.cancel.isEnabled()

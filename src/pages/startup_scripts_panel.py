@@ -11,9 +11,13 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.startup_scripts import ScriptEntry, ScriptError, StartupScriptController, root_key
+from src.core.host import IS_LINUX
 from src.i18n import translate_ui_phrase
 from src.widgets.toggle_switch import ToggleSwitch
 from src.widgets.ui_translation import mark_translatable, set_translatable_accessible_name, set_translatable_text
+
+SCRIPT_FILTER = 'Shell scripts (*.sh)' if IS_LINUX else 'Batch files (*.bat)'
+MISSING_SCRIPT = 'Choose an existing .sh file.' if IS_LINUX else 'Choose an existing .bat file.'
 
 
 def _button(text: str, role="signalSecondary") -> QPushButton:
@@ -58,14 +62,14 @@ class ScriptDialog(QDialog):
         self.arguments_edit.setPlaceholderText("Optional arguments, e.g. start --port 12345")
         mark_translatable(self.arguments_edit)
         form.addRow(_label("Name"), self.name_edit)
-        form.addRow(_label("Batch file"), file_row)
+        form.addRow(_label('Shell script' if IS_LINUX else 'Batch file'), file_row)
         form.addRow(_label("Arguments"), self.arguments_edit)
         self.auto_check = QCheckBox("Start with server")
         mark_translatable(self.auto_check)
         self.auto_check.setChecked(entry.auto_start if entry else True)
         form.addRow("", self.auto_check)
         layout.addLayout(form)
-        help_label = _label("Scripts open in their own console and keep running when the launcher closes.")
+        help_label = _label('Shell scripts run independently and keep running when the launcher closes.' if IS_LINUX else "Scripts open in their own console and keep running when the launcher closes.")
         help_label.setWordWrap(True)
         layout.addWidget(help_label)
         self.error_label = _label("")
@@ -84,7 +88,7 @@ class ScriptDialog(QDialog):
         layout.addLayout(actions)
 
     def _browse(self):
-        filename, _ = QFileDialog.getOpenFileName(self, translate_ui_phrase("Batch file"), self.filename_edit.text(), translate_ui_phrase("Batch files (*.bat)"))
+        filename, _ = QFileDialog.getOpenFileName(self, translate_ui_phrase('Shell script' if IS_LINUX else 'Batch file'), self.filename_edit.text(), translate_ui_phrase(SCRIPT_FILTER))
         if filename:
             self.filename_edit.setText(filename)
             if not self.name_edit.text().strip():
@@ -95,10 +99,10 @@ class ScriptDialog(QDialog):
             item = ScriptEntry.create(self.name_edit.text(), self.filename_edit.text(),
                                       arguments=self.arguments_edit.text(), auto_start=self.auto_check.isChecked())
             if not Path(item.filename).is_file():
-                raise ScriptError("Choose an existing .bat file.")
+                raise ScriptError(MISSING_SCRIPT)
             self.entry = replace(item, id=self._original.id) if self._original else item
         except (ScriptError, OSError) as exc:
-            set_translatable_text(self.error_label, str(exc) if isinstance(exc, ScriptError) else "Choose an existing .bat file.")
+            set_translatable_text(self.error_label, str(exc) if isinstance(exc, ScriptError) else MISSING_SCRIPT)
             return
         self.accept()
 
@@ -161,7 +165,7 @@ class ScriptRow(QFrame):
 
     def set_state(self, state: str, details: str):
         set_translatable_text(self.state_label, state)
-        tip = translate_ui_phrase("Status refers to the batch script, not any program it starts.")
+        tip = translate_ui_phrase('Status refers to the shell script, not any program it starts.' if IS_LINUX else "Status refers to the batch script, not any program it starts.")
         self.state_label.setToolTip(tip + ("\n" + details if details else ""))
         self.state_label.setProperty("state", "error" if state == "FAILED" else ("enabled" if state == "RUNNING" else "readonly"))
         self.state_label.style().unpolish(self.state_label)
@@ -192,11 +196,11 @@ class StartupScriptsPanel(QWidget):
         self.title_label = _label("STARTUP SCRIPTS", "modsManifestTitle")
         header.addWidget(self.title_label)
         header.addStretch()
-        self.add_button = _button("+ Add .bat file", "signalPrimary")
+        self.add_button = _button('+ Add .sh file' if IS_LINUX else '+ Add .bat file', 'signalPrimary')
         self.add_button.clicked.connect(self._add)
         header.addWidget(self.add_button)
         layout.addLayout(header)
-        description = _label("Run your own .bat files after the Game server is ready.")
+        description = _label('Run your own .sh files after the Game server is ready.' if IS_LINUX else 'Run your own .bat files after the Game server is ready.')
         description.setWordWrap(True)
         layout.addWidget(description)
         self.notice_label = _label("")
@@ -278,7 +282,7 @@ class StartupScriptsPanel(QWidget):
     def _edit_dialog(self, entry: ScriptEntry | None):
         filename = ""
         if entry is None:
-            filename, _ = QFileDialog.getOpenFileName(self, translate_ui_phrase("Add startup script"), self._root, translate_ui_phrase("Batch files (*.bat)"))
+            filename, _ = QFileDialog.getOpenFileName(self, translate_ui_phrase("Add startup script"), self._root, translate_ui_phrase(SCRIPT_FILTER))
             if not filename:
                 return None
         dialog = ScriptDialog(self, entry=entry, filename=filename)

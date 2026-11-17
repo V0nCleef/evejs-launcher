@@ -20,7 +20,15 @@ import subprocess
 import time
 import uuid
 from typing import Mapping
-import winreg
+from .host import IS_WINDOWS
+if IS_WINDOWS:
+    import winreg
+else:
+    winreg = None
+
+_REG_SZ = 1 if winreg is None else winreg.REG_SZ
+_REG_EXPAND_SZ = 2 if winreg is None else winreg.REG_EXPAND_SZ
+_REG_DWORD = 4 if winreg is None else winreg.REG_DWORD
 
 from .mod_activation_state import retire_removed_mod_activation
 from .mod_lifecycle_lock import acquire_mod_lifecycle_lock
@@ -44,20 +52,20 @@ _APP_ID_PATTERN = re.compile(
     r"[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}\Z"
 )
 _EXPECTED_REGISTRY_TYPES = {
-    "SchemaVersion": winreg.REG_DWORD,
-    "Provider": winreg.REG_SZ,
-    "AppId": winreg.REG_SZ,
-    "ModId": winreg.REG_SZ,
-    "DisplayName": winreg.REG_SZ,
-    "PackageVersion": winreg.REG_SZ,
-    "EveJSPath": winreg.REG_SZ,
-    "BundleSha256": winreg.REG_SZ,
-    "ExpandHelperSha256": winreg.REG_SZ,
-    "CurrentPointerSha256": winreg.REG_SZ,
-    "RemovalInventorySha256": winreg.REG_SZ,
-    "UninstallerSha256": winreg.REG_SZ,
-    "UninstallerDataSha256": winreg.REG_SZ,
-    "SupportsPurgeState": winreg.REG_DWORD,
+    "SchemaVersion": _REG_DWORD,
+    "Provider": _REG_SZ,
+    "AppId": _REG_SZ,
+    "ModId": _REG_SZ,
+    "DisplayName": _REG_SZ,
+    "PackageVersion": _REG_SZ,
+    "EveJSPath": _REG_SZ,
+    "BundleSha256": _REG_SZ,
+    "ExpandHelperSha256": _REG_SZ,
+    "CurrentPointerSha256": _REG_SZ,
+    "RemovalInventorySha256": _REG_SZ,
+    "UninstallerSha256": _REG_SZ,
+    "UninstallerDataSha256": _REG_SZ,
+    "SupportsPurgeState": _REG_DWORD,
 }
 _STANDARD_UNINSTALL_AUTHORITY_FIELDS = (
     "UninstallString",
@@ -201,6 +209,8 @@ def _removal_contract_mod(mod: Mod) -> Mod:
 def read_managed_mod_registration(mod: Mod) -> ManagedModRegistration:
     """Read and revalidate the fixed installer enrollment for ``mod``."""
 
+    if not IS_WINDOWS:
+        raise ModNotManagedError("Windows installer management is unavailable on Linux.")
     if not isinstance(mod, Mod):
         raise TypeError("mod must be a Mod instance.")
     mod = _removal_contract_mod(mod)
@@ -1015,6 +1025,8 @@ def _read_registry_values(
     registry_view: int = 0,
     unsupported_view_is_missing: bool = False,
 ) -> dict[str, tuple[object, int]] | None:
+    if not IS_WINDOWS:
+        return None
     try:
         key = winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,
@@ -1052,6 +1064,8 @@ def _read_registry_values(
 
 
 def _registry_key_exists(path: str) -> bool:
+    if not IS_WINDOWS:
+        return False
     for registry_view in dict.fromkeys(_REGISTRY_VIEWS):
         try:
             key = winreg.OpenKey(
@@ -1087,7 +1101,7 @@ def _require_registry_text(
     name: str,
 ) -> str:
     raw = values.get(name)
-    if raw is None or raw[1] != winreg.REG_SZ or type(raw[0]) is not str:
+    if raw is None or raw[1] != _REG_SZ or type(raw[0]) is not str:
         raise ModManagementError(f"The launcher removal value {name!r} is invalid.")
     text = raw[0]
     if (
@@ -1105,7 +1119,7 @@ def _standard_registry_text(
     name: str,
 ) -> str:
     raw = values.get(name)
-    if raw is None or raw[1] not in (winreg.REG_SZ, winreg.REG_EXPAND_SZ):
+    if raw is None or raw[1] not in (_REG_SZ, _REG_EXPAND_SZ):
         raise ModManagementError(f"The Windows uninstall value {name!r} is missing.")
     if type(raw[0]) is not str or not raw[0].strip():
         raise ModManagementError(f"The Windows uninstall value {name!r} is invalid.")
@@ -1117,7 +1131,7 @@ def _require_registry_dword(
     name: str,
 ) -> int:
     raw = values.get(name)
-    if raw is None or raw[1] != winreg.REG_DWORD or type(raw[0]) is not int:
+    if raw is None or raw[1] != _REG_DWORD or type(raw[0]) is not int:
         raise ModManagementError(f"The launcher removal value {name!r} is invalid.")
     return raw[0]
 

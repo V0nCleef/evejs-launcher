@@ -20,6 +20,7 @@ from .native_maintenance import (
     persistence_owner_checkpoint,
     wait_for_persistence_owners,
 )
+from .native_runtime import node_executable, node_environment
 from .platform import get_hidden_process_flags
 
 
@@ -438,7 +439,7 @@ def _run_helper(
     game_store: Path,
     owner_checkpoint: dict[str, int] | None = None,
 ) -> dict[str, Any]:
-    environment = os.environ.copy()
+    environment = node_environment(root)
     environment["EVEJS_GAMESTORE_SQLITE_PATH"] = str(
         game_store / "gamestore.sqlite"
     )
@@ -456,7 +457,7 @@ def _run_helper(
     )
     try:
         completed = subprocess.run(
-            ["node", str(_helper_path())],
+            [node_executable(root), str(_helper_path())],
             cwd=str(root),
             env=environment,
             input=payload,

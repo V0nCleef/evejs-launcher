@@ -27,6 +27,7 @@ class ToolDispatchKind(Enum):
 
     NATIVE_WRAPPER = "native_wrapper"
     DOCKER_COMPOSE = "docker_compose"
+    LINUX_MAINTENANCE = 'linux_maintenance'
     UNAVAILABLE = "unavailable"
 
 
@@ -442,6 +443,16 @@ def resolve_tools(
     compose_file: str | Path | None = None,
 ) -> tuple[ResolvedTool, ...]:
     """Resolve every reviewed action for the selected runtime without raising."""
+    from .host import IS_LINUX
+    if IS_LINUX and backend is RuntimeBackend.NATIVE:
+        definition = ToolDefinition(
+            'linux-maintenance', 'Linux installation and maintenance', 'Client & Setup', 'Linux Setup',
+            'Install or prepare EveJS, preview updates, restore backups, retain backups and reseed Market.',
+            Path('.evejs-linux-tools/evejs-linux-update.py'), 'LX', 'client', 'Linux Setup v1.19',
+            (ToolAction('open', 'Open…'),))
+        action = ResolvedToolAction(definition.actions[0], ToolDispatchKind.LINUX_MAINTENANCE)
+        return (ResolvedTool(definition, None, True, actions=(action,)), *_unavailable_tools(
+            None, 'This tool uses a Windows wrapper. Use Linux installation and maintenance for supported Linux operations.'))
     root_text = str(evejs_root or "").strip()
     if not root_text:
         return _unavailable_tools(None, "Set the EveJS root in Settings")
@@ -491,8 +502,8 @@ def resolve_tools(
             _resolved_wrapper(
                 definition,
                 candidate,
-                available=available,
-                reason=reason,
+                available=available and not IS_LINUX,
+                reason='This tool requires a Windows host wrapper.' if IS_LINUX else reason,
             )
         )
 

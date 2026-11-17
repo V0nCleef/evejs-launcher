@@ -29,8 +29,10 @@ class ClientWindowReadinessGate(QObject):
         timeout_ms: int,
         poll_interval_ms: int,
         parent: QObject | None = None,
+        ready_reason: str = "window-visible",
     ) -> None:
         super().__init__(parent)
+        self._ready_reason = ready_reason
         if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
             raise ValueError("Client readiness requires a positive process ID.")
         self._pid = pid
@@ -167,7 +169,7 @@ class ClientWindowReadinessGate(QObject):
                 )
                 return False
             if visible:
-                self._complete(True, "window-visible")
+                self._complete(True, self._ready_reason)
                 return True
             return False
 

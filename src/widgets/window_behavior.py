@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QRect, Qt
+from ..core.host import IS_LINUX
 
 
 def launcher_startup_geometry(work_area: QRect) -> QRect:
@@ -26,6 +27,8 @@ def launcher_window_flags() -> Qt.WindowType:
     borderless title bar while giving the Windows taskbar the minimize/restore
     capabilities it expects from an ordinary top-level application window.
     """
+    if IS_LINUX:
+        return Qt.WindowType.Window
     return (
         Qt.WindowType.Window
         | Qt.WindowType.FramelessWindowHint

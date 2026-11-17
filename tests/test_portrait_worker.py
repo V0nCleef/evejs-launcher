@@ -342,7 +342,7 @@ def test_main_window_close_cancels_portrait_without_gui_thread_wait(
 
         def load(self, request: PortraitRequest) -> PortraitImageResult:
             started.set()
-            assert release.wait(2.0)
+            assert release.wait(10.0)
             return PortraitImageResult(request, _image(QColor("green")), "native")
 
     class InjectedLoader(PortraitLoader):
@@ -365,7 +365,10 @@ def test_main_window_close_cancels_portrait_without_gui_thread_wait(
     try:
         window._status_timer.stop()
         window._prune_timer.stop()
-        _wait_until(qapp, started.is_set)
+        # Readiness includes asynchronous account loading and thread scheduling;
+        # only close() below has the strict responsiveness requirement.
+        _wait_until(qapp, started.is_set, timeout_ms=10_000)
+        assert window._characters_page.portrait_loads_active() is True
 
         before = time.monotonic()
         window.close()

@@ -165,7 +165,12 @@ def _finish_update_install_if_ready(self) -> None:
 
     if dialog is not None:
         dialog.set_stage("install", "Switching to the standalone updater…")
-    QTimer.singleShot(750, hard_exit)
+    from ..core.host import IS_LINUX
+    if IS_LINUX:
+        from ..updater.linux_update import finish_handoff
+        finish_handoff(self)
+    else:
+        QTimer.singleShot(750, hard_exit)
 
 
 def _create_update_checker(self) -> UpdateChecker:
@@ -185,7 +190,8 @@ def _create_update_checker(self) -> UpdateChecker:
 
 def _start_update_checker(self, checker: UpdateChecker) -> None:
     """Start one checker unless shutdown has begun or it already runs."""
-    if self._close_in_progress or checker.isRunning():
+    if (self._close_in_progress or checker.isRunning()
+            or vars(self).get("_runtime_startup_deferred", False)):
         return
     if checker not in self._active_update_checkers:
         self._active_update_checkers.append(checker)

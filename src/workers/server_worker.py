@@ -95,7 +95,7 @@ class ServiceStartWorker(QObject):
         start_market: bool,
         start_game: bool,
         game_port: int = int(Ports.GAME_TCP),
-        readiness_timeout_sec: float = 120,
+        readiness_timeout_sec: float | None = None,
         market_readiness_timeout_sec: float | None = None,
         continue_game_after_market_failure: bool = False,
         poll_interval_sec: float = 0.25,
@@ -115,6 +115,9 @@ class ServiceStartWorker(QObject):
         self._start_market = start_market
         self._start_game = start_game
         self._game_port = validate_port(game_port, label="Game service")
+        if readiness_timeout_sec is None:
+            from ..core.host import IS_LINUX
+            readiness_timeout_sec = 300 if IS_LINUX else 120
         self._readiness_timeout_sec = max(0.01, float(readiness_timeout_sec))
         self._market_readiness_timeout_sec = (
             self._readiness_timeout_sec
@@ -137,6 +140,10 @@ class ServiceStartWorker(QObject):
 
     @staticmethod
     def _default_probe(port: int) -> bool:
+        from ..core.host import IS_LINUX
+        if IS_LINUX and port in (40110, 26002):
+            from ..core.linux_services import http_health
+            return http_health(port)
         return server_launcher.is_server_running(port=port)
 
     def _wait_for_ports(
@@ -181,6 +188,20 @@ class ServiceStartWorker(QObject):
         mod_runtime_snapshot: object | None = None
         mod_runtime_error: str | None = None
 
+        from ..core.host import IS_LINUX
+        linux_installation = None
+        if IS_LINUX:
+            from ..core.linux_installation import LinuxInstallation
+            try:
+                linux_installation = LinuxInstallation.load(self._evejs_root)
+                linux_installation.require_supported_mods()
+            except (OSError, ValueError) as exc:
+                self.completed.emit(self._result(
+                    market_error=str(exc) if self._start_market else None,
+                    game_error=str(exc) if self._start_game else None))
+                return
+            self._continue_game_after_market_failure = False
+
         if self._prepare_server_fn is not None:
             self.phase_changed.emit("market" if self._start_market else "game", "checking")
             try:
@@ -191,6 +212,18 @@ class ServiceStartWorker(QObject):
                     market_error=error if self._start_market else None,
                     game_error=error if self._start_game else None,
                 ))
+                return
+
+        if linux_installation is not None:
+            # An EveJS update may restore stock sources. Let the owning mod's
+            # preparation hook repair its files before checking their binding,
+            # then require that verification before either service can spawn.
+            try:
+                linux_installation.verified_market_binary()
+            except (OSError, ValueError) as exc:
+                self.completed.emit(self._result(
+                    market_error=str(exc) if self._start_market else None,
+                    game_error=str(exc) if self._start_game else None))
                 return
 
         if self._start_market and self._market_preflight_fn is not None:
@@ -285,10 +318,17 @@ class ServiceStartWorker(QObject):
             self.phase_changed.emit("game", "waiting")
             game_ready, game_error = self._wait_for_ports(
                 game_process,
-                (self._game_port,),
+                ((self._game_port, 26001, 26002, 26003, 5222, 26400, linux_installation.cdn_port)
+                 if linux_installation is not None else (self._game_port,)),
                 "Game service",
                 timeout_sec=self._readiness_timeout_sec,
             )
+            if game_ready and linux_installation is not None:
+                from ..core.linux_client import require_backend_tls
+                try:
+                    require_backend_tls(linux_installation, self._game_port)
+                except (OSError, ValueError) as exc:
+                    game_ready, game_error = False, str(exc)
             if not game_ready:
                 self.completed.emit(
                     self._result(
@@ -376,6 +416,10 @@ class ServiceStopWorker(QObject):
 
     @staticmethod
     def _default_force_kill(process: ManagedProcess) -> bool:
+        from ..core.host import IS_LINUX
+        if IS_LINUX:
+            from ..core.platform import terminate_process_tree
+            return terminate_process_tree(process.pid)
         result = subprocess.run(
             ["taskkill", "/F", "/T", "/PID", str(process.pid)],
             stdin=subprocess.DEVNULL,
@@ -507,10 +551,12 @@ class ServiceMonitor(QObject):
         parent: QObject | None = None,
         *,
         game_port: int = int(Ports.GAME_TCP),
+        linux_root: str = "",
     ) -> None:
         super().__init__(parent)
         self._interval_ms = max(250, int(interval_ms))
         self._game_port = validate_port(game_port, label="Game service")
+        self._linux_root = linux_root
         self._shutdown_requested = threading.Event()
         self._startup_timer: QTimer | None = None
         self._timer: QTimer | None = None
@@ -557,6 +603,9 @@ class ServiceMonitor(QObject):
         market_reachable = server_launcher.is_server_running(
             port=int(Ports.MARKET_RPC)
         )
+        if self._linux_root:
+            from ..core.linux_services import observe_backend
+            game_reachable, market_reachable = observe_backend(self._linux_root, self._game_port)
         reachability = (game_reachable, market_reachable)
         probe = ServiceProbe(
             game_reachable=game_reachable,

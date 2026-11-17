@@ -2,6 +2,13 @@
 
 ## Changelog
 
+## v1.0.87 - 2026-11-17
+- Add native Linux launcher support for prepared EveJS installations, Proton client profiles and Linux service ownership.
+- Support Linux launcher updates with startup verification, process ownership handoff and rollback.
+- Add Linux maintenance for source builds, backups, restore and prepared runtime management.
+- Verify and select the native Linux Market executable installed by NPC Market Buyers.
+- Preserve the Windows launcher, personal drone group recovery and existing mod lifecycle controls.
+
 ## v1.0.86 - 2026-11-16
 - Fix a worker-shutdown deadlock that could leave the launcher window unresponsive.
 - Make Start Stack follow the current ready, starting, running and failed service colours.

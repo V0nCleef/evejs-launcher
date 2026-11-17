@@ -1,0 +1,5 @@
+*
+!requirements-linux.txt
+!requirements-dev.txt
+!tools/
+!tools/Dockerfile.linux-qa

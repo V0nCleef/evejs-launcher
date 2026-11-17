@@ -8,11 +8,21 @@ signals depending on the outcome.
 from __future__ import annotations
 
 import sys
+import platform
 from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from src.updater.github import get_latest_release
+
+
+def release_package_name(host: str | None = None, machine: str | None = None) -> str:
+    host = sys.platform if host is None else host
+    if host == 'win32':
+        return 'EveJS-Launcher-V1.zip'
+    if host.startswith('linux') and (machine or platform.machine()).lower() in ('x86_64', 'amd64'):
+        return 'EveJS-Launcher-Linux-x86_64.tar.gz'
+    return ''
 
 
 def get_current_version() -> str:
@@ -137,7 +147,10 @@ class UpdateChecker(QThread):
 
         # Releases may also contain source ZIPs. Only the named onedir
         # package contains the executable and runtime required by the updater.
-        package_name = "EveJS-Launcher-V1.zip"
+        package_name = release_package_name()
+        if not package_name:
+            self.check_failed.emit('No launcher update package is available for this operating system and processor.')
+            return
         download_url = ""
         for asset in release.get("assets", []):
             if asset.get("name", "").casefold() == package_name.casefold():

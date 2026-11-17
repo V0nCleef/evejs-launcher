@@ -1,10 +1,12 @@
 # Build artifacts
+.qa/
 build/
 dist/
 output/
 .codex-stage/
 tmp/
 *.spec
+!build_linux.spec
 __pycache__/
 *.pyc
 *.pyo

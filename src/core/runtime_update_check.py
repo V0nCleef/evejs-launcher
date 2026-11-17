@@ -40,6 +40,9 @@ setTimeout(() => process.exit(124), 150000).unref();
 class RuntimeUpdateCheck:
     @classmethod
     def from_argv(cls, argv):
+        if sys.platform.startswith("linux"):
+            from .linux_update_check import LinuxUpdateCheck
+            return LinuxUpdateCheck.from_argv(argv)
         if "--apply-update" in argv:
             return None  # the independent updater follows its ordinary route
         if "--runtime-update-check" in argv:

@@ -49,6 +49,7 @@ class ClientLaunchRequest:
     hide_console: bool = False
     docker_mod_operation: object | None = None
     require_account_creation: bool = False
+    linux_setup_root: str = ""
 
 
 @dataclass(frozen=True)

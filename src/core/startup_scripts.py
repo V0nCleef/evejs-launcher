@@ -16,6 +16,7 @@ from uuid import uuid4
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot
 
 from src import config
+from .host import IS_LINUX
 
 log = logging.getLogger(__name__)
 _PREFIX = "_EVEJS_STARTUP_SCRIPT_"
@@ -47,6 +48,15 @@ def parse_arguments(text: str) -> tuple[str, ...]:
         raise ScriptError("Invalid script arguments.")
     if not text.strip():
         return ()
+    if IS_LINUX:
+        import shlex
+        try:
+            values = tuple(shlex.split(text))
+        except ValueError as exc:
+            raise ScriptError('Invalid script arguments.') from exc
+        if len(values) > 64:
+            raise ScriptError('A script can accept at most 64 arguments.')
+        return values
     # CommandLineToArgvW treats argv[0] specially, hence the dummy executable.
     shell = ctypes.WinDLL("shell32", use_last_error=True)
     shell.CommandLineToArgvW.argtypes = (wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int))
@@ -74,8 +84,8 @@ def validate_entry(entry: ScriptEntry) -> None:
         raise ScriptError("Enter a script name.")
     if (not isinstance(entry.filename, str) or len(entry.filename) > 4096
             or any(c in entry.filename for c in '\r\n\x00"')
-            or not Path(entry.filename).is_absolute() or Path(entry.filename).suffix.casefold() != ".bat"):
-        raise ScriptError("Choose an absolute .bat file path.")
+            or not Path(entry.filename).is_absolute() or Path(entry.filename).suffix.casefold() != ('.sh' if IS_LINUX else '.bat')):
+        raise ScriptError('Choose an absolute .sh file path.' if IS_LINUX else 'Choose an absolute .bat file path.')
     if not isinstance(entry.auto_start, bool):
         raise ScriptError("Invalid automatic startup setting.")
     parse_arguments(entry.arguments)
@@ -168,6 +178,14 @@ def launch_batch(entry: ScriptEntry) -> subprocess.Popen:
     if not filename.is_file():
         raise FileNotFoundError(entry.filename)
     arguments = parse_arguments(entry.arguments)
+    if IS_LINUX:
+        import shutil
+        bash = shutil.which('bash')
+        if bash is None:
+            raise ScriptError('Bash is required to run shell startup scripts.')
+        from .host import external_process_environment
+        return subprocess.Popen([bash, '--noprofile', '--norc', str(filename), *arguments],
+                                cwd=str(filename.parent), env=external_process_environment(), start_new_session=True)
     environment = {key: value for key, value in os.environ.items() if not key.upper().startswith(_PREFIX)}
     environment[_PREFIX + "FILE"] = str(filename)
     # Each value is expanded exactly once inside its own quotes. No user text

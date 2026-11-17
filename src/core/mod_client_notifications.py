@@ -43,6 +43,8 @@ def start_client_notifications(prepared, *, backend, process=None, error_type=""
             return
         try:
             code = process.wait()
+            if not getattr(process, 'exit_status_known', True):
+                code = None
         except Exception as exc:
             log.warning("Mod exit observation failed launch=%s error_type=%s", launch_id, type(exc).__name__)
             return

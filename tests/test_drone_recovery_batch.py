@@ -1,5 +1,6 @@
 """Exercise the actual saved-profile catalog, ownership checks and launch handoff."""
 import hashlib
+import os
 import json
 from pathlib import Path
 import sqlite3
@@ -37,7 +38,7 @@ def saved(root, world, members, *, stable=None, account=1, character=101,
     user=folder/f'core_user_{account}.dat'
     user.write_bytes(data)
     (folder/f'core_char_{character}.dat').write_bytes(profiles._EMPTY_SETTINGS)
-    identity={**identity,'settingsFolder':str(main).lower()}
+    identity={**identity,'settingsFolder':os.path.normcase(str(main))}
     manifest=root/hashlib.sha256(profiles._json_bytes(identity)).hexdigest()/'active.json'
     manifest.parent.mkdir(parents=True,exist_ok=True)
     files={'account.dat':data,'character.dat':profiles._EMPTY_SETTINGS}
@@ -106,7 +107,7 @@ def test_batch_recovers_multiple_characters_without_crossing_ownership(recovery_
     context,old,first=recovery_world
     first.write_bytes(preferences({'採掘':('same-group',[11,12,21,404])}))
     scan=scan_recovery(context)
-    world=next(w for w in scan.worlds if w.source_root==str(old).lower())
+    world=next(w for w in scan.worlds if w.source_root==os.path.normcase(str(old)))
     assert len(world.characters)==2
     assert [row.drone_count for row in world.characters]==[6,2]
     assert memberships(world.characters[0].plan.candidate)=={'採掘':{999,11,12}}
@@ -143,7 +144,7 @@ def test_stale_review_is_rejected_before_creating_recovery_slots(recovery_world,
         replacement.write_bytes(context.database.read_bytes())
         replacement.replace(context.database)
     with pytest.raises(RecoveryChangedError,match='Scan again'):
-        apply_recovery(scan,str(old).lower())
+        apply_recovery(scan,os.path.normcase(str(old)))
     assert not (context.storage_root/'native-drones').exists()
 
 
@@ -152,7 +153,7 @@ def test_running_native_client_blocks_apply(recovery_world,monkeypatch):
     scan=scan_recovery(context)
     monkeypatch.setattr('src.core.overview_patch.is_eve_client_running',lambda:True)
     with pytest.raises(SharedSettingsError,match='Close EVE clients'):
-        apply_recovery(scan,str(old).lower())
+        apply_recovery(scan,os.path.normcase(str(old)))
     assert not (context.storage_root/'native-drones').exists()
 
 
@@ -169,9 +170,9 @@ def test_missing_current_personal_definitions_can_be_restored_in_one_batch(recov
     from dataclasses import replace
     context=replace(context,world_root=str(Path(context.world_root).parent/'brand-new-world'),scope='installation-groups:'+'e'*64)
     scan=scan_recovery(context)
-    rows=next(world.characters for world in scan.worlds if world.source_root==str(old).lower())
+    rows=next(world.characters for world in scan.worlds if world.source_root==os.path.normcase(str(old)))
     assert len(rows)==2 and all(row.initializes_profile for row in rows)
-    apply_recovery(scan,str(old).lower())
+    apply_recovery(scan,os.path.normcase(str(old)))
     assert memberships(native.read_personal_settings(context.storage_root,context.scope,1,101))=={'採掘':{11,12}}
 
 
@@ -187,7 +188,7 @@ def test_foreign_scope_and_docker_target_are_not_recovery_sources(recovery_world
 
 def test_recovery_slot_is_consumed_by_the_normal_shared_launch(recovery_world,tmp_path,monkeypatch):
     context,old,_=recovery_world
-    apply_recovery(scan_recovery(context),str(old).lower())
+    apply_recovery(scan_recovery(context),os.path.normcase(str(old)))
     source=profiles.SharedSettingsSource('pilot2',2,202,context.world_root)
     tq=tmp_path/'launcher/Profiles/pilot1/tq'
     tq.mkdir(parents=True)
@@ -197,6 +198,13 @@ def test_recovery_slot_is_consumed_by_the_normal_shared_launch(recovery_world,tm
     source_tq=tq.parent.parent/'pilot2/tq'
     source_tq.mkdir(parents=True)
     from src.core import platform
+    # This fixture tests recovery handoff, using authored account settings;
+    # real Proton prefix discovery is covered by the Linux profile tests.
+    monkeypatch.setattr(platform, 'get_eve_settings_path',
+        lambda client: tmp_path / 'account-settings' / Path(client).parent.name)
+    from src.core import linux_profiles
+    monkeypatch.setattr(linux_profiles, 'named_settings_alias',
+        lambda client, name, host: tmp_path / 'named-settings' / Path(client).parent.name / name)
     settings=platform.get_eve_settings_path(str(source_tq))
     settings.mkdir(parents=True)
     (settings/'core_char_202.dat').write_bytes(profiles._EMPTY_SETTINGS)
@@ -228,7 +236,7 @@ def test_all_characters_recover_together_and_second_scan_is_idempotent(recovery_
     context,old,first=recovery_world
     before=first.read_bytes()
     facts=context.database.read_bytes()
-    result=apply_recovery(scan_recovery(context),str(old).lower())
+    result=apply_recovery(scan_recovery(context),os.path.normcase(str(old)))
     assert result==dict(characters=2,groups=2,drones=8,serverChanged=False,historicalProfilesChanged=False)
     assert memberships(native.read_personal_settings(context.storage_root,SCOPE,1,101))=={'採掘':{999,11,12}}
     assert memberships(native.read_personal_settings(context.storage_root,SCOPE,2,202))=={'採掘':{998,21}}
@@ -248,7 +256,7 @@ def test_batch_failure_rolls_back_all_personal_pointers(recovery_world,monkeypat
         return original(path,data)
     monkeypatch.setattr(profiles,'_atomic_bytes',failure)
     with pytest.raises(OSError,match='injected'):
-        apply_recovery(scan_recovery(context),str(old).lower())
+        apply_recovery(scan_recovery(context),os.path.normcase(str(old)))
     assert native.read_personal_settings(context.storage_root,SCOPE,1,101)==preferences({'採掘':('same-group',[999])})
     assert native.read_personal_settings(context.storage_root,SCOPE,2,202)==preferences({'採掘':('same-group',[998])})
     store=context.storage_root/'native-drones'/hashlib.sha256(SCOPE.encode()).hexdigest()
@@ -283,7 +291,7 @@ def test_recovery_keeps_independent_characters_on_the_same_account(recovery_worl
     put(con,'items',31,{'itemID':31,'ownerID':102,'categoryID':18,'quantity':1})
     con.commit(); con.close()
     saved(context.storage_root,old,[31],account=1,character=102,session='b'*32,group='other-pilot-group')
-    apply_recovery(scan_recovery(context),str(old).lower())
+    apply_recovery(scan_recovery(context),os.path.normcase(str(old)))
     first=memberships(native.read_personal_settings(context.storage_root,SCOPE,1,101))
     other=memberships(native.read_personal_settings(context.storage_root,SCOPE,1,102))
     assert first=={'採掘':{999,11,12}}
@@ -300,5 +308,5 @@ def test_source_catalog_refuses_redirected_history_root(recovery_world,tmp_path)
             catalog.saved_profiles((redirected,),SCOPE,context.world_root,catalog.inventory_facts(context.database))
     finally:
         # Remove only the junction entry, never its destination.
-        import os
-        os.rmdir(redirected)
+        from src.core.platform import remove_directory_link
+        remove_directory_link(redirected)

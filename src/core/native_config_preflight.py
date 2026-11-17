@@ -16,6 +16,7 @@ import subprocess
 from typing import Mapping
 
 from .platform import get_hidden_process_flags
+from .host import external_process_environment
 from .evejs_compatibility import CONFIG_PREFLIGHT_VERSIONS
 
 
@@ -287,9 +288,10 @@ def validate_native_server_config(
 
 
 def _build_child_environment(env: Mapping[str, str] | None) -> dict[str, str]:
-    child_env = os.environ.copy()
+    child_env = external_process_environment()
     if env is not None:
         child_env.update({str(key): str(value) for key, value in env.items()})
+    child_env = external_process_environment(child_env)
     return {
         key: value
         for key, value in child_env.items()

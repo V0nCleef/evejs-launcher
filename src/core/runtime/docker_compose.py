@@ -33,6 +33,7 @@ _TOOLS_PROFILE_SERVICES = ("--profile", "tools", "config", "--services")
 _CONTAINER_ID = re.compile(r"[0-9a-f]{64}\Z")
 _CONTAINER_SHORT_ID = re.compile(r"[0-9a-f]{12,64}\Z")
 _CONTAINER_STARTED_AT = re.compile(r"[^\t\r\n]{1,128}\Z")
+_CONTAINER_PORTS_INSPECT_FORMAT = "{{json .NetworkSettings.Ports}}"
 _CONTAINER_RUNTIME_INSPECT_FORMAT = (
     "{{.Id}}\t{{.State.StartedAt}}\t{{.State.Running}}"
 )
@@ -453,6 +454,37 @@ class ComposeInspector:
             ),
         )
 
+    def container_tcp_publications(self, target, record, container_id):
+        """Read actual port bindings from one exact, running server container."""
+        before = self.container_runtime_id_and_identity(target, record)
+        if before is None or before[0] != container_id:
+            raise ComposeValidationError("The selected Docker server changed.")
+        payload = self._run_parsed(
+            ("inspect", "--type", "container", "--format", _CONTAINER_PORTS_INSPECT_FORMAT, container_id),
+            target, parser=json.loads,
+        )
+        if not isinstance(payload, dict) or len(payload) > 256:
+            raise ComposeValidationError("Container port bindings are malformed.")
+        result = []
+        for key, bindings in payload.items():
+            match = re.fullmatch(r"([0-9]{1,5})/tcp", key)
+            if match is None or bindings is None:
+                continue
+            if not isinstance(bindings, list) or len(bindings) > 16:
+                raise ComposeValidationError("Container port bindings are malformed.")
+            for binding in bindings:
+                if not isinstance(binding, dict):
+                    raise ComposeValidationError("Container port bindings are malformed.")
+                host = binding.get("HostIp")
+                port = int(binding.get("HostPort", 0))
+                target_port = int(match[1])
+                if host not in ("127.0.0.1", "::1") or not 1 <= port <= 65535 or not 1 <= target_port <= 65535:
+                    raise ComposeValidationError("Linux client port bindings must be explicit loopback publications.")
+                result.append(Endpoint(record.service, host, port, target_port, "tcp"))
+        if self.container_runtime_id_and_identity(target, record) != before:
+            raise ComposeValidationError("The selected Docker server changed during port inspection.")
+        return tuple(result)
+
     def server_password_bypass_enabled(
         self,
         target: ComposeTarget,
@@ -542,14 +574,8 @@ class ComposeInspector:
         }
         inspect_allowed = (
             len(args) == 6
-            and args[:5]
-            == (
-                "inspect",
-                "--type",
-                "container",
-                "--format",
-                _CONTAINER_RUNTIME_INSPECT_FORMAT,
-            )
+            and args[:4] == ("inspect", "--type", "container", "--format")
+            and args[4] in (_CONTAINER_RUNTIME_INSPECT_FORMAT, _CONTAINER_PORTS_INSPECT_FORMAT)
             and isinstance(args[5], str)
             and bool(_CONTAINER_SHORT_ID.fullmatch(args[5].casefold()))
         )

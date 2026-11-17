@@ -18,6 +18,7 @@ import threading
 import time
 import tomllib
 from pathlib import Path
+from .host import IS_LINUX
 
 from ..constants import Ports
 from ..config import CONFIG_DIR
@@ -428,6 +429,12 @@ def _run_game_dependency_command(
 ) -> subprocess.CompletedProcess:
     """Run one bootstrap command off the GUI thread and mirror exact output."""
     _append_game_console(f"Running: {subprocess.list2cmdline(command)}")
+    if IS_LINUX:
+        from .linux_process import run_bounded
+        output = run_bounded(command, cwd=server_dir, env=env, timeout=timeout_sec, limit=1024 * 1024)
+        with SERVER_CONSOLE_LOG.open('a', encoding='utf-8', errors='replace') as stream:
+            stream.write(output)
+        return subprocess.CompletedProcess(command, 0, stdout=output if capture_output else None)
     try:
         with SERVER_CONSOLE_LOG.open("a", encoding="utf-8", errors="replace") as stream:
             process = subprocess.Popen(
@@ -808,6 +815,9 @@ def start_game_server(
     Stdout and stderr write directly to a temp log file so the launcher's
     console panel can tail the server without owning its output lifecycle.
     """
+    if IS_LINUX:
+        from .linux_services import start_game
+        return start_game(evejs_root, mode, mod_runtime_plan=mod_runtime_plan)
     runtime_root = Path(evejs_root)
     server_dir = runtime_root / "server"
     index_js = server_dir / "index.js"
@@ -908,6 +918,9 @@ def start_market_server(evejs_root: str) -> subprocess.Popen:
     Stdout and stderr write directly to a temp log file so the launcher's
     console panel can tail Market without owning its output lifecycle.
     """
+    if IS_LINUX:
+        from .linux_services import start_market
+        return start_market(evejs_root)
     market_dir = Path(evejs_root) / "externalservices" / "market-server"
     cargo_toml = market_dir / "Cargo.toml"
     if not cargo_toml.exists():

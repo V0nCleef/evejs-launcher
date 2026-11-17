@@ -1237,6 +1237,10 @@ class ModsPage(QWidget):
 
     def _row_capability(self, mod: Mod) -> tuple[bool, str, str]:
         """Return whether this backend may mutate ``mod`` and why not."""
+        from src.core.mod_host import mod_unavailable_reason
+        reason = mod_unavailable_reason(mod)
+        if reason:
+            return False, reason, 'LINUX UNSUPPORTED'
         if not mod.valid:
             return False, mod.error or "This mod manifest is invalid.", "INVALID"
         if mod.activation_kind is ActivationKind.CLIENT_PACKAGE and mod.api_descriptor is None:

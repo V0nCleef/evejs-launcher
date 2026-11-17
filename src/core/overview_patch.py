@@ -172,6 +172,23 @@ def inspect_overview_patch(client_path: str | Path) -> OverviewPatchStatus:
 def is_eve_client_running() -> bool:
     """Return whether any EVE client process is visible to the current user."""
     if os.name != "nt":
+        from .host import IS_LINUX
+        if IS_LINUX:
+            for entry in Path('/proc').iterdir():
+                if not entry.name.isdigit():
+                    continue
+                try:
+                    if entry.stat().st_uid != os.getuid():
+                        continue
+                    with (entry / 'cmdline').open('rb') as stream:
+                        command = stream.read(65536)
+                    if any(arg.replace(b'\\', b'/').rsplit(b'/', 1)[-1].lower() == b'exefile.exe'
+                           for arg in command.split(b'\0')):
+                        return True
+                except FileNotFoundError:
+                    continue
+                except PermissionError:
+                    return True
         return False
     try:
         completed = subprocess.run(
@@ -588,18 +605,26 @@ def _build_patched_archive(source_path: Path, stage_path: Path, client: Path) ->
             original_pyc = zlib.decompress(original_entry)
         except zlib.error as exc:
             raise OverviewPatchError("The overview module has an invalid compression layer.") from exc
-        source = _decompile_pyc(original_pyc)
-        patched_source = _patch_source(source)
-        patched_pyc = _compile_with_client_python(
-            patched_source,
-            client / "bin64" / "python27.dll",
-            original_pyc[:8],
-        )
-        patched_pyc = _graft_original_overview_methods(
-            original_pyc,
-            patched_pyc,
-            client / "bin64" / "python27.dll",
-        )
+        from .host import IS_LINUX
+        if IS_LINUX:
+            from .portable_overview import graft_overview
+            try:
+                patched_pyc = graft_overview(original_pyc)
+            except (OSError, ValueError) as exc:
+                raise OverviewPatchError("The portable overview bridge could not be prepared.") from exc
+        else:
+            source = _decompile_pyc(original_pyc)
+            patched_source = _patch_source(source)
+            patched_pyc = _compile_with_client_python(
+                patched_source,
+                client / "bin64" / "python27.dll",
+                original_pyc[:8],
+            )
+            patched_pyc = _graft_original_overview_methods(
+                original_pyc,
+                patched_pyc,
+                client / "bin64" / "python27.dll",
+            )
         patched_entry = zlib.compress(patched_pyc, 9)
         marker = {
             "patchVersion": PATCH_VERSION,

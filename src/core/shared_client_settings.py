@@ -20,6 +20,10 @@ _EVE_PREFS_SHA256 = "c79f54ef7882f755c53219343a402b6a7f18c89d82f062ce49565338ab3
 
 def _create_junction(target: Path, alias: Path) -> None:
     """Create an unprivileged NTFS junction without a command interpreter."""
+    from .host import IS_LINUX
+    if IS_LINUX:
+        alias.symlink_to(target, target_is_directory=True)
+        return
     import ctypes
     from ctypes import wintypes as W
     import struct
@@ -59,7 +63,11 @@ def _create_junction(target: Path, alias: Path) -> None:
 def _remove_junction(alias: Path) -> None:
     if not _is_directory_link(alias):
         raise SharedSettingsError("The shared settings link is not owned by the launcher.")
-    alias.rmdir()
+    from .host import IS_LINUX
+    if IS_LINUX:
+        alias.unlink()
+    else:
+        alias.rmdir()
 
 
 class SharedSettingsError(ValueError):
@@ -185,6 +193,10 @@ def shared_settings_alias(profile_tq: Path, host: str = "127.0.0.1", *, profile_
         # This build parses /server by splitting at ':', so IPv6 cannot be
         # supplied using its per-process override. Never silently reroute it.
         raise SharedSettingsError("Shared settings require an IPv4 loopback Game endpoint.") from exc
+    from .host import IS_LINUX
+    if IS_LINUX:
+        from .linux_profiles import named_settings_alias
+        return named_settings_alias(profile_tq, profile_name, host), host
     key = os.path.normpath(str(profile_tq).lower())
     key = key.replace("/", "_").replace("\\", "_").replace(":", "").replace(" ", "_")
     base = platform.get_eve_settings_path(str(profile_tq)).parent.parent

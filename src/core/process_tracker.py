@@ -141,7 +141,7 @@ class ProcessTracker:
                 "uptime_seconds=%.1f return_code=%s window_seen=%s",
                 client.pid,
                 max(0.0, client.uptime_seconds),
-                return_code,
+                return_code if getattr(process, 'exit_status_known', True) else 'unavailable',
                 client.has_seen_window,
             )
             return False

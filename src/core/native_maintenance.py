@@ -13,6 +13,7 @@ import threading
 import time
 from typing import Callable, Iterator
 
+from .native_runtime import node_executable, node_environment
 from .platform import get_hidden_process_flags
 
 
@@ -377,7 +378,7 @@ class _MaintenanceLeaseGuard:
             raise PersistenceMaintenanceLeaseError(
                 "The bundled EveJS maintenance lease helper is missing."
             )
-        environment = os.environ.copy()
+        environment = node_environment(self._evejs_root)
         environment["EVEJS_GAMESTORE_SQLITE_PATH"] = str(
             self._game_store / "gamestore.sqlite"
         )
@@ -385,7 +386,7 @@ class _MaintenanceLeaseGuard:
         environment["EVEJS_GAMESTORE_OWNER_ROLE"] = "maintenance"
         try:
             process = subprocess.Popen(
-                ["node", str(helper)],
+                [node_executable(self._evejs_root), str(helper)],
                 cwd=str(self._evejs_root),
                 env=environment,
                 stdin=subprocess.PIPE,

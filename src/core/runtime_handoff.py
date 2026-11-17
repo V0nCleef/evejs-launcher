@@ -18,10 +18,12 @@ import time
 import uuid
 
 from .. import config
-from .process_identity_win import (
-    ProcessIdentity, ReconnectedProcess, capture_process_identity,
-    current_process_identity, identity_is_running, protect_checkpoint,
-)
+from .host import IS_WINDOWS
+if IS_WINDOWS:
+    from .process_identity_win import (
+        ProcessIdentity, ReconnectedProcess, capture_process_identity,
+        current_process_identity, identity_is_running, protect_checkpoint,
+    )
 
 log = logging.getLogger(__name__)
 _MAX_BYTES = 2 * 1024 * 1024
@@ -52,6 +54,9 @@ def _canonical(path: str | Path) -> str:
 def _context(cfg: dict) -> dict:
     result = {key: cfg.get(key, config.DEFAULT_CONFIG.get(key, "default")) for key in _CONTEXT_KEYS}
     result.update({key: _canonical(cfg.get(key, "")) for key in _CONTEXT_PATHS})
+    from .host import IS_LINUX
+    if IS_LINUX:
+        result["linux_setup_root"] = _canonical(cfg.get("linux_setup_root", ""))
     return result
 
 
@@ -71,6 +76,12 @@ def _native_receipt(process: object) -> dict | None:
 
 def prepare_runtime_handoff(owner: object, executable: str | Path) -> HandoffTicket | None:
     """Freeze only live handles already registered to the outgoing window."""
+    if not IS_WINDOWS:
+        from .host import IS_LINUX
+        if IS_LINUX:
+            from .runtime_handoff_linux import prepare
+            return prepare(owner, executable)
+        raise OSError('Live launcher update handoff is unavailable on this host.')
     state = vars(owner)
     records = []
     cfg = state.get("_cfg", {})
@@ -176,6 +187,12 @@ def _restore_native_evidence(owner: object, process: ReconnectedProcess, receipt
 
 def resume_runtime_handoff(owner: object, executable: str | Path) -> ResumeResult:
     """Consume once after the old GUI exits; never infer Online from a receipt."""
+    if not IS_WINDOWS:
+        from .host import IS_LINUX
+        if IS_LINUX:
+            from .runtime_handoff_linux import resume
+            return resume(owner, executable)
+        return ResumeResult()
     path = checkpoint_path(executable)
     claimed = None
     content = None

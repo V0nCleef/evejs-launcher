@@ -21,6 +21,9 @@ WORLD_DEFAULTS = {
     "hide_test_characters": True, "never_hide_characters": [],
     "docker_readiness_timeout_sec": 180,
 }
+from .host import IS_LINUX
+if IS_LINUX:
+    WORLD_DEFAULTS["linux_setup_root"] = ""
 WORLD_FIELDS = frozenset(WORLD_DEFAULTS)
 _ID = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}\Z")
 

@@ -69,6 +69,9 @@ def _schedule_pending_update_cleanup() -> None:
     if not getattr(sys, "frozen", False):
         return
 
+    from src.core.host import IS_LINUX
+    if IS_LINUX:
+        return  # The independent Linux agent owns its rollback and cleanup.
     from src.updater.handoff import cleanup_pending_update
 
     install_dir = Path(sys.executable).resolve().parent
@@ -152,7 +155,14 @@ def main() -> int:
     from src.constants import APP_VERSION
     setup_logger(__name__).info("Launcher startup version=%s log_file=%s", APP_VERSION, _LOG_FILE)
     handoff = _parse_update_handoff(sys.argv[1:])
-    app = QApplication([sys.argv[0]] if handoff is not None or headless is not None or runtime_check is not None else sys.argv)
+    linux_startup = None
+    if sys.platform.startswith("linux") and "--linux-update-request" in sys.argv:
+        from src.updater.linux_update import StartupHandshake
+        offset = sys.argv.index("--linux-update-request")
+        if offset + 2 != len(sys.argv):
+            raise ValueError("Invalid Linux update startup arguments.")
+        linux_startup = StartupHandshake(sys.argv[offset + 1])
+    app = QApplication([sys.argv[0]] if handoff is not None or linux_startup is not None or headless is not None or runtime_check is not None else sys.argv)
     app.setApplicationName(APP_NAME)
     app.setOrganizationName("NousResearch")
 
@@ -183,7 +193,7 @@ def main() -> int:
         return app.exec()
 
     # ── First-run setup wizard ────────────────────────────────────────
-    if not cfg.get("evejs_root"):
+    if not cfg.get("evejs_root") and linux_startup is None:
         from src.wizard import SetupWizard
         wizard = SetupWizard()
         if headless is not None:
@@ -198,14 +208,36 @@ def main() -> int:
     # the fatal handler below with a full traceback.
     from src.app import MainWindow
 
-    window = MainWindow()
-    from src.core.runtime_handoff import resume_runtime_handoff
-    recovered = resume_runtime_handoff(window, sys.executable)
-    if recovered.game or recovered.market or recovered.clients:
-        window._update_status_bar()
-        window._refresh_characters()
+    window = MainWindow(**({"defer_runtime_startup": True} if linux_startup is not None else {}))
+    from src.core.runtime_handoff import resume_runtime_handoff, ResumeResult
+
+    def recover_runtime():
+        recovered = resume_runtime_handoff(window, sys.executable)
+        if recovered.game or recovered.market or recovered.clients:
+            window._update_status_bar()
+            window._refresh_characters()
+        return recovered
+
+    recovered = recover_runtime() if linux_startup is None else ResumeResult()
     window.show()
-    if runtime_check is not None:
+    if linux_startup is not None:
+        window._set_operation_controls_busy(True)
+
+        def accept_linux_update():
+            # The agent has committed. A failure before here leaves the one-use
+            # checkpoint untouched, allowing the old build to recover it.
+            window._runtime_startup_deferred = False
+            accepted_recovery = recover_runtime()
+            if runtime_check is not None:
+                runtime_check.attach(window, app, accepted_recovery)
+            window._set_operation_controls_busy(False)
+            window._schedule_service_monitor_start()
+            window._refresh_characters()
+            window._prepare_shipboard_voice()
+            window._start_launcher_ambience()
+
+        linux_startup.attach(window, app, accept_linux_update)
+    if runtime_check is not None and linux_startup is None:
         runtime_check.attach(window, app, recovered)
     if headless is not None:
         headless.attach(window, app)

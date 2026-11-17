@@ -9,8 +9,9 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from ..constants import APP_NAME
+from ..core.host import state_directory
 
-_LOG_DIR = Path(os.environ.get("APPDATA", "")) / APP_NAME / "logs"
+_LOG_DIR = state_directory() / "logs"
 _LOG_FILE = _LOG_DIR / "launcher.log"
 
 _MAX_BYTES = 5 * 1024 * 1024  # 5 MB

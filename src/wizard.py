@@ -39,6 +39,7 @@ from .core.discovery import (
     validate_docker_evejs_root,
     validate_evejs_root,
 )
+from .core.host import IS_LINUX
 from .core.runtime.docker_setup import (
     DockerPreflightRequest,
     DockerPreflightResult,
@@ -68,10 +69,14 @@ NATIVE_RUNTIME_HELP = (
     "Runs the EveJS Game and Market services directly on Windows from the "
     "selected EveJS folder. Docker Desktop is not required."
 )
+if IS_LINUX:
+    NATIVE_RUNTIME_HELP = 'Runs a prepared Linux installation using its selected Node, native Market and Proton runtimes.'
 DOCKER_RUNTIME_HELP = (
     "Uses an existing EveJS Compose project through Docker Desktop in "
     "Linux-container mode."
 )
+if IS_LINUX:
+    DOCKER_RUNTIME_HELP = 'Uses an existing EveJS Compose project through Docker Engine and the Compose plugin.'
 RUNTIME_DATA_NOTICE = (
     "Changing runtime does not move characters, market data, or server data."
 )
@@ -125,6 +130,8 @@ _NATIVE_REVIEW_TEMPLATE = (
     "CLIENT Path: {client_path}\n\n"
     "Click Next to save these settings."
 )
+if IS_LINUX:
+    _NATIVE_REVIEW_TEMPLATE = _NATIVE_REVIEW_TEMPLATE.replace('directly on Windows', 'directly on Linux')
 
 
 def _wizard_qss() -> str:
@@ -461,9 +468,12 @@ class SetupWizard(QDialog):
         # Page 0: Welcome
         p0 = _WizardPage(
             "Welcome to EveJS Launcher",
-            "This tool manages your local EveJS services and EVE clients.\n\n"
-            "You will choose whether EveJS runs directly on Windows or through "
-            "Docker Desktop. The launcher never switches this choice automatically.",
+            "This tool manages your local EveJS services and EVE clients.\n\n" +
+            ("Choose a prepared Linux installation or an existing Docker Compose project. "
+             "Linux Setup can prepare a new installation from the next page."
+             if IS_LINUX else
+             "You will choose whether EveJS runs directly on Windows or through "
+             "Docker Desktop. The launcher never switches this choice automatically."),
             eyebrow="DEEP SIGNAL // INITIALIZATION 01",
         )
         welcome_intro = QLabel(
@@ -502,11 +512,11 @@ class SetupWizard(QDialog):
         self._allow_control_shrink(self._backend_combo)
         self._backend_combo.setAccessibleName("EveJS runtime")
         self._backend_combo.addItem(
-            "Native — run directly on Windows",
+            "Native — run directly on Linux" if IS_LINUX else "Native — run directly on Windows",
             "native",
         )
         self._backend_combo.addItem(
-            "Docker Compose — use Docker Desktop",
+            "Docker Compose — use Docker Engine" if IS_LINUX else "Docker Compose — use Docker Desktop",
             "docker_compose",
         )
         self._backend_combo.setToolTip(NATIVE_RUNTIME_HELP)
@@ -543,6 +553,10 @@ class SetupWizard(QDialog):
         browse.clicked.connect(self._browse)
         ph.addWidget(browse)
         p1.content.addLayout(ph)
+        if IS_LINUX:
+            setup_button = QPushButton('Install or prepare EveJS with Linux Setup…')
+            setup_button.clicked.connect(self._open_linux_setup)
+            p1.content.addWidget(setup_button)
 
         self._path_status = QLabel("Enter the path to your EveJS folder")
         self._path_status.setProperty("class", "wizardStatus")
@@ -948,7 +962,8 @@ class SetupWizard(QDialog):
     # ── Navigation ────────────────────────────────────────────────────
 
     def _browse(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Select EveJS Root Folder", "G:\\")
+        from .core.host import IS_LINUX
+        path = QFileDialog.getExistingDirectory(self, "Select EveJS Root Folder", str(Path.home()) if IS_LINUX else "G:\\")
         if path:
             self._path_input.setText(path)
 
@@ -1255,6 +1270,13 @@ class SetupWizard(QDialog):
             self._next_btn.setEnabled(True)
         self._back_btn.setVisible(prev > 0)
 
+    def _open_linux_setup(self) -> None:
+        from .widgets.linux_maintenance_dialog import LinuxMaintenanceDialog
+        dialog = LinuxMaintenanceDialog('', self)
+        dialog.exec()
+        dialog.deleteLater()
+        self._on_path_changed(self._path_input.text())
+
     def _go_next(self) -> None:
         cur = self._stack.currentIndex()
 
@@ -1351,6 +1373,10 @@ class SetupWizard(QDialog):
             )
         else:
             cfg["runtime_backend"] = "native"
+        from .core.host import IS_LINUX
+        if IS_LINUX and not self._docker_mode():
+            from .core.linux_installation import imported_settings
+            cfg.update(imported_settings(self._evejs_root))
         save(cfg)
         self.accept()
 

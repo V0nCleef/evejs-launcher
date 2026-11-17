@@ -348,6 +348,7 @@ class DockerCommandRunner:
         stdin: int | BinaryIO,
     ) -> subprocess.CompletedProcess[str]:
         """Run with the shared bounded-output and Windows Job containment path."""
+        from ..host import IS_LINUX, external_process_environment
         with tempfile.TemporaryFile(mode="w+b") as stdout_file, tempfile.TemporaryFile(mode="w+b") as stderr_file:
             process = subprocess.Popen(
                 argv,
@@ -357,18 +358,26 @@ class DockerCommandRunner:
                 stdout=stdout_file,
                 stderr=stderr_file,
                 text=False,
+                **({'env': external_process_environment()} if IS_LINUX else {}),
                 **platform.get_suspended_hidden_process_flags(),
             )
-            process_handle = getattr(process, "_handle", None)
-            if not isinstance(process_handle, int) or process_handle <= 0:
-                self._kill_and_reap_suspended_root(process)
-                raise OSError("Docker command process handle is unavailable.")
-            job_handle = platform.create_kill_on_close_job(process_handle)
-            if job_handle is None:
-                self._kill_and_reap_suspended_root(process)
-                raise OSError("Could not contain the Docker command process tree.")
+            from ..host import IS_LINUX
+            if IS_LINUX:
+                from ..linux_process import OwnedServiceProcess
+                process = OwnedServiceProcess(process)
+                process_handle = None
+                job_handle = process
+            else:
+                process_handle = getattr(process, "_handle", None)
+                if not isinstance(process_handle, int) or process_handle <= 0:
+                    self._kill_and_reap_suspended_root(process)
+                    raise OSError("Docker command process handle is unavailable.")
+                job_handle = platform.create_kill_on_close_job(process_handle)
+                if job_handle is None:
+                    self._kill_and_reap_suspended_root(process)
+                    raise OSError("Could not contain the Docker command process tree.")
             try:
-                if not platform.resume_process(process_handle):
+                if not IS_LINUX and not platform.resume_process(process_handle):
                     platform.terminate_job(job_handle)
                     process.wait(timeout=_PROCESS_REAP_SECONDS)
                     raise OSError("Could not resume the contained Docker command.")

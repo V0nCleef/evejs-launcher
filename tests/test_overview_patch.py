@@ -294,6 +294,8 @@ def test_repack_preserves_duplicate_entries_by_zipinfo_index(
         "_graft_original_overview_methods",
         lambda _original, compiled, _dll: compiled,
     )
+    from src.core import host
+    monkeypatch.setattr(host, "IS_LINUX", False)  # This case mocks the Windows compiler seam.
     marker = patcher._build_patched_archive(source_path, stage_path, client)
 
     with zipfile.ZipFile(source_path) as source, zipfile.ZipFile(stage_path) as staged:

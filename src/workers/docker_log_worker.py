@@ -133,14 +133,21 @@ class DockerLogWorker(QObject):
             argv = build_log_argv(executable, target, self._service, self._tail)
             if self._cancelled.is_set():
                 return
+            from ..core.host import IS_LINUX, external_process_environment
             process = subprocess.Popen(
                 argv, shell=False, cwd=os.fspath(target.project_directory),
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace", bufsize=1,
+                **({'env': external_process_environment()} if IS_LINUX else {}),
                 **platform.get_suspended_hidden_process_flags(),
             )
+            from ..core.host import IS_LINUX
+            if IS_LINUX:
+                from ..core.linux_process import OwnedServiceProcess
+                process = OwnedServiceProcess(process)
+                self._job_handle = process
             process_handle = getattr(process, "_handle", None)
-            if isinstance(process_handle, int) and process_handle > 0:
+            if not IS_LINUX and isinstance(process_handle, int) and process_handle > 0:
                 job_handle = platform.create_kill_on_close_job(process_handle)
                 if job_handle is None:
                     process.kill()

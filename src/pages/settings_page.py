@@ -52,6 +52,7 @@ from src.core.client_autologin import (
     inspect_client_auto_login_capability,
 )
 from src.core.discovery import resolve_client_tq_path
+from src.core.host import IS_LINUX
 
 from src.core.runtime.docker_setup import (
     DockerPreflightRequest,
@@ -83,10 +84,14 @@ NATIVE_RUNTIME_HELP = (
     "Runs the EveJS Game and Market services directly on Windows from the "
     "selected EveJS folder. Docker Desktop is not required."
 )
+if IS_LINUX:
+    NATIVE_RUNTIME_HELP = 'Runs the prepared EveJS Game and Market services directly on Linux using the selected Node and Market runtimes.'
 DOCKER_RUNTIME_HELP = (
     "Uses an existing EveJS Compose project through Docker Desktop in "
     "Linux-container mode."
 )
+if IS_LINUX:
+    DOCKER_RUNTIME_HELP = 'Uses an existing EveJS Compose project through Docker Engine and the Compose plugin.'
 RUNTIME_DATA_NOTICE = (
     "Changing runtime does not move characters, market data, or server data."
 )
@@ -133,6 +138,7 @@ class SettingsPage(QWidget):
     docker_preflight_requested = pyqtSignal(object)
     voice_preview_requested = pyqtSignal()
     drone_recovery_requested = pyqtSignal()
+    linux_maintenance_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -201,6 +207,15 @@ class SettingsPage(QWidget):
         self.evejs_root_edit = QLineEdit()
         self.evejs_root_edit.editingFinished.connect(self._on_evejs_root_edited)
         general_form.addRow("EveJS Root:", self._with_browse(self.evejs_root_edit, directory=True))
+        from src.core.host import IS_LINUX
+        if IS_LINUX:
+            self.linux_maintenance_button = QPushButton('Linux installation and maintenance…')
+            self.linux_maintenance_button.clicked.connect(self.linux_maintenance_requested)
+            general_form.addRow('', self.linux_maintenance_button)
+            self.linux_setup_root_edit = QLineEdit()
+            self.linux_setup_root_edit.setPlaceholderText('Optional for Docker: installation prepared by Linux Setup')
+            self.linux_setup_root_edit.setToolTip('Proton, prefix, client cache and CA are read from this installation. Blank uses EveJS Root.')
+            general_form.addRow('Linux client setup:', self._with_browse(self.linux_setup_root_edit, directory=True))
 
         self.client_path_edit = QLineEdit()
         self.client_path_edit.setPlaceholderText("Copied EVE client tq folder")
@@ -261,11 +276,11 @@ class SettingsPage(QWidget):
             QSizePolicy.Policy.Fixed,
         )
         self.runtime_backend_combo.addItem(
-            "Native — run directly on Windows",
+            "Native — run directly on Linux" if IS_LINUX else "Native — run directly on Windows",
             "native",
         )
         self.runtime_backend_combo.addItem(
-            "Docker Compose — use Docker Desktop",
+            "Docker Compose — use Docker Engine" if IS_LINUX else "Docker Compose — use Docker Desktop",
             "docker_compose",
         )
         self.runtime_backend_combo.currentIndexChanged.connect(self._update_runtime_visibility)
@@ -1310,6 +1325,8 @@ class SettingsPage(QWidget):
         self._set_combo_data(self.close_behavior_combo, cfg.get("close_behavior", "ask"))
 
         self.evejs_root_edit.setText(str(cfg.get("evejs_root", "")))
+        if hasattr(self, "linux_setup_root_edit"):
+            self.linux_setup_root_edit.setText(str(cfg.get("linux_setup_root", "")))
         raw_client_path = str(cfg.get("client_path", ""))
         resolved_client_path = resolve_client_tq_path(
             raw_client_path,
@@ -1449,6 +1466,19 @@ class SettingsPage(QWidget):
 
     def save_settings(self) -> None:
         """Persist Native immediately or preflight the exact Docker draft."""
+        from ..core.host import IS_LINUX
+        if IS_LINUX and self.runtime_backend_combo.currentData() == 'native':
+            from ..core.linux_installation import imported_settings
+            try:
+                settings = imported_settings(self.evejs_root_edit.text().strip())
+            except (OSError, ValueError) as exc:
+                self._show_save_feedback(str(exc), success=False)
+                self.save_finished.emit(False)
+                return
+            cfg = self._collect_settings()
+            cfg.update(settings)
+            self._persist_settings(cfg)
+            return
         if self._lifecycle_busy:
             self._reject_lifecycle_busy_save()
             return
@@ -1519,6 +1549,8 @@ class SettingsPage(QWidget):
             "close_behavior": self.close_behavior_combo.currentData() or "ask",
             "evejs_root": self.evejs_root_edit.text().strip(),
             "client_path": self.client_path_edit.text().strip(),
+            **({"linux_setup_root": self.linux_setup_root_edit.text().strip()}
+               if hasattr(self, "linux_setup_root_edit") else {}),
             "client_settings_mode": self.client_settings_mode_combo.currentData() or "separate",
             "shared_settings_folder": self._legacy_shared_settings_folder,
             "shared_settings_source": self._selected_shared_profile_source(),
@@ -1752,6 +1784,9 @@ class SettingsPage(QWidget):
             not self._lifecycle_busy and self._pending_docker_request is None
         )
         self.drone_recovery_btn.setEnabled(not self._lifecycle_busy)
+        maintenance = getattr(self, 'linux_maintenance_button', None)
+        if maintenance is not None:
+            maintenance.setEnabled(not self._lifecycle_busy and self.runtime_backend_combo.currentData() == 'native')
 
     def _reject_lifecycle_busy_save(self) -> None:
         """Reject even programmatic Save attempts at the persistence boundary."""
@@ -1818,6 +1853,10 @@ class SettingsPage(QWidget):
         docker = self.runtime_backend_combo.currentData() == "docker_compose"
         self.docker_fields.setVisible(docker)
         self.scripts_box.setVisible(not docker)
+        maintenance = getattr(self, "linux_maintenance_button", None)
+        if maintenance is not None:
+            maintenance.setEnabled(not self._lifecycle_busy and self.runtime_backend_combo.currentData() == "native")
+            maintenance.setToolTip("Maintain the saved Native Linux installation. Use Docker tools for a Compose project.")
         runtime_help = DOCKER_RUNTIME_HELP if docker else NATIVE_RUNTIME_HELP
         set_translatable_text(self.runtime_backend_help_label, runtime_help)
         set_translatable_tooltip(self.runtime_backend_combo, runtime_help)
@@ -1945,6 +1984,14 @@ class SettingsPage(QWidget):
 
     def _on_evejs_root_edited(self) -> None:
         """Startup is derived at launch; root edits need no script scan."""
+        from ..core.host import IS_LINUX
+        if IS_LINUX:
+            from ..core.linux_installation import imported_settings
+            try:
+                settings = imported_settings(self.evejs_root_edit.text().strip())
+            except (OSError, ValueError):
+                return
+            self.client_path_edit.setText(settings["client_path"])
 
     # ── Danger zone ──────────────────────────────────────────────────────────
     def _delete_all_local_data(self) -> None:

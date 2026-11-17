@@ -9,12 +9,13 @@ from pathlib import Path
 import tempfile
 
 from .i18n import normalize_language
+from .core.host import IS_LINUX, config_directory
 from .core.installation_profiles import ensure_profiles, sync_active_profile, InstallationProfileError
 
 log = logging.getLogger(__name__)
 
 APP_NAME = "EveJS-Launcher"
-CONFIG_DIR = Path(os.environ.get("APPDATA", "")) / APP_NAME
+CONFIG_DIR = config_directory()
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 DEFAULT_CONFIG = {
@@ -73,6 +74,10 @@ DEFAULT_CONFIG = {
     "update_skip_versions": [],          # list of version strings the user has skipped
     "update_last_checked": "",           # ISO timestamp of last successful check
 }
+
+
+if IS_LINUX:
+    DEFAULT_CONFIG.update(auto_login_enabled=False, update_auto_check=False, update_check_interval_hours=0)
 
 
 def _default_config() -> dict:

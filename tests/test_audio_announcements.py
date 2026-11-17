@@ -917,6 +917,10 @@ def test_single_character_announcement_is_accepted_once_and_failure_is_not_repea
     announcement_window: MainWindow,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # These deferred doubles deliberately do not run Qt event loops. Real
+    # QObject affinity and retirement are covered by the worker lifecycle tests.
+    monkeypatch.setattr(app_module, 'move_worker_to_thread',
+                        lambda worker, thread: worker.moveToThread(thread))
     window = announcement_window
     request = SimpleNamespace(
         username="fixture-account",

@@ -384,6 +384,10 @@ def _restore_eve_window(process: LaunchedProcess, timeout: int = 60) -> None:
 
 def _perform_client_launch(request: ClientLaunchRequest) -> LaunchedProcess:
     """Prepare one profile and create its EVE process outside the GUI thread."""
+    from .core.host import IS_LINUX
+    if IS_LINUX:
+        from .core.linux_client import perform_linux_client_launch
+        return perform_linux_client_launch(request)
     log.info("Client launch stage=endpoints_waiting account=%s", request.username)
     wait_for_client_endpoints(request.launch_context)
     log.info("Client launch stage=endpoints_ready account=%s", request.username)
@@ -566,8 +570,9 @@ class MainWindow(QMainWindow):
     _CLIENT_CODE_GRABBER_WINDOW_TITLE = "EVE Client Code Grabber"
     _CLIENT_CODE_GRABBER_WINDOW_CLASS = "TkTopLevel"
 
-    def __init__(self) -> None:
+    def __init__(self, *, defer_runtime_startup: bool = False) -> None:
         super().__init__()
+        self._runtime_startup_deferred = defer_runtime_startup
         self.setWindowTitle(APP_TITLE)
 
         # Frameless window with custom title bar
@@ -820,6 +825,7 @@ class MainWindow(QMainWindow):
         self._mod_coordinator.attach(self._mods_page)
         self._tools_page.open_settings_requested.connect(self._open_settings_page)
         self._tools_page.launch_requested.connect(self._on_tool_launch_requested)
+        self._settings_page.linux_maintenance_requested.connect(self._open_linux_maintenance)
 
         self._status_bar.console_toggled.connect(self._on_console_toggled)
         self._home_page.console_requested.connect(self._on_console_toggled)
@@ -857,7 +863,8 @@ class MainWindow(QMainWindow):
         # Native QSoundEffect can report unavailable when constructed before
         # Qt enters its event loop. Probe once the window is event-loop ready,
         # just like the optional launcher ambience below.
-        QTimer.singleShot(0, self._prepare_shipboard_voice)
+        if not self._runtime_startup_deferred:
+            QTimer.singleShot(0, self._prepare_shipboard_voice)
         self._settings_page.save_finished.connect(
             self._on_settings_save_finished
         )
@@ -865,12 +872,13 @@ class MainWindow(QMainWindow):
             self._begin_docker_preflight
         )
 
-        if self._cfg.get("update_auto_check", True):
+        if self._cfg.get("update_auto_check", True) and not self._runtime_startup_deferred:
             QTimer.singleShot(2000, self._start_automatic_update_check)
 
         # Initialize local ambience only after the window has entered Qt's
         # event loop.  Playback is optional and never gates launcher startup.
-        QTimer.singleShot(0, self._start_launcher_ambience)
+        if not self._runtime_startup_deferred:
+            QTimer.singleShot(0, self._start_launcher_ambience)
 
         self._update_timer = QTimer(self)
         self._update_timer.timeout.connect(self._start_automatic_update_check)
@@ -941,6 +949,10 @@ class MainWindow(QMainWindow):
         )
         self._tools_page = ToolsPage(str(self._cfg.get("evejs_root", "")))
         self._settings_page = SettingsPage()
+        from .core.host import IS_LINUX, LINUX_PREVIEW_NOTICE
+        if IS_LINUX:
+            self._mods_page.setToolTip(LINUX_PREVIEW_NOTICE)
+            self._tools_page.setToolTip(LINUX_PREVIEW_NOTICE)
         self._settings_page.set_save_validator(self._settings_save_rejection)
         self._stack.addWidget(self._home_page)        # Page.HOME = 0
         self._stack.addWidget(self._characters_page)  # Page.CHARACTERS = 1
@@ -1128,6 +1140,35 @@ class MainWindow(QMainWindow):
         """Route page-owned setup actions through the central navigation state."""
         self._switch_page(int(Page.SETTINGS))
 
+    def _open_linux_maintenance(self) -> None:
+        from .core.host import IS_LINUX
+        if not IS_LINUX:
+            return
+        if self._cfg.get("runtime_backend", "native") != "native":
+            QMessageBox.information(self, 'Native maintenance unavailable',
+                'Select and save a Native installation before using Linux maintenance. '
+                'Use the Docker tools for the selected Compose project.')
+            return
+        from .core.application_operations import active_mutations, running_runtime_components
+        if active_mutations(self) or getattr(self, '_close_in_progress', False):
+            QMessageBox.information(self, 'Operation in progress', 'Wait for the current operation to finish before opening maintenance.')
+            return
+        running = running_runtime_components(self)
+        if running:
+            QMessageBox.information(self, 'Stop EveJS first', 'Stop ' + ', '.join(running) + ' before opening Linux maintenance.')
+            return
+        from .widgets.linux_maintenance_dialog import LinuxMaintenanceDialog
+        dialog = LinuxMaintenanceDialog(str(self._cfg.get('evejs_root', '')), self)
+        self._linux_maintenance_dialog = dialog
+        self._set_operation_controls_busy(True)
+        try:
+            dialog.exec()
+        finally:
+            self._linux_maintenance_dialog = None
+            self._set_operation_controls_busy(False)
+            dialog.deleteLater()
+            self._refresh_characters()
+
     def _on_tool_launch_requested(
         self,
         tool: ResolvedTool,
@@ -1280,6 +1321,9 @@ class MainWindow(QMainWindow):
 
         if canonical_action.dispatch_kind is ToolDispatchKind.DOCKER_COMPOSE:
             self._begin_docker_tool(canonical_tool, canonical_action)
+            return
+        if canonical_action.dispatch_kind is ToolDispatchKind.LINUX_MAINTENANCE:
+            self._open_linux_maintenance()
             return
         self._launch_native_tool(canonical_tool, reviewed_action)
 
@@ -2425,6 +2469,7 @@ class MainWindow(QMainWindow):
         from .core.application_operations import update_active
         return (
             getattr(self, "_lifecycle_thread", None) is not None
+            or getattr(self, "_linux_maintenance_dialog", None) is not None
             or update_active(self)
             or getattr(self, "_mod_operation_request", None) is not None
             or getattr(self, "_drone_recovery_request", None) is not None
@@ -6768,7 +6813,8 @@ class MainWindow(QMainWindow):
         docker_auto_login_probe = None
         new_account_requested = self._docker_mode() and not character_name and not any(
             account.username == username for account in getattr(self,"_accounts",()))
-        if (auto_login_enabled or new_account_requested) and self._docker_mode():
+        from .core.host import IS_LINUX
+        if (auto_login_enabled or new_account_requested or IS_LINUX) and self._docker_mode():
             try:
                 target_factory = self._docker_log_target_factory()
                 runtime_snapshot = getattr(self, "_runtime_snapshot", None)
@@ -6850,6 +6896,7 @@ class MainWindow(QMainWindow):
             hide_console=character_id is None,
             docker_auto_login_probe=docker_auto_login_probe,
             require_account_creation=new_account_requested,
+            linux_setup_root=str(self._cfg.get("linux_setup_root", "")),
             docker_mod_operation=(self._mod_coordinator._context() if getattr(self, "_mod_coordinator", None) is not None
                                   and self._docker_managed() else None),
             overview_bridge=overview_bridge,
@@ -7187,10 +7234,14 @@ class MainWindow(QMainWindow):
                 queue.item_finished(True)
             return
 
+        from .core.host import IS_LINUX
+        probe = process.launch_ready if IS_LINUX else has_visible_window_for_pid
+        readiness = {"ready_reason": "client-process-settled"} if IS_LINUX else {}
         gate = ClientWindowReadinessGate(
             process.pid,
             process.poll,
-            has_visible_window_for_pid,
+            probe,
+            **readiness,
             timeout_ms=_CLIENT_WINDOW_READY_TIMEOUT_MS,
             poll_interval_ms=_CLIENT_WINDOW_READY_POLL_MS,
             parent=self,
@@ -7233,7 +7284,7 @@ class MainWindow(QMainWindow):
         gate.deleteLater()
 
         if ready:
-            log.info("Launch All client window ready pid=%s", gate.pid)
+            log.info("Launch All client ready pid=%s reason=%s", gate.pid, reason)
         else:
             process_exited = reason.startswith("process-exited:")
             if process_exited:
@@ -7834,7 +7885,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_characters(self) -> None:
         """Schedule one serialized account refresh outside the GUI thread."""
-        if self._close_in_progress:
+        if self._close_in_progress or vars(self).get("_runtime_startup_deferred", False):
             return
         activity_timer = self.__dict__.get("_character_activity_timer")
         if activity_timer is not None:
@@ -9113,6 +9164,7 @@ class MainWindow(QMainWindow):
         if (
             self._service_thread is not None
             or self._service_monitor_start_pending
+            or vars(self).get("_runtime_startup_deferred", False)
             or self._close_in_progress
         ):
             return
@@ -9155,9 +9207,11 @@ class MainWindow(QMainWindow):
                 settings_identity=self._docker_monitor_settings_identity(),
             )
         else:
+            from .core.host import IS_LINUX
             monitor = ServiceMonitor(
                 interval_ms=5_000,
                 game_port=self._native_game_port(),
+                **({"linux_root": str(self._cfg.get("evejs_root", ""))} if IS_LINUX else {}),
             )
         monitor.moveToThread(thread)
         thread.started.connect(monitor.start)
@@ -10091,6 +10145,7 @@ class MainWindow(QMainWindow):
             return
         if (
             getattr(self, "_character_creation_thread", None) is not None
+            or getattr(self, "_linux_maintenance_dialog", None) is not None
             or getattr(self, "_character_creation_request", None) is not None
             or getattr(self, "_character_deletion_thread", None) is not None
             or getattr(self, "_character_deletion_request", None) is not None

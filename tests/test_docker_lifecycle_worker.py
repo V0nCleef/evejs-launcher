@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QThread, qInstallMessageHandler
+from PyQt6.QtCore import QEvent, QThread, qInstallMessageHandler
 from PyQt6.QtTest import QTest
 
 from src.core.runtime.docker_compose import ComposeTarget
@@ -98,8 +98,8 @@ def test_every_controller_outcome_emits_one_completion_and_one_cleanup(qapp, tmp
         assert cleanup == ["cleanup"]
 
 
-def test_main_window_docker_worker_is_deleted_in_worker_thread_before_coordinator_release(qapp, tmp_path: Path) -> None:
-    """Canonical coordinator wiring never uses thread.finished -> deleteLater."""
+def test_main_window_docker_worker_retires_after_its_background_thread(qapp, tmp_path: Path) -> None:
+    """Exercise the real coordinator and queued deletion on its owner thread."""
     from PyQt6 import sip
     from PyQt6.QtWidgets import QMainWindow
     from src.app import MainWindow
@@ -154,7 +154,8 @@ def test_main_window_docker_worker_is_deleted_in_worker_thread_before_coordinato
         window._begin_lifecycle_worker(worker, completed)
         for _ in range(100):
             qapp.processEvents()
-            if window._lifecycle_thread is None:
+            qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            if window._lifecycle_thread is None and sip.isdeleted(worker):
                 break
             QTest.qWait(5)
     finally:

@@ -125,7 +125,7 @@ a = Analysis(
         ('VERSION', '.'),
         ('licenses/*', 'licenses'),
         ('src/core/template_settings/*', 'src/core/template_settings'),
-        ('src/core/helpers/*', 'src/core/helpers'),
+        ('src/core/helpers/*.js', 'src/core/helpers'),
     ],
     hiddenimports=[
         'PyQt6.QtWidgets', 'PyQt6.QtCore', 'PyQt6.QtGui',
