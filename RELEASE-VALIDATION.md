@@ -1,3 +1,51 @@
+# Launcher 1.0.89 validation
+
+The Windows and Linux candidates add persistent visual character ordering,
+portrait resolution compatibility, a generic Save Migration tab, and refreshed
+navigation icons.
+
+The final combined Windows regression passed 475 tests with 48 platform skips;
+the Ubuntu 24.04 regression passed 515 tests with eight platform skips. Windows
+batch-wrapper/window tests and Linux-only client, archive and process tests use
+their applicable host; the Linux counterparts run separately. Fixtures use the
+host configuration directory and a private application state. Linux update
+transactions include real compiled ELF programs and rejection of a group-writable
+installation; the production ownership checks remain unchanged.
+
+Save Migration passed all 18 storage checks on each host. These include Native
+to Native, Native to Docker, Docker to Native and Docker to Docker; Copy and Move;
+real Docker named volumes; SQLite WAL, escrow, clean market seeds, backups,
+stale input, pending destination writes and source-removal failure. Docker Game
+and Market image definitions are checked separately against the selected root,
+and subsequent commands keep the captured local Docker endpoint. Both runtimes
+must be stopped. Transfers require the same verified EveJS base version and
+save format; incompatible or unresolved layouts are rejected. Fresh Market
+requires acknowledgement that open orders and their escrow stay behind.
+
+Read-only checks accepted the current EveJS 261115.2 definitions, including all
+133 declared GameStore tables and its Market schema. No live save was transferred.
+The Windows desktop checks exercised card dragging, restart persistence, and a
+copy through the integrated Save Migration confirmation and progress dialogs,
+using disposable characters and worlds. Portrait tests used real ephemeral HTTP
+responses for several upload resolutions, canonical cache checks and real Qt
+workers. All seven non-English languages cover the new controls and reviewed
+diagnostics, while installation names and selected file names remain literal.
+
+Both onedir packages passed normal, immediate, roster, profiles, updater,
+ownership and wizard startup/shutdown modes in isolated offscreen processes.
+Seventeen embedded application modules were compared with the reviewed source
+on each host, and thirteen bundled data inputs matched. SVG glyphs render
+offline at desktop scale factors. Compilation, Foundation and dependency checks
+passed; the Foundation script now always uses private diagnostic storage.
+
+Coverage is storage, process, Qt and launcher behavior. No new EVE gameplay,
+full live EveJS startup against the transferred worlds, Linux desktop drag
+interaction or graphics-driver validation is claimed. The installed launcher,
+settings, saves and mods were not upgraded or replaced by this release work.
+Publication verifies both hosted archives and their exact source/tag binding.
+
+## Previous release evidence
+
 # Launcher 1.0.86 validation
 
 The accepted Windows candidate fixes background-worker retirement, Start Stack

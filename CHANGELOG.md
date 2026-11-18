@@ -2,10 +2,14 @@
 
 ## Changelog
 
-## Unreleased
+## v1.0.89 - 2026-11-18
 - Drag character cards into a custom visual order and remember it for each installation across launcher restarts and EveJS upgrades. Keep hidden characters, filters and launch-group order intact.
 - Accept valid EveJS portraits served at a different resolution from the requested URL and scale them for the launcher. Recognize the additional Native portrait layout and 32/1024-pixel files.
 - Record bounded portrait failure codes without character names, filesystem paths or response contents.
+- Add Save Migration to copy or move a playthrough between registered Native and Docker installations on the same verified EveJS version and save format. Back up the destination first and verify the new copy before removing an original.
+- Choose a clean market or carry compatible orders, escrow and market history. Show what stays behind before confirming a fresh market.
+- Check that both installations are stopped, reject pending game writes and verify Docker Game and Market image definitions before transferring data.
+- Refresh the navigation with consistent icons and translate the new transfer controls into every supported launcher language.
 - Thanks to JcKalck and ItrkZ. for reporting the character ordering and missing portrait issues. 🫡
 
 ## v1.0.88 - 2026-11-18

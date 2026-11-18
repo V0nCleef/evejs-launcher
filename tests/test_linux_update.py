@@ -33,7 +33,9 @@ def transaction(tmp_path):
     binary = tmp_path / 'fixture'
     subprocess.run(['cc', '-o', str(binary), str(source)], check=True)
     install = tmp_path / 'installed'
-    install.mkdir()
+    # Ubuntu may use umask 0002. The updater correctly rejects a group-writable
+    # installation, so the ordinary transaction fixture must set its own mode.
+    install.mkdir(mode=0o700)
     shutil.copy2(binary, install / agent.EXECUTABLE)
     (install / '_internal').mkdir()
     (install / '_internal/VERSION').write_text('1.0.0')
@@ -80,6 +82,13 @@ def launch_agent(directory, children, *, parent_timeout=3, startup_timeout=3):
     process = subprocess.Popen([sys.executable, '-c', code], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     children.append(process)
     return process
+
+
+def test_group_writable_installation_is_rejected(transaction):
+    directory, install, old, request, children = transaction
+    install.chmod(0o775)
+    with pytest.raises(ValueError, match='invalid or expired'):
+        agent.load_request(directory)
 
 
 def test_successful_switch_requires_exact_startup_ack_and_preserves_user_files(transaction):

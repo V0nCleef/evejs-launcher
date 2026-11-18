@@ -34,7 +34,8 @@ def test_prepare_uses_unique_state_and_does_not_replace_existing_config(tmp_path
     original.write_bytes(b'original-state')
     saved_hook = sys.excepthook
     check = HeadlessCheck(tmp_path, 'immediate')
-    for name in ('APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'QT_QPA_PLATFORM'):
+    for name in ('APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'QT_QPA_PLATFORM',
+                 'XDG_CONFIG_HOME', 'XDG_STATE_HOME'):
         monkeypatch.setenv(name, 'original-environment')
     try:
         check.prepare()
@@ -42,7 +43,10 @@ def test_prepare_uses_unique_state_and_does_not_replace_existing_config(tmp_path
         assert original.read_bytes() == b'original-state'
         assert os.environ['QT_QPA_PLATFORM'] == 'offscreen'
         assert Path(os.environ['APPDATA']).is_relative_to(check.state)
-        cfg = json.loads((Path(os.environ['APPDATA']) / 'EveJS-Launcher/config.json').read_text())
+        from src.core.host import config_directory
+        config_file = config_directory() / 'config.json'
+        assert config_file.is_relative_to(check.state)
+        cfg = json.loads(config_file.read_text())
         assert cfg['auto_start_server'] is cfg['auto_start_market'] is cfg['update_auto_check'] is False
         assert Path(cfg['evejs_root']).is_relative_to(check.state)
     finally:

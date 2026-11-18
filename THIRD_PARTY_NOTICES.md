@@ -63,3 +63,14 @@ hashes, processing parameters, line text, and output hashes are recorded in
 and runtime character or account names are never synthesized.
 
 EVE Online, EVE, and related marks are trademarks of CCP hf. EveJS Launcher is an independent community project and is not affiliated with CCP Games.
+
+The navigation icons in `assets/icons/navigation/` are from Lucide Icons and
+Contributors (ISC; some icons retain the Feather MIT notice). The complete
+upstream notices are in [licenses/LUCIDE.txt](licenses/LUCIDE.txt). Original
+source blob hashes and paths are recorded in `assets/icons/navigation/sources.json`.
+The launcher renders these bundled paths at 19 logical pixels with a 1.6-unit
+stroke and its own navigation colors. No icon assets are fetched at runtime.
+
+Release 1.0.89 also includes psutil 7.2.2 (BSD 3-Clause). Its copyright and
+license are in [licenses/PSUTIL-BSD-3-CLAUSE.txt](licenses/PSUTIL-BSD-3-CLAUSE.txt).
+Source: https://github.com/giampaolo/psutil/tree/release-7.2.2.

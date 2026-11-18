@@ -53,11 +53,19 @@ def test_successful_worker_teardown_keeps_update_guard_until_exit(qapp, monkeypa
     owner._update_install_thread_finished = True
     owner._update_progress_dialog = None
     timers = []
+    linux_handoffs = []
+    from src.core.host import IS_LINUX
+    if IS_LINUX:
+        from src.updater import linux_update
+        monkeypatch.setattr(linux_update, "finish_handoff", linux_handoffs.append)
     monkeypatch.setattr(app_module.QTimer, "singleShot", lambda delay, cb: timers.append((delay, cb)))
     owner._finish_update_install_if_ready()
     assert owner._update_install_worker is None and deleted == [True]
     assert update_active(owner) and active_mutations(owner) == ("update",)
-    assert timers == [(750, app_module.hard_exit)]
+    if IS_LINUX:
+        assert linux_handoffs == [owner] and timers == []
+    else:
+        assert timers == [(750, app_module.hard_exit)]
     owner.deleteLater()
 
 

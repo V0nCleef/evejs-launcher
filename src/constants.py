@@ -125,3 +125,4 @@ class Page(IntEnum):
     MODS = 2
     TOOLS = 3
     SETTINGS = 4
+    SAVE_MIGRATION = 5

@@ -8,6 +8,7 @@ import re
 from .translations_eu import UI_PHRASES_BY_LANGUAGE as EU_UI_PHRASES
 from .translations_character_details import TRANSLATIONS as _CHARACTER_TRANSLATIONS
 from .translations_character_order import SOURCE_PHRASES as CHARACTER_ORDER_SOURCE_PHRASES, UI_PHRASES_BY_LANGUAGE as CHARACTER_ORDER_UI_PHRASES
+from .translations_save_migration import SOURCE_PHRASES as SAVE_MIGRATION_SOURCE_PHRASES, UI_PHRASES_BY_LANGUAGE as SAVE_MIGRATION_UI_PHRASES
 from .translations_mod_approvals import SOURCE_PHRASES as MOD_APPROVAL_SOURCE_PHRASES, UI_PHRASES_BY_LANGUAGE as MOD_APPROVAL_UI_PHRASES
 from .translations_ja_ko import UI_PHRASES_BY_LANGUAGE as JA_KO_UI_PHRASES
 from .translations_auto_login import UI_PHRASES_BY_LANGUAGE as AUTO_LOGIN_UI_PHRASES
@@ -57,6 +58,8 @@ for _language, _catalog in DRONE_RECOVERY_UI_PHRASES.items():
     UI_PHRASES_BY_LANGUAGE[_language] = {**UI_PHRASES_BY_LANGUAGE[_language], **_catalog}
 for _language, _catalog in CHARACTER_ORDER_UI_PHRASES.items():
     UI_PHRASES_BY_LANGUAGE[_language] = {**UI_PHRASES_BY_LANGUAGE[_language], **_catalog}
+for _language, _catalog in SAVE_MIGRATION_UI_PHRASES.items():
+    UI_PHRASES_BY_LANGUAGE[_language] = {**UI_PHRASES_BY_LANGUAGE[_language], **_catalog}
 for _language, _catalog in CHARACTER_SETUP_UI_PHRASES.items():
     UI_PHRASES_BY_LANGUAGE[_language] = {**UI_PHRASES_BY_LANGUAGE[_language], **_catalog}
 for _language, _catalog in MOD_APPROVAL_UI_PHRASES.items():
@@ -81,6 +84,7 @@ SOURCE_PHRASES = tuple(
 SOURCE_PHRASES = tuple(sorted(set(SOURCE_PHRASES) | set(TRAY_SOURCE_PHRASES)))
 SOURCE_PHRASES = tuple(sorted(set(SOURCE_PHRASES) | set(DRONE_RECOVERY_SOURCE_PHRASES)))
 SOURCE_PHRASES = tuple(sorted(set(SOURCE_PHRASES) | set(CHARACTER_ORDER_SOURCE_PHRASES)))
+SOURCE_PHRASES = tuple(sorted(set(SOURCE_PHRASES) | set(SAVE_MIGRATION_SOURCE_PHRASES)))
 SOURCE_PHRASE_SET = frozenset(SOURCE_PHRASES)
 
 

@@ -18,6 +18,8 @@ datas += [
     ('assets/deep_signal/operations_orbital.png', 'assets/deep_signal'),
     ('assets/deep_signal/operations_scene.json', 'assets/deep_signal'),
     ('assets/character_creation/*.png', 'assets/character_creation'),
+    ('assets/icons/navigation/*.svg', 'assets/icons/navigation'),
+    ('assets/icons/navigation/sources.json', 'assets/icons/navigation'),
     ('assets/audio/music/celestial_transit.wav', 'assets/audio/music'),
     ('assets/audio/voice/lyra/*.wav', 'assets/audio/voice/lyra'),
     ('assets/audio/voice/lyra/manifest.json', 'assets/audio/voice/lyra'),

@@ -51,7 +51,8 @@ def test_tools_navigation_sits_between_mods_and_settings(
         assert [
             panel.nav_group.button(int(page)).text()
             for page in Page
-        ] == ["Home", "Characters", "Mods", "Tools", "Settings"]
+        ] == ["Home", "Characters", "Mods", "Tools", "Settings", "Save Migration"]
+        assert panel.layout().indexOf(panel.btn_save_migration) == panel.layout().indexOf(panel.btn_characters) + 1
         assert panel.nav_group.id(panel.btn_tools) == int(Page.TOOLS)
         assert panel.nav_group.id(panel.btn_settings) == int(Page.SETTINGS)
     finally:
@@ -140,7 +141,7 @@ def test_navigation_retranslates_without_owning_the_footer_language_selector(
     try:
         assert not hasattr(panel, "language_combo")
         assert not hasattr(panel, "language_changed")
-        assert panel.minimumSizeHint().height() <= 560
+        assert panel.minimumSizeHint().height() <= 612
 
         set_language("zh_CN")
         panel.retranslate_ui()

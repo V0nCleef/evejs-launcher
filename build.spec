@@ -56,7 +56,7 @@ EXCLUDES = [
     'PyQt6.QtRemoteObjects', 'PyQt6.QtScxml', 'PyQt6.QtSensors', 'PyQt6.QtSerialPort',
     'PyQt6.QtStateMachine', 'PyQt6.QtVirtualKeyboard',
     'PyQt6.QtWaylandClient', 'PyQt6.QtWebView', 'PyQt6.QtBluetooth',
-    'PyQt6.QtHelp', 'PyQt6.QtLocation', 'PyQt6.QtSvg', 'PyQt6.QtSvgWidgets',
+    'PyQt6.QtHelp', 'PyQt6.QtLocation', 'PyQt6.QtSvgWidgets',
     # Heavy Python packages we don't need in the bundle
     'cryptography', 'numpy', 'pandas', 'scipy', 'matplotlib',
     'tkinter', 'turtle', 'turtledemo', 'idlelib', 'lib2to3', 'distutils',
@@ -93,7 +93,7 @@ BINARY_EXCLUDES = [
     'Qt6Purchasing*.dll', 'Qt6RemoteObjects*.dll', 'Qt6Scxml*.dll',
     'Qt6Sensors*.dll', 'Qt6SerialPort*.dll', 'Qt6StateMachine*.dll',
     'Qt6VirtualKeyboard*.dll', 'Qt6Bluetooth*.dll',
-    'Qt6Help*.dll', 'Qt6Location*.dll', 'Qt6Svg*.dll',
+    'Qt6Help*.dll', 'Qt6Location*.dll',
     'd3dcompiler_*.dll',  # DirectX shader compiler — not needed
 ]
 
@@ -107,6 +107,8 @@ a = Analysis(
         ('assets/deep_signal/operations_orbital.png', 'assets/deep_signal'),
         ('assets/deep_signal/operations_scene.json', 'assets/deep_signal'),
         ('assets/character_creation/*.png', 'assets/character_creation'),
+        ('assets/icons/navigation/*.svg', 'assets/icons/navigation'),
+        ('assets/icons/navigation/sources.json', 'assets/icons/navigation'),
         # Explicit release allowlist: review renders and future drafts must not
         # become bundled merely because somebody placed a WAV beside this file.
         # Personal playlist paths remain local config references.

@@ -3,6 +3,16 @@ import logging
 import os
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
+
+# This script is also run directly, outside pytest's environment fixtures.
+# Its diagnostic logger must never append to a normal launcher installation.
+_project_root = Path(__file__).resolve().parents[1]
+_qa_root = _project_root / ".qa"
+_qa_root.mkdir(exist_ok=True)
+_private_state = TemporaryDirectory(prefix="foundation-", dir=_qa_root)
+for _key in ("APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"):
+    os.environ[_key] = str(Path(_private_state.name) / _key.lower())
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -75,3 +85,5 @@ assert PortraitCache.get("test_64") is None
 print("cache OK      | put/get/clear/set_limit verified")
 
 print("\nALL FOUNDATION MODULES OK")
+logging.shutdown()
+_private_state.cleanup()

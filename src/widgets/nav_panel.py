@@ -10,9 +10,7 @@ from PyQt6.QtGui import (
     QFont,
     QIcon,
     QPainter,
-    QPainterPath,
     QPen,
-    QPixmap,
 )
 from PyQt6.QtWidgets import (
     QFrame,
@@ -28,6 +26,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.constants import COLORS, Page
+from src.ui.navigation_icons import NAV_ICON_SIZE, navigation_icon
 from src.i18n import translate, translate_service_action, translate_ui_phrase
 
 
@@ -35,97 +34,6 @@ def logo_asset_path(module_file: str | Path | None = None) -> Path:
     """Resolve the bundled logo independently of the process working directory."""
     source_file = Path(module_file) if module_file is not None else Path(__file__)
     return source_file.resolve().parent.parent.parent / "assets" / "logo.png"
-
-
-def _nav_icon(kind: str, size: int = 24) -> QIcon:
-    """Create a crisp original line icon without relying on external assets."""
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(QColor("#B7C9D6"), 1.45)
-    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-    painter.setPen(pen)
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    center = QPointF(size / 2.0, size / 2.0)
-    r = size * 0.32
-
-    if kind == "home":
-        roof = QPainterPath()
-        roof.moveTo(size * 0.18, size * 0.48)
-        roof.lineTo(size * 0.5, size * 0.19)
-        roof.lineTo(size * 0.82, size * 0.48)
-        painter.drawPath(roof)
-        painter.drawPolyline(
-            QPointF(size * 0.27, size * 0.42),
-            QPointF(size * 0.27, size * 0.79),
-            QPointF(size * 0.73, size * 0.79),
-            QPointF(size * 0.73, size * 0.42),
-        )
-        painter.drawLine(
-            QPointF(size * 0.44, size * 0.79),
-            QPointF(size * 0.44, size * 0.59),
-        )
-    elif kind == "characters":
-        painter.drawEllipse(
-            QRectF(size * 0.38, size * 0.17, size * 0.24, size * 0.24)
-        )
-        arc = QPainterPath()
-        arc.moveTo(size * 0.19, size * 0.79)
-        arc.cubicTo(
-            size * 0.24, size * 0.49,
-            size * 0.76, size * 0.49,
-            size * 0.81, size * 0.79,
-        )
-        painter.drawPath(arc)
-    elif kind == "mods":
-        points = [
-            QPointF(
-                center.x() + r * 1.06 * cos(i * pi / 3.0),
-                center.y() + r * 1.06 * sin(i * pi / 3.0),
-            )
-            for i in range(6)
-        ]
-        painter.drawPolygon(*points)
-        painter.drawEllipse(center, size * 0.08, size * 0.08)
-        painter.drawLine(points[0], center)
-        painter.drawLine(points[2], center)
-        painter.drawLine(points[4], center)
-    elif kind == "tools":
-        painter.drawLine(
-            QPointF(size * 0.22, size * 0.75),
-            QPointF(size * 0.72, size * 0.25),
-        )
-        painter.drawEllipse(
-            QRectF(size * 0.16, size * 0.69, size * 0.19, size * 0.19)
-        )
-        painter.drawArc(
-            QRectF(size * 0.56, size * 0.10, size * 0.31, size * 0.31),
-            35 * 16,
-            180 * 16,
-        )
-        painter.drawLine(
-            QPointF(size * 0.29, size * 0.24),
-            QPointF(size * 0.76, size * 0.72),
-        )
-    else:
-        painter.drawEllipse(center, r, r)
-        for angle in range(0, 360, 45):
-            radians = angle * 3.141592653589793 / 180.0
-            inner = QPointF(
-                center.x() + r * 0.78 * cos(radians),
-                center.y() + r * 0.78 * sin(radians),
-            )
-            outer = QPointF(
-                center.x() + r * 1.18 * cos(radians),
-                center.y() + r * 1.18 * sin(radians),
-            )
-            painter.drawLine(inner, outer)
-        painter.drawEllipse(center, size * 0.08, size * 0.08)
-
-    painter.end()
-    return QIcon(pixmap)
 
 
 def _paint_telemetry_button(button: QPushButton, badge_count: int = 0) -> None:
@@ -172,7 +80,7 @@ class NavButton(QPushButton):
         super().__init__(text, parent)
         if icon:
             self.setIcon(icon)
-            self.setIconSize(QSize(24, 24))
+            self.setIconSize(QSize(NAV_ICON_SIZE, NAV_ICON_SIZE))
         self.setCheckable(True)
         self.setAutoExclusive(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -472,19 +380,23 @@ class NavPanel(QFrame):
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
 
-        self.btn_home = NavButton(translate("nav.home"), _nav_icon("home"))
+        self.btn_home = NavButton(translate("nav.home"), navigation_icon("home"))
         self.btn_characters = NavButton(
-            translate("nav.characters"), _nav_icon("characters")
+            translate("nav.characters"), navigation_icon("characters")
         )
-        self.btn_mods = NavButton(translate("nav.mods"), _nav_icon("mods"))
-        self.btn_tools = NavButton(translate("nav.tools"), _nav_icon("tools"))
+        self.btn_save_migration = NavButton(
+            translate_ui_phrase("Save Migration"), navigation_icon("save_migration")
+        )
+        self.btn_mods = NavButton(translate("nav.mods"), navigation_icon("mods"))
+        self.btn_tools = NavButton(translate("nav.tools"), navigation_icon("tools"))
         self.btn_settings = NavButton(
-            translate("nav.settings"), _nav_icon("settings")
+            translate("nav.settings"), navigation_icon("settings")
         )
 
         nav_buttons = [
             (self.btn_home, Page.HOME),
             (self.btn_characters, Page.CHARACTERS),
+            (self.btn_save_migration, Page.SAVE_MIGRATION),
             (self.btn_mods, Page.MODS),
             (self.btn_tools, Page.TOOLS),
             (self.btn_settings, Page.SETTINGS),
@@ -558,6 +470,7 @@ class NavPanel(QFrame):
         self.command_label.setText(translate("nav.command_deck"))
         self.btn_home.setText(translate("nav.home"))
         self.btn_characters.setText(translate("nav.characters"))
+        self.btn_save_migration.setText(translate_ui_phrase("Save Migration"))
         self.btn_mods.setText(translate("nav.mods"))
         self.btn_tools.setText(translate("nav.tools"))
         self.btn_settings.setText(translate("nav.settings"))

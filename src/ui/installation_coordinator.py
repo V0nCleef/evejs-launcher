@@ -119,7 +119,7 @@ class InstallationBar(QWidget):
         if any(getattr(w, name, None) is not None for name in (
             "_mod_operation_request", "_client_launch_thread", "_launch_queue", "_character_creation_thread",
             "_character_deletion_thread", "_overview_patch_thread", "_mod_lifecycle_lease",
-            "_docker_character_token", "_docker_tool_token")):
+            "_save_migration_thread", "_docker_character_token", "_docker_tool_token")):
             return "Wait for the current launcher operation before changing installations."
         if getattr(getattr(w, "_tracker", None), "running_count", 0):
             return "Close the tracked clients before switching installations."

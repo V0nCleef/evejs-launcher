@@ -52,6 +52,11 @@ def tray(qapp, tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config.json")
     cfg = config.load()
     cfg.update(evejs_root=str(tmp_path), close_behavior="ask", update_auto_check=False)
+    from src.core.host import IS_LINUX
+    if IS_LINUX:
+        # This is a tray/preferences fixture with no prepared runtime. Native
+        # Linux Setup validation has its own installation/backend tests.
+        monkeypatch.setattr("src.core.linux_installation.imported_settings", lambda _root: {})
     config.save(cfg)
     window = MainWindow.__new__(MainWindow)
     QMainWindow.__init__(window)

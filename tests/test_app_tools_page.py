@@ -14,6 +14,7 @@ from src import app as app_module
 from src import config
 from src.app import MainWindow
 from src.constants import Page
+from src.core.host import IS_LINUX
 from src.core.tool_catalog import ResolvedTool, ToolAction, supported_tool_definitions
 
 
@@ -176,6 +177,7 @@ def test_unrelated_settings_save_does_not_rescan_tools_root(
     assert tools_calls == []
 
 
+@pytest.mark.skipif(IS_LINUX, reason="Windows batch-wrapper and native window contract; Linux dispatch has separate coverage")
 def test_one_normal_tool_click_spawns_once_and_reports_launched(
     qapp: QApplication,
     tools_window: MainWindow,
@@ -199,6 +201,7 @@ def test_one_normal_tool_click_spawns_once_and_reports_launched(
     assert tools_window._market_proc is None
 
 
+@pytest.mark.skipif(IS_LINUX, reason="Windows batch-wrapper and native window contract; Linux dispatch has separate coverage")
 def test_client_code_grabber_centers_only_its_owned_exact_title_window(
     tools_window: MainWindow,
     monkeypatch: pytest.MonkeyPatch,
@@ -255,6 +258,7 @@ def test_client_code_grabber_centers_only_its_owned_exact_title_window(
     assert tools_window._tool_window_timers == set()
 
 
+@pytest.mark.skipif(IS_LINUX, reason="Windows batch-wrapper and native window contract; Linux dispatch has separate coverage")
 def test_tool_window_centering_poll_is_bounded(
     tools_window: MainWindow,
     monkeypatch: pytest.MonkeyPatch,
@@ -310,6 +314,7 @@ def test_central_handler_cancels_destructive_action_before_spawn(
     assert calls == []
 
 
+@pytest.mark.skipif(IS_LINUX, reason="Windows batch-wrapper and native window contract; Linux dispatch has separate coverage")
 def test_central_handler_uses_curated_arguments_for_programmatic_action(
     tools_window: MainWindow,
     monkeypatch: pytest.MonkeyPatch,
@@ -332,6 +337,7 @@ def test_central_handler_uses_curated_arguments_for_programmatic_action(
     assert calls == [(card.tool.absolute_entrypoint, ())]
 
 
+@pytest.mark.skipif(IS_LINUX, reason="Windows batch-wrapper and native window contract; Linux dispatch has separate coverage")
 def test_central_handler_uses_current_curated_wrapper_path(
     tools_window: MainWindow,
     tmp_path: Path,
@@ -386,6 +392,7 @@ def test_central_handler_rejects_action_not_in_curated_definition(
     ]
 
 
+@pytest.mark.skipif(IS_LINUX, reason="Windows batch-wrapper and native window contract; Linux dispatch has separate coverage")
 def test_central_handler_confirmed_reset_launches_without_modifier(
     tools_window: MainWindow,
     monkeypatch: pytest.MonkeyPatch,
@@ -411,6 +418,7 @@ def test_central_handler_confirmed_reset_launches_without_modifier(
     assert calls == [(card.tool.absolute_entrypoint, ())]
 
 
+@pytest.mark.skipif(IS_LINUX, reason="Windows batch-wrapper and native window contract; Linux dispatch has separate coverage")
 def test_tool_spawn_failure_is_logged_inline_and_shown_contextually(
     qapp: QApplication,
     tools_window: MainWindow,

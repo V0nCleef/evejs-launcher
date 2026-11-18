@@ -1,0 +1,41 @@
+{
+  "project": "Lucide",
+  "license": "licenses/LUCIDE.txt",
+  "rendering": {
+    "logical_size": 19,
+    "view_box": 24,
+    "stroke_width": 1.6
+  },
+  "icons": [
+    {
+      "file": "house.svg",
+      "source": "https://github.com/lucide-icons/lucide/blob/main/icons/house.svg",
+      "git_blob_sha": "10e4097e290fdb2f1f919b264bf4e3095348de7c"
+    },
+    {
+      "file": "scan-face.svg",
+      "source": "https://github.com/lucide-icons/lucide/blob/main/icons/scan-face.svg",
+      "git_blob_sha": "d1227a0e327c16da38b72b8c9067b95dcbef72f0"
+    },
+    {
+      "file": "folder-sync.svg",
+      "source": "https://github.com/lucide-icons/lucide/blob/main/icons/folder-sync.svg",
+      "git_blob_sha": "f627e318de717799b05e045836f38a93821b2f05"
+    },
+    {
+      "file": "boxes.svg",
+      "source": "https://github.com/lucide-icons/lucide/blob/main/icons/boxes.svg",
+      "git_blob_sha": "fddb08c599fdd8cf967efdd18adf06ab3f8a5831"
+    },
+    {
+      "file": "wrench.svg",
+      "source": "https://github.com/lucide-icons/lucide/blob/main/icons/wrench.svg",
+      "git_blob_sha": "3624343211c8555480270e5371b65c34d92700c0"
+    },
+    {
+      "file": "sliders-horizontal.svg",
+      "source": "https://github.com/lucide-icons/lucide/blob/main/icons/sliders-horizontal.svg",
+      "git_blob_sha": "819f80c1f0cc7fade2088fb776030e348657a486"
+    }
+  ]
+}

@@ -19,6 +19,7 @@ MUTATION_FIELDS = {
     "mod_operation": ("_mod_operation_thread", "_mod_operation_request"),
     "mod_settings": ("_mod_settings_thread", "_mod_settings_request"),
     "drone_recovery": ("_drone_recovery_request",),
+    "save_migration": ("_save_migration_thread",),
 }
 
 

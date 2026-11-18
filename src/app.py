@@ -945,6 +945,15 @@ class MainWindow(QMainWindow):
         self._page_reveal = PageReveal(self)
         self._home_page = HomePage()
         self._characters_page = CharactersPage()
+        from .core.save_migration import verify_stock_game
+        from .pages.save_migration_page import SaveMigrationPage
+        self._save_migration_thread = None
+        self._save_migration_page = SaveMigrationPage(
+            verifier=verify_stock_game,
+            can_start=self._can_start_save_migration,
+            installation_label=lambda entry: entry["name"],
+        )
+        self._save_migration_page.busy_changed.connect(self._on_save_migration_busy)
         self._mods_page = ModsPage(defer_inventory=True)
         self._startup_scripts_requested.connect(
             self._mods_page.startup_scripts.start_for_server
@@ -961,6 +970,7 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._mods_page)        # Page.MODS = 2
         self._stack.addWidget(self._tools_page)       # Page.TOOLS = 3
         self._stack.addWidget(self._settings_page)    # Page.SETTINGS = 4
+        self._stack.addWidget(self._save_migration_page)  # Page.SAVE_MIGRATION = 5
         content.addWidget(self._stack, 1)
 
         root.addLayout(content, 1)
@@ -981,6 +991,7 @@ class MainWindow(QMainWindow):
         self._status_bar = StatusBar(self)
         from .ui.installation_coordinator import InstallationBar
         self._installation_bar = InstallationBar(self)
+        self._installation_bar.presentation_changed.connect(self._refresh_save_migration_installations)
         self._status_bar.set_installation_controls(self._installation_bar)
         root.addWidget(self._status_bar)
 
@@ -1005,6 +1016,7 @@ class MainWindow(QMainWindow):
             getattr(self, "_title_bar", None),
             getattr(self, "_home_page", None),
             getattr(self, "_characters_page", None),
+            getattr(self, "_save_migration_page", None),
             getattr(self, "_shipboard_caption", None),
         ):
             refresh = getattr(page, "retranslate_ui", None)
@@ -1115,6 +1127,54 @@ class MainWindow(QMainWindow):
             self._settings_page.refresh_if_clean()
         elif index == int(Page.TOOLS):
             self._tools_page.refresh_tools(str(self._cfg.get("evejs_root", "")))
+        elif index == int(Page.SAVE_MIGRATION):
+            self._refresh_save_migration_installations()
+            self._save_migration_page.retranslate_ui()
+
+    def _refresh_save_migration_installations(self) -> None:
+        from .core.installation_profiles import sync_active_profile, InstallationProfileError
+        if self._save_migration_page.busy:
+            return
+        try:
+            profiles = sync_active_profile(self._cfg)
+        except InstallationProfileError as error:
+            self._save_migration_registry_snapshot = None
+            self._save_migration_page.set_installations([], "")
+            self._save_migration_page._set_status(str(error))
+        else:
+            # Footer presentation updates must not rebuild an open picker or
+            # reread version files when the registry has not changed.
+            snapshot = (profiles["installation_profiles"], profiles["active_installation_profile"])
+            if snapshot == getattr(self, "_save_migration_registry_snapshot", None):
+                return
+            from copy import deepcopy
+            self._save_migration_registry_snapshot = deepcopy(snapshot)
+            self._save_migration_page.set_installations(
+                profiles["installation_profiles"], profiles["active_installation_profile"]
+            )
+
+    def _can_start_save_migration(self) -> bool:
+        from .core.application_operations import active_mutations
+        if (active_mutations(self) or getattr(self, "_close_in_progress", False)
+                or getattr(self, "_pending_settings_intent", None) is not None):
+            QMessageBox.information(self, "Operation In Progress",
+                "Wait for the current operation to finish before transferring a save.")
+            return False
+        if getattr(getattr(self, "_tracker", None), "running_count", 0):
+            QMessageBox.information(self, "Save Migration",
+                "Close tracked EVE clients before transferring a save.")
+            return False
+        return True
+
+    def _on_save_migration_busy(self, worker: object) -> None:
+        # Retain ownership until the worker's terminal GUI continuation runs.
+        self._save_migration_thread = worker
+        if worker is not None:
+            self._cancel_data_loads()
+            self._characters_page.cancel_portrait_loads(invalidate=True)
+        self._set_operation_controls_busy(worker is not None)
+        if worker is None:
+            self._refresh_characters()
 
     def _apply_runtime_settings(self) -> None:
         """Apply persisted Home animation preferences without restarting the app."""
@@ -2475,6 +2535,7 @@ class MainWindow(QMainWindow):
             or update_active(self)
             or getattr(self, "_mod_operation_request", None) is not None
             or getattr(self, "_drone_recovery_request", None) is not None
+            or getattr(self, "_save_migration_thread", None) is not None
         )
 
     def _update_allows_mutation(self) -> bool:
@@ -7921,6 +7982,8 @@ class MainWindow(QMainWindow):
 
     def _refresh_characters(self) -> None:
         """Schedule one serialized account refresh outside the GUI thread."""
+        if getattr(self, "_save_migration_thread", None) is not None:
+            return
         if self._close_in_progress or vars(self).get("_runtime_startup_deferred", False):
             return
         activity_timer = self.__dict__.get("_character_activity_timer")
@@ -9872,6 +9935,8 @@ class MainWindow(QMainWindow):
     def _settings_save_rejection(self, draft: dict) -> str | None:
         """Reject unsafe Native endpoint changes before Settings writes disk."""
         from .core.application_operations import update_active
+        if getattr(self, "_save_migration_thread", None) is not None:
+            return "Wait for the current operation to finish before transferring a save."
         if getattr(self, "_drone_recovery_request", None) is not None:
             return "Wait for the active operation to finish before recovering drone groups."
         if update_active(self):
@@ -10137,6 +10202,9 @@ class MainWindow(QMainWindow):
 
     def _close_launcher(self, event) -> None:
         """The existing guarded real shutdown, independent of X-to-tray."""
+        if getattr(self, "_save_migration_thread", None) is not None:
+            event.ignore()
+            return
         if getattr(self, "_drone_recovery_request", None) is not None:
             event.ignore()
             return
