@@ -18,6 +18,7 @@ from .client_autologin import (
     require_auto_login_arguments,
     supports_client_no_console,
 )
+from .client_renderer import configure_client_renderer
 from .dlss5_runtime import prepare_installed_dlss5
 from .discovery import get_ca_cert_path
 from .mod_api_runtime import prepare_public_client_mods
@@ -464,9 +465,6 @@ def launch_client(
         if dlss5_environment:
             env.pop("RESHADE_BASE_PATH_OVERRIDE", None)
             env.update(dlss5_environment)
-            log.info(
-                "Using installed DLSS5 client renderer in DX12 mode."
-            )
         if overview_bridge is not None:
             env["EVEJS_OVERVIEW_BRIDGE"] = overview_bridge.command
             env["EVEJS_OVERVIEW_ACK_PATH"] = str(overview_bridge.ack_path)
@@ -528,6 +526,15 @@ def launch_client(
             )
         backend = "docker" if effective_context.target_identity is not None else "native"
         try:
+            mod_environment = {key.upper(): value for key, value in public_mods.environment.items()}
+            renderer = configure_client_renderer(
+                evejs_root, exe.parent, env,
+                override=dlss5_environment.get("TRINITYPLATFORM")
+                if dlss5_environment else mod_environment.get("TRINITYPLATFORM"),
+                override_source="installed DLSS5" if dlss5_environment else "client mod",
+            )
+            if dlss5_environment and not renderer.fallback:
+                log.info("Using installed DLSS5 client renderer in DX12 mode.")
             if pre_spawn_check is not None:
                 pre_spawn_check()
             process = launch_eve_client(exe, env, exe.parent, arguments=arguments)

@@ -2,6 +2,12 @@
 
 ## Changelog
 
+## v1.0.88 - 2026-11-18
+- Honor EveJS's saved DX11/DX12 renderer preference for Windows clients and Linux/Proton clients, including the existing TRINITYPLATFORM setting and inherited preferences.
+- Fall back to DX11 when the selected client has no DX12 renderer, and log the requested renderer, the effective choice and any fallback.
+- Preserve installed Windows DLSS5 and client-mod renderer overrides. Pass the selected renderer to Proton on Linux without changing its graphics translation components.
+- Thanks to ltrkZ. for reporting the renderer mismatch. 🫡
+
 ## v1.0.87 - 2026-11-17
 - Add native Linux launcher support for prepared EveJS installations, Proton client profiles and Linux service ownership.
 - Support Linux launcher updates with startup verification, process ownership handoff and rollback.

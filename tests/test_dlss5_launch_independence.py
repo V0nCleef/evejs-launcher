@@ -15,7 +15,7 @@ def renderer(tmp_path):
     client = tmp_path / "client" / "tq"
     binary = client / "bin64"
     binary.mkdir(parents=True)
-    for name in ("dxgi.dll", "renodx-dlss5.addon64", "nvngx_dlssnr.dll", "sl.dlss_nr.dll"):
+    for name in ("_trinity_dx12.dll", "dxgi.dll", "renodx-dlss5.addon64", "nvngx_dlssnr.dll", "sl.dlss_nr.dll"):
         (binary / name).write_bytes(b"installed renderer fixture")
     (binary / "ReShade.ini").write_text(
         "[ADDON]\nLoadFromDllMain=another.addon64\n"

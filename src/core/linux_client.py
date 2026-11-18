@@ -365,6 +365,12 @@ def perform_linux_client_launch(request):
         # Preserve GUI stdout/stderr inheritance. Never kill the prefix's shared wineserver.
         alias_created = False
         try:
+            from .client_renderer import configure_client_renderer
+            mod_environment = {key.upper(): value for key, value in public_mods.environment.items()}
+            configure_client_renderer(
+                request.evejs_root, exe.parent, env,
+                override=mod_environment.get('TRINITYPLATFORM'),
+            )
             wait_for_client_endpoints(request.launch_context)
             check_backend()
             alias.symlink_to(settings.resolve(strict=True), target_is_directory=True)

@@ -570,11 +570,45 @@ def test_launch_client_does_not_inject_dlss5_or_change_inherited_reshade_without
 
     env = captured["env"]
     assert isinstance(env, dict)
-    assert "TRINITYPLATFORM" not in env
+    assert env["TRINITYPLATFORM"] == "dx11"
     assert "EVEJS_DLSS5" not in env
     # No-package launches retain their historical inherited environment. A
     # verified DLSS5 launch replaces this value with its profile-owned path.
     assert env["RESHADE_BASE_PATH_OVERRIDE"] == str(tmp_path / "stale")
+
+
+def test_launch_client_honors_saved_dx12_without_dlss5(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import nullcontext
+    from src.core.mod_api_runtime import PreparedClientMods
+
+    _accept_fixture_cache(monkeypatch)
+    monkeypatch.delenv("TRINITYPLATFORM", raising=False)
+    monkeypatch.delenv("EVEJS_CLIENT_RENDERER", raising=False)
+    tq = tmp_path / "Shared Client" / "tq"
+    _create_client_cache(tq)
+    exe = tq / "bin64" / "exefile.exe"
+    exe.parent.mkdir()
+    exe.write_bytes(b"fixture")
+    (exe.parent / "_trinity_dx12.dll").write_bytes(b"fixture")
+    root = tmp_path / "EveJS"
+    config = root / "tools" / "ClientSETUP" / "scripts" / "EvEJSConfig.bat"
+    config.parent.mkdir(parents=True)
+    config.write_text('set "EVEJS_CLIENT_RENDERER=dx12"\n', encoding="utf-8")
+    captured = {}
+    monkeypatch.setattr(launcher, "scan_mods", lambda _root: [])
+    monkeypatch.setattr(launcher, "serialize_evejs_client_trust_and_spawn", nullcontext)
+    monkeypatch.setattr(launcher, "acquire_mod_lifecycle_lock", lambda _path: nullcontext())
+    monkeypatch.setattr(launcher, "prepare_evejs_client_certificate_trust", lambda *_args: False)
+    monkeypatch.setattr(launcher, "prepare_public_client_mods", lambda *_args, **_kwargs: PreparedClientMods({}, (), ()))
+    monkeypatch.setattr(launcher, "launch_eve_client", lambda _exe, env, _cwd, *, arguments: captured.update(env=env) or object())
+
+    launcher.launch_client(str(root), tq, client_path=str(tq))
+
+    assert captured["env"]["TRINITYPLATFORM"] == "dx12"
+    assert "EVEJS_DLSS5" not in captured["env"]
 
 
 def test_launch_client_injects_dx12_for_installed_dlss5_without_manager(
@@ -591,6 +625,7 @@ def test_launch_client_injects_dx12_for_installed_dlss5_without_manager(
     configured_exe = configured_tq / "bin64" / "exefile.exe"
     configured_exe.parent.mkdir(parents=True, exist_ok=True)
     configured_exe.write_bytes(b"")
+    (exe.parent / "_trinity_dx12.dll").write_bytes(b"renderer")
     (configured_exe.parent / "dxgi.dll").write_bytes(b"reshade")
     (configured_exe.parent / "renodx-dlss5.addon64").write_bytes(b"renodx")
     (configured_exe.parent / "nvngx_dlssnr.dll").write_bytes(b"neural runtime")

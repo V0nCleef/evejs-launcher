@@ -74,6 +74,7 @@ def test_changed_docker_runtime_is_rejected(runtime):
 
 def test_linux_docker_launch_uses_its_own_endpoint_scope_and_mod_backend(prepared_launch, tmp_path, monkeypatch):
     from src.core import mod_api_runtime, mod_client_notifications
+    from pathlib import Path
     request, calls = prepared_launch
     original = request.evejs_root
     compose_root = tmp_path / 'compose-project'
@@ -82,6 +83,12 @@ def test_linux_docker_launch_uses_its_own_endpoint_scope_and_mod_backend(prepare
     context = replace(context, game_port=28000, proxy_url='http://127.0.0.1:28002')
     request = replace(request, evejs_root=str(compose_root), linux_setup_root=original,
                       launch_context=context, docker_auto_login_probe=probe, auto_login_enabled=False)
+    installation = linux_client.LinuxInstallation.load(original)
+    (installation.client / 'bin64/_trinity_dx12.dll').write_bytes(b'renderer fixture')
+    for root, selected in ((Path(original), 'dx11'), (compose_root, 'dx12')):
+        config = root / 'tools/ClientSETUP/scripts/EvEJSConfig.bat'
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(f'set "EVEJS_CLIENT_RENDERER={selected}"\n')
     checks = []
     monkeypatch.setattr(docker_client, 'require_docker_runtime', lambda *args: checks.append(args[0]))
     def forbidden(*args):
@@ -96,6 +103,7 @@ def test_linux_docker_launch_uses_its_own_endpoint_scope_and_mod_backend(prepare
     assert len(checks) == 2
     assert '/port:28000' in calls[0][0]
     assert calls[0][1]['env']['HTTP_PROXY'] == 'http://127.0.0.1:28002'
+    assert calls[0][1]['env']['TRINITYPLATFORM'] == 'dx12'
     assert mods[0][0][0] == str(compose_root)
     assert mods[0][1]['backend'] == 'docker'
     assert notifications[0]['backend'] == 'docker'

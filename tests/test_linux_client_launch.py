@@ -1,5 +1,6 @@
 """Exercise the production Proton preparation boundary without running EVE."""
 from dataclasses import replace
+import subprocess
 import sys
 from types import SimpleNamespace
 
@@ -12,6 +13,7 @@ from src.core.overview_state import OverviewBridgeLaunch
 from src.workers.client_launch_worker import ClientLaunchRequest
 
 pytestmark = pytest.mark.skipif(sys.platform != 'linux', reason='Linux profile links and locks')
+_NATIVE_POPEN = subprocess.Popen
 
 
 @pytest.fixture
@@ -34,6 +36,72 @@ def prepared_launch(linux_installation, monkeypatch, tmp_path):
     request = ClientLaunchRequest('fixture-account', 'Fixture Pilot', str(linux_installation.root),
         str(linux_installation.client), tmp_path / 'profiles', ClientLaunchContext.native(), auto_login_enabled=True)
     return request, calls
+
+
+@pytest.mark.parametrize('requested,has_dx12,expected', [
+    ('dx12', True, 'dx12'), ('dx11', True, 'dx11'), ('dx12', False, 'dx11'),
+])
+def test_saved_renderer_reaches_proton_without_changing_translation_stack(
+    prepared_launch, linux_installation, monkeypatch, requested, has_dx12, expected,
+):
+    request, calls = prepared_launch
+    monkeypatch.delenv('EVEJS_CLIENT_RENDERER', raising=False)
+    monkeypatch.delenv('TRINITYPLATFORM', raising=False)
+    config = linux_installation.root / 'tools/ClientSETUP/scripts/EvEJSConfig.bat'
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(f'set "EVEJS_CLIENT_RENDERER={requested}"\n')
+    renderer = linux_installation.client / 'bin64/_trinity_dx12.dll'
+    if has_dx12:
+        renderer.write_bytes(b'client renderer fixture')
+    else:
+        renderer.unlink(missing_ok=True)
+
+    linux_client.perform_linux_client_launch(request)
+
+    command, options = calls[0]
+    assert options['env']['TRINITYPLATFORM'] == expected
+    assert command[:2] == [str(linux_installation.proton), 'run']
+
+
+@pytest.mark.parametrize('requested,has_dx12,expected', [
+    ('dx12', True, 'dx12'), ('dx11', True, 'dx11'), ('dx12', False, 'dx11'),
+])
+def test_selected_renderer_reaches_a_real_linux_probe_process(
+    prepared_launch, linux_installation, monkeypatch, tmp_path, requested, has_dx12, expected,
+):
+    request, _calls = prepared_launch
+    monkeypatch.delenv('EVEJS_CLIENT_RENDERER', raising=False)
+    monkeypatch.delenv('TRINITYPLATFORM', raising=False)
+    config = linux_installation.root / 'tools/ClientSETUP/scripts/EvEJSConfig.bat'
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(f'set "EVEJS_CLIENT_RENDERER={requested}"\n')
+    renderer = linux_installation.client / 'bin64/_trinity_dx12.dll'
+    if has_dx12:
+        renderer.write_bytes(b'client renderer fixture')
+    else:
+        renderer.unlink(missing_ok=True)
+    output = tmp_path / 'probe-output.txt'
+    monkeypatch.setenv('EVEJS_RENDERER_PROBE_OUTPUT', str(output))
+    # Replace only this fixture's inert Proton placeholder with a child-env
+    # recorder. No actual Proton installation or EVE binary runs in this test.
+    linux_installation.proton.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$TRINITYPLATFORM" "$@" > "$EVEJS_RENDERER_PROBE_OUTPUT"\n'
+    )
+    linux_installation.proton.chmod(0o755)
+    monkeypatch.setattr(linux_client.subprocess, 'Popen', _NATIVE_POPEN)
+
+    process = linux_client.perform_linux_client_launch(request)
+    try:
+        assert process.wait(timeout=5) == 0
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+
+    observed = output.read_text().splitlines()
+    assert observed[0] == expected
+    assert observed[1:3] == ['run', str(linux_installation.client / 'bin64/exefile.exe')]
+    assert '/port:26000' in observed
 
 
 def test_idless_named_launch_preserves_manual_login_and_adds_portable_mod_options(prepared_launch):

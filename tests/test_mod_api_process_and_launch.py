@@ -68,6 +68,7 @@ def fixture_launcher(tmp_path, monkeypatch, folder_name):
 
 def test_public_dlss_folder_cannot_request_receipt_verification_before_spawn(tmp_path, monkeypatch):
     root, profile, client, mod = fixture_launcher(tmp_path, monkeypatch, "DLSS5")
+    (profile / "bin64" / "_trinity_dx12.dll").write_bytes(b"renderer fixture")
     events = []
     monkeypatch.setattr(launcher, "prepare_installed_dlss5", lambda *_args: {"TRINITYPLATFORM": "dx12"})
     def prepare(*args, **kwargs):
