@@ -936,6 +936,7 @@ def test_docker_missing_endpoints_fail_before_profile_and_client_work(
     assert "endpoint" in messages[0].casefold()
 
 
+@pytest.mark.skipif(config.IS_LINUX, reason='Windows client spawn seam; Linux equivalent is in test_linux_docker_client.py')
 def test_complete_connect_only_endpoints_use_one_context_for_profile_and_client(
     docker_window: MainWindow,
     monkeypatch: pytest.MonkeyPatch,

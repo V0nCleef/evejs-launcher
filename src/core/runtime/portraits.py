@@ -23,30 +23,16 @@ _MAX_DIMENSION = 2048
 _MAX_PIXELS = 4_194_304
 _ALLOWED_SIZES = frozenset({64, 128, 256, 512})
 
-_PORTRAIT_SEARCH_PATHS = (
-    # EveJS v0.12.4 writes generated portraits beside the active game store.
-    # Keep this authoritative runtime location ahead of the legacy source-tree
-    # path so migrated/stale files cannot shadow the currently selected store.
-    "_local/gameStore/images/Character/{character_id}_{size}.jpg",
-    "_local/gameStore/images/Character/{character_id}_{size}.png",
-    "_local/gameStore/images/Character/{character_id}_256.jpg",
-    "_local/gameStore/images/Character/{character_id}_256.png",
-    "_local/gameStore/images/Character/{character_id}_128.jpg",
-    "_local/gameStore/images/Character/{character_id}_128.png",
-    "_local/gameStore/images/Character/{character_id}_512.jpg",
-    "_local/gameStore/images/Character/{character_id}_512.png",
-    "_local/gameStore/images/Character/{character_id}_64.jpg",
-    "_local/gameStore/images/Character/{character_id}_64.png",
-    "server/src/_secondary/image/generated/Character/{character_id}_{size}.jpg",
-    "server/src/_secondary/image/generated/Character/{character_id}_{size}.png",
-    "server/src/_secondary/image/generated/Character/{character_id}_256.jpg",
-    "server/src/_secondary/image/generated/Character/{character_id}_256.png",
-    "server/src/_secondary/image/generated/Character/{character_id}_128.jpg",
-    "server/src/_secondary/image/generated/Character/{character_id}_128.png",
-    "server/src/_secondary/image/generated/Character/{character_id}_512.jpg",
-    "server/src/_secondary/image/generated/Character/{character_id}_512.png",
-    "server/src/_secondary/image/generated/Character/{character_id}_64.jpg",
-    "server/src/_secondary/image/generated/Character/{character_id}_64.png",
+_PORTRAIT_SEARCH_PATHS = tuple(
+    f"{root}/{{character_id}}_{size}.{extension}"
+    for root in (
+        "_local/gameStore/images/Character",
+        "server/src/gameStore/images/Character",
+        "server/src/_secondary/image/generated/Character",
+    )
+    for size in ("{size}", 256, 128, 512, 64, 1024, 32)
+    for extension in ("jpg", "png")
+) + (
     "server/src/_secondary/image/images/hi.jpg",
     "server/src/_secondary/image/images/hi.png",
 )
@@ -281,11 +267,19 @@ class PortraitProvider:
                 "network",
                 "The portrait endpoint could not be read within safe bounds.",
             ) from exc
-        return _decode_image(
+        # EveJS publishes the same uploaded bytes under each size alias. The
+        # suffix selects a rendition URL, not the uploaded image dimensions.
+        # Keep square/decode/pixel bounds, then cache only the canonical size.
+        image = _decode_image(
             payload,
             expected_mime=content_type,
-            expected_size=request.size,
+            expected_size=None,
             exact_size=True,
+        )
+        return image.scaled(
+            request.size, request.size,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
         )
 
     def _load_native(self, request: PortraitRequest) -> QImage:

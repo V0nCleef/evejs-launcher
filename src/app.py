@@ -98,6 +98,7 @@ from .core.groups import (
     save_target_groups,
     select_group,
 )
+from .core.character_order import CharacterOrderError, load_character_order, save_character_order, validate_order
 from .core.character_creation import (
     normalize_account_name,
     CharacterCreationRequest,
@@ -797,6 +798,7 @@ class MainWindow(QMainWindow):
         self._home_page.kill_all_clicked.connect(self._kill_all_clients)
 
         self._characters_page.launch_character.connect(self._on_character_launch)
+        self._characters_page.character_order_changed.connect(self._on_character_order_changed)
         self._characters_page.group_selection_changed.connect(
             self._on_group_selection_changed
         )
@@ -7405,7 +7407,8 @@ class MainWindow(QMainWindow):
         selection = self.__dict__.get("_data_selection")
         storage_identity = installation_group_identity(self.__dict__.get("_cfg", {}), selection) if selection is not None else target_identity
         if (target_identity == self.__dict__.get("_group_target_identity")
-                and storage_identity == self.__dict__.get("_group_storage_identity")):
+                and storage_identity == self.__dict__.get("_group_storage_identity")
+                and '_character_order' in self.__dict__):
             return
         try:
             state = (load_target_groups(target_identity) if storage_identity == target_identity
@@ -7416,6 +7419,39 @@ class MainWindow(QMainWindow):
         self._group_target_identity = target_identity
         self._group_storage_identity = storage_identity
         self._group_state = state
+
+        try:
+            self._character_order = load_character_order(storage_identity)
+            self._character_order_writable = True
+        except (OSError, CharacterOrderError) as error:
+            log.warning('Saved character order unavailable (%s)', type(error).__name__)
+            self._character_order = ()
+            self._character_order_writable = False
+
+    def _on_character_order_changed(self, order: object) -> None:
+        """Commit only the currently attributed installation's visual order."""
+        selection = self.__dict__.get('_data_selection')
+        scope = self.__dict__.get('_group_storage_identity')
+        previous = self.__dict__.get('_character_order', ())
+        page = self._characters_page
+        if (selection is None or not scope or page._order_scope != scope
+                or not self.__dict__.get('_character_order_writable', False)
+                or self.__dict__.get('_data_load_error')
+                or installation_group_identity(self._cfg, selection) != scope):
+            page.set_character_order(previous, '', enabled=False)
+            return
+        try:
+            updated = validate_order(order)
+            save_character_order(scope, updated)
+        except (OSError, CharacterOrderError) as error:
+            log.warning('Character order save failed (%s)', type(error).__name__)
+            page.set_character_order(previous, scope)
+            QMessageBox.warning(
+                self, 'Character order not saved',
+                'Could not save the character order. Your previous order was kept. Check the launcher logs and try again.',
+            )
+            return
+        self._character_order = updated
 
     def _on_group_selection_changed(self, group_id: object = None) -> None:
         """Persist one shared Home/Characters launch-target selection."""
@@ -8332,6 +8368,14 @@ class MainWindow(QMainWindow):
         hidden = self._effective_hidden_characters(persist=True)
         rows = visible_character_rows(self._accounts, hidden)
         group_state = getattr(self, "_group_state", TargetGroupState())
+        order_setter = getattr(self._characters_page, 'set_character_order', None)
+        if callable(order_setter):
+            order_setter(
+                self.__dict__.get('_character_order', ()),
+                self.__dict__.get('_group_storage_identity') or '',
+                enabled=self.__dict__.get('_character_order_writable', False)
+                and not self._data_load_error and self._data_selection is not None,
+            )
 
         for page in (
             getattr(self, "_home_page", None),

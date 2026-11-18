@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import math
 from typing import Optional
+from PyQt6 import sip
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QMimeData, Qt, pyqtSignal
 from PyQt6.QtGui import (
+    QDrag,
     QKeyEvent,
     QPixmap,
     QPainter,
@@ -15,6 +17,7 @@ from PyQt6.QtGui import (
     QPen,
 )
 from PyQt6.QtWidgets import (
+    QApplication,
     QFrame,
     QVBoxLayout,
     QHBoxLayout,
@@ -40,6 +43,8 @@ from src.widgets.ui_translation import (
     set_translatable_tooltip,
 )
 
+
+CHARACTER_CARD_MIME = 'application/x-evejs-character-card'
 
 # Map status to bar color and button state
 _STATUS_CONFIG = {
@@ -246,6 +251,8 @@ class CharacterCard(QFrame):
     manage_groups_requested = pyqtSignal(str, str, int)
     delete_character_requested = pyqtSignal(str, str, int)
     delete_account_requested = pyqtSignal(str, str, int)
+    reorder_dropped = pyqtSignal(object, bool)
+    drag_finished = pyqtSignal()
 
     def __init__(
         self,
@@ -274,6 +281,12 @@ class CharacterCard(QFrame):
         self._ship_type_id = 0
         self._status = status
         self._portrait_pixmap: Optional[QPixmap] = None
+        self._reorder_context = None
+        self._active_drag_context = None
+        self._drag_start = None
+        self._dragged = False
+        self._drop_after = None
+        self.setAcceptDrops(True)
         self._launch_available = True
         self._launch_unavailable_reason = ""
 
@@ -662,5 +675,91 @@ class CharacterCard(QFrame):
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self.setFocus(Qt.FocusReason.MouseFocusReason)
-            self.selected.emit(self.username, self.char_name, self.char_id)
+            self._drag_start = event.position().toPoint()
+            self._dragged = False
+            event.accept()
+            return
         super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self._drag_start is not None and not self._dragged and self.rect().contains(event.position().toPoint()):
+                self.selected.emit(self.username, self.char_name, self.char_id)
+            self._drag_start = None
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if (self._reorder_context is not None and self._drag_start is not None
+                and event.buttons() & Qt.MouseButton.LeftButton
+                and (event.position().toPoint()-self._drag_start).manhattanLength() >= QApplication.startDragDistance()):
+            self._dragged = True
+            self._active_drag_context = self._reorder_context
+            drag = QDrag(self)
+            mime = QMimeData()
+            mime.setData(CHARACTER_CARD_MIME, b'1')
+            drag.setMimeData(mime)
+            drag.setPixmap(self.grab())
+            drag.setHotSpot(self._drag_start)
+            self._drag_start = None
+            try:
+                drag.exec(Qt.DropAction.MoveAction)
+            finally:
+                self._active_drag_context = None
+                if not sip.isdeleted(self):
+                    self.drag_finished.emit()
+            return
+        super().mouseMoveEvent(event)
+
+    def accepts_character_drag(self, event) -> bool:
+        source = event.source()
+        return (self._reorder_context is not None and isinstance(source, CharacterCard) and not sip.isdeleted(source)
+                and source is not self and source.parentWidget() is self.parentWidget()
+                and source._active_drag_context is self._reorder_context
+                and event.mimeData().hasFormat(CHARACTER_CARD_MIME))
+
+    def dragEnterEvent(self, event) -> None:
+        if self.accepts_character_drag(event):
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.accept()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if not self.accepts_character_drag(event):
+            event.ignore()
+            return
+        self._drop_after = event.position().x() >= self.width()/2
+        if self.layoutDirection() == Qt.LayoutDirection.RightToLeft:
+            self._drop_after = not self._drop_after
+        self.update()
+        event.setDropAction(Qt.DropAction.MoveAction)
+        event.accept()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._drop_after = None
+        self.update()
+        event.accept()
+
+    def dropEvent(self, event) -> None:
+        if not self.accepts_character_drag(event):
+            event.ignore()
+            return
+        after = event.position().x() >= self.width()/2
+        if self.layoutDirection() == Qt.LayoutDirection.RightToLeft:
+            after = not after
+        self._drop_after = None
+        self.update()
+        self.reorder_dropped.emit(event.source(), after)
+        event.setDropAction(Qt.DropAction.MoveAction)
+        event.accept()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if self._drop_after is not None:
+            painter = QPainter(self)
+            painter.setPen(QPen(QColor(S['accent']), 3))
+            right = self._drop_after != (self.layoutDirection() == Qt.LayoutDirection.RightToLeft)
+            x = self.width()-2 if right else 2
+            painter.drawLine(x, 5, x, self.height()-5)

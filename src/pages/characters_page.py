@@ -22,9 +22,11 @@ Behaviour
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from PyQt6.QtCore import (
+    QEvent,
     QEasingCurve,
     QParallelAnimationGroup,
     QPropertyAnimation,
@@ -58,6 +60,7 @@ from PyQt6.QtWidgets import (
 
 from src.constants import COLORS as C, SEMANTIC_COLORS as S, Status
 from src.core.character_names import ship_display_name, location_display_name
+from src.core.character_order import move_character, ordered_keys, validate_order
 from src.core.dashboard import visible_character_rows
 from src.core.db import Account, Character, _fmt_isk, _fmt_sp
 from src.core.groups import TargetGroupState
@@ -71,7 +74,7 @@ from src.core.runtime.portraits import (
 from src.i18n import format_ui_phrase, translate_ui_phrase
 from src.ui.motion import MotionController
 from src.utils.cache import PortraitCache
-from src.widgets.character_card import CharacterCard
+from src.widgets.character_card import CHARACTER_CARD_MIME, CharacterCard
 from src.widgets.deep_signal_background import operations_scene_path
 from src.widgets.detail_panel import DetailPanel
 from src.widgets.new_character_card import NewCharacterCard
@@ -91,6 +94,7 @@ GRID_SPACING = 10
 _SKELETON_COUNT = 6
 _DETAIL_HEIGHT = 150
 _ROSTER_SUBTITLE = "Inspect capsule telemetry, organise launch groups, and deploy a pilot."
+log = logging.getLogger(__name__)
 
 
 class _StaticCharacterScene(QWidget):
@@ -167,6 +171,7 @@ class CharactersPage(QWidget):
     cancel_group_launches_requested = pyqtSignal()
     manage_groups_requested = pyqtSignal(object)  # optional focused character ID
     portrait_loads_idle = pyqtSignal()
+    character_order_changed = pyqtSignal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -176,6 +181,17 @@ class CharactersPage(QWidget):
         self._new_character_card: NewCharacterCard | None = None
         # Flat list of (username, Character) for layout.
         self._rotation_pool: list[tuple[str, Character]] = []
+        self._roster_rows: list[tuple[str, Character]] = []
+        self._character_order = ()
+        self._order_scope = ''
+        self._order_context = None
+        self._row_identities = {}
+        self._all_character_keys = ()
+        self._drag_scroll_delta = 0
+        self._drag_source = None
+        self._drag_scroll_timer = QTimer(self)
+        self._drag_scroll_timer.setInterval(40)
+        self._drag_scroll_timer.timeout.connect(self._scroll_while_dragging)
         self._selected_key: tuple[str, int] | None = None
         self._tracker: ProcessTracker | None = None
         self._motion = MotionController(parent=self)
@@ -199,6 +215,7 @@ class CharactersPage(QWidget):
             tuple[PortraitLoader, PortraitRequest],
         ] = {}
         self._portrait_tokens: dict[tuple[str, int], object] = {}
+        self._portrait_failure_codes = {}
         self._portrait_target: PortraitTarget | None = None
         self._portrait_generation = 0
         self._evejs_root: str = ""
@@ -352,6 +369,10 @@ class CharactersPage(QWidget):
         self._scroll.setAccessibleName("Character roster")
 
         self._grid_container = QWidget()
+        self._grid_viewport = self._scroll.viewport()
+        self._grid_container.setAcceptDrops(True)
+        self._scroll.viewport().setAcceptDrops(True)
+        self._scroll.viewport().installEventFilter(self)
         self._grid_container.setProperty("deepSignal", True)
         self._grid_container.installEventFilter(self)
         self._grid = QGridLayout(self._grid_container)
@@ -508,11 +529,17 @@ class CharactersPage(QWidget):
         target_changed = portrait_target != self._portrait_target
         if target_changed:
             self.cancel_portrait_loads(invalidate=True)
+            self._portrait_failure_codes.clear()
             self._portrait_target = portrait_target
             for card in self._cards.values():
                 card.set_portrait(None)
                 card.set_skeleton()
         hidden = set(hidden_characters)
+        self._row_identities = {
+            (account.username, character.char_id): (account.account_id, character.char_id)
+            for account in accounts for character in account.characters
+        }
+        self._all_character_keys = tuple(self._row_identities.values())
 
         # Use the same pure visible-character view as Home and Launch All.
         desired = [
@@ -531,6 +558,7 @@ class CharactersPage(QWidget):
             if key not in desired_keys:
                 card = self._cards.pop(key)
                 self._portrait_tokens.pop(key, None)
+                self._portrait_failure_codes.pop(key, None)
                 self._grid.removeWidget(card)
                 card.deleteLater()
                 if self._selected_key == key:
@@ -566,7 +594,14 @@ class CharactersPage(QWidget):
                 card.delete_account_requested.connect(
                     self.delete_account_requested.emit
                 )
+                card.reorder_dropped.connect(
+                    lambda source, after, target=card: self._move_card(source, target, after)
+                )
+                card.drag_finished.connect(self._clear_drop_indicators)
+                card.installEventFilter(self)
                 self._cards[key] = card
+            card._reorder_context = self._order_context
+            set_translatable_tooltip(card, 'Drag to reorder characters' if self._order_context else '')
             card.set_stats(
                 ship_type_id=char.ship_type_id,
                 isk=_fmt_isk(char.isk),
@@ -588,6 +623,8 @@ class CharactersPage(QWidget):
                 self._load_portrait_for_card(card)
 
         self._rotation_pool = desired
+        self._roster_rows = desired
+        self._sort_character_cards()
         self._relayout_grid()
         self._apply_filter(self.search_edit.text())
 
@@ -705,6 +742,109 @@ class CharactersPage(QWidget):
             self._launching_accounts.get(username) == character.name
         )
 
+    def set_character_order(self, order, scope: str, *, enabled: bool = True) -> None:
+        """Apply saved positions without touching launch-group member order."""
+        self._character_order = validate_order(order)
+        scope = scope if enabled and isinstance(scope, str) else ''
+        if scope != self._order_scope:
+            self._clear_drop_indicators()
+            self._order_scope = scope
+            self._order_context = object() if scope else None
+        for card in self._cards.values():
+            card._reorder_context = self._order_context
+            set_translatable_tooltip(card, 'Drag to reorder characters' if self._order_context else '')
+        self._sort_character_cards()
+        self._relayout_grid()
+
+    def _sort_character_cards(self) -> None:
+        rows = {self._row_identities[(username, character.char_id)]: (username, character)
+                for username, character in self._roster_rows}
+        self._rotation_pool = [rows[key] for key in ordered_keys(self._character_order, tuple(rows))]
+
+    def _move_card(self, source, target, after: bool) -> None:
+        cards = set(self._cards.values())
+        if (self._order_context is None or source is target or source not in cards or target not in cards
+                or source.isHidden() or target.isHidden()):
+            return
+        visible = tuple(self._row_identities[key] for key, card in self._cards.items() if not card.isHidden())
+        updated = move_character(
+            self._character_order, self._all_character_keys, visible,
+            self._row_identities[(source.username, source.char_id)],
+            self._row_identities[(target.username, target.char_id)], after=after,
+        )
+        if updated == self._character_order:
+            return
+        self._character_order = updated
+        self._sort_character_cards()
+        self._relayout_grid()
+        self.character_order_changed.emit(updated)
+
+    def _clear_drop_indicators(self) -> None:
+        self._drag_scroll_timer.stop()
+        self._drag_scroll_delta = 0
+        self._drag_source = None
+        for card in self._cards.values():
+            card._drop_after = None
+            card.update()
+
+    def _valid_character_drag(self, event) -> bool:
+        source = event.source()
+        return (self._order_context is not None and isinstance(source, CharacterCard)
+                and source in self._cards.values() and not source.isHidden()
+                and source._active_drag_context is self._order_context
+                and event.mimeData().hasFormat(CHARACTER_CARD_MIME))
+
+    def _track_drag_scroll(self, obj, event) -> None:
+        point = self._scroll.viewport().mapFromGlobal(obj.mapToGlobal(event.position().toPoint()))
+        viewport = self._scroll.viewport()
+        delta = 0
+        if viewport.rect().contains(point):
+            if point.y() < 30:
+                delta = -16
+            elif point.y() > viewport.height()-30:
+                delta = 16
+        self._drag_source = event.source()
+        self._drag_scroll_delta = delta
+        if delta:
+            self._drag_scroll_timer.start()
+        else:
+            self._drag_scroll_timer.stop()
+
+    def _scroll_while_dragging(self) -> None:
+        source = self._drag_source
+        if source not in self._cards.values() or source._active_drag_context is not self._order_context:
+            self._clear_drop_indicators()
+            return
+        bar = self._scroll.verticalScrollBar()
+        bar.setValue(bar.value()+self._drag_scroll_delta)
+
+    def _handle_grid_drag(self, obj, event) -> bool:
+        """Gaps and empty space accept the same internal move as a card."""
+        visible = [self._cards[(username, char.char_id)] for username, char in self._rotation_pool
+                   if not self._cards[(username, char.char_id)].isHidden()]
+        if not visible:
+            return False
+        point = self._grid_container.mapFromGlobal(obj.mapToGlobal(event.position().toPoint()))
+        if point.y() > visible[-1].geometry().bottom():
+            target, after = visible[-1], True
+        elif point.y() < visible[0].geometry().top():
+            target, after = visible[0], False
+        else:
+            target = min(visible, key=lambda card: (card.geometry().center()-point).manhattanLength())
+            after = point.x() >= target.geometry().center().x()
+            if self.layoutDirection() == Qt.LayoutDirection.RightToLeft:
+                after = not after
+        if event.type() == QEvent.Type.Drop:
+            self._move_card(event.source(), target, after)
+            self._clear_drop_indicators()
+        else:
+            for card in visible:
+                card._drop_after = after if card is target else None
+                card.update()
+        event.setDropAction(Qt.DropAction.MoveAction)
+        event.accept()
+        return True
+
     def _relayout_grid(self) -> None:
         """Re-position visible cards using the current viewport width."""
         available = self._scroll.viewport().width()
@@ -820,6 +960,13 @@ class CharactersPage(QWidget):
         key = self._portrait_key_for_token(failure.request.token)
         if key is not None and self._portrait_tokens.get(key) is failure.request.token:
             self._portrait_tokens.pop(key, None)
+            code = failure.code
+            if not isinstance(code, str) or len(code) > 32 or not code.replace('_', '').isalnum():
+                code = 'unexpected_error'
+            if self._portrait_failure_codes.get(key) != code:
+                self._portrait_failure_codes[key] = code
+                source = 'http' if self._portrait_target and self._portrait_target.image_endpoint else 'native'
+                log.warning('Character portrait unavailable (source=%s, code=%s)', source, code)
 
     def _apply_portrait_result(
         self,
@@ -830,6 +977,7 @@ class CharactersPage(QWidget):
         if self._portrait_tokens.get(key) is not request.token:
             return
         self._portrait_tokens.pop(key, None)
+        self._portrait_failure_codes.pop(key, None)
         card = self._cards.get(key)
         if card is None:
             return
@@ -1380,6 +1528,15 @@ class CharactersPage(QWidget):
         super().keyPressEvent(event)
 
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        if obj in (self._grid_container, self._grid_viewport) or isinstance(obj, CharacterCard):
+            if event.type() in (QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.Drop):
+                if self._valid_character_drag(event):
+                    if event.type() != QEvent.Type.Drop:
+                        self._track_drag_scroll(obj, event)
+                    if obj in (self._grid_container, self._grid_viewport):
+                        return self._handle_grid_drag(obj, event)
+            elif event.type() == QEvent.Type.DragLeave:
+                self._drag_scroll_timer.stop()
         if obj is self._grid_container and event.type() == event.Type.MouseButtonPress:
             if event.button() == Qt.MouseButton.LeftButton:
                 # Check if the click landed on a CharacterCard — if so, let it through

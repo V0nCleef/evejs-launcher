@@ -2,6 +2,12 @@
 
 ## Changelog
 
+## Unreleased
+- Drag character cards into a custom visual order and remember it for each installation across launcher restarts and EveJS upgrades. Keep hidden characters, filters and launch-group order intact.
+- Accept valid EveJS portraits served at a different resolution from the requested URL and scale them for the launcher. Recognize the additional Native portrait layout and 32/1024-pixel files.
+- Record bounded portrait failure codes without character names, filesystem paths or response contents.
+- Thanks to JcKalck and ItrkZ. for reporting the character ordering and missing portrait issues. 🫡
+
 ## v1.0.88 - 2026-11-18
 - Honor EveJS's saved DX11/DX12 renderer preference for Windows clients and Linux/Proton clients, including the existing TRINITYPLATFORM setting and inherited preferences.
 - Fall back to DX11 when the selected client has no DX12 renderer, and log the requested renderer, the effective choice and any fallback.

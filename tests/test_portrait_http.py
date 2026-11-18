@@ -216,7 +216,6 @@ def test_http_portrait_rejects_invalid_response_envelope(
         (_image_bytes("PNG"), len(_image_bytes("PNG")), "image/jpeg", "signature"),
         (b"\xff\xd8\xffnot-an-image", 15, "image/jpeg", "decode"),
         (_image_bytes(width=64, height=32), len(_image_bytes(width=64, height=32)), "image/jpeg", "dimensions"),
-        (_image_bytes(width=128, height=128), len(_image_bytes(width=128, height=128)), "image/jpeg", "dimensions"),
         (_image_bytes(width=2049, height=2049), len(_image_bytes(width=2049, height=2049)), "image/jpeg", "dimensions"),
     ],
     ids=[
@@ -225,7 +224,6 @@ def test_http_portrait_rejects_invalid_response_envelope(
         "mime-signature",
         "decode",
         "non-square",
-        "wrong-size",
         "huge-dimensions",
     ],
 )

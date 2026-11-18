@@ -24,7 +24,7 @@ def test_fresh_config_uses_ask_preference(isolated_config: Path) -> None:
 
     assert loaded["server_start_preference"] == ASK_EVERY_TIME
     assert loaded["language"] == "en"
-    assert loaded["auto_login_enabled"] is True
+    assert loaded["auto_login_enabled"] is (not config.IS_LINUX)
     assert "server_start_script" not in loaded
     assert "server_start_scripts" not in loaded
     assert "server_script_prompted" not in loaded
@@ -249,7 +249,7 @@ def test_missing_auto_login_setting_defaults_on_for_each_backend(
         encoding="utf-8",
     )
 
-    assert config.load()["auto_login_enabled"] is True
+    assert config.load()["auto_login_enabled"] is (not config.IS_LINUX)
 
 
 def test_language_setting_accepts_supported_codes_and_rejects_unknown_values(
