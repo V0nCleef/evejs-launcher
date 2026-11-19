@@ -135,18 +135,21 @@ def test_transfer_progress_cannot_be_dismissed_mid_transaction(qapp):
     dialog.deleteLater()
 
 
-def test_worker_start_failure_releases_ownership_and_keeps_page_usable(qapp, monkeypatch):
+@pytest.mark.parametrize("empty_error", [False, True])
+def test_worker_start_failure_releases_ownership_and_keeps_page_usable(qapp, monkeypatch, empty_error):
     from src.pages import save_migration_page as page_module
     page = page_module.SaveMigrationPage(verifier=lambda *a: None, can_start=lambda: True,
                                          installation_label=lambda entry: entry['name'])
     ownership = []
+    outcomes = []
     page.busy_changed.connect(ownership.append)
     def fail(worker):
-        raise RuntimeError('Disposable thread start failure')
+        raise RuntimeError() if empty_error else RuntimeError('Disposable thread start failure')
     monkeypatch.setattr(page_module._TransferThread, 'start', fail)
-    monkeypatch.setattr(page_module.LocalizedMessageBox, 'warning', lambda *a: None)
+    monkeypatch.setattr(page, '_show_outcome', lambda *args: outcomes.append(args))
     page._start(SimpleNamespace())
     assert not page.busy
     assert ownership[-1] is None and len(ownership) == 2
-    assert 'start failure' in page.status.text()
+    assert ('RuntimeError' if empty_error else 'start failure') in page.status.text()
+    assert outcomes[0][1] == 'Save Migration stopped'
     page.deleteLater()

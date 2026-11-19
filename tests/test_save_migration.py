@@ -334,7 +334,8 @@ def test_fresh_market_uses_a_separate_clean_seed(tmp_path):
     assert _row(seed, "SELECT count(*) FROM market_orders") == (0,)
 
 
-def test_launcher_page_runs_copy_after_fresh_market_acknowledgement(qapp, tmp_path):
+@pytest.mark.parametrize("move", [False, True], ids=["copy", "move"])
+def test_launcher_page_runs_copy_after_fresh_market_acknowledgement(qapp, tmp_path, move):
     import time
     from PyQt6.QtCore import QTimer
     from PyQt6.QtTest import QTest
@@ -350,23 +351,41 @@ def test_launcher_page_runs_copy_after_fresh_market_acknowledgement(qapp, tmp_pa
         {"id": "second", "name": "Testing", "settings": {**destination.settings, "evejs_root": str(destination.root)}},
     ]
     page.set_installations(profiles, "first")
+    page.move.setChecked(move)
     assert page.review.isEnabled()
     assert "won’t appear" in page.market_note.text()
     verified = []
     def click_review():
         dialog = next(dialog for dialog in page.findChildren(QDialog) if dialog.isVisible())
-        action = next(button for button in dialog.findChildren(QPushButton) if button.text() == "Copy playthrough")
+        action = next(button for button in dialog.findChildren(QPushButton)
+                      if button.text() == ("Move playthrough" if move else "Copy playthrough"))
         verified.append(not action.isEnabled())
         dialog.findChild(QCheckBox).setChecked(True)
         action.click()
-    QTimer.singleShot(0, click_review)
-    page.review.click()
-    end = time.monotonic() + 30
-    while page.busy and time.monotonic() < end:
-        QTest.qWait(20)
+    outcomes = []
+    close_result = QTimer(page)
+    close_result.setInterval(10)
+    def dismiss_result():
+        for dialog in page.findChildren(QDialog):
+            if dialog.objectName() == "saveMigrationOutcome" and dialog.isVisible():
+                outcomes.append(dialog.windowTitle())
+                dialog.accept()
+    close_result.timeout.connect(dismiss_result)
+    close_result.start()
+    try:
+        QTimer.singleShot(0, click_review)
+        page.review.click()
+        end = time.monotonic() + 30
+        while page.busy and time.monotonic() < end:
+            QTest.qWait(20)
+    finally:
+        close_result.stop()
     assert not page.busy
     assert verified == [True]
-    assert page.status.text() == "Playthrough copied."
+    expected = "Playthrough moved." if move else "Playthrough copied."
+    assert page.status.text() == expected
+    assert outcomes == [expected]
+    assert (source.root / GAME).exists() is not move
     assert _row(destination.root / GAME, "SELECT key FROM items") == ("normal",)
     page.deleteLater()
     qapp.processEvents()

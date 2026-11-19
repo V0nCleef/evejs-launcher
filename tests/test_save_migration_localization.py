@@ -49,7 +49,7 @@ def test_page_and_review_translate_while_names_and_seed_files_stay_literal(qapp,
             dialog.reject()
         QTimer.singleShot(0, review)
         page._review()
-        assert observed == [(translate_ui_phrase('Review transfer'),
+        assert observed == [(translate_ui_phrase('Move playthrough'),
             translate_ui_phrase('I’ve checked my open orders and understand what stays behind.'),False)]
         assert not page.busy
         diagnostic = 'Game still owns this save. Stop it and let its last write lease expire.'

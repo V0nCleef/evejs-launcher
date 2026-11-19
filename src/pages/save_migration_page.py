@@ -4,15 +4,16 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import QThread, Qt, QUrl, pyqtSignal
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtGui import QDesktopServices, QTextOption
 from PyQt6.QtWidgets import (
     QButtonGroup, QCheckBox, QComboBox, QDialog, QFrame, QGridLayout, QHBoxLayout,
-    QLabel, QPushButton, QRadioButton, QScrollArea, QVBoxLayout, QWidget,
+    QLabel, QPlainTextEdit, QPushButton, QRadioButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from src.core.save_migration import SaveInstallation, SaveMigrationError, Transfer, migrate, review_transfer
-from src.widgets.localized_dialogs import LocalizedFileDialog, LocalizedMessageBox
+from src.widgets.localized_dialogs import LocalizedFileDialog
 from src.widgets.page_header import PageHeader
+from src.widgets.save_transfer_flight import SaveTransferFlight
 from src.i18n import current_language, translate_ui_phrase
 from src.widgets.ui_translation import (
     mark_translatable, register_translatable_widget_tree, retranslate_widget_tree,
@@ -20,7 +21,59 @@ from src.widgets.ui_translation import (
 )
 
 
-class _TransferProgressDialog(QDialog):
+class _MigrationDialog(QDialog):
+    def __init__(self, parent=None, *, title="Save Migration", accent="#63ddff", position=0.0):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumWidth(548)
+        self.setStyleSheet("""
+            QDialog { background: #0a121e; }
+            QLabel, QCheckBox { background: transparent; }
+            QFrame[class="signalInstrument"] {
+                background: #101f30;
+                border: 1px solid #324d63;
+                border-radius: 6px;
+            }
+        """)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self.flight = SaveTransferFlight(self, accent=accent, position=position)
+        outer.addWidget(self.flight)
+        hero = QVBoxLayout(self.flight)
+        hero.setContentsMargins(23, 14, 23, 0)
+        self.heading = _label(title)
+        self.heading.setStyleSheet("color: #f3f8ff; font-size: 25px; font-weight: 600;")
+        hero.addWidget(self.heading)
+        hero.addStretch()
+        self.content = QVBoxLayout()
+        self.content.setContentsMargins(20, 16, 20, 17)
+        self.content.setSpacing(10)
+        outer.addLayout(self.content)
+
+
+class _TransferProgressDialog(_MigrationDialog):
+    # Each waypoint is a real migration phase, not a percentage or an ETA.
+    _WAYPOINTS = {
+        "Checking that both installations are stopped…": .09,
+        "Backing up and verifying the playthrough and market…": .23,
+        "Checking the game and market formats…": .44,
+        "Installing the verified save at the destination…": .71,
+        "Removing the original save after verification…": .93,
+    }
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("saveMigrationProgress")
+        self.message = _label("Preparing the transfer…")
+        self.content.addWidget(self.message)
+
+    def update_progress(self, text):
+        set_translatable_text(self.message, text)
+        waypoint = self._WAYPOINTS.get(text)
+        if waypoint is not None:
+            self.flight.set_position(waypoint)
+
     def reject(self):
         # A transfer may be between rename and verification. Esc must not
         # dismiss its progress window or offer an unsafe cancellation.
@@ -44,7 +97,7 @@ class _TransferThread(QThread):
         try:
             self.result = migrate(self.request, progress=self.progress.emit, verify_game=self.verifier)
         except Exception as error:
-            self.error = str(error)
+            self.error = str(error) or type(error).__name__
 
 
 def _label(text="", *, subtle=False):
@@ -316,12 +369,38 @@ class SaveMigrationPage(QWidget):
             review_transfer(request)
         except (OSError, SaveMigrationError, ValueError) as error:
             self._set_status(str(error))
+            self._show_outcome(request, "Save Migration stopped", str(error))
             return
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Review transfer")
-        dialog.setMinimumWidth(430)
-        content = QVBoxLayout(dialog)
-        content.addWidget(_label(f"{self.source.currentText()}  →  {self.target.currentText()}"))
+        action = "Move playthrough" if request.move else "Copy playthrough"
+        dialog = _MigrationDialog(self, title=action)
+        dialog.setObjectName("saveMigrationReview")
+        content = dialog.content
+        route = QHBoxLayout()
+        verb = "MOVE" if request.move else "COPY"
+        for direction, name, installation in (
+            ("FROM", self.source.currentText(), source),
+            ("TO", self.target.currentText(), target),
+        ):
+            panel = _panel(route, f"{verb} {direction}")
+            location = _label(subtle=True)
+            location.setProperty("i18nIgnore", True)
+            location.ensurePolished()
+            location.setText(location.fontMetrics().elidedText(name, Qt.TextElideMode.ElideMiddle, 210))
+            location.setToolTip(name)
+            location.setAccessibleName(name)
+            panel.addWidget(location)
+            path = str(installation.root)
+            path_label = _label(subtle=True)
+            path_label.setObjectName("saveMigrationPath")
+            path_label.setProperty("i18nIgnore", True)
+            path_label.ensurePolished()
+            path_label.setText(path_label.fontMetrics().elidedText(
+                path, Qt.TextElideMode.ElideMiddle, 210,
+            ))
+            path_label.setToolTip(path)
+            path_label.setAccessibleName(path)
+            panel.addWidget(path_label)
+        content.addLayout(route)
         content.addWidget(_label(
             "Move the playthrough after verifying its destination copy." if request.move else
             "Copy the playthrough and keep the original."
@@ -333,8 +412,6 @@ class SaveMigrationPage(QWidget):
             content.addWidget(_label("Start with a clean destination market. Orders and their escrow stay behind."))
         if request.move and not request.carry_market:
             content.addWidget(_label("The old market remains in the source installation."))
-        content.addWidget(_label("The destination keeps its own installation settings and mods."))
-        content.addWidget(_label("The transfer stops if the save format cannot be verified."))
         acknowledge = QCheckBox("I’ve checked my open orders and understand what stays behind.")
         if not request.carry_market:
             content.addWidget(acknowledge)
@@ -342,8 +419,10 @@ class SaveMigrationPage(QWidget):
         controls.addStretch()
         back = QPushButton("Back")
         back.clicked.connect(dialog.reject)
+        back.setDefault(True)
         controls.addWidget(back)
-        confirm = QPushButton("Move playthrough" if request.move else "Copy playthrough")
+        confirm = QPushButton(action)
+        confirm.setAutoDefault(False)
         confirm.setProperty("class", "signalPrimary")
         confirm.setEnabled(request.carry_market)
         confirm.clicked.connect(dialog.accept)
@@ -358,15 +437,10 @@ class SaveMigrationPage(QWidget):
     def _start(self, request):
         worker = _TransferThread(request, self._verifier, self)
         waiting = _TransferProgressDialog(self)
-        waiting.setWindowTitle("Save Migration")
         waiting.setWindowModality(Qt.WindowModality.ApplicationModal)
         waiting.setWindowFlag(Qt.WindowType.CustomizeWindowHint, True)
         waiting.setWindowFlag(Qt.WindowType.WindowTitleHint, True)
-        waiting.setMinimumWidth(410)
-        layout = QVBoxLayout(waiting)
-        message = _label("Preparing the transfer…")
-        layout.addWidget(message)
-        worker.progress.connect(lambda text: set_translatable_text(message, text))
+        worker.progress.connect(waiting.update_progress)
         worker.finished.connect(self._finished)
         self._worker, self._dialog = worker, waiting
         self.busy_changed.emit(worker)
@@ -375,7 +449,7 @@ class SaveMigrationPage(QWidget):
         try:
             worker.start()
         except Exception as error:
-            worker.error = str(error)
+            worker.error = str(error) or type(error).__name__
             self._finished()
 
     def _finished(self):
@@ -384,17 +458,53 @@ class SaveMigrationPage(QWidget):
         dialog.done(QDialog.DialogCode.Accepted)
         dialog.deleteLater()
         self.busy_changed.emit(None)
-        if worker.error:
-            self._set_status(worker.error)
-            LocalizedMessageBox.warning(self, "Save Migration stopped", _translated_message(worker.error))
+        request, result, error = worker.request, worker.result, worker.error
+        worker.deleteLater()
+        if error:
+            outcome, detail = "Save Migration stopped", error
         else:
-            result = worker.result
+            outcome = "Playthrough moved." if result.moved else "Playthrough copied."
+            detail = result.note
             self._last_backup = result.backup
             self.backup_button.show()
-            self._set_status(result.note or ("Playthrough moved." if result.moved else "Playthrough copied."))
-            self.transfer_finished.emit(worker.request)
-        worker.deleteLater()
+            self.transfer_finished.emit(request)
+        self._set_status(detail or outcome)
         self._render()
+        self._show_outcome(request, outcome, detail)
+
+    def _show_outcome(self, request, outcome, detail=""):
+        stopped = outcome == "Save Migration stopped"
+        accent = "#ff8c96" if stopped else "#ffcf72" if detail else "#72f0c1"
+        dialog = _MigrationDialog(self, title=outcome, accent=accent, position=0.0 if stopped else 1.0)
+        dialog.setObjectName("saveMigrationOutcome")
+        route = _label()
+        route.setObjectName("saveMigrationRoute")
+        route.setProperty("i18nIgnore", True)
+        route.setStyleSheet(f"color: {accent}; font-size: 15px; font-weight: 600;")
+        route.ensurePolished()
+        route_name = f"{request.source.name}  →  {request.destination.name}"
+        route.setText(route.fontMetrics().elidedText(route_name, Qt.TextElideMode.ElideMiddle, 480))
+        route.setToolTip(route_name)
+        route.setAccessibleName(route_name)
+        dialog.content.addWidget(route)
+        if detail:
+            message = QPlainTextEdit(_translated_message(detail))
+            message.setObjectName("saveMigrationDetail")
+            message.setReadOnly(True)
+            message.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+            message.setMaximumHeight(140)
+            dialog.content.addWidget(message)
+        controls = QHBoxLayout()
+        controls.addStretch()
+        ok = QPushButton("OK")
+        ok.setProperty("class", "signalPrimary")
+        ok.setDefault(True)
+        ok.clicked.connect(dialog.accept)
+        controls.addWidget(ok)
+        dialog.content.addLayout(controls)
+        register_translatable_widget_tree(dialog)
+        dialog.exec()
+        dialog.deleteLater()
 
     def _open_backup(self):
         if self._last_backup is not None:
