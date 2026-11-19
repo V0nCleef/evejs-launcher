@@ -224,3 +224,47 @@ def test_failed_operation_advances_baseline_without_success_feedback(qapp, monke
     finally:
         page.close()
         page.deleteLater()
+
+
+def test_failed_read_only_worker_does_not_silence_the_next_committed_import(qapp, monkeypatch, tmp_path):
+    import time
+    from PyQt6.QtWidgets import QMainWindow
+    from src.core.local_mod_packages import LocalModPackages
+    from src.ui.mod_coordinator import ModCoordinator
+    root = tmp_path/'world'
+    _loader(root, 'A')
+    page = _mods_page(qapp, monkeypatch, root, RuntimeBackend.NATIVE)
+    owner = QMainWindow()
+    owner._set_operation_controls_busy = page.set_lifecycle_busy
+    owner._docker_mode = lambda: False
+    coordinator = ModCoordinator(owner)
+    coordinator._page = page
+    coordinator._updates.poll_timer.stop()
+    coordinator._updates.check = lambda **_kwargs: None
+    cues = QSignalSpy(page._feedback.cue_requested)
+    results = []
+    def wait_done(predicate):
+        until = time.monotonic() + 5
+        while time.monotonic() < until:
+            qapp.processEvents()
+            if predicate() and coordinator._token is None:
+                return
+            QTest.qWait(5)
+        assert False, 'Retained mod worker did not finish'
+    try:
+        def read_failure(): raise OSError('fixture inventory read failure')
+        assert coordinator.run(read_failure, results.append)
+        wait_done(lambda: bool(results))
+        assert not results[0].success
+        assert not page._suppress_feedback_once
+        package = tmp_path/'package'
+        package.mkdir()
+        (package/'loader.js').write_text('module.exports = {};\n')
+        assert coordinator.run(lambda: LocalModPackages(root).import_package(package, enabled=False),
+                               coordinator._operation_result)
+        wait_done(lambda: len(page._rows) == 2)
+        assert any(cue[0] == 'arrival' for cue in cues)
+    finally:
+        page.close()
+        page.deleteLater()
+        owner.deleteLater()

@@ -133,6 +133,8 @@ class ModUpdateController(QObject):
             return
         dialog = ModUpdateDialog(mod, offer, self.host.window)
         def completed(result):
+            if not result.success:
+                self.host._page.suppress_next_inventory_feedback()
             self.offers.pop(self.key(mod), None)
             self.checked.pop(self.key(mod), None)
             self.update_badge()
