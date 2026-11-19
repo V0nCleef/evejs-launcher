@@ -1,11 +1,12 @@
 """Offline Save Migration for registered EveJS worlds."""
 from __future__ import annotations
 
-from contextlib import ExitStack, closing
+from contextlib import ExitStack, closing, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -18,6 +19,8 @@ from uuid import uuid4
 from .mod_evejs_compatibility import installed_evejs_version
 from .mod_lifecycle_lock import acquire_mod_lifecycle_lease
 from .save_migration_storage import SaveMigrationError, bundle_inventory, plain, resolve_storage
+
+_LOG = logging.getLogger(__name__)
 
 _REQUIRED_GAME = frozenset({"accounts", "characters", "items"})
 _REQUIRED_MARKET = frozenset({"manifest", "stations", "market_types", "seed_stock",
@@ -337,9 +340,20 @@ def migrate(request, *, progress=lambda _: None, verify_game=verify_stock_game):
         return result
 
 
+@contextmanager
+def _transfer_workspace(backup):
+    workspace = TemporaryDirectory(prefix="work-", dir=backup)
+    try:
+        yield Path(workspace.name)
+    finally:
+        try:
+            workspace.cleanup()
+        except OSError:
+            _LOG.warning("Could not remove save transfer workspace %s", workspace.name, exc_info=True)
+
+
 def _transfer(request, source, target, backup, offline, progress, verify_game):
-    with TemporaryDirectory(prefix="work-", dir=backup) as scratch_name:
-        scratch = Path(scratch_name)
+    with _transfer_workspace(backup) as scratch:
         original = (backup if request.move else scratch) / "source"
         destination = backup / "destination"
         incoming = scratch / "incoming"

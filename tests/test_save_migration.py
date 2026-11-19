@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pytest
 
+from src.core import save_migration
 from src.core.save_migration import SaveInstallation, Transfer, migrate, verify_stock_game
 from src.core.save_migration_storage import SaveMigrationError, resolve_storage
 
@@ -140,6 +141,95 @@ def test_fresh_market_keeps_normal_inventory_and_old_market(tmp_path):
     assert _row(result.backup / "source/game", "SELECT count(*) FROM marketEscrow") == (1,)
 
 
+@pytest.mark.parametrize("reject", [True, False], ids=["rejected", "copied"])
+def test_workspace_cleanup_error_preserves_transfer_result(tmp_path, monkeypatch, caplog, reject):
+    class LockedWorkspace(save_migration.TemporaryDirectory):
+        def cleanup(self):
+            super().cleanup()
+            if Path(self.name).name.startswith("work-"):
+                raise PermissionError("fixture cleanup lock")
+
+    monkeypatch.setattr(save_migration, "TemporaryDirectory", LockedWorkspace)
+    source = installation(tmp_path / "source", "player")
+    target = installation(tmp_path / "target", "target")
+
+    def check_game(db, request, destination_tables):
+        if reject:
+            raise SaveMigrationError("Fixture format rejection")
+
+    transfer = Transfer(source, target, False, False)
+    if reject:
+        with pytest.raises(SaveMigrationError, match="Fixture format rejection"):
+            migrate(transfer, verify_game=check_game)
+    else:
+        migrate(transfer, verify_game=check_game)
+
+    area = target.root / ".evejs-launcher/save-migrations"
+    receipt, = area.glob("*/transfer.json")
+    assert json.loads(receipt.read_text())["state"] == ("stopped" if reject else "copied")
+    assert _row(source.root / GAME, "SELECT json FROM characters") == ('{"name": "player"}',)
+    expected = "target" if reject else "player"
+    assert _row(target.root / GAME, "SELECT json FROM characters") == (json.dumps({"name": expected}),)
+    assert "Could not remove save transfer workspace" in caplog.text
+    assert "fixture cleanup lock" in caplog.text
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires Windows file sharing semantics")
+@pytest.mark.parametrize("reject", [True, False], ids=["rejected", "completed"])
+@pytest.mark.parametrize("move", [False, True], ids=["copy", "move"])
+def test_real_windows_workspace_lock_preserves_result(tmp_path, monkeypatch, caplog, reject, move):
+    held = []
+
+    class LockedWorkspace(save_migration.TemporaryDirectory):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            if Path(self.name).name.startswith("work-"):
+                handle = (Path(self.name) / "held-scratch-file").open("w+b")
+                handle.write(b"disposable locked scratch data")
+                handle.flush()
+                held.append((handle, Path(self.name)))
+
+    monkeypatch.setattr(save_migration, "TemporaryDirectory", LockedWorkspace)
+    source = installation(tmp_path / "source", "player", trading=True)
+    target = installation(tmp_path / "target", "target", trading=True)
+
+    def check_game(db, request, destination_tables):
+        if reject:
+            raise SaveMigrationError("Fixture format rejection")
+        verify_stock_game(db, request, destination_tables)
+
+    try:
+        transfer = Transfer(source, target, move, True)
+        if reject:
+            with pytest.raises(SaveMigrationError, match="Fixture format rejection") as failure:
+                migrate(transfer, verify_game=check_game)
+            assert str(failure.value.__cause__) == "Fixture format rejection"
+        else:
+            result = migrate(transfer, verify_game=check_game)
+            assert result.moved is move and not result.note
+
+        receipt, = (target.root / ".evejs-launcher/save-migrations").glob("*/transfer.json")
+        expected_state = "stopped" if reject else "moved" if move else "copied"
+        assert json.loads(receipt.read_text())["state"] == expected_state
+        assert _row(receipt.parent / "destination/game", "SELECT json FROM characters") == ('{"name": "target"}',)
+        if move:
+            assert _row(receipt.parent / "source/game", "SELECT json FROM characters") == ('{"name": "player"}',)
+        if reject or not move:
+            assert _row(source.root / GAME, "SELECT json FROM characters") == ('{"name": "player"}',)
+        else:
+            assert not (source.root / GAME).exists()
+        expected_target = "target" if reject else "player"
+        assert _row(target.root / GAME, "SELECT json FROM characters") == (json.dumps({"name": expected_target}),)
+        assert any(record.name == save_migration.__name__ and record.exc_info
+                   and getattr(record.exc_info[1], "winerror", None) == 32 for record in caplog.records)
+    finally:
+        for handle, scratch in held:
+            handle.close()
+            assert scratch.resolve().is_relative_to(tmp_path.resolve())
+            if scratch.exists():
+                shutil.rmtree(scratch)
+
+
 @pytest.mark.parametrize("reason", ["market", "busy", "stale"])
 def test_dangerous_input_leaves_both_worlds_intact(tmp_path, reason):
     source = installation(tmp_path / "source", "player",
@@ -198,8 +288,17 @@ def test_destination_with_pending_game_writes_is_never_replaced(tmp_path, state)
 
 
 
-def test_source_cleanup_failure_keeps_the_verified_destination(tmp_path, monkeypatch):
+@pytest.mark.parametrize("cleanup_error", [False, True], ids=["clean-workspace", "locked-workspace"])
+def test_source_cleanup_failure_keeps_the_verified_destination(tmp_path, monkeypatch, caplog, cleanup_error):
     from src.core.save_migration_storage import SaveStorage
+
+    if cleanup_error:
+        class LockedWorkspace(save_migration.TemporaryDirectory):
+            def cleanup(self):
+                super().cleanup()
+                if Path(self.name).name.startswith("work-"):
+                    raise PermissionError("fixture cleanup lock")
+        monkeypatch.setattr(save_migration, "TemporaryDirectory", LockedWorkspace)
 
     source = installation(tmp_path / "source", "player", trading=True)
     destination = installation(tmp_path / "target", "target")
@@ -218,6 +317,9 @@ def test_source_cleanup_failure_keeps_the_verified_destination(tmp_path, monkeyp
     assert _row(destination.root / GAME, "SELECT json FROM characters") == ('{"name": "player"}',)
     assert (result.backup / "source/game").is_file()
     assert (result.backup / "destination/game").is_file()
+    assert json.loads((result.backup / "transfer.json").read_text())["state"] == "copy-only"
+    if cleanup_error:
+        assert "Could not remove save transfer workspace" in caplog.text
 
 
 def test_fresh_market_uses_a_separate_clean_seed(tmp_path):
