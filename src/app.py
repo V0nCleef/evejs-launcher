@@ -992,6 +992,7 @@ class MainWindow(QMainWindow):
         from .ui.installation_coordinator import InstallationBar
         self._installation_bar = InstallationBar(self)
         self._installation_bar.presentation_changed.connect(self._refresh_save_migration_installations)
+        self._mods_page._feedback.cue_requested.connect(self._audio_controller.play_mod_cue)
         self._status_bar.set_installation_controls(self._installation_bar)
         root.addWidget(self._status_bar)
 
@@ -1078,10 +1079,8 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentIndex(index)
         self._on_page_changed(index)
         page = self._stack.currentWidget()
-        # Fade only controls on Home. Other pages reveal their header, avoiding
-        # nested opacity effects around portraits and loading placeholders.
-        target = page._foreground if page is self._home_page else getattr(page, "page_header", None)
-        self._page_reveal.start(target)
+        # A mouse-transparent scan leaves destination controls usable immediately.
+        self._page_reveal.start(page)
 
     def _ask_unsaved_settings(self) -> QMessageBox.StandardButton:
         """Ask how to resolve the visible Settings draft."""

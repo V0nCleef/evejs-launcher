@@ -774,6 +774,19 @@ class SettingsPage(QWidget):
             )
         )
 
+        self.sound_effects_toggle = ToggleSwitch()
+        self.sound_effects_volume_slider = self._new_audio_slider("Sound effects volume")
+        self.sound_effects_volume_value = QLabel("65%")
+        layout.addWidget(
+            self._make_audio_slider_control(
+                "Sound effects",
+                "Optional mod arrival and removal sounds from your installed EVE client.",
+                self.sound_effects_volume_slider,
+                self.sound_effects_volume_value,
+                self.sound_effects_toggle,
+            )
+        )
+
         self.voice_enabled_toggle = ToggleSwitch()
         self.voice_volume_slider = self._new_audio_slider("Voice volume")
         self.voice_volume_value = QLabel("100%")
@@ -818,6 +831,7 @@ class SettingsPage(QWidget):
         for slider, label in (
             (self.music_volume_slider, self.music_volume_value),
             (self.voice_volume_slider, self.voice_volume_value),
+            (self.sound_effects_volume_slider, self.sound_effects_volume_value),
             (self.ducking_level_slider, self.ducking_level_value),
         ):
             slider.valueChanged.connect(
@@ -825,6 +839,7 @@ class SettingsPage(QWidget):
             )
         for toggle in (
             self.music_enabled_toggle,
+            self.sound_effects_toggle,
             self.voice_enabled_toggle,
             self.ducking_enabled_toggle,
         ):
@@ -1012,6 +1027,7 @@ class SettingsPage(QWidget):
         voice_enabled = self.voice_enabled_toggle.isChecked()
 
         self.music_volume_slider.setEnabled(music_enabled)
+        self.sound_effects_volume_slider.setEnabled(self.sound_effects_toggle.isChecked())
         self.voice_volume_slider.setEnabled(voice_enabled)
         ducking_available = music_enabled and voice_enabled
         self.ducking_enabled_toggle.setEnabled(ducking_available)
@@ -1354,6 +1370,8 @@ class SettingsPage(QWidget):
         self.music_volume_slider.setValue(
             int(cfg.get("audio_music_volume", 50))
         )
+        self.sound_effects_toggle.setChecked(bool(cfg.get("audio_sound_effects_enabled", True)))
+        self.sound_effects_volume_slider.setValue(int(cfg.get("audio_sound_effects_volume", 65)))
         self.voice_enabled_toggle.setChecked(
             bool(cfg.get("audio_voice_enabled", True))
         )
@@ -1560,6 +1578,8 @@ class SettingsPage(QWidget):
             "auto_start_market": self.auto_start_market_toggle.isChecked(),
             "auto_login_enabled": self.auto_login_toggle.isChecked(),
             "audio_music_enabled": self.music_enabled_toggle.isChecked(),
+            "audio_sound_effects_enabled": self.sound_effects_toggle.isChecked(),
+            "audio_sound_effects_volume": self.sound_effects_volume_slider.value(),
             "audio_music_volume": self.music_volume_slider.value(),
             "audio_voice_enabled": self.voice_enabled_toggle.isChecked(),
             "audio_voice_volume": self.voice_volume_slider.value(),

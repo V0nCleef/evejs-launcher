@@ -700,6 +700,10 @@ class ModsPage(QWidget):
         self._restore_scroll_timer.setSingleShot(True)
         self._restore_scroll_timer.timeout.connect(self._restore_scroll)
         self._build_ui()
+        from src.ui.mod_feedback import ModFeedback
+        self._feedback = ModFeedback(self)
+        self._feedback_snapshot = None
+        self._suppress_feedback_once = False
         register_translatable_widget_tree(self)
         self.refresh_mods()
 
@@ -1393,6 +1397,32 @@ class ModsPage(QWidget):
     def show_inventory(self, inventory: ModInventory) -> None:
         if inventory.root != self._evejs_root:
             return
+        previous = self._feedback_snapshot
+        same_target = previous is not None and previous[0] == inventory.root
+        decorate = same_target and not self._suppress_feedback_once
+        self._suppress_feedback_once = False
+        old_states = previous[1] if same_target else {}
+        self._feedback_snapshot = (inventory.root, {folder_key(mod): mod.active for mod in inventory.mods})
+        old_rows = {folder_key(row.mod): row for row in self._rows}
+        existing_widgets = [self._list_layout.itemAt(index).widget()
+                            for index in range(self._list_layout.count() - 1)]
+        new_keys = {folder_key(mod) for mod in inventory.mods}
+        ghosts, departures = [], []
+        for index, widget in enumerate(existing_widgets):
+            if widget is None:
+                continue
+            if widget.objectName() == 'departingModSpace':
+                if same_target:
+                    ghosts.append((index, widget))
+                else:
+                    self._feedback.forget_row(widget)
+            elif widget in self._rows and folder_key(widget.mod) not in new_keys:
+                ghost = self._feedback.departure(widget) if decorate else None
+                if ghost is not None:
+                    ghosts.append((index, ghost))
+                    departures.append(ghost)
+            elif widget not in self._rows:
+                widget.deleteLater()
         self._inventory = inventory
         evejs_root, mods = inventory.root, inventory.mods
         scroll_position = self._scroll.verticalScrollBar().value()
@@ -1403,17 +1433,11 @@ class ModsPage(QWidget):
         loader_keys = [folder_key(mod) for mod in mods
                        if mod.valid and mod.activation_kind is ActivationKind.LOADER_RENAME]
 
-        for row in self._rows:
-            row.setParent(None)
-            row.deleteLater()
         self._rows.clear()
-
-        # Preserve the trailing stretch so short manifests remain top-aligned.
+        # Detach layout items only; unaffected widgets and in-flight silhouettes survive.
         while self._list_layout.count() > 1:
-            item = self._list_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+            self._list_layout.takeAt(0)
+        changes = []
 
         if not mods:
             empty = QFrame()
@@ -1477,8 +1501,7 @@ class ModsPage(QWidget):
                     can_toggle = can_remove = False
                     disabled_reason = ownership_error
                     disabled_state = "REPAIR REQUIRED"
-                row = ModRow(
-                    mod,
+                options = dict(
                     client_script_delivery=reported_delivery(mod, config.get_setting("client_path") or None,
                                                              "native" if self._runtime_backend is RuntimeBackend.NATIVE else "docker"),
                     projection=projection,
@@ -1500,22 +1523,58 @@ class ModsPage(QWidget):
                     can_move_up=not inventory.registry_conflict and key in loader_keys and loader_keys.index(key) > 0,
                     can_move_down=not inventory.registry_conflict and key in loader_keys and loader_keys.index(key) < len(loader_keys) - 1,
                     cleanup=(inventory.local_records[key].cleanup if key in inventory.local_records else None),
-                    parent=self._list_container,
                 )
-                row.state_changed.connect(self._update_summary_and_actions)
-                row.remove_requested.connect(self.remove_mod_requested.emit)
-                row.configure_requested.connect(self.configure_mod_requested.emit)
-                row.activation_requested.connect(self.activation_requested.emit)
-                row.move_requested.connect(self.move_requested.emit)
-                row.helper_requested.connect(self.helper_requested.emit)
-                row.update_requested.connect(self.update_mod_requested.emit)
+                signature = repr((mod, projection, {name: value for name, value in options.items()
+                                                    if name not in {'can_move_up', 'can_move_down'}}))
+                row = old_rows.pop(key, None)
+                if row is None or getattr(row, '_presentation_signature', None) != signature:
+                    if row is not None:
+                        self._feedback.forget_row(row)
+                        row.hide()
+                        row.deleteLater()
+                    row = ModRow(mod, parent=self._list_container, **options)
+                    row._presentation_signature = signature
+                    row.state_changed.connect(self._update_summary_and_actions)
+                    row.remove_requested.connect(self.remove_mod_requested.emit)
+                    row.configure_requested.connect(self.configure_mod_requested.emit)
+                    row.activation_requested.connect(self.activation_requested.emit)
+                    row.move_requested.connect(self.move_requested.emit)
+                    row.helper_requested.connect(self.helper_requested.emit)
+                    row.update_requested.connect(self.update_mod_requested.emit)
+                if decorate:
+                    if key not in old_states:
+                        if mod.valid:
+                            changes.append((row, 'arrival'))
+                    elif old_states[key] != mod.active:
+                        changes.append((row, 'power'))
                 row.set_lifecycle_busy(self._lifecycle_busy)
+                for button, option in ((row.move_up_btn, 'can_move_up'), (row.move_down_btn, 'can_move_down')):
+                    button.setVisible(mod.valid and mod.activation_kind is ActivationKind.LOADER_RENAME
+                                      and self._refresh_handler is not None and options[option])
                 self._rows.append(row)
                 self._list_layout.insertWidget(index, row)
 
+        for row in old_rows.values():
+            self._feedback.forget_row(row)
+            row.hide()
+            row.deleteLater()
+        for index, ghost in ghosts:
+            self._list_layout.insertWidget(min(index, self._list_layout.count() - 1), ghost)
+            ghost.show()
+        for row in self._rows:
+            row.show()
+        self._list_layout.activate()
+        for ghost in departures:
+            self._feedback.start_departure(ghost)
+        for row, kind in changes:
+            self._feedback.present(row, kind)
         self._update_summary_and_actions()
         self._restore_scroll_position = scroll_position
         self._restore_scroll_timer.start(0)
+
+    def suppress_next_inventory_feedback(self) -> None:
+        """Advance the baseline silently after an operation reports failure."""
+        self._suppress_feedback_once = True
 
     def _restore_scroll(self):
         self._scroll.verticalScrollBar().setValue(self._restore_scroll_position)

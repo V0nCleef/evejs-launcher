@@ -106,6 +106,8 @@ class AudioController(QObject):
         self._music_spectrum = SILENT_MUSIC_SPECTRUM
         self._voice_speaking = False
         self._voice_caption_queue: deque[tuple[Path, str]] = deque()
+        from .game_feedback import GameCueController
+        self._game_cues = GameCueController(self, settings or {})
 
     @property
     def settings(self) -> AudioSettings:
@@ -163,6 +165,7 @@ class AudioController(QObject):
         )
         self._configured_music_paths = configured_music_paths
         self._settings = updated
+        self._game_cues.apply_settings(mapping)
 
         if music_library_changed and self._music_uses_library:
             self._refresh_library_playlist()
@@ -431,8 +434,12 @@ class AudioController(QObject):
         backend.configure(self._settings)
         return self._queue_voice_clip(path, announcement.text, backend)
 
+    def play_mod_cue(self, cue: str) -> bool:
+        return self._game_cues.play(cue)
+
     def shutdown(self) -> None:
         """Stop all optional playback without creating either backend."""
+        self._game_cues.shutdown()
         self._music_requested = False
         if self._music_backend is not None:
             self._music_backend.stop()

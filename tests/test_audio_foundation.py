@@ -32,6 +32,10 @@ def isolated_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     config_file = tmp_path / "config.json"
     monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(config, "CONFIG_FILE", config_file)
+    if config.IS_LINUX:
+        # Exercise audio draft persistence without requiring a live Proton setup.
+        from src.core import linux_installation
+        monkeypatch.setattr(linux_installation, 'imported_settings', lambda _root: {})
     return config_file
 
 

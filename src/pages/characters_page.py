@@ -777,6 +777,7 @@ class CharactersPage(QWidget):
         self._character_order = updated
         self._sort_character_cards()
         self._relayout_grid()
+        source.land()
         self.character_order_changed.emit(updated)
 
     def _clear_drop_indicators(self) -> None:

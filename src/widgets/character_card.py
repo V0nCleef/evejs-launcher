@@ -28,6 +28,8 @@ from PyQt6.QtWidgets import (
     QMenu,
 )
 
+from src.widgets.character_card_motion import CharacterCardMotion
+
 from src.constants import COLORS as C, SEMANTIC_COLORS as S, Status
 from src.core.character_names import ship_display_name, location_display_name
 from src.i18n import (
@@ -239,7 +241,7 @@ class HamburgerButton(QPushButton):
         super().focusOutEvent(event)
 
 
-class CharacterCard(QFrame):
+class CharacterCard(CharacterCardMotion, QFrame):
     CARD_MIN_WIDTH = 148
     CARD_MAX_WIDTH = 196
     CARD_HEIGHT = 252
@@ -311,6 +313,7 @@ class CharacterCard(QFrame):
         mark_translatable(self._launch_btn)
         set_translatable_tooltip(self._selection_marker, "Selected character")
         self._restyle()
+        self._init_card_motion()
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -672,46 +675,6 @@ class CharacterCard(QFrame):
             return
         super().keyPressEvent(event)
 
-    def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.setFocus(Qt.FocusReason.MouseFocusReason)
-            self._drag_start = event.position().toPoint()
-            self._dragged = False
-            event.accept()
-            return
-        super().mousePressEvent(event)
-
-    def mouseReleaseEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            if self._drag_start is not None and not self._dragged and self.rect().contains(event.position().toPoint()):
-                self.selected.emit(self.username, self.char_name, self.char_id)
-            self._drag_start = None
-            event.accept()
-            return
-        super().mouseReleaseEvent(event)
-
-    def mouseMoveEvent(self, event) -> None:
-        if (self._reorder_context is not None and self._drag_start is not None
-                and event.buttons() & Qt.MouseButton.LeftButton
-                and (event.position().toPoint()-self._drag_start).manhattanLength() >= QApplication.startDragDistance()):
-            self._dragged = True
-            self._active_drag_context = self._reorder_context
-            drag = QDrag(self)
-            mime = QMimeData()
-            mime.setData(CHARACTER_CARD_MIME, b'1')
-            drag.setMimeData(mime)
-            drag.setPixmap(self.grab())
-            drag.setHotSpot(self._drag_start)
-            self._drag_start = None
-            try:
-                drag.exec(Qt.DropAction.MoveAction)
-            finally:
-                self._active_drag_context = None
-                if not sip.isdeleted(self):
-                    self.drag_finished.emit()
-            return
-        super().mouseMoveEvent(event)
-
     def accepts_character_drag(self, event) -> bool:
         source = event.source()
         return (self._reorder_context is not None and isinstance(source, CharacterCard) and not sip.isdeleted(source)
@@ -757,9 +720,4 @@ class CharacterCard(QFrame):
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
-        if self._drop_after is not None:
-            painter = QPainter(self)
-            painter.setPen(QPen(QColor(S['accent']), 3))
-            right = self._drop_after != (self.layoutDirection() == Qt.LayoutDirection.RightToLeft)
-            x = self.width()-2 if right else 2
-            painter.drawLine(x, 5, x, self.height()-5)
+        self._paint_reorder_feedback()

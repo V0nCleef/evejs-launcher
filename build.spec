@@ -9,6 +9,9 @@ from PyInstaller.utils.hooks import collect_submodules
 
 from build_support import reject_contaminated_binaries, sanitize_build_path
 from src.core.mod_guide import catalog_paths
+from decoder_build_support import decoder_build_inputs
+
+_decoder_datas, _decoder_binaries = decoder_build_inputs('windows')
 
 
 _clean_path, _removed_build_paths = sanitize_build_path(
@@ -100,8 +103,9 @@ BINARY_EXCLUDES = [
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
+    binaries=_decoder_binaries,
     datas=[
+        *_decoder_datas,
         ('assets/data/character_names.json', 'assets/data'),
         ("assets/hero/hero_nebula.png", "assets/hero"),  # updater artwork fallback
         ('assets/deep_signal/operations_orbital.png', 'assets/deep_signal'),

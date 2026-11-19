@@ -84,7 +84,8 @@ def test_repeated_page_reveal_clears_prior_effect_and_reduced_motion(qapp):
         reveal.start(a)
         reveal.start(b)
         assert a.graphicsEffect() is None
-        assert b.graphicsEffect() is not None
+        assert b.graphicsEffect() is None
+        assert reveal._layer.parentWidget() is b
         reveal.finish()
         assert b.graphicsEffect() is None
         host.setProperty("animationsEnabled", False)

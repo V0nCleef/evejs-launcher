@@ -337,7 +337,7 @@ def test_lifecycle_busy_refresh_does_not_permanently_disable_remove(
     page.set_mod_runtime_snapshot(None)
     replacement_row = page._rows[0]
 
-    assert replacement_row is not original_row
+    assert replacement_row is original_row
     assert not replacement_row.remove_btn.isEnabled()
 
     page.set_lifecycle_busy(False)

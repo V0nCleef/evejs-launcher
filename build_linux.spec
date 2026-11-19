@@ -4,6 +4,9 @@ import json
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
 from src.core.mod_guide import catalog_paths
+from decoder_build_support import decoder_build_inputs
+
+decoder_datas, decoder_binaries = decoder_build_inputs('linux')
 
 catalog = json.loads(Path('docs/how-to-make-a-mod/navigation.json').read_text(encoding='utf-8'))
 guide = [Path(path) for path in catalog_paths(catalog)]
@@ -38,7 +41,7 @@ excluded = ['src.core.platform_win', 'src.core.process_identity_win', 'winreg',
             'PyQt6.QtWebEngineCore', 'PyQt6.QtWebEngineWidgets', 'PyQt6.QtQuick', 'PyQt6.QtQml',
             'pytest', 'tkinter', 'unittest']
 hidden = [name for name in collect_submodules('src') if name not in excluded]
-a = Analysis(['main.py'], pathex=[], binaries=[], datas=datas, hiddenimports=hidden,
+a = Analysis(['main.py'], pathex=[], binaries=decoder_binaries, datas=datas + decoder_datas, hiddenimports=hidden,
              excludes=excluded, noarchive=False)
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='evejs-launcher', debug=False,

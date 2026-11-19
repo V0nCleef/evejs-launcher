@@ -187,6 +187,8 @@ class ModCoordinator(QObject):
             return
         self._presenting = True
         result, callback, thread = self._result, self._callback, self._thread
+        if not result.success and self._page is not None:
+            self._page.suppress_next_inventory_feedback()
         # Keep the shared operation reservation through any modal result UI.
         self._callback = None
         try:

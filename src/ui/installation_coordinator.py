@@ -142,6 +142,9 @@ class InstallationBar(QWidget):
             QMessageBox.information(self._launcher, "Installation", reason)
             return
         self._apply(select_profile(self._launcher._cfg, identity))
+        reveal = getattr(self._launcher, "_page_reveal", None)
+        if reveal is not None:
+            reveal.start(self._launcher._stack.currentWidget())
 
     def _apply(self, cfg):
         config.save(cfg)

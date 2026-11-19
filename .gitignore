@@ -1,5 +1,7 @@
 # Build artifacts
 .qa/
+assets/decoders/windows/
+assets/decoders/linux/
 build/
 dist/
 output/

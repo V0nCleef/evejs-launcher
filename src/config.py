@@ -53,6 +53,8 @@ DEFAULT_CONFIG = {
     # remains a separate Settings/runtime safety switch for music and LYRA.
     "audio_music_muted": False,
     "audio_music_enabled": True,
+    "audio_sound_effects_enabled": True,
+    "audio_sound_effects_volume": 65,
     "audio_music_volume": 50,         # percent, 0-100
     # Retained only to read older configs; custom music is no longer exposed.
     "audio_music_library": [],
@@ -334,6 +336,12 @@ def _migrate_audio_settings(migrated: dict) -> None:
     migrated["audio_master_muted"] = False
     migrated["audio_music_muted"] = _bool_setting(
         migrated.get("audio_music_muted"), default=False
+    )
+    migrated["audio_sound_effects_enabled"] = _bool_setting(
+        migrated.get("audio_sound_effects_enabled"), default=True
+    )
+    migrated["audio_sound_effects_volume"] = _percent_setting(
+        migrated.get("audio_sound_effects_volume"), default=65
     )
     migrated["audio_music_enabled"] = _bool_setting(
         migrated.get("audio_music_enabled"), default=True

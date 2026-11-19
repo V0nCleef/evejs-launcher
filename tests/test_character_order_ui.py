@@ -107,9 +107,11 @@ def test_drag_gesture_reaches_qt_drop_without_launching_or_selecting(qapp,monkey
                 QCoreApplication.sendEvent(target,drop)
                 assert drop.isAccepted()
                 return action
-        monkeypatch.setattr(card_module,'QDrag',Drag)
+        from src.widgets import character_card_motion
+        monkeypatch.setattr(character_card_motion,'QDrag',Drag)
         widget={'card':source,'portrait':source._portrait,'name':source._name_label,'account':source._account_label}[origin]
         QTest.mousePress(widget,Qt.MouseButton.LeftButton,pos=QPoint(8,8))
+        QTest.qWait(source.HOLD_MS + 25)
         QTest.mouseMove(widget,QPoint(50,15))
         QTest.mouseRelease(widget,Qt.MouseButton.LeftButton,pos=QPoint(50,15))
         assert _ids(page)==[103,101,110,102]
