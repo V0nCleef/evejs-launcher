@@ -4,14 +4,14 @@ from __future__ import annotations
 from pathlib import Path
 from PyQt6.QtCore import QUrl, QSize, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QComboBox, QPushButton, QLabel, QFileDialog, QSizePolicy, QToolButton, QMenu
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QComboBox, QPushButton, QLabel, QSizePolicy, QToolButton, QMenu
 
 from src import config
 from src.core.installation_profiles import (
     ensure_profiles, select_profile, add_profile, rename_profile, remove_profile,
     InstallationProfileError,
 )
-from src.widgets.localized_dialogs import LocalizedInputDialog as QInputDialog, LocalizedMessageBox as QMessageBox
+from src.widgets.localized_dialogs import LocalizedFileDialog as QFileDialog, LocalizedInputDialog as QInputDialog, LocalizedMessageBox as QMessageBox
 from src.widgets.ui_translation import register_translatable_widget_tree
 from src.i18n import translate_ui_phrase
 

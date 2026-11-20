@@ -7682,6 +7682,20 @@ class MainWindow(QMainWindow):
             ):
                 candidates.append((account, character))
         if not candidates:
+            if not launch_rows:
+                # Never fail silently: say why nothing launched.
+                total = sum(len(account.characters) for account in self._accounts)
+                if total and hidden:
+                    message = (
+                        "No visible characters to launch. All {count} character(s) are hidden "
+                        "(characters on test/GM accounts are hidden by default). Unhide one "
+                        "on the Characters page, or launch it from there."
+                    ).format(count=total)
+                elif total:
+                    message = "The selected group has no launchable characters."
+                else:
+                    message = "No characters exist yet. Create one on the Characters page first."
+                QMessageBox.information(self, "Nothing To Launch", message)
             self._refresh_character_views()
             return
 

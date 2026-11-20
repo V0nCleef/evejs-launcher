@@ -8,7 +8,8 @@ import time
 import pytest
 from PyQt6.QtCore import QCoreApplication, QEvent
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
+from PyQt6.QtWidgets import QApplication, QMessageBox
+from src.widgets.localized_dialogs import LocalizedFileDialog as QFileDialog
 
 from src import app as app_module
 from src import config

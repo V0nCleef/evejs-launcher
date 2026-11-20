@@ -54,6 +54,30 @@ def _load_fonts() -> dict[str, str]:
         return {"header": "Segoe UI", "body": "Segoe UI", "mono": "Consolas"}
 
 
+def _prefer_portal_file_dialogs() -> None:
+    """Linux: use the desktop's file dialog (sees every mounted drive) when available.
+
+    The bundled Qt cannot load the KDE/GNOME theme, so it would otherwise show
+    its own dialog. The xdg-desktop-portal dialog is the real KDE/GNOME one.
+    An existing QT_QPA_PLATFORMTHEME is never overridden.
+    """
+    if not sys.platform.startswith("linux") or os.environ.get("QT_QPA_PLATFORMTHEME"):
+        return
+    try:
+        from PyQt6.QtDBus import QDBusConnection
+
+        bus = QDBusConnection.sessionBus()
+        iface = bus.interface()
+        name = "org.freedesktop.portal.Desktop"
+        if iface is not None and (
+            iface.isServiceRegistered(name).value()
+            or name in iface.activatableServiceNames().value()
+        ):
+            os.environ["QT_QPA_PLATFORMTHEME"] = "xdgdesktopportal"
+    except Exception:
+        pass
+
+
 def _parse_update_handoff(argv: list[str]):  # type: ignore[no-untyped-def]
     """Return a staged-update request when this build was launched as an agent."""
     if "--apply-update" not in argv:
@@ -162,6 +186,7 @@ def main() -> int:
         if offset + 2 != len(sys.argv):
             raise ValueError("Invalid Linux update startup arguments.")
         linux_startup = StartupHandshake(sys.argv[offset + 1])
+    _prefer_portal_file_dialogs()
     app = QApplication([sys.argv[0]] if handoff is not None or linux_startup is not None or headless is not None or runtime_check is not None else sys.argv)
     app.setApplicationName(APP_NAME)
     app.setOrganizationName("NousResearch")

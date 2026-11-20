@@ -325,10 +325,18 @@ class ServiceStartWorker(QObject):
             )
             if game_ready and linux_installation is not None:
                 from ..core.linux_client import require_backend_tls
-                try:
-                    require_backend_tls(linux_installation, self._game_port)
-                except (OSError, ValueError) as exc:
-                    game_ready, game_error = False, str(exc)
+                # A slow first boot can open its ports before the TLS listeners
+                # answer; retry for a bounded time while the process is alive.
+                tls_deadline = time.monotonic() + 45.0
+                while True:
+                    try:
+                        require_backend_tls(linux_installation, self._game_port)
+                        break
+                    except (OSError, ValueError) as exc:
+                        if time.monotonic() >= tls_deadline or game_process.poll() is not None:
+                            game_ready, game_error = False, str(exc)
+                            break
+                        time.sleep(2.0)
             if not game_ready:
                 self.completed.emit(
                     self._result(

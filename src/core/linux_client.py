@@ -83,6 +83,24 @@ def settings_base(installation: LinuxInstallation, host: str = "127.0.0.1") -> P
             / (key + "_" + host))
 
 
+def _ensure_x_authority(env: dict) -> None:
+    """KDE Wayland's Xwayland needs XAUTHORITY; if the launcher was started
+    without it (terminal/remote shell) Wine cannot open a window."""
+    if not env.get("DISPLAY") or env.get("XAUTHORITY"):
+        return
+    runtime = Path(env.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
+    try:
+        candidates = sorted(runtime.glob("xauth_*"), key=lambda p: p.stat().st_mtime, reverse=True)
+        candidates += sorted(runtime.glob(".mutter-Xwaylandauth.*"), key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        candidates = []
+    candidates.append(Path.home() / ".Xauthority")
+    for candidate in candidates:
+        if candidate.is_file():
+            env["XAUTHORITY"] = str(candidate)
+            return
+
+
 def proton_environment(installation: LinuxInstallation, env: dict) -> dict:
     from .host import external_process_environment
     result = external_process_environment(env)
@@ -95,6 +113,7 @@ def proton_environment(installation: LinuxInstallation, env: dict) -> dict:
     result.pop("SSL_CERT_DIR", None)
     result["EO_REMOTEFILECACHEFOLDER"] = wine_path(installation.cache / "ResFiles")
     result.pop("WINEPREFIX", None)
+    _ensure_x_authority(result)
     return result
 
 
@@ -151,12 +170,22 @@ def require_client_trust(installation: LinuxInstallation) -> None:
         raise LinuxSetupError("The copied client's CA trust is not prepared for this installation. Repair certificates with Linux Setup after closing EVE.") from exc
 
 
+def local_ca_context(ca: Path) -> ssl.SSLContext:
+    """Trust only the local EveJS CA. Python 3.13+ turns on strict X.509 checks by
+    default, and the locally generated cert has no Authority Key Identifier, so
+    strict mode wrongly rejects it. Chain and hostname checks stay on."""
+    context = ssl.create_default_context(cafile=str(ca))
+    if hasattr(context, 'verify_flags'):
+        context.verify_flags &= ~ssl.VERIFY_X509_STRICT
+    return context
+
+
 def require_backend_tls(installation: LinuxInstallation, game_port: int) -> None:
     from .linux_services import http_health
     if not http_health(40110) or not http_health(26002):
         raise LinuxSetupError("The prepared Linux Market/proxy health endpoint is unavailable.")
     ca = installation.root / "_local/certs/xmpp-ca-cert.pem"
-    context = ssl.create_default_context(cafile=str(ca))
+    context = local_ca_context(ca)
     for port, host in ((5222, "localhost"), (26003, "dev-public-gateway.evetech.net"), (installation.cdn_port, "localhost")):
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=3) as connection:

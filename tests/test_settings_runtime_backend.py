@@ -5,7 +5,8 @@ from copy import deepcopy
 import json
 
 import pytest
-from PyQt6.QtWidgets import QApplication, QFileDialog
+from PyQt6.QtWidgets import QApplication
+from src.widgets.localized_dialogs import LocalizedFileDialog as QFileDialog
 
 from src import config, i18n
 from src.core.client_autologin import AutoLoginCapability

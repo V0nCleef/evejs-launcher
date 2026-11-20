@@ -9,10 +9,11 @@ import zipfile
 from PyQt6.QtCore import QUrl, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QDesktopServices, QFont, QImage, QPalette, QPixmap, QTextCursor, QTextDocument, QTextFormat
 from PyQt6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+    QApplication, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
     QListWidget, QPushButton, QScrollArea, QTextBrowser, QVBoxLayout, QWidget,
 )
 
+from src.widgets.localized_dialogs import LocalizedFileDialog as QFileDialog
 from src.core.mod_guide import catalog_paths, render_page
 from src.i18n import LANGUAGES, current_language
 from src.constants import SEMANTIC_COLORS as S

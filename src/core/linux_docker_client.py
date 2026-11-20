@@ -4,6 +4,7 @@ from __future__ import annotations
 import socket
 import ssl
 
+from .linux_client import local_ca_context
 from .linux_installation import LinuxSetupError
 from .runtime.docker_autologin import _select_server
 from .runtime.docker_cli import DockerCommandRunner
@@ -40,7 +41,7 @@ def require_docker_runtime(request, installation, *, inspector=None):
     if not probe_endpoint(endpoints.image):
         raise LinuxSetupError('The selected Docker image endpoint is unavailable.')
     ca = installation.root / '_local/certs/xmpp-ca-cert.pem'
-    trust = ssl.create_default_context(cafile=str(ca))
+    trust = local_ca_context(ca)
     for endpoint, hostname in ((endpoints.xmpp, 'localhost'),
                                 (endpoints.assets, 'dev-public-gateway.evetech.net'), (cdn[0], 'localhost')):
         try:

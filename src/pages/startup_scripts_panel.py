@@ -6,12 +6,13 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import (
-    QCheckBox, QDialog, QFileDialog, QFormLayout, QFrame, QHBoxLayout,
+    QCheckBox, QDialog, QFormLayout, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from src.core.startup_scripts import ScriptEntry, ScriptError, StartupScriptController, root_key
 from src.core.host import IS_LINUX
+from src.widgets.localized_dialogs import LocalizedFileDialog as QFileDialog
 from src.i18n import translate_ui_phrase
 from src.widgets.toggle_switch import ToggleSwitch
 from src.widgets.ui_translation import mark_translatable, set_translatable_accessible_name, set_translatable_text

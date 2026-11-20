@@ -7,7 +7,7 @@ import time
 import pytest
 from PyQt6.QtCore import QThread
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QFileDialog
+from src.widgets.localized_dialogs import LocalizedFileDialog as QFileDialog
 
 from src import config
 from src.i18n import current_language, set_language

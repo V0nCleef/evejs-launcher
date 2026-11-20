@@ -2,15 +2,86 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import os
+from pathlib import Path
 from typing import Any
 
+from PyQt6.QtCore import QStorageInfo, QUrl
 from PyQt6.QtWidgets import (
     QFileDialog as QtFileDialog,
     QInputDialog as QtInputDialog,
     QMessageBox as QtMessageBox,
 )
 
+from src.core.host import IS_LINUX
 from src.i18n import translate_ui_phrase
+
+_LINUX_MOUNT_ROOTS = ("/run/media", "/media", "/mnt", "/var/mnt")
+
+
+def linux_sidebar_urls() -> list[QUrl]:
+    """Places for the Qt file dialog: home, root and every mounted drive.
+
+    Qt's own dialog only lists the OS drive on Linux; external and secondary
+    drives live under /run/media/<user>/, /media, /mnt and similar.
+    """
+    places: list[str] = ["/", str(Path.home())]
+    try:
+        for volume in QStorageInfo.mountedVolumes():
+            root = volume.rootPath()
+            if volume.isValid() and volume.isReady() and root.startswith(
+                tuple(base + "/" for base in _LINUX_MOUNT_ROOTS)
+            ):
+                places.append(root)
+    except Exception:  # pragma: no cover - never block a browse dialog
+        pass
+    for base in _LINUX_MOUNT_ROOTS:
+        try:
+            for child in sorted(Path(base).iterdir()):
+                if not child.is_dir():
+                    continue
+                if child.is_mount():
+                    places.append(str(child))
+                    continue
+                # /run/media/<user>/<drive> and /media/<user>/<drive> are one level deeper.
+                places.extend(str(d) for d in sorted(child.iterdir()) if d.is_dir() and d.is_mount())
+        except OSError:
+            continue
+    seen: set[tuple[int, int]] = set()
+    urls: list[QUrl] = []
+    for place in places:
+        try:
+            info = os.stat(place)
+        except OSError:
+            continue
+        key = (info.st_dev, info.st_ino)  # the same drive can be mounted twice
+        if key not in seen:
+            seen.add(key)
+            urls.append(QUrl.fromLocalFile(place))
+    return urls
+
+
+def _linux_dialog(
+    parent: Any,
+    caption: str,
+    directory: str,
+    name_filter: str,
+    initial_filter: str,
+    options: Any,
+    file_mode: Any,
+    accept_mode: Any,
+) -> tuple[list[str], str]:
+    """Run a QFileDialog instance with drive shortcuts (Qt dialog) or the portal."""
+    dialog = QtFileDialog(parent, caption, directory, name_filter)
+    dialog.setOptions(options)
+    dialog.setFileMode(file_mode)
+    dialog.setAcceptMode(accept_mode)
+    if initial_filter:
+        dialog.selectNameFilter(initial_filter)
+    dialog.setSidebarUrls(linux_sidebar_urls())
+    if dialog.exec():
+        return dialog.selectedFiles(), dialog.selectedNameFilter()
+    return [], ""
 
 
 _STANDARD_BUTTON_TEXT = {
@@ -229,6 +300,12 @@ class LocalizedFileDialog(QtFileDialog):
         directory: str = "",
         options: Any = QtFileDialog.Option.ShowDirsOnly,
     ) -> str:
+        if IS_LINUX:
+            files, _flt = _linux_dialog(
+                parent, translate_ui_phrase(caption), directory, "", "", options,
+                QtFileDialog.FileMode.Directory, QtFileDialog.AcceptMode.AcceptOpen,
+            )
+            return files[0] if files else ""
         return QtFileDialog.getExistingDirectory(
             parent,
             translate_ui_phrase(caption),
@@ -245,6 +322,13 @@ class LocalizedFileDialog(QtFileDialog):
         initialFilter: str = "",  # noqa: N803 - Qt API compatibility
         options: Any = QtFileDialog.Option(0),
     ) -> tuple[str, str]:
+        if IS_LINUX:
+            files, selected = _linux_dialog(
+                parent, translate_ui_phrase(caption), directory, translate_ui_phrase(filter),
+                initialFilter, options,
+                QtFileDialog.FileMode.ExistingFile, QtFileDialog.AcceptMode.AcceptOpen,
+            )
+            return (files[0], selected) if files else ("", "")
         return QtFileDialog.getOpenFileName(
             parent,
             translate_ui_phrase(caption),
@@ -263,6 +347,13 @@ class LocalizedFileDialog(QtFileDialog):
         initialFilter: str = "",  # noqa: N803 - Qt API compatibility
         options: Any = QtFileDialog.Option(0),
     ) -> tuple[str, str]:
+        if IS_LINUX:
+            files, selected = _linux_dialog(
+                parent, translate_ui_phrase(caption), directory, translate_ui_phrase(filter),
+                initialFilter, options,
+                QtFileDialog.FileMode.AnyFile, QtFileDialog.AcceptMode.AcceptSave,
+            )
+            return (files[0], selected) if files else ("", "")
         return QtFileDialog.getSaveFileName(
             parent,
             translate_ui_phrase(caption),
