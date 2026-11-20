@@ -239,6 +239,9 @@ def test_footer_owns_the_full_bottom_edge_without_a_painted_shoulder(
     shell.resize(width, height)
     shell.show()
     qapp.processEvents()
+    # Added navigation entries can make Qt grow a small requested shell.
+    # Check the real bottom edge, including that enforced layout minimum.
+    height = shell.height()
 
     try:
         assert bar.geometry().getRect() == (
