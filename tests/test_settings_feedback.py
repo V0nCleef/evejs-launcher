@@ -18,6 +18,11 @@ def isolated_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     config_file = config_dir / "config.json"
     monkeypatch.setattr(config, "CONFIG_DIR", config_dir)
     monkeypatch.setattr(config, "CONFIG_FILE", config_file)
+    if config.IS_LINUX:
+        # These tests isolate save feedback from prepared-runtime discovery.
+        # Real Linux import validation is covered by test_linux_installation.py.
+        from src.core import linux_installation
+        monkeypatch.setattr(linux_installation, "imported_settings", lambda _root: {})
     return config_file
 
 

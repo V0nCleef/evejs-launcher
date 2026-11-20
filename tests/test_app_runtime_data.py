@@ -291,6 +291,7 @@ def test_stale_account_result_cannot_replace_current_accounts(
 
 def test_clearing_the_evejs_root_retires_a_stale_data_error() -> None:
     window = MainWindow.__new__(MainWindow)
+    window._save_migration_thread = None
     window._close_in_progress = False
     window._cfg = {"evejs_root": ""}
     window._account_request_token = object()
@@ -520,6 +521,7 @@ def test_docker_data_factory_carries_current_private_settings_and_generation(
 
 def test_docker_account_refresh_rejects_result_from_other_observed_target() -> None:
     window = MainWindow.__new__(MainWindow)
+    window._save_migration_thread = None
     window._cfg = {
         "runtime_backend": "docker_compose",
         "docker_control_policy": "connect_only",
@@ -590,6 +592,7 @@ def test_docker_account_refresh_rejects_result_from_other_observed_target() -> N
 
 def test_docker_account_results_require_observed_target_authority() -> None:
     window = MainWindow.__new__(MainWindow)
+    window._save_migration_thread = None
     window._settings_page = None
     window._cfg = {
         "runtime_backend": "docker_compose",

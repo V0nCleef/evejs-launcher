@@ -2,6 +2,13 @@
 
 ## Changelog
 
+## v1.0.90 - 2026-11-20
+- Add clearer page transitions and character drag-and-drop feedback, with reduced-motion support.
+- Show mod arrival and removal effects after confirmed changes, retain unaffected rows, and keep background read errors from suppressing successful results.
+- Add optional sound effects from supported installed EVE clients, with their own volume setting and the existing mute controls. Unrecognized client sound revisions stay silent.
+- Decode and play sound effects away from the interface thread, including clean shutdown while sounds are playing.
+- Make Save Migration reviews, transfer stages and Copy/Move outcomes clearer. Preserve completed transfer results when temporary workspace cleanup is delayed.
+
 ## v1.0.89 - 2026-11-18
 - Drag character cards into a custom visual order and remember it for each installation across launcher restarts and EveJS upgrades. Keep hidden characters, filters and launch-group order intact.
 - Accept valid EveJS portraits served at a different resolution from the requested URL and scale them for the launcher. Recognize the additional Native portrait layout and 32/1024-pixel files.
