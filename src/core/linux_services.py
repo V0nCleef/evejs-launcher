@@ -20,8 +20,8 @@ def _serialize_start(function):
     return start
 
 
-def http_health(port: int) -> bool:
-    connection = HTTPConnection('127.0.0.1', port, timeout=1)
+def http_health(port: int, *, timeout: float = 1) -> bool:
+    connection = HTTPConnection('127.0.0.1', port, timeout=timeout)
     try:
         connection.request('GET', '/health')
         response = connection.getresponse()

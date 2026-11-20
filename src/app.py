@@ -87,6 +87,7 @@ from .core.client_autologin import (
     inspect_client_auto_login_capability,
 )
 from .core.groups import (
+    CharacterGroup,
     GroupValidationError,
     TargetGroupState,
     find_relink_candidates,
@@ -7646,6 +7647,18 @@ class MainWindow(QMainWindow):
             None,
         )
 
+    def _empty_batch_launch_reason(self, group: CharacterGroup | None) -> str:
+        if group is not None:
+            return (
+                "This group has no visible, non-banned characters."
+                if group.members else "This group is empty."
+            )
+        if any(account.characters for account in self._accounts if not account.banned):
+            return "No visible characters. Check hidden characters on the Characters page."
+        if not any(account.characters for account in self._accounts):
+            return "No characters are loaded. Open the Characters page."
+        return "No visible accounts available"
+
     def _launch_all(self) -> None:
         """Queue the selected group (or All Visible) serially."""
         if self._lifecycle_active():
@@ -7673,6 +7686,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Group Needs Attention", group_error)
             self._refresh_character_views()
             return
+        selected_group = getattr(self, "_group_state", TargetGroupState()).selected_group
         candidates: list[tuple[Account, Character]] = []
         for account, character in launch_rows:
             if (
@@ -7683,27 +7697,10 @@ class MainWindow(QMainWindow):
                 candidates.append((account, character))
         if not candidates:
             if not launch_rows:
-                # Never fail silently: say why nothing launched.
-                total = sum(len(account.characters) for account in self._accounts)
-                if total and hidden:
-                    message = (
-                        "No visible characters to launch. All {count} character(s) are hidden "
-                        "(characters on test/GM accounts are hidden by default). Unhide one "
-                        "on the Characters page, or launch it from there."
-                    ).format(count=total)
-                elif total:
-                    message = "The selected group has no launchable characters."
-                else:
-                    message = "No characters exist yet. Create one on the Characters page first."
-                QMessageBox.information(self, "Nothing To Launch", message)
+                QMessageBox.information(self, "Launch All", self._empty_batch_launch_reason(selected_group))
             self._refresh_character_views()
             return
 
-        selected_group = getattr(
-            self,
-            "_group_state",
-            TargetGroupState(),
-        ).selected_group
         group_name = selected_group.name if selected_group is not None else None
         skipped_running = max(0, len(launch_rows) - len(candidates))
         skipped_unavailable = (
@@ -8541,18 +8538,7 @@ class MainWindow(QMainWindow):
             if not launch_available:
                 apply_launch_availability(False, launch_reason)
             elif not launch_usernames:
-                apply_launch_availability(
-                    False,
-                    (
-                        f"No visible, non-banned characters in {selected_name}"
-                        if selected_group is not None and selected_group.members
-                        else (
-                            f"{selected_name} has no characters"
-                            if selected_group is not None
-                            else "No visible accounts available"
-                        )
-                    ),
-                )
+                apply_launch_availability(False, self._empty_batch_launch_reason(selected_group))
             elif not eligible_usernames:
                 apply_launch_availability(
                     False,
@@ -8570,18 +8556,7 @@ class MainWindow(QMainWindow):
                 "Configure the EveJS root and EVE client path first",
             )
         elif not launch_usernames:
-            apply_launch_availability(
-                False,
-                (
-                    f"No visible, non-banned characters in {selected_name}"
-                    if selected_group is not None and selected_group.members
-                    else (
-                        f"{selected_name} has no characters"
-                        if selected_group is not None
-                        else "No visible accounts available"
-                    )
-                ),
-            )
+            apply_launch_availability(False, self._empty_batch_launch_reason(selected_group))
         elif not eligible_usernames:
             apply_launch_availability(
                 False,

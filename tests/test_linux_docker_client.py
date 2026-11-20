@@ -1,5 +1,6 @@
 """Linux Docker client endpoints stay tied to the observed running container."""
 from dataclasses import replace
+import ssl
 import sys
 from types import SimpleNamespace
 
@@ -30,7 +31,7 @@ def runtime(tmp_path, monkeypatch):
         def __enter__(self): return self
         def __exit__(self, *args): pass
     monkeypatch.setattr(docker_client.socket, 'create_connection', lambda *args, **kwargs: Connection())
-    monkeypatch.setattr(docker_client.ssl, 'create_default_context', lambda **kwargs:
+    monkeypatch.setattr(docker_client, 'local_ca_context', lambda ca:
         SimpleNamespace(wrap_socket=lambda *args, **kwargs: Connection()))
     return request, installation, inspector, actual
 
@@ -58,7 +59,7 @@ def test_stale_port_mapping_is_rejected(runtime):
 def test_wrong_docker_ca_is_rejected(runtime, monkeypatch):
     request, installation, inspector, _ = runtime
     def fail(*args, **kwargs):
-        raise docker_client.ssl.SSLError('fixture CA mismatch')
+        raise ssl.SSLError('fixture CA mismatch')
     monkeypatch.setattr(docker_client.socket, 'create_connection', fail)
     with pytest.raises(LinuxSetupError, match='do not match the CA'):
         docker_client.require_docker_runtime(request, installation, inspector=inspector)

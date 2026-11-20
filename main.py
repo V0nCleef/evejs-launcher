@@ -61,7 +61,9 @@ def _prefer_portal_file_dialogs() -> None:
     its own dialog. The xdg-desktop-portal dialog is the real KDE/GNOME one.
     An existing QT_QPA_PLATFORMTHEME is never overridden.
     """
-    if not sys.platform.startswith("linux") or os.environ.get("QT_QPA_PLATFORMTHEME"):
+    if (not sys.platform.startswith("linux")
+            or "QT_QPA_PLATFORMTHEME" in os.environ
+            or os.environ.get("QT_QPA_PLATFORM") in {"offscreen", "minimal"}):
         return
     try:
         from PyQt6.QtDBus import QDBusConnection
@@ -74,8 +76,8 @@ def _prefer_portal_file_dialogs() -> None:
             or name in iface.activatableServiceNames().value()
         ):
             os.environ["QT_QPA_PLATFORMTHEME"] = "xdgdesktopportal"
-    except Exception:
-        pass
+    except (ImportError, RuntimeError, TypeError):
+        pass  # The Qt dialog remains available without D-Bus.
 
 
 def _parse_update_handoff(argv: list[str]):  # type: ignore[no-untyped-def]

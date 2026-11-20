@@ -9,8 +9,10 @@ import re
 import shutil
 import socket
 import ssl
+import stat
 import subprocess
 import threading
+import time
 import uuid
 
 from .host import config_directory
@@ -83,20 +85,73 @@ def settings_base(installation: LinuxInstallation, host: str = "127.0.0.1") -> P
             / (key + "_" + host))
 
 
+def _has_x_cookie(path: Path, display: bytes, *, session_wide: bool = False) -> bool:
+    """Check an Xauthority record without exporting or logging its cookie."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if info.st_uid != os.getuid() or not stat.S_ISREG(info.st_mode):
+                return False
+            records = stream.read(65537)
+    except OSError:
+        return False
+    if len(records) > 65536:
+        return False
+
+    offset = 0
+    while offset + 2 <= len(records):
+        family = int.from_bytes(records[offset:offset + 2], "big")
+        offset += 2
+        fields = []
+        for _ in range(4):  # address, display number, protocol, cookie
+            if offset + 2 > len(records):
+                return False
+            size = int.from_bytes(records[offset:offset + 2], "big")
+            offset += 2
+            if offset + size > len(records):
+                return False
+            fields.append(records[offset:offset + size])
+            offset += size
+        host, number, protocol, cookie = fields
+        if ((number == display or (session_wide and not number))
+                and protocol == b"MIT-MAGIC-COOKIE-1" and len(cookie) == 16
+                and (family == 65535 or (family == 256 and host == os.fsencode(socket.gethostname())))):
+            return True
+    return False
+
+
 def _ensure_x_authority(env: dict) -> None:
-    """KDE Wayland's Xwayland needs XAUTHORITY; if the launcher was started
-    without it (terminal/remote shell) Wine cannot open a window."""
-    if not env.get("DISPLAY") or env.get("XAUTHORITY"):
+    """Recover the current local Xwayland cookie when XAUTHORITY isn't inherited."""
+    if env.get("XAUTHORITY"):
+        return
+    display = re.fullmatch(r"(?:unix)?:([0-9]+)(?:\.[0-9]+)?", env.get("DISPLAY", ""))
+    if display is None:
         return
     runtime = Path(env.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
-    try:
-        candidates = sorted(runtime.glob("xauth_*"), key=lambda p: p.stat().st_mtime, reverse=True)
-        candidates += sorted(runtime.glob(".mutter-Xwaylandauth.*"), key=lambda p: p.stat().st_mtime, reverse=True)
-    except OSError:
-        candidates = []
-    candidates.append(Path.home() / ".Xauthority")
-    for candidate in candidates:
-        if candidate.is_file():
+    candidates = []
+    if runtime.is_absolute():
+        try:
+            for path in runtime.iterdir():
+                if path.name.startswith(("xauth_", ".mutter-Xwaylandauth.")):
+                    try:
+                        candidates.append((path.lstat().st_mtime_ns, path))
+                    except OSError:
+                        continue
+        except OSError:
+            pass
+    paths = [path for _, path in sorted(candidates, reverse=True)]
+    paths.append(Path.home() / ".Xauthority")
+    number = display[1].encode("ascii")
+    for candidate in paths:
+        if _has_x_cookie(candidate, number):
+            env["XAUTHORITY"] = str(candidate)
+            return
+    # Mutter writes a session-wide cookie with an empty display field.
+    # Prefer exact matches (including ~/.Xauthority) before that fallback.
+    for candidate in paths[:-1]:
+        if (candidate.name.startswith(".mutter-Xwaylandauth.")
+                and _has_x_cookie(candidate, number, session_wide=True)):
             env["XAUTHORITY"] = str(candidate)
             return
 
@@ -175,27 +230,39 @@ def local_ca_context(ca: Path) -> ssl.SSLContext:
     default, and the locally generated cert has no Authority Key Identifier, so
     strict mode wrongly rejects it. Chain and hostname checks stay on."""
     context = ssl.create_default_context(cafile=str(ca))
-    if hasattr(context, 'verify_flags'):
-        context.verify_flags &= ~ssl.VERIFY_X509_STRICT
+    context.verify_flags &= ~ssl.VERIFY_X509_STRICT
     return context
 
 
-def require_backend_tls(installation: LinuxInstallation, game_port: int) -> None:
+def require_backend_tls(
+    installation: LinuxInstallation, game_port: int, *,
+    deadline: float | None = None, clock=time.monotonic,
+) -> None:
     from .linux_services import http_health
-    if not http_health(40110) or not http_health(26002):
+
+    def timeout(limit: float) -> float:
+        if deadline is None:
+            return limit
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise LinuxSetupError("The prepared Linux backend readiness check timed out.")
+        return min(limit, remaining)
+
+    if not http_health(40110, timeout=timeout(1)) or not http_health(26002, timeout=timeout(1)):
         raise LinuxSetupError("The prepared Linux Market/proxy health endpoint is unavailable.")
     ca = installation.root / "_local/certs/xmpp-ca-cert.pem"
     context = local_ca_context(ca)
     for port, host in ((5222, "localhost"), (26003, "dev-public-gateway.evetech.net"), (installation.cdn_port, "localhost")):
         try:
-            with socket.create_connection(("127.0.0.1", port), timeout=3) as connection:
+            with socket.create_connection(("127.0.0.1", port), timeout=timeout(3)) as connection:
+                connection.settimeout(timeout(3))
                 with context.wrap_socket(connection, server_hostname=host):
                     pass
         except (OSError, ssl.SSLError) as exc:
             raise LinuxSetupError(f"The prepared Linux TLS service on port {port} is unavailable or has the wrong certificate.") from exc
     for port in (game_port, 26001, 26002, 26400, 40110, 40111):
         try:
-            with socket.create_connection(("127.0.0.1", port), timeout=2):
+            with socket.create_connection(("127.0.0.1", port), timeout=timeout(2)):
                 pass
         except OSError as exc:
             raise LinuxSetupError(f"The prepared Linux service on port {port} is unavailable.") from exc

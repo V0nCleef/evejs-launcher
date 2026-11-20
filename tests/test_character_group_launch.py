@@ -1,6 +1,7 @@
 """Main-window integration tests for exact character-group launching."""
 from __future__ import annotations
 
+import pytest
 from PyQt6.QtWidgets import QApplication, QMainWindow
 
 from src import config
@@ -88,6 +89,37 @@ def test_group_launch_queues_exact_selected_characters(
     ]
     assert queued[0][1] == "Miners"
     window.deleteLater()
+
+
+@pytest.mark.parametrize('scenario, reason', [
+    ('hidden', 'No visible characters. Check hidden characters on the Characters page.'),
+    ('empty-roster', 'No characters are loaded. Open the Characters page.'),
+    ('empty-group', 'This group is empty.'),
+    ('hidden-group', 'This group has no visible, non-banned characters.'),
+])
+def test_batch_launch_explains_empty_selection(qapp, monkeypatch, scenario, reason):
+    window = _window(qapp)
+    window._ensure_server_if_needed = lambda *_: pytest.fail('no client should be queued')
+    refreshed = []
+    window._refresh_character_views = lambda: refreshed.append(True)
+    if scenario == 'empty-roster':
+        window._accounts = []
+    elif scenario == 'hidden':
+        window._effective_hidden_characters = lambda: {'First', 'Second', 'Third'}
+    else:
+        members = (GroupMember(1, 101),) if scenario == 'hidden-group' else ()
+        window._group_state = TargetGroupState(
+            (CharacterGroup('mining', 'Mining', members=members),), 'mining',
+        )
+        window._effective_hidden_characters = lambda: {'First'}
+    messages = []
+    monkeypatch.setattr('src.app.QMessageBox.information', lambda _, title, text: messages.append((title, text)))
+    try:
+        window._launch_all()
+        assert messages == [('Launch All', reason)]
+        assert refreshed == [True]
+    finally:
+        window.deleteLater()
 
 
 def test_all_visible_keeps_first_character_per_account_behavior(

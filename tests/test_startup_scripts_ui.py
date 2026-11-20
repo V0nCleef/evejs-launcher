@@ -23,12 +23,18 @@ def isolate(tmp_path, monkeypatch, qapp):
     set_language(prior)
 
 
-def test_panel_add_edit_toggle_remove_and_root_isolation(qapp, tmp_path, monkeypatch):
+@pytest.fixture
+def startup_script(tmp_path):
+    path = tmp_path / ("Start.sh" if ui.IS_LINUX else "Start.bat")
+    path.write_text("#!/bin/sh\n" if ui.IS_LINUX else "@echo off\n")
+    return path
+
+
+def test_panel_add_edit_toggle_remove_and_root_isolation(qapp, tmp_path, monkeypatch, startup_script):
     root, other = tmp_path / "EveJS", tmp_path / "Other"
     root.mkdir()
     other.mkdir()
-    filename = tmp_path / "Start.bat"
-    filename.write_text("@echo off\n")
+    filename = startup_script
     original = ScriptEntry.create("Example Tool", str(filename))
     panel = ui.StartupScriptsPanel()
     panel.set_root(str(root))
@@ -52,11 +58,10 @@ def test_panel_add_edit_toggle_remove_and_root_isolation(qapp, tmp_path, monkeyp
     panel.deleteLater()
 
 
-def test_script_names_and_paths_do_not_get_translated(qapp, tmp_path):
+def test_script_names_and_paths_do_not_get_translated(qapp, tmp_path, startup_script):
     root = tmp_path / "EveJS"
     root.mkdir()
-    filename = tmp_path / "Start.bat"
-    filename.write_text("@echo off\n")
+    filename = startup_script
     item = ScriptEntry.create("Run now", str(filename))
     store = ScriptStore(tmp_path / "store.json")
     store.save(root, item)
@@ -89,10 +94,14 @@ def test_mods_page_keeps_scripts_below_inventory_and_separate_from_mod_count(qap
     page.deleteLater()
 
 
-def test_entry_dialog_saves_windows_arguments(qapp, tmp_path):
-    filename = tmp_path / "Start.bat"
-    filename.write_text("@echo off\n")
-    dialog = ui.ScriptDialog(filename=str(filename))
+def test_entry_dialog_browses_and_preserves_arguments(qapp, startup_script, monkeypatch):
+    from src.widgets.localized_dialogs import LocalizedFileDialog
+
+    assert ui.QFileDialog is LocalizedFileDialog
+    monkeypatch.setattr(LocalizedFileDialog, 'getOpenFileName', lambda *_: (str(startup_script), ''))
+    dialog = ui.ScriptDialog()
+    dialog._browse()
+    assert dialog.filename_edit.text() == str(startup_script)
     dialog.name_edit.setText("My Tool")
     dialog.arguments_edit.setText('start --name "two words"')
     dialog._save()

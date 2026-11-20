@@ -1,4 +1,5 @@
 """Native provider repair must precede source-bound executable verification."""
+import ssl
 from types import SimpleNamespace
 
 import pytest
@@ -10,7 +11,7 @@ from src.workers.server_worker import ServiceStartWorker
 @pytest.mark.parametrize('case', ['repair', 'prepare-failure', 'unrepaired'])
 def test_provider_prepares_before_final_binary_verification(qapp, tmp_path, monkeypatch, case):
     monkeypatch.setattr('src.core.host.IS_LINUX', True)
-    monkeypatch.setattr('src.core.linux_client.require_backend_tls', lambda *_: None)
+    monkeypatch.setattr('src.core.linux_client.require_backend_tls', lambda *_, **kwargs: None)
     calls = []
     repaired = False
 
@@ -49,3 +50,47 @@ def test_provider_prepares_before_final_binary_verification(qapp, tmp_path, monk
         assert results[0].market_error and results[0].game_error
         assert calls == (['supported', 'prepare'] if case == 'prepare-failure'
                          else ['supported', 'prepare', 'verify'])
+
+
+@pytest.mark.parametrize('scenario', ['slow', 'exits', 'times-out', 'wrong-ca'])
+def test_linux_start_waits_for_delayed_tls_without_accepting_failure(qapp, monkeypatch, scenario):
+    monkeypatch.setattr('src.core.host.IS_LINUX', True)
+    installation = SimpleNamespace(require_supported_mods=lambda: None,
+                                   verified_market_binary=lambda: None, cdn_port=443)
+    monkeypatch.setattr(LinuxInstallation, 'load', lambda _: installation)
+    elapsed = 0.0
+    probes = []
+
+    def sleep(seconds):
+        nonlocal elapsed
+        elapsed += seconds
+
+    def tls(actual, port, *, deadline, clock):
+        assert actual is installation and port == 26000
+        assert deadline == 45 and clock() == elapsed and elapsed < deadline
+        probes.append(elapsed)
+        if scenario == 'slow' and len(probes) == 3:
+            return
+        if scenario == 'wrong-ca':
+            raise LinuxSetupError('certificate does not match') from ssl.SSLCertVerificationError()
+        raise LinuxSetupError('TLS listener is still starting')
+
+    monkeypatch.setattr('src.core.linux_client.require_backend_tls', tls)
+    process = SimpleNamespace(pid=502, poll=lambda: 17 if scenario == 'exits' and elapsed else None)
+    worker = ServiceStartWorker(
+        'fixture', mode='vanilla', start_market=False, start_game=True,
+        start_game_fn=lambda *_, **__: process, probe=lambda _: True,
+        sleep_fn=sleep, clock_fn=lambda: elapsed,
+    )
+    results = []
+    worker.completed.connect(results.append)
+    worker.run()
+    [result] = results
+    assert result.game_process is process
+    assert result.game_ready == (scenario == 'slow')
+    assert (elapsed, result.game_error) == {
+        'slow': (2, None),
+        'exits': (1, 'Game service exited before readiness (code 17).'),
+        'times-out': (45, 'TLS listener is still starting'),
+        'wrong-ca': (0, 'certificate does not match'),
+    }[scenario]

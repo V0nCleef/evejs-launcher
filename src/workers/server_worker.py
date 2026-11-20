@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import subprocess
+import ssl
 import time
 import threading
 from typing import Protocol
@@ -178,6 +179,39 @@ class ServiceStartWorker(QObject):
             message = f"{message} Last probe error: {probe_error}"
         return False, message
 
+    def _wait_for_linux_tls(
+        self, process: ManagedProcess, installation,
+    ) -> tuple[bool, str | None]:
+        from ..core.linux_client import require_backend_tls
+        from ..core.linux_installation import LinuxSetupError
+
+        deadline = self._clock() + 45
+        last_error = "The prepared Linux backend readiness check timed out."
+        while True:
+            return_code = process.poll()
+            if return_code is not None:
+                return False, f"Game service exited before readiness (code {return_code})."
+            remaining = deadline - self._clock()
+            if remaining <= 0:
+                return False, last_error
+            try:
+                require_backend_tls(
+                    installation, self._game_port, deadline=deadline, clock=self._clock,
+                )
+            except LinuxSetupError as exc:
+                if isinstance(exc.__cause__, ssl.SSLCertVerificationError):
+                    return False, str(exc)
+                last_error = str(exc)
+            except (OSError, ValueError) as exc:
+                return False, str(exc)
+            else:
+                return_code = process.poll()
+                if return_code is not None:
+                    return False, f"Game service exited before readiness (code {return_code})."
+                return True, None
+            if process.poll() is None:
+                self._sleep(max(0, min(1, deadline - self._clock())))
+
     @pyqtSlot()
     def run(self) -> None:
         """Run Market → Game startup and emit one terminal result."""
@@ -324,19 +358,7 @@ class ServiceStartWorker(QObject):
                 timeout_sec=self._readiness_timeout_sec,
             )
             if game_ready and linux_installation is not None:
-                from ..core.linux_client import require_backend_tls
-                # A slow first boot can open its ports before the TLS listeners
-                # answer; retry for a bounded time while the process is alive.
-                tls_deadline = time.monotonic() + 45.0
-                while True:
-                    try:
-                        require_backend_tls(linux_installation, self._game_port)
-                        break
-                    except (OSError, ValueError) as exc:
-                        if time.monotonic() >= tls_deadline or game_process.poll() is not None:
-                            game_ready, game_error = False, str(exc)
-                            break
-                        time.sleep(2.0)
+                game_ready, game_error = self._wait_for_linux_tls(game_process, linux_installation)
             if not game_ready:
                 self.completed.emit(
                     self._result(

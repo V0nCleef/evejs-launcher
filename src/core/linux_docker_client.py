@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import socket
-import ssl
 
 from .linux_client import local_ca_context
 from .linux_installation import LinuxSetupError
@@ -48,7 +47,7 @@ def require_docker_runtime(request, installation, *, inspector=None):
             with socket.create_connection((endpoint.host, endpoint.port), timeout=3) as connection:
                 with trust.wrap_socket(connection, server_hostname=hostname):
                     pass
-        except (OSError, ssl.SSLError) as exc:
+        except OSError as exc:
             raise LinuxSetupError('The selected Docker TLS endpoints do not match the CA used to prepare this copied client. Prepare a client for that Docker CA before launching.') from exc
     after = selected.preflight(probe.target)
     if _select_server(after, probe, context, selected) != before:

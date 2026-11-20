@@ -4,9 +4,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 import os
 from pathlib import Path
+import re
 from typing import Any
 
-from PyQt6.QtCore import QStorageInfo, QUrl
+from PyQt6.QtCore import QUrl
 from PyQt6.QtWidgets import (
     QFileDialog as QtFileDialog,
     QInputDialog as QtInputDialog,
@@ -17,48 +18,23 @@ from src.core.host import IS_LINUX
 from src.i18n import translate_ui_phrase
 
 _LINUX_MOUNT_ROOTS = ("/run/media", "/media", "/mnt", "/var/mnt")
+_MOUNTINFO = Path("/proc/self/mountinfo")
 
 
 def linux_sidebar_urls() -> list[QUrl]:
-    """Places for the Qt file dialog: home, root and every mounted drive.
-
-    Qt's own dialog only lists the OS drive on Linux; external and secondary
-    drives live under /run/media/<user>/, /media, /mnt and similar.
-    """
+    """Find mounts at common drive locations without probing their filesystems."""
     places: list[str] = ["/", str(Path.home())]
     try:
-        for volume in QStorageInfo.mountedVolumes():
-            root = volume.rootPath()
-            if volume.isValid() and volume.isReady() and root.startswith(
-                tuple(base + "/" for base in _LINUX_MOUNT_ROOTS)
-            ):
+        for line in _MOUNTINFO.read_bytes().splitlines():
+            fields = line.split()
+            if len(fields) < 6:
+                continue
+            root = os.fsdecode(re.sub(rb"\\([0-7]{3})", lambda m: bytes([int(m[1], 8)]), fields[4]))
+            if any(root == base or root.startswith(base + "/") for base in _LINUX_MOUNT_ROOTS):
                 places.append(root)
-    except Exception:  # pragma: no cover - never block a browse dialog
+    except OSError:
         pass
-    for base in _LINUX_MOUNT_ROOTS:
-        try:
-            for child in sorted(Path(base).iterdir()):
-                if not child.is_dir():
-                    continue
-                if child.is_mount():
-                    places.append(str(child))
-                    continue
-                # /run/media/<user>/<drive> and /media/<user>/<drive> are one level deeper.
-                places.extend(str(d) for d in sorted(child.iterdir()) if d.is_dir() and d.is_mount())
-        except OSError:
-            continue
-    seen: set[tuple[int, int]] = set()
-    urls: list[QUrl] = []
-    for place in places:
-        try:
-            info = os.stat(place)
-        except OSError:
-            continue
-        key = (info.st_dev, info.st_ino)  # the same drive can be mounted twice
-        if key not in seen:
-            seen.add(key)
-            urls.append(QUrl.fromLocalFile(place))
-    return urls
+    return [QUrl.fromLocalFile(path) for path in dict.fromkeys(places)]
 
 
 def _linux_dialog(
@@ -72,10 +48,24 @@ def _linux_dialog(
     accept_mode: Any,
 ) -> tuple[list[str], str]:
     """Run a QFileDialog instance with drive shortcuts (Qt dialog) or the portal."""
-    dialog = QtFileDialog(parent, caption, directory, name_filter)
+    dialog = QtFileDialog(parent)
+    # Qt requires options (especially DontUseNativeDialog) before other setters.
     dialog.setOptions(options)
+    if caption:
+        dialog.setWindowTitle(caption)
     dialog.setFileMode(file_mode)
     dialog.setAcceptMode(accept_mode)
+    if directory:
+        path = Path(directory).expanduser()
+        if path.is_dir():
+            dialog.setDirectory(str(path))
+        else:
+            if path.is_absolute():
+                dialog.setDirectory(str(path.parent))
+            if file_mode != QtFileDialog.FileMode.Directory:
+                dialog.selectFile(path.name)
+    if name_filter:
+        dialog.setNameFilter(name_filter)
     if initial_filter:
         dialog.selectNameFilter(initial_filter)
     dialog.setSidebarUrls(linux_sidebar_urls())
