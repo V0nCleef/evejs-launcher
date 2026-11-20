@@ -2,6 +2,13 @@
 
 ## Changelog
 
+## v1.0.91 - 2026-11-20
+- Show mounted drives in Linux file pickers, using the desktop portal when available and drive shortcuts in the Qt fallback.
+- Accept the configured legacy EveJS local CA on Linux while preserving certificate and hostname checks in Native and Docker. Give Native TLS listeners time to finish starting.
+- Recover missing Xwayland authorization for Proton when the launcher starts without `XAUTHORITY`.
+- Explain why Launch All is unavailable when the roster is hidden or empty, or the selected group has no eligible characters.
+- Thanks to Daghie for testing on Bazzite and contributing the fixes in PR #5. 🫡
+
 ## v1.0.90 - 2026-11-20
 - Add clearer page transitions and character drag-and-drop feedback, with reduced-motion support.
 - Show mod arrival and removal effects after confirmed changes, retain unaffected rows, and keep background read errors from suppressing successful results.
