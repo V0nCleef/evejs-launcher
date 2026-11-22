@@ -2,6 +2,10 @@
 
 ## Changelog
 
+## v1.0.92 - 2026-11-22
+- Opening the launcher again restores the existing window from the system tray and closes the extra process.
+- Keep one launcher running per settings directory on Windows and Linux, for both Native and Docker setups.
+
 ## v1.0.91 - 2026-11-20
 - Show mounted drives in Linux file pickers, using the desktop portal when available and drive shortcuts in the Qt fallback.
 - Accept the configured legacy EveJS local CA on Linux while preserving certificate and hostname checks in Native and Docker. Give Native TLS listeners time to finish starting.

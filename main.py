@@ -10,6 +10,7 @@ import os
 import sys
 import threading
 import traceback
+from contextlib import nullcontext
 from pathlib import Path
 
 # ── Suppress noisy Qt DPI warning on Windows (must precede QApplication) ──
@@ -20,7 +21,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from PyQt6.QtCore import QEvent, QLocale
+from PyQt6.QtCore import QEvent, QLocale, Qt
 from PyQt6.QtGui import QColor, QFontDatabase, QPalette
 from PyQt6.QtWidgets import QApplication
 
@@ -157,6 +158,12 @@ def _initialize_ui_language(system_locale: str) -> dict:
     return cfg
 
 
+def _focus_dialog(dialog) -> None:
+    dialog.setWindowState(dialog.windowState() & ~Qt.WindowState.WindowMinimized)
+    dialog.raise_()
+    dialog.activateWindow()
+
+
 def main() -> int:
     if any(flag in sys.argv[1:] for flag in (
         "--collect-roster-diagnostics", "--list-roster-diagnostic-targets",
@@ -177,9 +184,6 @@ def main() -> int:
         except (OSError, ValueError):
             # Invalid diagnostic storage must fail before normal APPDATA logging.
             return 2
-    from src.utils.logger import setup_logger, _LOG_FILE
-    from src.constants import APP_VERSION
-    setup_logger(__name__).info("Launcher startup version=%s log_file=%s", APP_VERSION, _LOG_FILE)
     handoff = _parse_update_handoff(sys.argv[1:])
     linux_startup = None
     if sys.platform.startswith("linux") and "--linux-update-request" in sys.argv:
@@ -192,6 +196,24 @@ def main() -> int:
     app = QApplication([sys.argv[0]] if handoff is not None or linux_startup is not None or headless is not None or runtime_check is not None else sys.argv)
     app.setApplicationName(APP_NAME)
     app.setOrganizationName("NousResearch")
+
+    instance_context = nullcontext()
+    if handoff is None and headless is None and runtime_check is None:
+        from src.config import CONFIG_DIR
+        from src.ui.launcher_instance import LauncherInstance
+
+        instance_context = LauncherInstance(CONFIG_DIR, activate_existing=linux_startup is None)
+    with instance_context as instance:
+        if instance is not None and not instance.primary:
+            # The Linux update agent needs a new process to complete its handshake.
+            return int(linux_startup is not None)
+        return _run_ui(app, handoff, linux_startup, headless, runtime_check, instance)
+
+
+def _run_ui(app, handoff, linux_startup, headless, runtime_check, instance) -> int:
+    from src.utils.logger import setup_logger, _LOG_FILE
+    from src.constants import APP_VERSION
+    setup_logger(__name__).info("Launcher startup version=%s log_file=%s", APP_VERSION, _LOG_FILE)
 
     # Apply dark palette before any widget is constructed.
     app.setPalette(_build_palette())
@@ -225,8 +247,12 @@ def main() -> int:
         wizard = SetupWizard()
         if headless is not None:
             headless.attach_wizard(wizard)
+        if instance is not None:
+            instance.set_restore(lambda: _focus_dialog(app.activeModalWidget() or wizard))
         if wizard.exec() == 1:  # QDialog.DialogCode.Accepted
             cfg = config.load()  # re-read after wizard saved it
+        if instance is not None:
+            instance.set_restore(None)
         # Even if cancelled, let the user configure via Settings later.
         wizard.deleteLater()
         wizard = None
@@ -270,6 +296,15 @@ def main() -> int:
         headless.attach(window, app)
     else:
         _schedule_pending_update_cleanup()
+    if instance is not None:
+        def restore_launcher():
+            dialog = app.activeModalWidget()
+            if dialog is not None:
+                _focus_dialog(dialog)
+            else:
+                window._tray_controller.restore()
+
+        instance.set_restore(restore_launcher)
     result = app.exec()
     code = headless.finish(result) if headless is not None else result
     if code == 0:
