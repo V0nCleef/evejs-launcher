@@ -1,4 +1,5 @@
 from contextlib import closing
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -16,8 +17,25 @@ from src.core.save_migration_storage import SaveMigrationError, resolve_storage
 
 GAME = Path("_local/gameStore/gamestore.sqlite")
 MARKET = Path("externalservices/market-server/data/generated/market.sqlite")
-PORTS = (26000, 40110, 40111)
 IMAGE = os.environ.get("EVEJS_SAVE_TEST_IMAGE", "node:22-alpine")
+
+
+@pytest.fixture(autouse=True)
+def isolate_native_fixture_ports(monkeypatch, tmp_path):
+    # Reserve a port without listening so the real offline check can run
+    # without consulting any Game or Market instance on the test host.
+    with socket.socket() as offline:
+        offline.bind(("127.0.0.1", 0))
+        port = offline.getsockname()[1]
+
+        def fixture_storage(root, settings):
+            storage = resolve_storage(root, settings)
+            if storage.runner is None and storage.root.is_relative_to(tmp_path):
+                return replace(storage, ports=(int(settings.get("game_port", port)),))
+            return storage
+
+        monkeypatch.setattr(save_migration, "resolve_storage", fixture_storage)
+        yield
 
 
 @pytest.fixture(scope="module")
@@ -108,9 +126,21 @@ def _row(path, sql):
 
 
 @pytest.mark.parametrize("move", [False, True], ids=["copy", "move"])
-def test_native_route(tmp_path, move):
-    source = installation(tmp_path / "source", "player", trading=True)
-    target = installation(tmp_path / "target", "target", trading=True)
+@pytest.mark.parametrize("depth", [
+    "standard",
+    pytest.param("long-save-path", marks=pytest.mark.skipif(os.name != "nt", reason="Windows long paths")),
+    pytest.param("long-install-path", marks=pytest.mark.skipif(os.name != "nt", reason="Windows long paths")),
+])
+def test_native_route(tmp_path, move, depth):
+    base = tmp_path
+    if depth != "standard":
+        endpoint = Path("source") / GAME.parent if depth == "long-save-path" else Path("source")
+        while len(str(base / endpoint)) <= 260:
+            base /= "Données QA"
+        if depth == "long-save-path":
+            assert len(str(base / "source")) < 260
+    source = installation(base / "source", "player", trading=True)
+    target = installation(base / "target", "target")
     with (target.root / GAME.parent / "data/keep.json").open("w") as stream:
         stream.write("target static data")
     result = migrate(Transfer(source, target, move, True))
@@ -124,8 +154,12 @@ def test_native_route(tmp_path, move):
     assert (source.root / GAME).exists() is not move
     assert (source.root / MARKET).exists() is not move
     assert _row(result.backup / "destination/game", "SELECT json FROM characters") == ('{"name": "target"}',)
+    assert _row(result.backup / "destination/market", "SELECT count(*) FROM market_orders") == (0,)
     assert (result.backup / "source/game").is_file() is move
     assert json.loads((result.backup / "transfer.json").read_text())["state"] == ("moved" if move else "copied")
+    for world in (source.root, target.root):
+        for parent in (GAME.parent, MARKET.parent):
+            assert not list((world / parent).glob(".evejs-save-migration-*"))
 
 
 def test_fresh_market_keeps_normal_inventory_and_old_market(tmp_path):
@@ -139,6 +173,47 @@ def test_fresh_market_keeps_normal_inventory_and_old_market(tmp_path):
     assert _row(target.root / GAME, "SELECT count(*) FROM marketRuntime") == (0,)
     assert _row(source.root / MARKET, "SELECT escrow FROM market_orders") == (500,)
     assert _row(result.backup / "source/game", "SELECT count(*) FROM marketEscrow") == (1,)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows rename sharing errors")
+@pytest.mark.parametrize("persistent", [False, True], ids=["transient", "persistent"])
+def test_windows_rename_conflict_retries_or_restores_destination(tmp_path, monkeypatch, persistent):
+    source = installation(tmp_path / "source", "player", trading=True)
+    target = installation(tmp_path / "target", "target")
+    marker = tmp_path / "rename-attempts"
+    fixture = tmp_path / "rename-conflict.js"
+    fixture.write_text("""
+const fs = require("node:fs");
+const path = require("node:path");
+const rename = fs.renameSync;
+let injected = false;
+fs.renameSync = (from, to) => {
+  if (path.basename(from) === "incoming" && path.basename(to) === "gamestore.sqlite"
+      && (!injected || process.env.EVEJS_TEST_PERSISTENT_RENAME === "1")) {
+    injected = true;
+    fs.appendFileSync(process.env.EVEJS_TEST_RENAME_MARKER, "x");
+    throw Object.assign(new Error("fixture rename denied"), { code: "EPERM" });
+  }
+  return rename(from, to);
+};
+""", encoding="utf-8")
+    monkeypatch.setenv("NODE_OPTIONS", f'--require "{fixture.as_posix()}"')
+    monkeypatch.setenv("EVEJS_TEST_RENAME_MARKER", str(marker))
+    monkeypatch.setenv("EVEJS_TEST_PERSISTENT_RENAME", "1" if persistent else "0")
+
+    transfer = Transfer(source, target, False, True)
+    if persistent:
+        with pytest.raises(SaveMigrationError, match="fixture rename denied"):
+            migrate(transfer)
+    else:
+        migrate(transfer)
+
+    assert marker.read_text() == ("xxxx" if persistent else "x")
+    expected = "target" if persistent else "player"
+    assert _row(target.root / GAME, "SELECT json FROM characters") == (json.dumps({"name": expected}),)
+    assert _row(target.root / MARKET, "SELECT count(*) FROM market_orders") == (int(not persistent),)
+    assert _row(source.root / GAME, "SELECT json FROM characters") == ('{"name": "player"}',)
+    assert not list((target.root / GAME.parent).glob(".evejs-save-migration-*"))
 
 
 @pytest.mark.parametrize("reject", [True, False], ids=["rejected", "copied"])
@@ -246,7 +321,7 @@ def test_dangerous_input_leaves_both_worlds_intact(tmp_path, reason):
             service.bind(("127.0.0.1", 0))
             service.listen(1)
             source.settings["game_port"] = service.getsockname()[1]
-        with pytest.raises(SaveMigrationError):
+        with pytest.raises(SaveMigrationError, match="port .* is in use" if reason == "busy" else None):
             migrate(Transfer(source, target, True, True), progress=progress)
     assert _row(target.root / GAME, "SELECT json FROM characters") == ('{"name": "target"}',)
     assert _row(source.root / GAME, "SELECT json FROM characters") == ('{"name": "player"}',)

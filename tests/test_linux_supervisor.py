@@ -92,3 +92,52 @@ def test_dead_supervisor_never_reports_success(tmp_path, monkeypatch):
     assert process.poll() is None
     with pytest.raises(OSError, match='no longer available'):
         process.wait(timeout=1)
+
+
+def test_native_services_write_to_the_selected_installation_console(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from src.core import evejs_compatibility, linux_services, native_config_preflight, server_launcher
+
+    root = tmp_path / "selected"
+    (root / "server").mkdir(parents=True)
+    (root / "externalservices/market-server").mkdir(parents=True)
+    market_binary = root / "market-fixture"
+    market_binary.write_text("#!/bin/sh\nprintf 'Market fixture output\\n'\n", encoding="utf-8")
+    market_binary.chmod(0o755)
+    installation = SimpleNamespace(
+        root=root,
+        node=Path(sys.executable),
+        cdn_port=0,
+        verified_market_binary=lambda: market_binary,
+        server_environment=lambda: dict(os.environ),
+    )
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setattr(server_launcher, "_LOGS_DIR", tmp_path / "launcher-logs")
+    monkeypatch.setattr(linux_services, "_prepared", lambda _root: installation)
+    monkeypatch.setattr(linux_services, "run_bounded", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        evejs_compatibility, "inspect_evejs_runtime",
+        lambda _root: SimpleNamespace(node_report_directory=root / "reports"),
+    )
+    monkeypatch.setattr(
+        native_config_preflight, "validate_native_server_config",
+        lambda *_args, **_kwargs: SimpleNamespace(supported=True, valid=True, message="Config verified"),
+    )
+    monkeypatch.setattr(
+        server_launcher, "build_game_server_command",
+        lambda *_args: ["node", "-c", "print('Game fixture output')"],
+    )
+    for launch, console, expected in (
+        (lambda: linux_services.start_game(str(root), "vanilla"), server_launcher.get_server_console_log, "Game"),
+        (lambda: linux_services.start_market(str(root)), server_launcher.get_market_console_log, "Market"),
+    ):
+        process = launch()
+        try:
+            assert process.wait(timeout=5) == 0
+            assert f"{expected} fixture output" in console(root).read_text(encoding="utf-8")
+            assert not console(tmp_path / "other").exists()
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+            process.release()

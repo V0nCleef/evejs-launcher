@@ -440,6 +440,13 @@ class _BootstrapProcess:
         return self.output, None
 
 
+@pytest.fixture
+def windows_native_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise the mocked direct-Popen route on any test host."""
+    monkeypatch.setattr(server_launcher, "IS_LINUX", False)
+
+
+@pytest.mark.usefixtures("windows_native_route")
 def test_native_game_dependency_probe_skips_repair_when_sqlite_is_usable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -452,7 +459,7 @@ def test_native_game_dependency_probe_skips_repair_when_sqlite_is_usable(
         commands.append(command)
         return _BootstrapProcess(0)
 
-    monkeypatch.setattr(server_launcher, "SERVER_CONSOLE_LOG", tmp_path / "game.log")
+    monkeypatch.setattr(server_launcher, "get_server_console_log", lambda _root: tmp_path / "game.log")
     monkeypatch.setattr(server_launcher.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(server_launcher, "get_hidden_process_flags", lambda: {})
 
@@ -466,6 +473,7 @@ def test_native_game_dependency_probe_skips_repair_when_sqlite_is_usable(
     assert "npm" not in " ".join(commands[0]).casefold()
 
 
+@pytest.mark.usefixtures("windows_native_route")
 def test_installed_broken_native_dependency_skips_ci_and_uses_only_pinned_script(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -488,7 +496,7 @@ def test_installed_broken_native_dependency_skips_ci_and_uses_only_pinned_script
         output = "12.0.1\n" if command[1:] == ["--version"] else ""
         return _BootstrapProcess(next(return_codes), output=output)
 
-    monkeypatch.setattr(server_launcher, "SERVER_CONSOLE_LOG", tmp_path / "game.log")
+    monkeypatch.setattr(server_launcher, "get_server_console_log", lambda _root: tmp_path / "game.log")
     monkeypatch.setattr(server_launcher.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(server_launcher, "get_hidden_process_flags", lambda: {})
     monkeypatch.setattr(server_launcher, "_npm_executable", lambda: "npm")
@@ -522,6 +530,7 @@ def test_installed_broken_native_dependency_skips_ci_and_uses_only_pinned_script
     assert "Native Game dependencies repaired and verified" in log_text
 
 
+@pytest.mark.usefixtures("windows_native_route")
 def test_missing_native_dependency_uses_scriptless_ci_before_pinned_rebuild(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -542,7 +551,7 @@ def test_missing_native_dependency_uses_scriptless_ci_before_pinned_rebuild(
         output = "12.0.1\n" if command[1:] == ["--version"] else ""
         return _BootstrapProcess(next(return_codes), output=output)
 
-    monkeypatch.setattr(server_launcher, "SERVER_CONSOLE_LOG", tmp_path / "game.log")
+    monkeypatch.setattr(server_launcher, "get_server_console_log", lambda _root: tmp_path / "game.log")
     monkeypatch.setattr(server_launcher.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(server_launcher, "get_hidden_process_flags", lambda: {})
     monkeypatch.setattr(server_launcher, "_npm_executable", lambda: "npm")
@@ -567,6 +576,7 @@ def test_missing_native_dependency_uses_scriptless_ci_before_pinned_rebuild(
         {"better-sqlite3@12.11.1": False},
     ),
 )
+@pytest.mark.usefixtures("windows_native_route")
 def test_native_game_dependency_repair_preserves_existing_denial(
     denial: dict[str, bool],
     tmp_path: Path,
@@ -584,7 +594,7 @@ def test_native_game_dependency_repair_preserves_existing_denial(
         commands.append(command)
         return _BootstrapProcess(1)
 
-    monkeypatch.setattr(server_launcher, "SERVER_CONSOLE_LOG", tmp_path / "game.log")
+    monkeypatch.setattr(server_launcher, "get_server_console_log", lambda _root: tmp_path / "game.log")
     monkeypatch.setattr(server_launcher.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(server_launcher, "get_hidden_process_flags", lambda: {})
 
@@ -596,6 +606,7 @@ def test_native_game_dependency_repair_preserves_existing_denial(
     assert package_json.read_text(encoding="utf-8") == original_manifest
 
 
+@pytest.mark.usefixtures("windows_native_route")
 def test_native_game_dependency_repair_surfaces_npm_ci_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -610,7 +621,7 @@ def test_native_game_dependency_repair_surfaces_npm_ci_failure(
         output = "12.0.1\n" if command[1:] == ["--version"] else ""
         return _BootstrapProcess(next(return_codes), output=output)
 
-    monkeypatch.setattr(server_launcher, "SERVER_CONSOLE_LOG", tmp_path / "game.log")
+    monkeypatch.setattr(server_launcher, "get_server_console_log", lambda _root: tmp_path / "game.log")
     monkeypatch.setattr(server_launcher.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(server_launcher, "get_hidden_process_flags", lambda: {})
     monkeypatch.setattr(server_launcher, "_npm_executable", lambda: "npm")
@@ -624,6 +635,7 @@ def test_native_game_dependency_repair_surfaces_npm_ci_failure(
     assert commands[2][1:3] == ["ci", "--ignore-scripts"]
 
 
+@pytest.mark.usefixtures("windows_native_route")
 def test_native_game_dependency_repair_supports_pre_npm12_without_approval(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -640,7 +652,7 @@ def test_native_game_dependency_repair_supports_pre_npm12_without_approval(
         output = "11.8.0\n" if command[1:] == ["--version"] else ""
         return _BootstrapProcess(next(return_codes), output=output)
 
-    monkeypatch.setattr(server_launcher, "SERVER_CONSOLE_LOG", tmp_path / "game.log")
+    monkeypatch.setattr(server_launcher, "get_server_console_log", lambda _root: tmp_path / "game.log")
     monkeypatch.setattr(server_launcher.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(server_launcher, "get_hidden_process_flags", lambda: {})
     monkeypatch.setattr(server_launcher, "_npm_executable", lambda: "npm")
@@ -664,6 +676,7 @@ def test_native_game_dependency_repair_supports_pre_npm12_without_approval(
     assert not any("install-scripts" in command for command in commands)
 
 
+@pytest.mark.usefixtures("windows_native_route")
 def test_native_game_dependency_timeout_terminates_exact_process_tree(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -673,7 +686,7 @@ def test_native_game_dependency_timeout_terminates_exact_process_tree(
             raise subprocess.TimeoutExpired("node", timeout)
 
     terminated: list[int] = []
-    monkeypatch.setattr(server_launcher, "SERVER_CONSOLE_LOG", tmp_path / "game.log")
+    monkeypatch.setattr(server_launcher, "get_server_console_log", lambda _root: tmp_path / "game.log")
     monkeypatch.setattr(
         server_launcher.subprocess,
         "Popen",
@@ -728,7 +741,7 @@ def test_native_store_runs_official_legacy_migration_before_selecting_data(
         legacy_store.rename(tmp_path / "_local" / "gameStore")
         return subprocess.CompletedProcess(command, 0)
 
-    monkeypatch.setattr(server_launcher, "SERVER_CONSOLE_LOG", tmp_path / "game.log")
+    monkeypatch.setattr(server_launcher, "get_server_console_log", lambda _root: tmp_path / "game.log")
     monkeypatch.setattr(server_launcher, "_run_game_dependency_command", fake_run)
 
     server_launcher._prepare_native_game_store_environment(
@@ -827,7 +840,7 @@ def test_native_store_migrates_legacy_sqlite_name_inside_canonical_root(
         legacy_sqlite.rename(canonical_store / "gamestore.sqlite")
         return subprocess.CompletedProcess(command, 0)
 
-    monkeypatch.setattr(server_launcher, "SERVER_CONSOLE_LOG", tmp_path / "game.log")
+    monkeypatch.setattr(server_launcher, "get_server_console_log", lambda _root: tmp_path / "game.log")
     monkeypatch.setattr(server_launcher, "_run_game_dependency_command", fake_run)
 
     server_launcher._prepare_native_game_store_environment(
@@ -876,6 +889,7 @@ def test_start_game_server_requires_an_explicit_mode(
 
 
 @pytest.mark.parametrize("mode", ["vanilla", "modded"])
+@pytest.mark.usefixtures("windows_native_route")
 def test_start_game_server_honors_explicit_mode(
     mode: str,
     tmp_path: Path,
@@ -915,12 +929,13 @@ def test_start_game_server_honors_explicit_mode(
         server_launcher,
         "ensure_native_game_dependencies",
         lambda _server_dir: server_launcher._append_game_console(
+            server_launcher.get_server_console_log(_server_dir.parent),
             "Dependency bootstrap preserved before Game output."
         ),
     )
     monkeypatch.setattr(server_launcher.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(server_launcher.threading, "Thread", FakeThread)
-    monkeypatch.setattr(server_launcher, "SERVER_CONSOLE_LOG", tmp_path / "server.log")
+    monkeypatch.setattr(server_launcher, "get_server_console_log", lambda _root: tmp_path / "server.log")
     monkeypatch.setattr(server_launcher, "_LOGS_DIR", tmp_path / "launcher-logs")
     monkeypatch.setattr(
         server_launcher,
@@ -960,6 +975,7 @@ def test_start_game_server_honors_explicit_mode(
     assert not hasattr(process, "mod_runtime_receipt")
 
 
+@pytest.mark.usefixtures("windows_native_route")
 def test_plan_bound_start_truncates_raw_attestation_after_dependency_work(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -968,7 +984,7 @@ def test_plan_bound_start_truncates_raw_attestation_after_dependency_work(
     server_dir.mkdir()
     (server_dir / "index.js").write_text("", encoding="utf-8")
     console_log = tmp_path / "server.log"
-    monkeypatch.setattr(server_launcher, "SERVER_CONSOLE_LOG", console_log)
+    monkeypatch.setattr(server_launcher, "get_server_console_log", lambda _root: console_log)
     monkeypatch.setattr(server_launcher, "_LOGS_DIR", tmp_path / "launcher-logs")
     status_log = server_launcher.get_native_mod_status_log(tmp_path)
     child_output = (
@@ -979,7 +995,7 @@ def test_plan_bound_start_truncates_raw_attestation_after_dependency_work(
     observed: dict[str, object] = {}
 
     def fake_dependencies(_server_dir: Path) -> None:
-        server_launcher._append_game_console("dependency output must stay human-only")
+        server_launcher._append_game_console(console_log, "dependency output must stay human-only")
         status_log.parent.mkdir(parents=True, exist_ok=True)
         status_log.write_bytes(b"stale status from an earlier start\n")
 
@@ -1055,6 +1071,7 @@ def test_plan_bound_start_truncates_raw_attestation_after_dependency_work(
         receipt.plan_sha256 = "0" * 64
 
 
+@pytest.mark.usefixtures("windows_native_route")
 def test_start_market_server_appends_attempt_pid_and_child_output(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1079,7 +1096,7 @@ def test_start_market_server_appends_attempt_pid_and_child_output(
         kwargs["stdout"].write(b"child output\n")
         return FakeProcess()
 
-    monkeypatch.setattr(server_launcher, "MARKET_CONSOLE_LOG", console_log)
+    monkeypatch.setattr(server_launcher, "get_market_console_log", lambda _root: console_log)
     monkeypatch.setattr(server_launcher, "get_market_binary_name", lambda: binary.name)
     monkeypatch.setattr(server_launcher, "get_hidden_process_flags", lambda: {})
     monkeypatch.setattr(server_launcher.subprocess, "Popen", fake_popen)
@@ -1107,6 +1124,7 @@ def test_start_market_server_appends_attempt_pid_and_child_output(
     assert "child output" in output
 
 
+@pytest.mark.usefixtures("windows_native_route")
 def test_start_market_server_preserves_prior_log_and_records_spawn_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1116,7 +1134,7 @@ def test_start_market_server_preserves_prior_log_and_records_spawn_failure(
     (market_dir / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
     console_log = tmp_path / "market.log"
     console_log.write_text("known-good startup\n", encoding="utf-8")
-    monkeypatch.setattr(server_launcher, "MARKET_CONSOLE_LOG", console_log)
+    monkeypatch.setattr(server_launcher, "get_market_console_log", lambda _root: console_log)
     monkeypatch.setattr(server_launcher, "get_market_binary_name", lambda: "missing.exe")
     monkeypatch.setattr(server_launcher, "get_hidden_process_flags", lambda: {})
     monkeypatch.setattr(

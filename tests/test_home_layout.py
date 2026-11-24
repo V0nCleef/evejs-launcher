@@ -92,6 +92,28 @@ def test_primary_actions_are_equal_strength_and_fit_the_minimum_viewport(
         qapp.setStyleSheet(original_style)
 
 
+def test_home_scrolls_if_controls_exceed_available_height(qapp: QApplication) -> None:
+    page = HomePage()
+    page.resize(780, 400)
+    page.show()
+    qapp.processEvents()
+
+    try:
+        scroll = page._operations_scroll
+        header = page.page_header
+        title = header.title_label
+        assert title.height() >= title.minimumSizeHint().height()
+        assert page.instrument_rail.height() >= page.services_card.game_row.height()
+        assert scroll.verticalScrollBar().maximum() > 0
+        assert scroll.horizontalScrollBar().maximum() == 0
+        scroll.ensureWidgetVisible(page.btn_discord, 0, 0)
+        assert scroll.verticalScrollBar().value() > 0
+        assert page.btn_discord.mapTo(scroll.viewport(), page.btn_discord.rect().bottomLeft()).y() < scroll.viewport().height()
+    finally:
+        page.close()
+        page.deleteLater()
+
+
 def test_home_exposes_deep_signal_operations_instruments(
     qapp: QApplication,
 ) -> None:

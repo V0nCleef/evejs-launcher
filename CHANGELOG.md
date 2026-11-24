@@ -2,6 +2,12 @@
 
 ## Changelog
 
+## v1.0.93 - 2026-11-24
+- Fix Save Migration on Windows when installations are nested in long paths. Retry brief file locks during database replacement and preserve backup and rollback behavior.
+- Make the Server and Market consoles open, switch, and close from the footer. Keep Native logs separate for each installation and stop the previous Docker log stream when switching.
+- Let Home scroll in short windows so the stack and launch controls stay reachable.
+- Show full Server and Market status and error details on hover and to screen readers. Align the footer with the sidebar in wide windows.
+
 ## v1.0.92 - 2026-11-22
 - Opening the launcher again restores the existing window from the system tray and closes the extra process.
 - Keep one launcher running per settings directory on Windows and Linux, for both Native and Docker setups.

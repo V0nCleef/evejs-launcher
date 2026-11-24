@@ -151,12 +151,12 @@ class RuntimeUpdateCheck:
         QTimer.singleShot(100, self._origin if self.args is not None else self._resumed)
 
     def _spawn(self, role, port):
-        from .server_launcher import _popen_with_console_log, SERVER_CONSOLE_LOG, MARKET_CONSOLE_LOG
+        from .server_launcher import _popen_with_console_log
         from .platform import get_graceful_server_process_flags, get_hidden_process_flags
         node = shutil.which("node")
         if not node:
             self.fail("node_not_available")
-        console = SERVER_CONSOLE_LOG if role == "game" else MARKET_CONSOLE_LOG if role == "market" else self.root / "client-console.log"
+        console = self.root / f"{role}-console.log"
         process = _popen_with_console_log([node, str(self.root / "server.js"), role,
                          str(self.root / (role + "-ready.json")), str(port)], console,
                          stdin=subprocess.DEVNULL, **(get_graceful_server_process_flags() if role == "game" else get_hidden_process_flags()))

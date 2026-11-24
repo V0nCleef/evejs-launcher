@@ -285,8 +285,9 @@ runMaintenanceOperation(database, 'linux-qa-second-character', () => {}, () => {
         except BaseException as exc:
             report['status'] = 'failed'
             report['error'] = str(exc)[-6000:]
-            from src.core.server_launcher import SERVER_CONSOLE_LOG, MARKET_CONSOLE_LOG
-            for name, path in [('gameConsole', SERVER_CONSOLE_LOG), ('marketConsole', MARKET_CONSOLE_LOG)]:
+            from src.core.server_launcher import get_server_console_log, get_market_console_log
+            for name, path in [('gameConsole', get_server_console_log(root)),
+                               ('marketConsole', get_market_console_log(root))]:
                 if path.is_file():
                     with path.open('rb') as stream:
                         stream.seek(max(0, path.stat().st_size - 10000))

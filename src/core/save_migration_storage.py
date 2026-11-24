@@ -152,8 +152,10 @@ class SaveStorage:
         if expected is not None:
             request.update(expected=expected, incoming=incoming, keep=keep)
         if not self.runner:
+            # Windows process creation can reject a long working directory.
+            # The helper and every path it receives are already absolute.
             completed = subprocess.run(
-                [self.node, str(_HELPER)], cwd=self.root, input=json.dumps(request).encode(),
+                [self.node, str(_HELPER)], input=json.dumps(request).encode(),
                 capture_output=True, timeout=_TIMEOUT, env=external_process_environment(), **get_hidden_process_flags(),
             )
             try:

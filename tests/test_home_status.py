@@ -19,6 +19,7 @@ from src.core.mod_runtime_state import (
     ModRuntimeSnapshot,
 )
 from src.core.service_status import ServiceState
+from src.ui.mod_coordinator import ModCoordinator
 from src.workers.server_worker import ServiceProbe, ServiceStartResult
 
 
@@ -28,6 +29,7 @@ def _window_config() -> dict:
         {
             "evejs_root": "",
             "client_path": "",
+            "close_behavior": "exit",
             "update_auto_check": False,
             "update_check_interval_hours": 0,
         }
@@ -57,12 +59,17 @@ def _native_runtime_snapshot(*, pid: int) -> ModRuntimeSnapshot:
 def status_window(
     qapp: QApplication,
     monkeypatch: pytest.MonkeyPatch,
+    close_main_window,
 ) -> tuple[MainWindow, dict[str, bool]]:
     cfg = _window_config()
     probes = {"game": False, "market": False}
     monkeypatch.setattr(config, "load", lambda: deepcopy(cfg))
     monkeypatch.setattr(config, "save", lambda _cfg: None)
     monkeypatch.setattr(app_module, "load_accounts", lambda _root: [])
+    # These status tests drive service observations directly.
+    monkeypatch.setattr(MainWindow, "_refresh_characters", lambda _window: None)
+    monkeypatch.setattr(MainWindow, "_schedule_service_monitor_start", lambda _window: None)
+    monkeypatch.setattr(ModCoordinator, "refresh", lambda _coordinator: None)
     monkeypatch.setattr(
         app_module,
         "is_server_running",
@@ -75,7 +82,10 @@ def status_window(
     window._status_timer.stop()
     window._prune_timer.stop()
     yield window, probes
-    window.deleteLater()
+    # Tests may leave fake process handles that cannot be shut down.
+    window._server_proc = None
+    window._market_proc = None
+    close_main_window(window)
 
 
 def test_online_game_probe_updates_footer_and_home(
@@ -290,7 +300,7 @@ def test_home_service_row_routes_to_the_existing_console_panel(
     monkeypatch.setattr(
         app_module,
         "get_market_console_log",
-        lambda: tmp_path / "market_console.log",
+        lambda _root: tmp_path / "market_console.log",
     )
 
     window._home_page.console_requested.emit("market")

@@ -107,6 +107,9 @@ def test_language_selector_lives_in_footer_and_retranslates_live(
         assert selected == ["zh_CN"]
         assert combo.accessibleName() == "启动器语言"
         assert combo.toolTip() == "启动器语言"
+        assert bar.server_section.accessibleName() == "切换游戏服务控制台"
+        assert bar.market_section.accessibleName() == "切换市场控制台"
+        assert bar.version_label.accessibleName() == "启动器版本"
     finally:
         set_language("en")
         bar.close()
@@ -146,7 +149,14 @@ def test_footer_semantic_states_keep_logical_text_and_pulse_lifecycle(
         assert bar.server_section.property("telemetryState") == "danger"
         assert COLORS["red"] in bar.server_section.dot.styleSheet()
         assert bar.server_section.label.text() == "Server: Failed"
-        assert bar.server_section.label.toolTip() == "boom"
+        assert bar.server_section.label.toolTip() == "Server: Failed\nboom"
+        assert bar.server_section.toolTip() == bar.server_section.accessibleDescription()
+        assert bar.server_section.accessibleName() == "Toggle Game console"
+
+        bar.set_market_state(ServiceState.UNKNOWN, error="Compose is unreachable")
+        assert bar.market_section.label.text() == "Market: Unknown"
+        assert bar.market_section.toolTip() == "Market: Unknown\nCompose is unreachable"
+        assert bar.market_section.label.toolTip() == bar.market_section.accessibleDescription()
 
         bar.set_client_count(3)
         assert bar.clients_section.property("telemetryState") == "online"

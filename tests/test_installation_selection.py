@@ -84,7 +84,7 @@ def test_equal_character_ids_keep_separate_overview_state(qapp,tmp_path,monkeypa
     w.close = lambda:None
 
 
-@pytest.mark.parametrize("width", [1000, 1389])
+@pytest.mark.parametrize("width", [1000, 1389, 1920])
 def test_installation_controls_share_one_footer_row_before_version(qapp, tmp_path, width):
     from PyQt6.QtCore import QPoint
     from src.theme import build_qss
@@ -102,6 +102,9 @@ def test_installation_controls_share_one_footer_row_before_version(qapp, tmp_pat
         qapp.processEvents()
         assert footer.width() == width
         assert footer.height() == StatusBar.HEIGHT
+        if width == 1920:
+            assert footer.build_label.isVisible()
+            assert footer.server_section.geometry().left() == 220
         selector = bar.selector.mapTo(footer, QPoint())
         version = footer.version_label.mapTo(footer, QPoint())
         language = footer.language_combo.mapTo(footer, QPoint())

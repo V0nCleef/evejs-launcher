@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QObject, QVariantAnimation
+from PyQt6.QtCore import QEvent, Qt, pyqtSignal, QUrl, QObject, QVariantAnimation
 from PyQt6.QtGui import QDesktopServices, QPainter, QColor
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPushButton,
     QSizePolicy,
+    QScrollArea,
     QStackedLayout,
     QVBoxLayout,
     QWidget,
@@ -607,13 +608,21 @@ class HomePage(QWidget):
         )
         layers.addWidget(self.traffic_overlay)
 
-        self._foreground = QWidget(self)
+        self._operations_scroll = QScrollArea(self)
+        self._operations_scroll.setProperty("deepSignal", True)
+        self._operations_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._operations_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._operations_scroll.setWidgetResizable(True)
+        self._operations_scroll.viewport().setProperty("deepSignal", True)
+        self._foreground = QWidget()
         self._foreground.setProperty("deepSignal", True)
-        layers.addWidget(self._foreground)
-        layers.setCurrentWidget(self._foreground)
+        self._operations_scroll.setWidget(self._foreground)
+        self._foreground.setAutoFillBackground(False)
+        layers.addWidget(self._operations_scroll)
+        layers.setCurrentWidget(self._operations_scroll)
         # StackAll only raises the current child; explicitly order the rest.
         self.signal_background.lower()
-        self.traffic_overlay.stackUnder(self._foreground)
+        self.traffic_overlay.stackUnder(self._operations_scroll)
         self.traffic_overlay.set_background(self.signal_background)
 
         self.accounts_count = 0
@@ -748,7 +757,8 @@ class HomePage(QWidget):
 
         canvas.addWidget(self.command_column)
         canvas.addStretch(1)
-        self._sync_command_width(self.width())
+        self._operations_scroll.viewport().installEventFilter(self)
+        self._sync_command_width(self._operations_scroll.viewport().width())
 
     def _sync_command_width(self, page_width: int) -> None:
         """Keep commands full-width at minimum size and cinematic when wide."""
@@ -759,10 +769,10 @@ class HomePage(QWidget):
             24 + self.command_column.width() + 12
         )
 
-    def resizeEvent(self, event) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        if hasattr(self, "command_column"):
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        if watched is self._operations_scroll.viewport() and event.type() == QEvent.Type.Resize:
             self._sync_command_width(event.size().width())
+        return super().eventFilter(watched, event)
 
     # ── Data ─────────────────────────────────────────────────────────────────
 

@@ -113,12 +113,17 @@ def test_cross_service_and_rapid_replacement_keep_only_the_last_intent(
     docker_window._docker_log_worker = worker
     docker_window._docker_log_thread = object()
     docker_window._pending_docker_log_service = None
+    panels: list[str] = []
+    docker_window._console_panel = type("Panel", (), {
+        "begin_stream": lambda _self, title, **_kwargs: panels.append(title),
+    })()
 
     docker_window._start_docker_log_stream("market")
     docker_window._start_docker_log_stream("server")
 
     assert worker.cancelled == 2
     assert docker_window._pending_docker_log_service == "server"
+    assert panels == ["Docker Compose — Market logs", "Docker Compose — Server logs"]
 
 
 def test_panel_close_clears_pending_and_cancellation_is_idempotent(
@@ -179,8 +184,8 @@ def test_native_empty_root_returns_before_resolving_logs_or_changing_panel(
         "clear_content": lambda *_args: calls.append("clear"),
         "set_title": lambda *_args: calls.append("title"),
     })()
-    monkeypatch.setattr(app_module, "get_server_console_log", lambda: pytest.fail("server resolver"))
-    monkeypatch.setattr(app_module, "get_market_console_log", lambda: pytest.fail("market resolver"))
+    monkeypatch.setattr(app_module, "get_server_console_log", lambda _root: pytest.fail("server resolver"))
+    monkeypatch.setattr(app_module, "get_market_console_log", lambda _root: pytest.fail("market resolver"))
 
     docker_window._on_console_toggled("server")
     docker_window._on_console_toggled("market")
@@ -194,8 +199,8 @@ def test_docker_routing_precedes_native_log_resolvers(
     routed: list[str] = []
     docker_window._console_panel = type("Panel", (), {"isVisible": lambda _self: False})()
     docker_window._start_docker_log_stream = routed.append
-    monkeypatch.setattr(app_module, "get_server_console_log", lambda: pytest.fail("native server resolver"))
-    monkeypatch.setattr(app_module, "get_market_console_log", lambda: pytest.fail("native market resolver"))
+    monkeypatch.setattr(app_module, "get_server_console_log", lambda _root: pytest.fail("native server resolver"))
+    monkeypatch.setattr(app_module, "get_market_console_log", lambda _root: pytest.fail("native market resolver"))
 
     docker_window._on_console_toggled("server")
     docker_window._on_console_toggled("market")
@@ -210,41 +215,37 @@ def test_native_existing_log_routes_tail_exact_path(
     log_path = tmp_path / f"{name}.log"
     log_path.write_text("line\n", encoding="utf-8")
     docker_window._cfg.update({"runtime_backend": "native", "evejs_root": "C:/EveJS"})
-    tailed: list[str] = []
+    tailed: list[tuple[str, str]] = []
     docker_window._console_panel = type("Panel", (), {
         "isVisible": lambda _self: False,
-        "tail": tailed.append,
+        "tail": lambda _self, path, *, title: tailed.append((path, title)),
     })()
-    monkeypatch.setattr(app_module, "get_server_console_log", lambda: log_path)
-    monkeypatch.setattr(app_module, "get_market_console_log", lambda: log_path)
+    monkeypatch.setattr(app_module, "get_server_console_log", lambda _root: log_path)
+    monkeypatch.setattr(app_module, "get_market_console_log", lambda _root: log_path)
 
     docker_window._on_console_toggled(name)
 
-    assert tailed == [str(log_path)]
+    assert tailed == [(log_path, name.title())]
 
 
 def test_native_missing_log_presentations_remain_service_specific(
-    docker_window: MainWindow, monkeypatch: pytest.MonkeyPatch, tmp_path,
+    docker_window: MainWindow, tmp_path,
 ) -> None:
-    docker_window._cfg.update({"runtime_backend": "native", "evejs_root": "C:/EveJS"})
-    calls: list[str] = []
-    docker_window._console_panel = type("Panel", (), {
-        "isVisible": lambda _self: False,
-        "show": lambda _self: calls.append("show"),
-        "raise_": lambda _self: calls.append("raise"),
-        "clear_content": lambda _self: calls.append("clear"),
-        "set_title": lambda _self, title: calls.append(title),
-    })()
-    missing = tmp_path / "missing.log"
-    monkeypatch.setattr(app_module, "get_server_console_log", lambda: missing)
-    monkeypatch.setattr(app_module, "get_market_console_log", lambda: missing)
+    from src.widgets.console_panel import ConsolePanel
+
+    docker_window._cfg.update({"runtime_backend": "native", "evejs_root": str(tmp_path)})
+    docker_window._console_panel = panel = ConsolePanel()
+    panel._log.setPlainText("old output")
 
     docker_window._on_console_toggled("server")
-    assert calls == ["show", "raise"]
-    calls.clear()
-    docker_window._on_console_toggled("market")
+    assert panel._title_label.text() == "Server"
+    assert panel._log.toPlainText() == ""
+    assert not panel._notepad_btn.isEnabled()
 
-    assert calls == ["clear", "Market Server — not started yet", "show", "raise"]
+    docker_window._on_console_toggled("market")
+    assert panel._title_label.text() == "Market"
+    assert panel._log_path.name == "market_console.log"
+    panel.stop()
 
 
 def test_same_service_docker_toggle_stops_panel_clears_pending_and_does_not_replace(
@@ -257,7 +258,8 @@ def test_same_service_docker_toggle_stops_panel_clears_pending_and_does_not_repl
     worker = Worker()
     docker_window._docker_log_worker = worker
     docker_window._docker_log_thread = object()
-    docker_window._docker_log_service = "server"
+    docker_window._console_service = "server"
+    docker_window._docker_log_service = "market"
     docker_window._docker_log_token = object()
     docker_window._pending_docker_log_service = None
     stops: list[bool] = []

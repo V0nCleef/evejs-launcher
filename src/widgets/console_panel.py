@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize
+from PyQt6.QtCore import QEvent, QPoint, Qt, QTimer, pyqtSignal, QSize
 from PyQt6.QtGui import QFontDatabase, QTextCursor, QMouseEvent
 from PyQt6.QtWidgets import (
     QApplication,
@@ -36,7 +36,6 @@ class ConsolePanel(QFrame):
     MAX_POLL_BYTES = 100_000
     DEFAULT_HEIGHT = 230
     MIN_AUTO_CLOSE_HEIGHT = 50
-    STATUS_BAR_OFFSET = 24
     HEADER_HEIGHT = 38
     MAX_HEIGHT_RATIO = 0.85
 
@@ -49,6 +48,7 @@ class ConsolePanel(QFrame):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setAccessibleName("Launcher console")
 
+        self._footer: QWidget | None = None
         self._log_path: Path | None = None
         self._streaming: bool = False
         self._log_offset: int = 0
@@ -63,6 +63,7 @@ class ConsolePanel(QFrame):
         self._build_ui()
         register_translatable_widget_tree(self)
         self._apply_style()
+        self.resize(self.sizeHint())
         self.hide()
 
     # ── UI construction ──────────────────────────────────────────────────────
@@ -269,17 +270,23 @@ class ConsolePanel(QFrame):
         self._set_monospace_font(size)
 
     # ── Geometry / positioning ───────────────────────────────────────────────
+    def set_footer(self, footer: QWidget) -> None:
+        self._footer = footer
+        footer.installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        if watched is self._footer and event.type() in (QEvent.Type.Move, QEvent.Type.Resize):
+            if self.isVisible():
+                self._reposition()
+        return super().eventFilter(watched, event)
+
     def _reposition(self) -> None:
-        if not self.parentWidget():
-            return
         parent = self.parentWidget()
-        max_h = int(parent.height() * self.MAX_HEIGHT_RATIO)
-        new_h = min(self.height(), max_h)
-        if new_h != self.height():
-            self.resize(self.width(), new_h)
-        x = 0
-        y = parent.height() - self.height() - self.STATUS_BAR_OFFSET
-        self.setGeometry(0, max(0, y), parent.width(), self.height())
+        if parent is None:
+            return
+        bottom = self._footer.mapTo(parent, QPoint()).y() if self._footer else parent.height()
+        height = min(self.height(), int(parent.height() * self.MAX_HEIGHT_RATIO), bottom)
+        self.setGeometry(0, bottom - height, parent.width(), height)
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
@@ -319,35 +326,18 @@ class ConsolePanel(QFrame):
         event.accept()
 
     # ── Log tailing ──────────────────────────────────────────────────────────
-    def tail(self, log_path: str | Path) -> None:
+    def tail(self, log_path: str | Path, *, title: str | None = None) -> None:
         """Start tailing *log_path* and show the panel."""
         self.stop_tailing()
         self._streaming = False
         set_translatable_text(self._activity_label, "●  LIVE")
         self._activity_label.setStyleSheet("")
-        self._notepad_btn.setEnabled(True)
         self._log_path = Path(log_path)
         self._log.clear()
         self._log_offset = 0
 
-        if self._log_path.exists():
-            file_size = self._log_path.stat().st_size
-            # Only load the newest bounded tail for large files.
-            if file_size > self.MAX_POLL_BYTES:
-                with open(self._log_path, "r", encoding="utf-8", errors="replace") as f:
-                    f.seek(file_size - self.MAX_POLL_BYTES)
-                    f.readline()  # discard partial line
-                    self._append_lines(f.read().splitlines())
-            else:
-                self._append_lines(
-                    self._log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-                )
-            self._log_offset = file_size
-
-        set_translatable_text_template(
-            self._title_label,
-            f"Console — {self._log_path.name}",
-        )
+        self._poll_log()
+        set_translatable_text_template(self._title_label, title or f"Console — {self._log_path.name}")
         self._poll_timer.start()
         self._reposition()
         self.show()
@@ -407,7 +397,16 @@ class ConsolePanel(QFrame):
         set_translatable_text(self._title_label, title)
 
     def _poll_log(self) -> None:
-        if not self._log_path or not self._log_path.exists():
+        if self._log_path is None:
+            return
+        exists = self._log_path.is_file()
+        self._notepad_btn.setEnabled(exists)
+        activity = "●  LIVE" if exists else "WAITING"
+        if self._activity_label.text() != activity:
+            set_translatable_text(self._activity_label, activity)
+        if not exists:
+            self._log.clear()
+            self._log_offset = 0
             return
         try:
             size = self._log_path.stat().st_size

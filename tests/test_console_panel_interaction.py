@@ -253,3 +253,82 @@ def test_poll_log_preserves_small_delta_and_utf8_replacement(
 
     assert appended == [["normal", "snowman: \u2603", "invalid: \ufffd"]]
     assert panel._log_offset == log_path.stat().st_size
+
+
+def test_footer_controls_switch_and_close_console_without_losing_access(
+    console_window: MainWindow, qapp: QApplication, tmp_path,
+) -> None:
+    window = console_window
+    panel = window._console_panel
+    panel.stop()
+    window._cfg["evejs_root"] = str(tmp_path)
+    footer = window._status_bar
+
+    QTest.mouseClick(footer.server_section.label, Qt.MouseButton.LeftButton)
+    assert panel.isVisible()
+    assert panel._title_label.text() == "Server"
+    assert panel.height() == panel.DEFAULT_HEIGHT
+    assert panel.geometry().bottom() < footer.geometry().top()
+    assert footer.server_section.property("consoleOpen")
+
+    QTest.mouseClick(footer.market_section.dot, Qt.MouseButton.LeftButton)
+    assert panel.isVisible()
+    assert panel._title_label.text() == "Market"
+    assert footer.market_section.property("consoleOpen")
+    assert not footer.server_section.property("consoleOpen")
+
+    footer.setFixedHeight(56)
+    window.resize(1000, 640)
+    qapp.processEvents()
+    assert panel.geometry().bottom() < footer.geometry().top()
+
+    footer.market_section.setFocus()
+    QTest.keyClick(footer.market_section, Qt.Key.Key_Space)
+    assert not panel.isVisible()
+    assert not footer.market_section.property("consoleOpen")
+
+    QTest.mouseClick(footer.server_section.label, Qt.MouseButton.LeftButton)
+    QTest.mouseClick(footer.server_section.label, Qt.MouseButton.LeftButton)
+    assert not panel.isVisible()
+
+
+@pytest.mark.parametrize("launcher_hidden", [False, True])
+def test_native_console_rebinds_when_switching_installations(
+    console_window: MainWindow, tmp_path, monkeypatch: pytest.MonkeyPatch, launcher_hidden: bool,
+) -> None:
+    from src.core import server_launcher
+
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    monkeypatch.setattr(server_launcher, "_LOGS_DIR", tmp_path / "logs")
+    first_console = server_launcher.get_server_console_log(first)
+    second_console = server_launcher.get_server_console_log(second)
+    first_console.parent.mkdir(parents=True)
+    first_console.write_text("first world\n", encoding="utf-8")
+
+    window = console_window
+    panel = window._console_panel
+    window._cfg["evejs_root"] = str(first)
+    assert first_console != second_console
+    assert server_launcher.get_server_console_log(first / ".." / "first") == first_console
+
+    window._on_console_toggled("server")
+    assert panel._log.toPlainText().strip() == "first world"
+    if launcher_hidden:
+        window.hide()
+    window._on_settings_saved({"evejs_root": str(second)})
+    window.show()
+    assert not panel.isVisible()
+
+    window._on_console_toggled("server")
+    assert panel._log.toPlainText() == ""
+    assert panel._log_path == second_console
+    assert not panel._notepad_btn.isEnabled()
+
+    second_console.parent.mkdir(parents=True)
+    second_console.write_text("second world\n", encoding="utf-8")
+    panel._poll_log()
+    assert panel._log.toPlainText().strip() == "second world"
+    assert panel._notepad_btn.isEnabled()

@@ -183,6 +183,8 @@ class StatusSection(QFrame):
             self._on_motion_policy_changed
         )
         self.setProperty("telemetryState", "offline")
+        if name in {"Server", "Market"}:
+            self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._build_ui()
         self._apply_style()
         self._motion_gate = VisibleMotion(self, lambda _allowed: self._sync_pulse())
@@ -217,11 +219,7 @@ class StatusSection(QFrame):
         # baseline under the application stylesheet.
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        set_translatable_accessible_name(
-            self,
-            f"{self.section_name} telemetry",
-            allow_templates=True,
-        )
+        self._set_accessible_name()
 
         # Pulsing animation for "Starting..." state
         self._opacity_effect = QGraphicsOpacityEffect(self.dot)
@@ -233,12 +231,14 @@ class StatusSection(QFrame):
         self._pulse.setEasingCurve(QEasingCurve.Type.InOutSine)
         self._pulse.setLoopCount(-1)
 
-    def _set_label_text(self, text: str) -> None:
-        """Keep the full status available while eliding only when shown narrow."""
+    def _set_label_text(self, text: str, *, detail: str | None = None) -> None:
+        """Keep the full status and reason available when the footer is narrow."""
         self._full_text = text
-        self.label.setToolTip(text)
-        self.label.setAccessibleDescription(text)
-        self.setAccessibleDescription(text)
+        description = f"{text}\n{detail}" if detail else text
+        self.setToolTip(description)
+        self.label.setToolTip(description)
+        self.label.setAccessibleDescription(description)
+        self.setAccessibleDescription(description)
         self.label.setText(text)
         if self.isVisible():
             self._render_label_text()
@@ -255,6 +255,10 @@ class StatusSection(QFrame):
             }}
             StatusSection:hover {{
                 background-color: rgba(30, 42, 56, 0.42);
+                border-radius: 4px;
+            }}
+            StatusSection:focus, StatusSection[consoleOpen="true"] {{
+                background-color: rgba(30, 42, 56, 0.80);
                 border-radius: 4px;
             }}
         """)
@@ -326,15 +330,10 @@ class StatusSection(QFrame):
             )
         elif state == ServiceState.FAILED:
             self._set_visual_state("danger", COLORS["red"])
-            self._set_label_text(
-                translate_service_action(f"{self.section_name}: Failed")
-            )
-            if error:
-                self.label.setToolTip(error)
+            self._set_label_text(translate_service_action(f"{self.section_name}: Failed"), detail=error)
         elif state == ServiceState.UNKNOWN:
             self._set_visual_state("warning", COLORS["gold"])
-            base = translate_service_action(f"{self.section_name}: Unknown")
-            self._set_label_text(base + (f" — {error}" if error else ""))
+            self._set_label_text(translate_service_action(f"{self.section_name}: Unknown"), detail=error)
         else:
             self._set_visual_state("offline", COLORS["grey"])
             self._set_label_text(
@@ -351,13 +350,17 @@ class StatusSection(QFrame):
         source = f"{count} client{'s' if count != 1 else ''} running"
         self._set_label_text(translate_ui_phrase(source))
 
+    def _set_accessible_name(self) -> None:
+        if self.section_name == "Server":
+            set_translatable_accessible_name(self, "Toggle Game console")
+        elif self.section_name == "Market":
+            set_translatable_accessible_name(self, "Toggle Market console")
+        else:
+            set_translatable_accessible_name(self, f"{self.section_name} telemetry", allow_templates=True)
+
     def retranslate_ui(self) -> None:
         """Render the current semantic state in the active language."""
-        set_translatable_accessible_name(
-            self,
-            f"{self.section_name} telemetry",
-            allow_templates=True,
-        )
+        self._set_accessible_name()
         if self._count is not None:
             self.set_count(self._count)
             return
@@ -371,6 +374,24 @@ class StatusSection(QFrame):
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._render_label_text()
+
+    def set_console_open(self, opened: bool) -> None:
+        if self.property("consoleOpen") != opened:
+            self.setProperty("consoleOpen", opened)
+            style = self.style()
+            style.unpolish(self)
+            style.polish(self)
+            self.update()
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if self.focusPolicy() != Qt.FocusPolicy.NoFocus and event.key() in (
+            Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter,
+        ):
+            if not event.isAutoRepeat():
+                self.clicked.emit(self.section_name.lower())
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
@@ -535,6 +556,7 @@ class StatusBar(QFrame):
         layout.addWidget(self.build_label)
 
         self.version_label = QLabel(f"v{APP_VERSION}")
+        set_translatable_accessible_name(self.version_label, "Launcher version")
         self.version_label.setSizePolicy(
             QSizePolicy.Policy.Minimum,
             QSizePolicy.Policy.Preferred,
@@ -559,7 +581,7 @@ class StatusBar(QFrame):
         spacer = self._telemetry_layout.itemAt(4)
         if spacer is not None and spacer.spacerItem() is not None:
             self._telemetry_layout.takeAt(4)
-        self.language_combo.setFixedWidth(160)
+        self.language_combo.setFixedWidth(200)
         for section in (self.server_section, self.market_section, self.clients_section):
             section.setMinimumWidth(50)
             section.layout().setContentsMargins(3, 2, 3, 2)
@@ -608,7 +630,8 @@ class StatusBar(QFrame):
             controls.logs.setMinimumWidth(0)
             controls.logs.setMaximumWidth(16777215)
             self.build_label.show()
-            self.language_combo.setFixedWidth(160)
+            # At full width the Game section begins at the 220 px navigation rail.
+            self.language_combo.setFixedWidth(200)
             sections = (self.server_section, self.market_section, self.clients_section)
             needed = 24 + 9 * 6 + self.language_combo.width() + controls.sizeHint().width()
             needed += self.build_label.sizeHint().width() + self.version_label.sizeHint().width()
@@ -635,10 +658,11 @@ class StatusBar(QFrame):
         self.language_changed.emit(normalized)
 
     def retranslate_ui(self) -> None:
-        """Refresh the footer-owned language control."""
+        """Refresh the footer labels and accessible text."""
         language_tooltip = translate("nav.language_tooltip")
         self.language_combo.setAccessibleName(language_tooltip)
         self.language_combo.setToolTip(language_tooltip)
+        set_translatable_accessible_name(self.version_label, "Launcher version")
         for section in (
             self.server_section,
             self.market_section,
@@ -656,6 +680,14 @@ class StatusBar(QFrame):
                         section.clicked.emit(section.section_name.lower())
                         return True
         return super().eventFilter(obj, event)
+
+    def is_console_control(self, widget: QWidget) -> bool:
+        return any(widget is section or section.isAncestorOf(widget)
+                   for section in (self.server_section, self.market_section))
+
+    def set_open_console(self, service: str | None) -> None:
+        self.server_section.set_console_open(service == "server")
+        self.market_section.set_console_open(service == "market")
 
     def set_server_state(self, state: ServiceState, pid: int | None = None, container: str | None = None,
                          error: str | None = None) -> None:

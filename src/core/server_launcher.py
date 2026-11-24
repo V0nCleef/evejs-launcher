@@ -47,8 +47,8 @@ from .platform import (
 _LOGS_DIR = CONFIG_DIR / "logs"
 _LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
+# Older handoffs retain the original source for their already-running child.
 SERVER_CONSOLE_LOG = _LOGS_DIR / "server_console.log"
-MARKET_CONSOLE_LOG = _LOGS_DIR / "market_console.log"
 DEFAULT_NATIVE_MARKET_DATABASE = "data/generated/market.sqlite"
 NATIVE_GAME_DEPENDENCY_TIMEOUT_SEC = 15 * 60
 NATIVE_GAME_PROBE_TIMEOUT_SEC = 30
@@ -70,6 +70,7 @@ class NativeModRuntimeLaunchReceipt:
     runtime_identity: str
     status_log_path: Path
     console_start_offset: int | None = None
+    console_log_path: Path | None = None
 
 
 def get_server_log_path(evejs_root: str | Path) -> Path:
@@ -84,9 +85,14 @@ def get_server_log_path(evejs_root: str | Path) -> Path:
     return layout.log_directory / "server.log"
 
 
-def get_server_console_log() -> Path:
-    """Return the path to the live server console log (1:1 stdout mirror)."""
-    return SERVER_CONSOLE_LOG
+def _native_root_digest(evejs_root: str | Path) -> str:
+    root = Path(evejs_root).resolve()
+    return hashlib.sha256(os.path.normcase(str(root)).encode("utf-8")).hexdigest()
+
+
+def get_server_console_log(evejs_root: str | Path) -> Path:
+    """Return the selected installation's Native Game stdout mirror."""
+    return _LOGS_DIR / "native" / _native_root_digest(evejs_root) / "server_console.log"
 
 
 def get_native_mod_status_log(evejs_root: str | Path) -> Path:
@@ -104,14 +110,12 @@ def get_native_mod_status_log(evejs_root: str | Path) -> Path:
         raise ValueError("The EveJS root is unavailable.") from exc
     if not root.is_dir():
         raise ValueError("The EveJS root is not a directory.")
-    root_identity = os.path.normcase(str(root))
-    digest = hashlib.sha256(root_identity.encode("utf-8")).hexdigest()
-    return _LOGS_DIR / "native_mod_status" / f"{digest}.log"
+    return _LOGS_DIR / "native_mod_status" / f"{_native_root_digest(root)}.log"
 
 
-def get_market_console_log() -> Path:
-    """Return the path to the live market console log (1:1 stdout mirror)."""
-    return MARKET_CONSOLE_LOG
+def get_market_console_log(evejs_root: str | Path) -> Path:
+    """Return the selected installation's Native Market stdout mirror."""
+    return _LOGS_DIR / "native" / _native_root_digest(evejs_root) / "market_console.log"
 
 
 class NativeMarketDatabaseState(str, Enum):
@@ -304,11 +308,12 @@ def resume_native_console_evidence(process: object) -> None:
     # therefore define the exact resume boundary, including the updater gap.
     destination_size = receipt.status_log_path.stat().st_size
     start = offset + destination_size
-    if start > SERVER_CONSOLE_LOG.stat().st_size:
+    console = receipt.console_log_path or SERVER_CONSOLE_LOG
+    if not console.is_file() or start > console.stat().st_size:
         return  # a truncated/replaced console cannot supply current evidence
     threading.Thread(
         target=_copy_console_slice_to_file,
-        args=(SERVER_CONSOLE_LOG, receipt.status_log_path, start, process),
+        args=(console, receipt.status_log_path, start, process),
         daemon=True, name="resumed-native-mod-evidence",
     ).start()
 
@@ -397,17 +402,17 @@ def _npm_executable() -> str:
     return "npm.cmd" if os.name == "nt" else "npm"
 
 
-def _append_game_console(message: str) -> None:
-    SERVER_CONSOLE_LOG.parent.mkdir(parents=True, exist_ok=True)
-    with SERVER_CONSOLE_LOG.open("a", encoding="utf-8", errors="replace") as stream:
+def _append_game_console(console: Path, message: str) -> None:
+    console.parent.mkdir(parents=True, exist_ok=True)
+    with console.open("a", encoding="utf-8", errors="replace") as stream:
         stream.write(f"[launcher] {message.rstrip()}\n")
 
 
-def _append_market_console_marker(message: str) -> None:
+def _append_market_console_marker(console: Path, message: str) -> None:
     """Append one durable launcher-owned Market lifecycle marker."""
-    MARKET_CONSOLE_LOG.parent.mkdir(parents=True, exist_ok=True)
+    console.parent.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
-    with MARKET_CONSOLE_LOG.open(
+    with console.open(
         "a",
         encoding="utf-8",
         errors="replace",
@@ -428,15 +433,16 @@ def _run_game_dependency_command(
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """Run one bootstrap command off the GUI thread and mirror exact output."""
-    _append_game_console(f"Running: {subprocess.list2cmdline(command)}")
+    console = get_server_console_log(server_dir.parent)
+    _append_game_console(console, f"Running: {subprocess.list2cmdline(command)}")
     if IS_LINUX:
         from .linux_process import run_bounded
         output = run_bounded(command, cwd=server_dir, env=env, timeout=timeout_sec, limit=1024 * 1024)
-        with SERVER_CONSOLE_LOG.open('a', encoding='utf-8', errors='replace') as stream:
+        with console.open('a', encoding='utf-8', errors='replace') as stream:
             stream.write(output)
         return subprocess.CompletedProcess(command, 0, stdout=output if capture_output else None)
     try:
-        with SERVER_CONSOLE_LOG.open("a", encoding="utf-8", errors="replace") as stream:
+        with console.open("a", encoding="utf-8", errors="replace") as stream:
             process = subprocess.Popen(
                 command,
                 cwd=str(server_dir),
@@ -465,6 +471,7 @@ def _run_game_dependency_command(
                 terminated = terminate_process_tree(process.pid)
                 outcome = "terminated" if terminated else "could not be terminated"
                 _append_game_console(
+                    console,
                     f"Timed out while trying to {purpose}; process tree {outcome}."
                 )
                 timeout_label = (
@@ -601,12 +608,14 @@ def _npm_major_version(npm: str, server_dir: Path) -> int:
 
 def ensure_native_game_dependencies(server_dir: Path) -> None:
     """Repair npm 12-blocked better-sqlite3, then verify a real SQLite query."""
-    _append_game_console("Checking the native better-sqlite3 runtime.")
+    console = get_server_console_log(server_dir.parent)
+    _append_game_console(console, "Checking the native better-sqlite3 runtime.")
     if _better_sqlite3_is_usable(server_dir):
-        _append_game_console("Native better-sqlite3 runtime is ready.")
+        _append_game_console(console, "Native better-sqlite3 runtime is ready.")
         return
 
     _append_game_console(
+        console,
         "The better-sqlite3 probe failed; starting the safe npm dependency repair."
     )
     _validate_vetted_native_game_dependency(server_dir)
@@ -615,6 +624,7 @@ def ensure_native_game_dependencies(server_dir: Path) -> None:
     version = _read_installed_better_sqlite3_version(server_dir)
     if version is None:
         _append_game_console(
+            console,
             "The installed better-sqlite3 package manifest is missing or unreadable; "
             "restoring the locked dependency tree without running install scripts."
         )
@@ -633,6 +643,7 @@ def ensure_native_game_dependencies(server_dir: Path) -> None:
         version = _installed_better_sqlite3_version(server_dir)
     else:
         _append_game_console(
+            console,
             f"Preserving the installed better-sqlite3@{version} package and "
             "repairing its native binding in place."
         )
@@ -674,6 +685,7 @@ def ensure_native_game_dependencies(server_dir: Path) -> None:
             )
     else:
         _append_game_console(
+            console,
             f"npm {npm_major} predates install-script approvals; proceeding with "
             "the targeted better-sqlite3 rebuild only."
         )
@@ -699,7 +711,7 @@ def ensure_native_game_dependencies(server_dir: Path) -> None:
             "native build output, correct the reported prerequisite, and retry."
         )
 
-    _append_game_console("Repair finished; verifying better-sqlite3 again.")
+    _append_game_console(console, "Repair finished; verifying better-sqlite3 again.")
     if not _better_sqlite3_is_usable(server_dir):
         raise RuntimeError(
             "Automatic dependency repair completed, but Node.js still cannot "
@@ -707,7 +719,7 @@ def ensure_native_game_dependencies(server_dir: Path) -> None:
             "the Game Console for the exact binding error, verify the EveJS "
             "Node.js/build prerequisites, and retry Start Game."
         )
-    _append_game_console("Native Game dependencies repaired and verified.")
+    _append_game_console(console, "Native Game dependencies repaired and verified.")
 
 
 def _prepare_native_game_store_environment(
@@ -761,7 +773,9 @@ def _prepare_native_game_store_environment(
         path.exists() for path in legacy_sqlite_paths
     )
     if needs_migration:
+        console = get_server_console_log(evejs_root)
         _append_game_console(
+            console,
             "Legacy newDatabase data detected; running EveJS's official v0.12.6 "
             "gameStore migration."
         )
@@ -796,7 +810,7 @@ def _prepare_native_game_store_environment(
                 "which save to use. Open the Game Console and inspect the selected "
                 "EveJS root before retrying."
             )
-        _append_game_console("Legacy gameStore migration completed and verified.")
+        _append_game_console(console, "Legacy gameStore migration completed and verified.")
 
     # Never inherit a gameStore override from another EveJS installation. A
     # canonical override is safe only when v0.12.6 already has a real data dir.
@@ -829,8 +843,9 @@ def start_game_server(
     # checks and repairs execute here inside ServiceStartWorker's QThread, so a
     # first-run npm install/rebuild does not block the Qt GUI thread.
     layout.node_report_directory.mkdir(parents=True, exist_ok=True)
-    SERVER_CONSOLE_LOG.parent.mkdir(parents=True, exist_ok=True)
-    SERVER_CONSOLE_LOG.write_text("", encoding="utf-8")
+    console = get_server_console_log(runtime_root)
+    console.parent.mkdir(parents=True, exist_ok=True)
+    console.write_text("", encoding="utf-8")
     ensure_native_game_dependencies(server_dir)
 
     env = os.environ.copy()
@@ -843,20 +858,20 @@ def start_game_server(
         try:
             config_result = validate_native_server_config(runtime_root, env=env)
         except NativeConfigPreflightError as exc:
-            _append_game_console(f"Native EveJS config preflight failed: {exc.message}")
+            _append_game_console(console, f"Native EveJS config preflight failed: {exc.message}")
             raise
         if config_result.supported and config_result.valid is not True:
             message = config_result.message or (
                 "The selected EveJS config could not be validated. No config files were changed."
             )
-            _append_game_console(f"Native EveJS config preflight failed: {message}")
+            _append_game_console(console, f"Native EveJS config preflight failed: {message}")
             raise NativeConfigPreflightError(message, valid=config_result.valid)
         if config_result.supported:
-            _append_game_console(config_result.message)
+            _append_game_console(console, config_result.message)
         else:
-            _append_game_console(config_result.message)
+            _append_game_console(console, config_result.message)
     else:
-        _append_game_console("Native EveJS config preflight is unavailable; continuing with the legacy startup check.")
+        _append_game_console(console, "Native EveJS config preflight is unavailable; continuing with the legacy startup check.")
 
     _prepare_native_game_store_environment(runtime_root, server_dir, env)
 
@@ -876,11 +891,11 @@ def start_game_server(
     mod_status_log = get_native_mod_status_log(evejs_root)
     mod_status_log.parent.mkdir(parents=True, exist_ok=True)
     mod_status_log.write_bytes(b"")
-    console_spawn_offset = SERVER_CONSOLE_LOG.stat().st_size
+    console_spawn_offset = console.stat().st_size
 
     proc = _popen_with_console_log(
         cmd,
-        SERVER_CONSOLE_LOG,
+        console,
         cwd=str(server_dir),
         env=env,
         stdin=subprocess.DEVNULL,
@@ -896,6 +911,7 @@ def start_game_server(
                 runtime_identity=mod_runtime_plan.runtime_identity,
                 status_log_path=mod_status_log,
                 console_start_offset=console_spawn_offset,
+                console_log_path=console,
             ),
         )
 
@@ -903,7 +919,7 @@ def start_game_server(
     # Python reader between Node and its stdout destination.
     threading.Thread(
         target=_copy_console_slice_to_file,
-        args=(SERVER_CONSOLE_LOG, mod_status_log, console_spawn_offset, proc),
+        args=(console, mod_status_log, console_spawn_offset, proc),
         daemon=True,
     ).start()
 
@@ -943,13 +959,15 @@ def start_market_server(evejs_root: str) -> subprocess.Popen:
 
     env = os.environ.copy()
 
+    console = get_market_console_log(evejs_root)
     _append_market_console_marker(
+        console,
         f"Market start attempt: {subprocess.list2cmdline(cmd)}"
     )
     try:
         proc = _popen_with_console_log(
             cmd,
-            MARKET_CONSOLE_LOG,
+            console,
             cwd=str(market_dir),
             env=env,
             stdin=subprocess.DEVNULL,
@@ -957,11 +975,12 @@ def start_market_server(evejs_root: str) -> subprocess.Popen:
         )
     except Exception as exc:
         _append_market_console_marker(
+            console,
             "Market process creation failed: "
             f"{type(exc).__name__}: {exc}"
         )
         raise
-    _append_market_console_marker(f"Market process started with PID {proc.pid}.")
+    _append_market_console_marker(console, f"Market process started with PID {proc.pid}.")
 
     return proc
 

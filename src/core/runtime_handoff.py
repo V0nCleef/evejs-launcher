@@ -71,7 +71,8 @@ def _native_receipt(process: object) -> dict | None:
     if not isinstance(receipt, NativeModRuntimeLaunchReceipt):
         return None
     return {"plan": receipt.plan_sha256, "identity": receipt.runtime_identity,
-            "status": str(receipt.status_log_path), "offset": receipt.console_start_offset}
+            "status": str(receipt.status_log_path), "offset": receipt.console_start_offset,
+            "scoped_console": receipt.console_log_path is not None}
 
 
 def prepare_runtime_handoff(owner: object, executable: str | Path) -> HandoffTicket | None:
@@ -171,12 +172,14 @@ def _restore_native_evidence(owner: object, process: ReconnectedProcess, receipt
     if not isinstance(receipt, dict):
         return
     from .mod_runtime_state import NATIVE_BACKEND, read_mod_runtime_snapshot
-    from .server_launcher import NativeModRuntimeLaunchReceipt, resume_native_console_evidence, get_native_mod_status_log
+    from .server_launcher import (NativeModRuntimeLaunchReceipt, get_native_mod_status_log,
+                                  get_server_console_log, resume_native_console_evidence)
     root = vars(owner)["_cfg"]["evejs_root"]
     if _canonical(receipt["status"]) != _canonical(get_native_mod_status_log(root)):
         raise ValueError("Native evidence belongs to another installation")
     process.mod_runtime_receipt = NativeModRuntimeLaunchReceipt(
         receipt["plan"], receipt["identity"], Path(receipt["status"]), receipt["offset"],
+        get_server_console_log(root) if receipt.get("scoped_console") is True else None,
     )
     resume_native_console_evidence(process)
     snapshot = read_mod_runtime_snapshot(root, backend=NATIVE_BACKEND,

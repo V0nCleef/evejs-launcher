@@ -977,6 +977,7 @@ class MainWindow(QMainWindow):
         root.addLayout(content, 1)
 
         # Console overlay (child of central widget — floats above content)
+        self._console_service: str | None = None
         self._console_panel = ConsolePanel(central)
         self._console_panel.closed.connect(self._on_console_panel_closed)
         self._console_panel.hide()
@@ -996,6 +997,7 @@ class MainWindow(QMainWindow):
         self._mods_page._feedback.cue_requested.connect(self._audio_controller.play_mod_cue)
         self._status_bar.set_installation_controls(self._installation_bar)
         root.addWidget(self._status_bar)
+        self._console_panel.set_footer(self._status_bar)
 
     # ── Page switching with cross-fade ─────────────────────────────────
 
@@ -8846,7 +8848,7 @@ class MainWindow(QMainWindow):
             )
             if callable(portrait_invalidate):
                 portrait_invalidate()
-            self._stop_docker_log_stream()
+            self._close_console_for_target_change()
         if mod_error != getattr(self, "_docker_monitor_mod_error", None):
             self._docker_monitor_mod_error = mod_error
             if mod_error:
@@ -9444,16 +9446,15 @@ class MainWindow(QMainWindow):
 
     def _start_docker_log_stream(self, service: str) -> None:
         """Start exactly one read-only local CLI follower for the selected service."""
-        active = getattr(self, "_docker_log_thread", None)
-        if active is not None:
-            self._pending_docker_log_service = service
-            self._stop_docker_log_stream(clear_pending=False)
-            return
-        self._log_generation += 1
         self._console_panel.begin_stream(
             f"Docker Compose — {service.title()} logs",
             allow_templates=True,
         )
+        if self._docker_log_thread is not None:
+            self._pending_docker_log_service = service
+            self._stop_docker_log_stream(clear_pending=False)
+            return
+        self._log_generation += 1
         thread = QThread(self)
         token = object()
         worker = DockerLogWorker(self._docker_project_target_factory(), service=service, token=token)
@@ -9484,8 +9485,22 @@ class MainWindow(QMainWindow):
         worker.request_cancel()
         return False
 
+    def _set_console_service(self, service: str | None) -> None:
+        self._console_service = service
+        status_bar = getattr(self, "_status_bar", None)
+        if status_bar is not None:
+            status_bar.set_open_console(service)
+
     def _on_console_panel_closed(self) -> None:
-        if self._docker_mode():
+        self._set_console_service(None)
+        if self._docker_mode() or getattr(self, "_docker_log_thread", None) is not None:
+            self._stop_docker_log_stream()
+
+    def _close_console_for_target_change(self) -> None:
+        panel = getattr(self, "_console_panel", None)
+        if panel is not None and not panel.isHidden():
+            panel.stop()
+        else:
             self._stop_docker_log_stream()
 
     @pyqtSlot(object, str)
@@ -9532,40 +9547,26 @@ class MainWindow(QMainWindow):
             self._start_docker_log_stream(pending)
 
     def _on_console_toggled(self, name: str) -> None:
-        """StatusBar section click → show/hide console panel for that service."""
+        """Close the selected console, or switch directly to the other service."""
+        if name not in {"server", "market"}:
+            return
+        if name == getattr(self, "_console_service", None) and self._console_panel.isVisible():
+            self._console_panel.stop()
+            return
         if self._docker_mode():
             if not hasattr(self, "_docker_log_worker"):
                 self._docker_unavailable("Docker console logs are not available in this version.")
-            elif (self._console_panel.isVisible() and self._docker_log_worker is not None
-                  and name == self._docker_log_service
-                  and self._pending_docker_log_service is None):
-                self._console_panel.stop()
-            elif name in {"server", "market"}:
-                self._start_docker_log_stream(name)
+                return
+            self._set_console_service(name)
+            self._start_docker_log_stream(name)
             return
+
         evejs_root = self._cfg.get("evejs_root", "")
         if not evejs_root:
             return
-        if self._console_panel.isVisible():
-            self._console_panel.stop()
-            return
-
-        if name == "server":
-            log_path = get_server_console_log()
-            if log_path.exists():
-                self._console_panel.tail(str(log_path))
-            else:
-                self._console_panel.show()
-                self._console_panel.raise_()
-        elif name == "market":
-            log_path = get_market_console_log()
-            if log_path.exists():
-                self._console_panel.tail(str(log_path))
-            else:
-                self._console_panel.clear_content()
-                self._console_panel.set_title("Market Server — not started yet")
-                self._console_panel.show()
-                self._console_panel.raise_()
+        get_console = get_server_console_log if name == "server" else get_market_console_log
+        self._set_console_service(name)
+        self._console_panel.tail(get_console(evejs_root), title=name.title())
 
     # ── Event filter: resize cursors + click-outside-console ──────────
 
@@ -9599,7 +9600,14 @@ class MainWindow(QMainWindow):
                 pos = self._console_panel.mapFromGlobal(
                     event.globalPosition().toPoint()
                 )
-                if not self._console_panel.rect().contains(pos):
+                services = self._home_page.services_card
+                console_control = event.button() == Qt.MouseButton.LeftButton and (
+                    self._status_bar.is_console_control(obj)
+                    or any(obj is row or row.isAncestorOf(obj) for row in (
+                        services.game_row, services.market_row,
+                    ))
+                )
+                if not self._console_panel.rect().contains(pos) and not console_control:
                     self._console_panel.stop()
 
         if own_widget and event.type() == QEvent.Type.MouseMove:
@@ -10093,7 +10101,7 @@ class MainWindow(QMainWindow):
             )
             if callable(portrait_invalidate):
                 portrait_invalidate()
-            self._stop_docker_log_stream()
+            self._close_console_for_target_change()
             self._monitor_generation = getattr(self, "_monitor_generation", 0) + 1
             self._service_monitor_restart_pending = True
             if self._docker_mode():

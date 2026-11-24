@@ -82,9 +82,10 @@ def test_beta_game_command_uses_absolute_report_directory(tmp_path):
 
 
 def _fake_start_dependencies(monkeypatch, root: Path, *, validator, prepare, spawn_observed):
+    monkeypatch.setattr(server_launcher, "IS_LINUX", False)
     server_dir = root / "server"
     console_log = root / "server-console.log"
-    monkeypatch.setattr(server_launcher, "SERVER_CONSOLE_LOG", console_log)
+    monkeypatch.setattr(server_launcher, "get_server_console_log", lambda _root: console_log)
     monkeypatch.setattr(server_launcher, "_LOGS_DIR", root / "launcher-logs")
     monkeypatch.setattr(
         server_launcher,

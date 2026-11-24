@@ -8,6 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 
+if sys.platform != "win32":
+    pytest.skip("Windows DPAPI process handoff", allow_module_level=True)
+
 from src import config
 from src.core import runtime_handoff as handoff
 from src.core.process_identity_win import (
@@ -227,7 +230,10 @@ def test_installed_launcher_restart_preserves_private_profile_and_resets_bootloa
     assert options["close_fds"] is True
 
 
-def test_native_runtime_evidence_and_missing_console_bytes_survive_checkpoint(child, environment, monkeypatch):
+@pytest.mark.parametrize("scoped_console", [False, True])
+def test_native_runtime_evidence_and_missing_console_bytes_survive_checkpoint(
+    child, environment, monkeypatch, scoped_console,
+):
     import threading
     import time
     from src.core import server_launcher as launcher
@@ -244,14 +250,17 @@ def test_native_runtime_evidence_and_missing_console_bytes_survive_checkpoint(ch
     snapshot = build_native_mod_runtime_snapshot(plan, (), b"", pid=child.pid)
     with acquire_mod_lifecycle_lock(root):
         write_mod_runtime_snapshot(snapshot)
-    console = root / "console.log"
+    legacy_console = root / "console.log"
+    console = launcher.get_server_console_log(root) if scoped_console else legacy_console
+    console.parent.mkdir(parents=True, exist_ok=True)
     console.write_bytes(b"diagnostics\nbefore\ngap\n")
     status = launcher.get_native_mod_status_log(root)
     status.parent.mkdir(parents=True, exist_ok=True)
     status.write_bytes(b"before\n")
-    monkeypatch.setattr(launcher, "SERVER_CONSOLE_LOG", console)
+    monkeypatch.setattr(launcher, "SERVER_CONSOLE_LOG", legacy_console)
     child.mod_runtime_receipt = launcher.NativeModRuntimeLaunchReceipt(
         plan.plan_sha256, plan.runtime_identity, status, len(b"diagnostics\n"),
+        console if scoped_console else None,
     )
     old._server_proc = child
     handoff.prepare_runtime_handoff(old, executable)

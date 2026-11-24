@@ -10,6 +10,7 @@ const { createHash } = require("node:crypto");
 const names = new Set(["game", "game-wal", "game-shm", "game-journal",
   "market", "market-wal", "market-shm", "market-journal", "images", "skins"]);
 const block = Buffer.alloc(1024 * 1024);
+const renamePause = new Int32Array(new SharedArrayBuffer(4));
 
 function stat(file) {
   try {
@@ -100,6 +101,19 @@ function capture(entries, bundle, hostOwner) {
   return before;
 }
 
+function renameSaveMember(from, to) {
+  for (let retry = 0; ; retry++) {
+    try {
+      fs.renameSync(from, to);
+      return;
+    } catch (error) {
+      if (process.platform !== "win32" || error.code !== "EPERM" || retry === 3) throw error;
+      // Give brief Windows sharing conflicts time to clear inside the transaction.
+      Atomics.wait(renamePause, 0, 0, 50 * 2 ** retry);
+    }
+  }
+}
+
 function replace(entries, bundle, expected, incoming, keep, docker) {
   if (!same(inventory(entries), expected)) throw Error("The save changed since its backup. Review it again.");
   const changes = entries.filter(([name]) => expected[name] !== incoming[name] && !keep.includes(name));
@@ -122,7 +136,10 @@ function replace(entries, bundle, expected, incoming, keep, docker) {
         }
       }
       if (!stat(parent)) continue;
-      const stage = fs.mkdtempSync(path.join(parent, ".evejs-save-migration-"));
+      // mkdtemp needs an extended-length prefix for deeply nested Windows paths.
+      const prefix = path.join(parent, ".evejs-save-migration-");
+      const created = fs.mkdtempSync(path.toNamespacedPath(prefix));
+      const stage = path.join(parent, path.basename(created));
       const move = { name, live, stage, old: path.join(stage, "original"),
         next: path.join(stage, "incoming"), displaced: false, installed: false };
       moves.push(move);
@@ -137,11 +154,11 @@ function replace(entries, bundle, expected, incoming, keep, docker) {
     if (!same(inventory(entries), expected)) throw Error("The save changed while preparing the transfer.");
     for (const move of moves) {
       if (expected[move.name]) {
-        fs.renameSync(move.live, move.old);
+        renameSaveMember(move.live, move.old);
         move.displaced = true;
       }
       if (incoming[move.name]) {
-        fs.renameSync(move.next, move.live);
+        renameSaveMember(move.next, move.live);
         move.installed = true;
       }
     }
@@ -149,8 +166,8 @@ function replace(entries, bundle, expected, incoming, keep, docker) {
   } catch (error) {
     for (const move of moves.reverse()) {
       try {
-        if (move.installed) fs.renameSync(move.live, move.next);
-        if (move.displaced) fs.renameSync(move.old, move.live);
+        if (move.installed) renameSaveMember(move.live, move.next);
+        if (move.displaced) renameSaveMember(move.old, move.live);
       } catch (_) {
         rollbackFailed = true;
       }

@@ -157,7 +157,8 @@ def test_home_traffic_remains_visible_through_compact_commands(qapp) -> None:
         layers = page.layout()
         assert layers.indexOf(page.signal_background) == 0
         assert layers.indexOf(page.traffic_overlay) == 1
-        assert layers.currentWidget() is page._foreground
+        assert layers.currentWidget() is page._operations_scroll
+        assert page._operations_scroll.widget() is page._foreground
         assert page.signal_background.is_animating() is False
         assert page.traffic_overlay.reserved_left_px >= 744
         assert page.traffic_overlay.is_animating() is True

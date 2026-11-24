@@ -57,7 +57,7 @@ def _prepared(root: str) -> LinuxInstallation:
 
 @_serialize_start
 def start_game(root: str, mode: str, *, mod_runtime_plan=None):
-    from .server_launcher import (SERVER_CONSOLE_LOG, NativeModRuntimeLaunchReceipt,
+    from .server_launcher import (get_server_console_log, NativeModRuntimeLaunchReceipt,
                                   build_game_server_command, get_native_mod_status_log,
                                   _prepare_native_game_store_environment, _append_game_console)
     installation = _prepared(root)
@@ -70,13 +70,14 @@ def start_game(root: str, mode: str, *, mod_runtime_plan=None):
     installation.verified_market_binary()
     env = installation.server_environment()
     server = installation.root / "server"
-    SERVER_CONSOLE_LOG.parent.mkdir(parents=True, exist_ok=True)
-    SERVER_CONSOLE_LOG.write_bytes(b'')
+    console = get_server_console_log(installation.root)
+    console.parent.mkdir(parents=True, exist_ok=True)
+    console.write_bytes(b'')
     from .native_config_preflight import validate_native_server_config
     checked = validate_native_server_config(installation.root, env=env)
     if checked.supported and checked.valid is not True:
         raise LinuxSetupError(checked.message)
-    _append_game_console(checked.message)
+    _append_game_console(console, checked.message)
     # Existing prepared dependencies are checked, never reinstalled or rebuilt.
     run_bounded([str(installation.node), "-e", "const D=require('better-sqlite3');const d=new D(':memory:');d.prepare('SELECT 1').get();d.close()"],
                 cwd=server, env=env, timeout=30)
@@ -93,15 +94,15 @@ def start_game(root: str, mode: str, *, mod_runtime_plan=None):
         stage_shared_menu(installation.root, mod_runtime_plan.shared_menu)
     from .evejs_compatibility import inspect_evejs_runtime
     inspect_evejs_runtime(root).node_report_directory.mkdir(parents=True, exist_ok=True)
-    offset = SERVER_CONSOLE_LOG.stat().st_size
+    offset = console.stat().st_size
     from .linux_supervisor import start_supervised_service
-    process = start_supervised_service(command, cwd=server, env=env, log=SERVER_CONSOLE_LOG)
+    process = start_supervised_service(command, cwd=server, env=env, log=console)
     if mod_runtime_plan is not None:
         status = get_native_mod_status_log(root)
         status.parent.mkdir(parents=True, exist_ok=True)
         status.write_bytes(b"")
         process.mod_runtime_receipt = NativeModRuntimeLaunchReceipt(mod_runtime_plan.plan_sha256,
-            mod_runtime_plan.runtime_identity, status, offset)
+            mod_runtime_plan.runtime_identity, status, offset, console)
         from .server_launcher import resume_native_console_evidence
         resume_native_console_evidence(process)
     return process
@@ -109,12 +110,13 @@ def start_game(root: str, mode: str, *, mod_runtime_plan=None):
 
 @_serialize_start
 def start_market(root: str):
-    from .server_launcher import MARKET_CONSOLE_LOG
+    from .server_launcher import get_market_console_log
     installation = _prepared(root)
     binary = installation.verified_market_binary()
-    MARKET_CONSOLE_LOG.parent.mkdir(parents=True, exist_ok=True)
-    MARKET_CONSOLE_LOG.write_bytes(b"")
+    console = get_market_console_log(installation.root)
+    console.parent.mkdir(parents=True, exist_ok=True)
+    console.write_bytes(b"")
     command = [str(binary), "--config", "config/market-server.local.toml", "serve"]
     from .linux_supervisor import start_supervised_service
     return start_supervised_service(command, cwd=installation.root / 'externalservices/market-server',
-        env=installation.server_environment(), log=MARKET_CONSOLE_LOG, termination_signal=signal.SIGINT)
+        env=installation.server_environment(), log=console, termination_signal=signal.SIGINT)
