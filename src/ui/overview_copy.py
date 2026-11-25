@@ -13,7 +13,7 @@ TITLE = "Copy overview once"
 CLOSE_CLIENTS = "Close EVE clients before copying their overviews."
 SEPARATE = "Save the Separate settings option first so the recipients can keep their own changes."
 NO_SNAPSHOT = "Launch the source character once to capture its overview, then close EVE."
-PATCH_REQUIRED = "Enable the Overview Bridge in Tools to copy an overview."
+PATCH_REQUIRED = "Install the Overview Bridge from Characters → New Character. Restore an older bridge before patching again."
 QUEUED = "Overview copy queued. It will apply once when each selected character next logs in."
 
 

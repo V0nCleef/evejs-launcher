@@ -27,9 +27,9 @@ SUPPORTED_CODE_SHA256 = (
 )
 TARGET_ENTRY = "eve/client/script/parklife/overview/presetservice.pyj"
 MARKER_ENTRY = "evejs_launcher/overview_bridge_v1.json"
-PATCH_VERSION = 3
+PATCH_VERSION = 4
 BACKUP_NAME = "code.ccp.evejs-launcher-original"
-_SOURCE_MARKER = "EVEJS_LAUNCHER_OVERVIEW_BRIDGE_V3"
+_SOURCE_MARKER = "EVEJS_LAUNCHER_OVERVIEW_BRIDGE_V4"
 _PY27_MAGIC = b"\x03\xf3\r\n"
 _COMPILE_LOCK = threading.Lock()
 
@@ -117,7 +117,7 @@ def inspect_overview_patch(client_path: str | Path) -> OverviewPatchStatus:
             if marker is not None:
                 patch_version = marker.get("patchVersion")
                 if (
-                    patch_version not in {1, 2, PATCH_VERSION}
+                    patch_version not in {1, 2, 3, PATCH_VERSION}
                     or marker.get("originalArchiveSHA256") != SUPPORTED_CODE_SHA256
                 ):
                     raise OverviewPatchError("The installed overview patch is unknown.")
@@ -140,13 +140,12 @@ def inspect_overview_patch(client_path: str | Path) -> OverviewPatchStatus:
                 if patch_version == PATCH_VERSION:
                     return OverviewPatchStatus(
                         OverviewPatchState.PATCHED,
-                        "Overview copy bridge v3 installed; original backup verified.",
+                        "Overview copy bridge v4 installed; original backup verified.",
                         build,
                     )
                 return OverviewPatchStatus(
                     OverviewPatchState.LEGACY,
-                    "Legacy overview bridge v1/v2 detected. Restore the original, "
-                    "then install the corrected v3 bridge.",
+                    "Legacy overview bridge detected. Restore the original, then patch the client to install v4.",
                     build,
                 )
     except (OSError, zipfile.BadZipFile, OverviewPatchError) as exc:
@@ -236,7 +235,7 @@ def _decompile_pyc(pyc: bytes) -> str:
 
 
 _BRIDGE_METHODS = r'''
-    # EVEJS_LAUNCHER_OVERVIEW_BRIDGE_V3
+    # EVEJS_LAUNCHER_OVERVIEW_BRIDGE_V4
     def _EveJSOverviewBridgeWaitForSession(self):
         command = os.environ.get('EVEJS_OVERVIEW_BRIDGE', '')
         if not command:
@@ -310,7 +309,9 @@ _BRIDGE_METHODS = r'''
                 hashvalue = parts[2]
                 sqID = int(parts[3])
                 presetKey = utillib.KeyVal(hashvalue=hashvalue, sqID=sqID)
-                yamlString = sm.RemoteSvc('overviewPresetMgr').GetStoredPreset(presetKey)
+                # The server accepts a tuple for the lookup. A serialized
+                # KeyVal is a marshal wrapper, rather than its attribute dict.
+                yamlString = sm.RemoteSvc('overviewPresetMgr').GetStoredPreset((hashvalue, sqID))
                 if yamlString is None:
                     raise RuntimeError('The selected EveJS overview snapshot was not found')
                 dataList = yaml.safe_load(yamlString)

@@ -13,7 +13,7 @@ from pathlib import Path
 import struct
 
 MAGIC = b'\x03\xf3\r\n'
-BRIDGE_SHA256 = '6f1f3cf2196433bb13bc7dee7185629483f250835e04c407bf67e3912ec251f3'
+BRIDGE_SHA256 = '758cfc22efd63f2831f23d5aad67626da369177376122006748aaae68edb32ad'
 _NULL = object()
 
 

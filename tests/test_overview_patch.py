@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import subprocess
 import sys
 import textwrap
@@ -345,8 +346,38 @@ def test_patched_status_requires_verified_marker_entry_and_backup(
     assert status.state is patcher.OverviewPatchState.PATCHED
 
 
-@pytest.mark.parametrize("legacy_version", [1, 2])
-def test_legacy_blocking_bridge_is_restore_only(
+def test_bridge_fetches_snapshot_with_server_tuple_and_keeps_local_keyval(monkeypatch):
+    hashvalue, sq_id = "a" * 40, 19
+
+    class OverviewService:
+        def GetStoredPreset(self, lookup):
+            assert lookup == (hashvalue, sq_id)
+            return "fixture preset"
+
+    values = {
+        "os": SimpleNamespace(environ={"EVEJS_OVERVIEW_BRIDGE": f"apply|23|{hashvalue}|{sq_id}"}),
+        "session": SimpleNamespace(charid=23),
+        "sm": SimpleNamespace(RemoteSvc=lambda name: OverviewService()),
+        "utillib": SimpleNamespace(KeyVal=SimpleNamespace),
+        "yaml": SimpleNamespace(safe_load=lambda payload: payload),
+        "GetDictFromList": lambda payload: {"settings": payload},
+    }
+    exec("class Bridge:\n" + patcher._BRIDGE_METHODS, values)
+    bridge = values["Bridge"]()
+    messages = []
+    applied = []
+    monkeypatch.setattr(bridge, "_EveJSOverviewBridgeWriteAck", messages.append)
+    bridge.StoreCurrentProfileDataInSettings = lambda: applied.append("backed up")
+    bridge.LoadOverviewProfileFromDict = lambda data, label, key, saveInHistory: applied.append(
+        (data, label, key.hashvalue, key.sqID, saveInHistory)
+    )
+    bridge._EveJSOverviewBridgeTryRun()
+    assert applied == ["backed up", ({"settings": "fixture preset"}, "Launcher copy", hashvalue, sq_id, True)]
+    assert messages == [f"apply|23|{hashvalue}|{sq_id}"]
+
+
+@pytest.mark.parametrize("legacy_version", [1, 2, 3])
+def test_legacy_bridge_is_restore_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     legacy_version: int,

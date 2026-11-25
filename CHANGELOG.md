@@ -6,6 +6,7 @@
 - Add Copy overview once in Settings for Native installations using the Overview Bridge and Separate client settings. Choose one captured character and one or more recipients.
 - Apply the selected snapshot once per recipient on the next launcher login. Each recipient can customize their own overview afterward.
 - Keep queued copies tied to the captured snapshot and require a matching acknowledgement before completing each copy.
+- Correct the Overview Bridge snapshot lookup. To upgrade an older bridge, use Restore Original and Patch Client under Characters → New Character.
 
 ## v1.0.95 - 2026-11-25
 - Save Migration can optionally bring saved overviews, hotkeys, and window layouts into Separate client settings at the destination.
