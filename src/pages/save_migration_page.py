@@ -146,12 +146,14 @@ class SaveMigrationPage(QWidget):
     busy_changed = pyqtSignal(object)
     transfer_finished = pyqtSignal(object)
 
-    def __init__(self, *, verifier, can_start, installation_label, parent=None):
+    def __init__(self, *, verifier, can_start, installation_label, parent=None,
+                 installation_from_profile=SaveInstallation.from_profile):
         super().__init__(parent)
         self.setProperty("deepSignal", True)
         self._verifier = verifier
         self._can_start = can_start
         self._installation_label = installation_label
+        self._installation_from_profile = installation_from_profile
         self._worker = None
         self._dialog = None
         self._seed = None
@@ -223,6 +225,10 @@ class SaveMigrationPage(QWidget):
         seed_row.addWidget(self.seed_detail, 1)
         content_panel.addLayout(seed_row)
         self.market.buttonToggled.connect(self._render)
+        self.copy_client_settings = QCheckBox("Copy overview, hotkeys and window layouts")
+        content_panel.addWidget(self.copy_client_settings)
+        self.client_settings_note = _label(subtle=True)
+        content_panel.addWidget(self.client_settings_note)
 
         action = _panel(layout, "TRANSFER TYPE")
         self.mode = QButtonGroup(self)
@@ -282,7 +288,7 @@ class SaveMigrationPage(QWidget):
             picker.blockSignals(True)
             picker.clear()
             for entry in entries:
-                picker.addItem(self._installation_label(entry), SaveInstallation.from_profile(entry))
+                picker.addItem(self._installation_label(entry), self._installation_from_profile(entry))
                 picker.setItemData(picker.count() - 1, entry["id"], Qt.ItemDataRole.UserRole + 1)
             if desired is not None:
                 picker.setCurrentIndex(keys.index(desired))
@@ -316,6 +322,11 @@ class SaveMigrationPage(QWidget):
             else:
                 label.clear()
         ready = bool(source and target and source.root != target.root)
+        separate = bool(target and target.settings.get("client_settings_mode", "separate") == "separate")
+        self.copy_client_settings.setEnabled(ready and separate and not self.busy)
+        set_translatable_text(self.client_settings_note,
+            "Copies saved client preferences into independent destination profiles."
+            if separate else "Use Separate client settings at the destination to copy per-character preferences.")
         self.swap.setEnabled(ready)
         self.review.setEnabled(ready and not self.busy)
         if self.source.count() < 2:
@@ -364,7 +375,8 @@ class SaveMigrationPage(QWidget):
         source, target = self.source.currentData(), self.target.currentData()
         if not source or not target or source.root == target.root:
             return
-        request = Transfer(source, target, self.move.isChecked(), self.bring.isChecked(), self._seed)
+        request = Transfer(source, target, self.move.isChecked(), self.bring.isChecked(), self._seed,
+                           carry_client_settings=self.copy_client_settings.isEnabled() and self.copy_client_settings.isChecked())
         try:
             review_transfer(request)
         except (OSError, SaveMigrationError, ValueError) as error:
@@ -406,6 +418,8 @@ class SaveMigrationPage(QWidget):
             "Copy the playthrough and keep the original."
         ))
         content.addWidget(_label("Any existing destination save and market are backed up first."))
+        if request.carry_client_settings:
+            content.addWidget(_label("Copy saved overview, hotkeys and window layouts. Existing destination preferences are backed up first."))
         if request.carry_market:
             content.addWidget(_label("Bring the market database if the formats match."))
         else:
@@ -465,16 +479,19 @@ class SaveMigrationPage(QWidget):
         else:
             outcome = "Playthrough moved." if result.moved else "Playthrough copied."
             detail = result.note
+            if result.client_settings_count:
+                summary = translate_ui_phrase("Saved client settings copied.")
+                detail = f"{detail}\n{summary}" if detail else summary
             self._last_backup = result.backup
             self.backup_button.show()
             self.transfer_finished.emit(request)
         self._set_status(detail or outcome)
         self._render()
-        self._show_outcome(request, outcome, detail)
+        self._show_outcome(request, outcome, detail, warning=bool(result and result.note))
 
-    def _show_outcome(self, request, outcome, detail=""):
+    def _show_outcome(self, request, outcome, detail="", *, warning=False):
         stopped = outcome == "Save Migration stopped"
-        accent = "#ff8c96" if stopped else "#ffcf72" if detail else "#72f0c1"
+        accent = "#ff8c96" if stopped else "#ffcf72" if warning else "#72f0c1"
         dialog = _MigrationDialog(self, title=outcome, accent=accent, position=0.0 if stopped else 1.0)
         dialog.setObjectName("saveMigrationOutcome")
         route = _label()

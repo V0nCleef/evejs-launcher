@@ -582,3 +582,90 @@ from .translations_save_migration_guards import (
 SOURCE_PHRASES += _GUARD_PHRASES
 for _language, _catalog in UI_PHRASES_BY_LANGUAGE.items():
     _catalog.update(_GUARD_CATALOGS[_language])
+
+
+_CLIENT_SETTINGS_PHRASES = (
+    "Copy overview, hotkeys and window layouts",
+    "Copies saved client preferences into independent destination profiles.",
+    "Use Separate client settings at the destination to copy per-character preferences.",
+    "Copy saved overview, hotkeys and window layouts. Existing destination preferences are backed up first.",
+    "Saved client settings copied.",
+    "Checking saved client settings…",
+    "Close EVE clients before copying client settings.",
+    "No saved client settings were found for the characters in this playthrough.",
+)
+_CLIENT_SETTINGS_VALUES = {
+    "nl": (
+        "Overzicht, sneltoetsen en vensterindeling kopiëren",
+        "Kopieert opgeslagen clientvoorkeuren naar afzonderlijke doelprofielen.",
+        "Kies Afzonderlijk bij de clientinstellingen van het doel om voorkeuren per personage te kopiëren.",
+        "Kopieer het opgeslagen overzicht, de sneltoetsen en de vensterindeling. Bestaande doelvoorkeuren worden eerst geback-upt.",
+        "Opgeslagen clientinstellingen gekopieerd.",
+        "Opgeslagen clientinstellingen controleren…",
+        "Sluit de EVE-clients voordat je clientinstellingen kopieert.",
+        "Er zijn geen opgeslagen clientinstellingen gevonden voor de personages in dit spel.",
+    ),
+    "de": (
+        "Übersicht, Tastenkürzel und Fensterlayouts kopieren",
+        "Kopiert gespeicherte Client-Einstellungen in separate Zielprofile.",
+        "Wähle am Ziel getrennte Client-Einstellungen, um Einstellungen pro Charakter zu kopieren.",
+        "Kopiere Übersicht, Tastenkürzel und Fensterlayouts. Bestehende Einstellungen am Ziel werden zuerst gesichert.",
+        "Gespeicherte Client-Einstellungen kopiert.",
+        "Gespeicherte Client-Einstellungen werden geprüft …",
+        "Schließe die EVE-Clients, bevor du Client-Einstellungen kopierst.",
+        "Für die Charaktere dieses Spielstands wurden keine gespeicherten Client-Einstellungen gefunden.",
+    ),
+    "fr": (
+        "Copier la vue d’ensemble, les raccourcis et la disposition des fenêtres",
+        "Copie les préférences du client dans des profils distincts sur la destination.",
+        "Choisissez des réglages de client séparés sur la destination pour copier les préférences de chaque personnage.",
+        "Copie la vue d’ensemble, les raccourcis et la disposition des fenêtres. Les préférences de destination sont d’abord sauvegardées.",
+        "Réglages du client copiés.",
+        "Vérification des réglages du client…",
+        "Fermez les clients EVE avant de copier leurs réglages.",
+        "Aucun réglage de client enregistré pour les personnages de cette partie.",
+    ),
+    "ru": (
+        "Скопировать обзор, горячие клавиши и расположение окон",
+        "Копирует сохранённые настройки клиента в отдельные профили назначения.",
+        "Чтобы скопировать настройки каждого персонажа, включите раздельные настройки клиента в месте назначения.",
+        "Копирует обзор, горячие клавиши и расположение окон. Существующие настройки назначения сначала сохраняются в резервной копии.",
+        "Сохранённые настройки клиента скопированы.",
+        "Проверка сохранённых настроек клиента…",
+        "Закройте клиенты EVE перед копированием настроек.",
+        "Сохранённые настройки клиента для персонажей этого сохранения не найдены.",
+    ),
+    "zh_CN": (
+        "复制总览、快捷键和窗口布局",
+        "将已保存的客户端偏好复制到目标安装的独立配置中。",
+        "请将目标安装的客户端设置改为独立模式，以便按角色复制偏好。",
+        "复制已保存的总览、快捷键和窗口布局。先备份目标安装的现有偏好。",
+        "已复制保存的客户端设置。",
+        "正在检查已保存的客户端设置…",
+        "复制客户端设置前请关闭 EVE 客户端。",
+        "找不到此存档中角色已保存的客户端设置。",
+    ),
+    "ja": (
+        "オーバービュー、ショートカット、ウィンドウ配置をコピー",
+        "保存済みの設定をコピー先の独立したプロファイルにコピーします。",
+        "キャラクターごとの設定をコピーするには、コピー先のクライアント設定を個別にしてください。",
+        "オーバービュー、ショートカット、ウィンドウ配置をコピーします。コピー先の既存の設定は先にバックアップします。",
+        "保存済みのクライアント設定をコピーしました。",
+        "保存済みのクライアント設定を確認中…",
+        "クライアント設定をコピーする前に EVE クライアントを閉じてください。",
+        "このセーブのキャラクターに保存済みのクライアント設定が見つかりませんでした。",
+    ),
+    "ko": (
+        "오버뷰, 단축키 및 창 배치 복사",
+        "저장된 클라이언트 환경설정을 대상의 독립 프로필에 복사합니다.",
+        "캐릭터별 환경설정을 복사하려면 대상의 클라이언트 설정을 개별 모드로 바꾸세요.",
+        "저장된 오버뷰, 단축키 및 창 배치를 복사합니다. 대상의 기존 환경설정은 먼저 백업됩니다.",
+        "저장된 클라이언트 설정을 복사했습니다.",
+        "저장된 클라이언트 설정 확인 중…",
+        "클라이언트 설정을 복사하기 전에 EVE 클라이언트를 닫으세요.",
+        "이 저장의 캐릭터에 대해 저장된 클라이언트 설정을 찾을 수 없습니다.",
+    ),
+}
+SOURCE_PHRASES += _CLIENT_SETTINGS_PHRASES
+for _language, _catalog in UI_PHRASES_BY_LANGUAGE.items():
+    _catalog.update(zip(_CLIENT_SETTINGS_PHRASES, _CLIENT_SETTINGS_VALUES[_language], strict=True))

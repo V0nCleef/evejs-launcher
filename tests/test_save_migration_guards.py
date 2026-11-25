@@ -146,7 +146,7 @@ def test_worker_start_failure_releases_ownership_and_keeps_page_usable(qapp, mon
     def fail(worker):
         raise RuntimeError() if empty_error else RuntimeError('Disposable thread start failure')
     monkeypatch.setattr(page_module._TransferThread, 'start', fail)
-    monkeypatch.setattr(page, '_show_outcome', lambda *args: outcomes.append(args))
+    monkeypatch.setattr(page, '_show_outcome', lambda *args, **_kwargs: outcomes.append(args))
     page._start(SimpleNamespace())
     assert not page.busy
     assert ownership[-1] is None and len(ownership) == 2

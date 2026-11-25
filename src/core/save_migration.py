@@ -39,11 +39,12 @@ class SaveInstallation:
     name: str
     root: Path
     settings: dict
+    profile_id: str = "default"
 
     @classmethod
     def from_profile(cls, entry):
         settings = entry["settings"].copy()
-        return cls(entry["name"], Path(settings["evejs_root"]), settings)
+        return cls(entry["name"], Path(settings["evejs_root"]), settings, entry["id"])
 
     @property
     def version(self):
@@ -57,6 +58,7 @@ class Transfer:
     move: bool
     carry_market: bool
     fresh_seed: Path | None = None
+    carry_client_settings: bool = False
 
 
 @dataclass(frozen=True)
@@ -64,6 +66,7 @@ class TransferResult:
     backup: Path
     moved: bool
     note: str = ""
+    client_settings_count: int = 0
 
 
 def _contract(root, files):
@@ -290,7 +293,8 @@ def _receipt(directory, state, request, **evidence):
     payload = {
         **history, "state": state, "action": "move" if request.move else "copy",
         "source": str(request.source.root), "destination": str(request.destination.root),
-        "market": "bring" if request.carry_market else "fresh", **evidence,
+        "market": "bring" if request.carry_market else "fresh",
+        "carry_client_settings": request.carry_client_settings, **evidence,
     }
     with pending.open("w", encoding="utf-8") as stream:
         json.dump(payload, stream, indent=2)
@@ -321,6 +325,12 @@ def migrate(request, *, progress=lambda _: None, verify_game=verify_stock_game):
         target.require_offline()
 
     with ExitStack() as locks:
+        if request.carry_client_settings:
+            from .overview_patch import is_eve_client_running
+            from .platform import serialize_evejs_client_trust_and_spawn
+            locks.enter_context(serialize_evejs_client_trust_and_spawn())
+            if is_eve_client_running():
+                raise SaveMigrationError("Close EVE clients before copying client settings.")
         for root in sorted((source.root, target.root)):
             locks.enter_context(acquire_mod_lifecycle_lease(root))
         offline()
@@ -368,15 +378,36 @@ def _transfer(request, source, target, backup, offline, progress, verify_game):
         if (incoming / "skins").exists() and "skins" not in target.files:
             raise SaveMigrationError("The destination has no persistent storage for saved ship skin designs.")
         expected = bundle_inventory(incoming, target.files)
+        changes = {}
+        if request.carry_client_settings:
+            from .save_migration_client_settings import capture_client_settings
+            progress("Checking saved client settings…")
+            changes = capture_client_settings(request, original / "game", source, target)
         offline()
         if source.action("inventory") != source_before:
             raise SaveMigrationError("The source save changed during preparation. Stop Game and Market and retry.")
         _receipt(backup, "installing-destination", request, destination_files=target_before, expected=expected)
         progress("Installing the verified save at the destination…")
+        if changes:
+            from .overview_patch import is_eve_client_running
+            if is_eve_client_running():
+                raise SaveMigrationError("Close EVE clients before copying client settings.")
         target.action("replace", incoming, expected=target_before, incoming=expected)
+        if changes:
+            from .save_migration_client_settings import apply_client_settings
+            try:
+                if is_eve_client_running():
+                    raise SaveMigrationError("Close EVE clients before copying client settings.")
+                apply_client_settings(changes, backup / "client-settings")
+            except (OSError, ValueError, RuntimeError) as error:
+                try:
+                    target.action("replace", destination, expected=expected, incoming=target_before)
+                except (OSError, ValueError, RuntimeError) as rollback_error:
+                    raise SaveMigrationError(f"Client settings failed and destination rollback needs attention. {rollback_error}") from error
+                raise SaveMigrationError(f"Client settings could not be copied. The destination save was restored. {error}") from error
         _receipt(backup, "destination-verified", request, destination_files=target_before, installed=expected)
         if not request.move:
-            return TransferResult(backup, False)
+            return TransferResult(backup, False, client_settings_count=len(changes))
         progress("Removing the original save after verification…")
         try:
             offline()
@@ -386,5 +417,5 @@ def _transfer(request, source, target, backup, offline, progress, verify_game):
             after = {name: source_before[name] if name in keep else None for name in source.files}
             source.action("replace", expected=source_before, incoming=after, keep=keep)
         except (ValueError, OSError, RuntimeError) as error:
-            return TransferResult(backup, False, f"The destination copy passed. Source removal stopped. {error}")
-        return TransferResult(backup, True)
+            return TransferResult(backup, False, f"The destination copy passed. Source removal stopped. {error}", len(changes))
+        return TransferResult(backup, True, client_settings_count=len(changes))

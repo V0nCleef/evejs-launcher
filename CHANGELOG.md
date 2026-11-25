@@ -2,6 +2,11 @@
 
 ## Changelog
 
+## v1.0.95 - 2026-11-25
+- Save Migration can optionally bring saved overviews, hotkeys, and window layouts into Separate client settings at the destination.
+- Match preferences to the accounts and characters in the transferred save. Back up existing destination files and restore the destination save if copying preferences fails.
+- Require EVE clients to be closed while copying settings. The original client preferences are kept when moving a playthrough.
+
 ## v1.0.94 - 2026-11-25
 - Configure mods in a compact layout that adapts to the window. Related settings share up to three columns, and longer forms have search.
 - Mod authors can arrange fields with an optional layout file. The Make a Mod guide includes a dedicated Configure forms page and a working example.

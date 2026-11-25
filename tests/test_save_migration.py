@@ -528,3 +528,119 @@ def test_docker_route(tmp_path, backends, move, docker_save_image):
     finally:
         for volume in volumes:
             docker("volume", "rm", volume)
+
+
+@pytest.mark.parametrize("move", [False, True])
+def test_optional_client_settings_use_numeric_identity_and_backup(tmp_path, monkeypatch, move):
+    from src.core import overview_patch
+    from src.core import save_migration_client_settings as client
+
+    source = replace(installation(tmp_path / "source", "source"), profile_id="a" * 32)
+    target = replace(installation(tmp_path / "target", "target"), profile_id="b" * 32)
+    with _db(source.root / GAME) as db:
+        db.execute("UPDATE accounts SET json=?", ('{"id":42}',))
+        db.execute("UPDATE characters SET json=?", ('{"characterName":"source","accountId":42}',))
+        db.commit()
+
+    monkeypatch.setattr(client, "IS_LINUX", False)
+    monkeypatch.setattr(client, "PROFILES_ROOT", tmp_path / "config/Profiles")
+    monkeypatch.setattr(client.platform, "get_eve_settings_path",
+                        lambda tq: Path(tq).parent / "settings")
+    monkeypatch.setattr(overview_patch, "is_eve_client_running", lambda: False)
+    paths = [client._windows_settings(client.main_location(i), ("account",))("account")[0]
+             for i in (source, target)]
+    for path in paths:
+        path.mkdir(parents=True)
+    for name, data in {"core_user_42.dat": b"~account", "core_char_1.dat": b"~character",
+                       "core_char_999.dat": b"~other", "core_public__.yaml": b"private"}.items():
+        (paths[0] / name).write_bytes(data)
+    (paths[1] / "core_char_1.dat").write_bytes(b"~previous")
+
+    result = migrate(Transfer(source, target, move, True, carry_client_settings=True))
+    assert result.moved is move
+    assert result.client_settings_count == 2
+    assert {file.name: file.read_bytes() for file in paths[1].iterdir()} == {
+        "core_user_42.dat": b"~account", "core_char_1.dat": b"~character"}
+    assert b"~previous" in {file.read_bytes() for file in
+                            (result.backup / "client-settings/backups").glob("*.bin")}
+    assert (paths[0] / "core_char_1.dat").read_bytes() == b"~character"
+
+
+def test_client_settings_failure_rolls_back_destination(tmp_path, monkeypatch):
+    from src.core import overview_patch
+    from src.core import save_migration_client_settings as client
+
+    source = installation(tmp_path / "source", "source")
+    target = installation(tmp_path / "target", "target")
+    monkeypatch.setattr(overview_patch, "is_eve_client_running", lambda: False)
+    monkeypatch.setattr(client, "capture_client_settings", lambda *_args: {tmp_path / "unused": b"~sample"})
+
+    def locked_preferences(*_args):
+        raise OSError("Preferences file is locked")
+
+    monkeypatch.setattr(client, "apply_client_settings", locked_preferences)
+    with pytest.raises(SaveMigrationError, match="The destination save was restored"):
+        migrate(Transfer(source, target, True, True, carry_client_settings=True))
+    assert b"source" == (source.root / GAME.parent / "images/Character/1.png").read_bytes()
+    assert b"target" == (target.root / GAME.parent / "images/Character/1.png").read_bytes()
+
+
+@pytest.mark.parametrize("linux", [False, True])
+def test_client_settings_ignores_shared_profiles_from_another_world(tmp_path, monkeypatch, linux):
+    from hashlib import sha256
+    from src.core import overview_patch
+    from src.core import save_migration_client_settings as client
+    from src.core.groups import installation_group_identity
+    from src.core.native_drone_profiles import remember_personal_settings
+    from src.core.shared_settings_profile import SharedSettingsSource, _json_bytes, shared_profile_main_folder
+
+    source = replace(installation(tmp_path / "source", "source"), profile_id="a" * 32)
+    target = replace(installation(tmp_path / "target", "target"), profile_id="b" * 32)
+    source.settings["client_settings_mode"] = "shared"
+    with _db(source.root / GAME) as db:
+        db.execute("UPDATE accounts SET json=?", ('{"id":42}',))
+        db.execute("UPDATE characters SET json=?", ('{"characterName":"source","accountId":42}',))
+        db.commit()
+    monkeypatch.setattr(client, "IS_LINUX", linux)
+    monkeypatch.setattr(client, "PROFILES_ROOT", tmp_path / "config/Profiles")
+    monkeypatch.setattr(client.platform, "get_eve_settings_path", lambda tq: Path(tq).parent / "settings")
+    monkeypatch.setattr(client, "_linux_settings", lambda installation, *_args, **_kwargs:
+                        lambda _name: (installation.root / "preferences",))
+    monkeypatch.setattr(overview_patch, "is_eve_client_running", lambda: False)
+
+    options = {**source.settings, "active_installation_profile": source.profile_id}
+    base = client.client_profiles_root(options, client.PROFILES_ROOT)
+    profile_tq = base / "account" / "tq"
+    shared_root = base.parent / "SharedProfiles"
+
+    def store(main, label):
+        main.mkdir(parents=True)
+        (main / "core_user_42.dat").write_bytes(b"~" + label + b" account")
+        (main / "core_char_1.dat").write_bytes(b"~" + label + b" character")
+
+    def legacy_world(root, label):
+        owner = SharedSettingsSource("account", 42, 1, str(root))
+        main = shared_profile_main_folder(profile_tq, owner, evejs_root=str(root))
+        store(main, label)
+        identity = {"source": owner.as_dict(), "serverRoot": os.path.normcase(str(root)),
+                    "targetIdentity": None, "settingsFolder": os.path.normcase(str(main))}
+        folder = shared_root / sha256(_json_bytes(identity)).hexdigest()
+        folder.mkdir(parents=True)
+        (folder / "active.json").write_bytes(_json_bytes({"identity": identity, "schemaVersion": 1}))
+
+    legacy_world(tmp_path / "unrelated", b"wrong")
+    if linux:
+        legacy_world(source.root, b"correct")
+        destination = target.root / "preferences"
+    else:
+        scope = installation_group_identity(options, None)
+        owner = SharedSettingsSource("account", 42, 1, str(source.root))
+        main = shared_profile_main_folder(profile_tq, owner, evejs_root=str(source.root), storage_identity=scope)
+        store(main, b"correct")
+        remember_personal_settings(shared_root, scope, 42, 1, main)
+        destination = client._windows_settings(client.main_location(target), ("account",))("account")[0]
+
+    result = migrate(Transfer(source, target, False, True, carry_client_settings=True))
+    assert result.client_settings_count == 2
+    assert (destination / "core_user_42.dat").read_bytes() == b"~correct account"
+    assert (destination / "core_char_1.dat").read_bytes() == b"~correct character"
