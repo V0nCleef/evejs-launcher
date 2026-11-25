@@ -2,6 +2,8 @@
 
 [Guide home](../00-start-here.md) | [Helpers](helpers.md) | [Profile example](../../../examples/mods/profile-options/README.md)
 
+See [Design Configure forms](../03a-configure-forms.md) for a three-field example and guidance on grouping settings.
+
 A descriptor's optional `settings` object declares a form and its storage. The launcher renders controls; the helper receives values, not Qt objects. Opening/cancelling performs no target writes. Save validates the draft, checks changed keys against the opened values and commits through key ownership.
 
 ## Complete small declaration
@@ -55,6 +57,22 @@ Required: `id`, `label`, `type`, `default`, `file`, `key`. Scope follows the fil
 Defaults pass the same validation as saved values. Invalid existing values produce a load error instead of silently becoming defaults. Numeric INI strings are decoded for numeric fields; string fields stay strings. `numeric_boolean` reads stored 0/1 and supplies a real Boolean to the helper.
 
 Forms support search, groups and advanced fields. Scrolling across numeric/choice controls does not alter their values. Changes remain drafts until Save. Cancel does not install a package or rewrite preferences.
+
+## Layout override file
+
+Place `evejs-launcher.settings-layout.json` beside `evejs-launcher.mod.json` in the mod folder or ZIP. Write an ordinary UTF-8 JSON file up to 64 KiB with unique keys. The file has exactly two top-level keys, `schemaVersion` set to `1` and `sections` with 1–64 entries.
+
+| Section key | Meaning |
+| --- | --- |
+| `id` | Unique ID using the same format as a settings field ID |
+| `title` | Plain text or a locale map with an `en` fallback, at most 128 characters per title |
+| `rows` | Ordered list of 1–256 rows with one to three existing field IDs per row |
+
+Use each case-sensitive field ID once across the file. Keep each section within the global or profile scope. Sections and rows follow their order in the file. A row with one ID requests full width. Rows with more IDs wrap when the window is narrow, and wider controls take their own row. The launcher keeps any unlisted settings in the automatic layout.
+
+Earlier launchers read the same settings manifest and use their standard layout. An invalid layout, including a removed field ID or unsupported schema version, shows a notice and switches to the automatic layout. The form remains available.
+
+The layout file is package metadata. A package update can replace or remove it while the launcher preserves declared settings files. Keep setting IDs, storage paths, and preservation declarations stable when shipping a layout-only update. Store player-editable values in files such as `preferences.json`.
 
 ## Languages
 

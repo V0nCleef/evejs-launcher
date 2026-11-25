@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "sections": [
+    {
+      "id": "arrayEscalation",
+      "title": {"en": "Array escalation", "nl": "Escalatie van arrays"},
+      "rows": [
+        ["array1Chance", "array2Chance", "array3Chance"],
+        ["notes"]
+      ]
+    }
+  ]
+}

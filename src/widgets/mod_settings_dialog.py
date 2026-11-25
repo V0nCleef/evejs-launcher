@@ -2,14 +2,15 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from decimal import Decimal
 import math
-from typing import Mapping, Sequence
+from typing import Iterator, Mapping, Sequence, TYPE_CHECKING
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QSignalBlocker, QTimer, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QCheckBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
-    QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
+    QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from src.constants import SEMANTIC_COLORS as S
@@ -20,6 +21,21 @@ from src.widgets.scroll_safe_controls import (
     ScrollSafeComboBox, ScrollSafeDoubleSpinBox, ScrollSafeSpinBox,
 )
 from src.widgets.toggle_switch import ToggleSwitch
+
+if TYPE_CHECKING:
+    from src.core.mod_settings_layout import SettingsLayoutSection
+
+
+@dataclass
+class _FormSection:
+    title: str
+    card: QWidget
+    grid: QGridLayout
+    rows: tuple[tuple[ModSetting, ...], ...]
+    authored: bool
+    visible: tuple[str, ...] = ()
+    positions: tuple[tuple[str, int, int, int], ...] = ()
+    columns: int = 0
 
 
 class ModSettingsDialog(QDialog):
@@ -34,7 +50,8 @@ class ModSettingsDialog(QDialog):
 
     def __init__(
         self, mod_name: str, fields: Sequence[ModSetting], values: Mapping[str, object],
-        *, scope_label: str = "", parent: QWidget | None = None,
+        *, scope_label: str = "", layout: tuple[SettingsLayoutSection, ...] = (),
+        layout_error: bool = False, parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("modSettingsDialog")
@@ -42,7 +59,7 @@ class ModSettingsDialog(QDialog):
         self.setWindowTitle(format_ui_phrase("Configure {mod}", mod=mod_name))
         self.setModal(True)
         self.resize(720, 660)
-        self.setMinimumSize(520, 400)
+        self.setMinimumSize(420, 400)
         self._fields = tuple(fields)
         if len({field.id for field in fields}) != len(fields):
             raise ValueError("Duplicate mod setting IDs")
@@ -53,12 +70,16 @@ class ModSettingsDialog(QDialog):
         self._controls: dict[str, QWidget] = {}
         self._rows: dict[str, QWidget] = {}
         self._errors: dict[str, QLabel] = {}
-        self._groups: list[tuple[QWidget, list[ModSetting]]] = []
+        self._labels: dict[str, tuple[QLabel, QLabel | None]] = {}
+        self._sections: list[_FormSection] = []
+        self._reflow_timer = QTimer(self)
+        self._reflow_timer.setSingleShot(True)
+        self._reflow_timer.timeout.connect(self._reflow)
         self._saving = False
         self._loading = True
         self._pending: dict[str, object] | None = None
         self._saved_restart: set[str] = set()
-        self._build_ui(mod_name, scope_label)
+        self._build_ui(mod_name, scope_label, layout, layout_error)
         self._loading = False
         self._refresh()
 
@@ -67,10 +88,16 @@ class ModSettingsDialog(QDialog):
         label = QLabel(text)
         label.setTextFormat(Qt.TextFormat.PlainText)
         label.setWordWrap(True)
+        policy = label.sizePolicy()
+        policy.setHorizontalPolicy(QSizePolicy.Policy.Ignored)
+        label.setSizePolicy(policy)
         label.setProperty("class", "muted" if muted else "secondary")
         return label
 
-    def _build_ui(self, mod_name: str, scope_label: str) -> None:
+    def _build_ui(
+        self, mod_name: str, scope_label: str, layout: tuple[SettingsLayoutSection, ...],
+        layout_error: bool,
+    ) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 20)
         root.setSpacing(12)
@@ -79,6 +106,10 @@ class ModSettingsDialog(QDialog):
         root.addWidget(title)
         if scope_label:
             root.addWidget(self._label(scope_label, muted=True))
+        if layout_error:
+            root.addWidget(self._label(translate_ui_phrase(
+                "The mod's layout hints could not be loaded. Using automatic layout."
+            ), muted=True))
 
         filters = QHBoxLayout()
         self.search_edit = QLineEdit()
@@ -91,6 +122,16 @@ class ModSettingsDialog(QDialog):
         self.advanced_toggle.setVisible(any(field.advanced for field in self._fields))
         self.advanced_toggle.toggled.connect(self._filter_rows)
         filters.addWidget(self.advanced_toggle)
+        self.section_jump = ScrollSafeComboBox()
+        jump_text = translate_ui_phrase("Jump to section")
+        self.section_jump.setAccessibleName(jump_text)
+        self.section_jump.setToolTip(jump_text)
+        self.section_jump.setPlaceholderText(jump_text)
+        self.section_jump.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.section_jump.setMinimumContentsLength(len(jump_text))
+        self.section_jump.activated.connect(self._jump_to_section)
+        self.section_jump.hide()
+        filters.addWidget(self.section_jump)
         root.addLayout(filters)
 
         self.scroll_area = QScrollArea()
@@ -100,46 +141,14 @@ class ModSettingsDialog(QDialog):
         body = QVBoxLayout(content)
         body.setContentsMargins(0, 0, 6, 0)
         body.setSpacing(12)
-        grouped: dict[str, list[ModSetting]] = {}
-        for field in self._fields:
-            group = localized_text(field.group) or translate_ui_phrase("Settings")
-            grouped.setdefault(group, []).append(field)
-        for title, fields in grouped.items():
-            card = QWidget()
-            card.setProperty("class", "card")
-            group_layout = QVBoxLayout(card)
-            group_layout.setContentsMargins(16, 14, 16, 14)
-            heading = self._label(title)
-            heading.setObjectName("modSettingsGroup")
-            group_layout.addWidget(heading)
-            for field in fields:
-                row = QWidget()
-                row_layout = QVBoxLayout(row)
-                row_layout.setContentsMargins(0, 6, 0, 6)
-                row_layout.setSpacing(5)
-                label = self._label(localized_text(field.label))
-                row_layout.addWidget(label)
-                description = localized_text(field.description)
-                if description:
-                    row_layout.addWidget(self._label(description, muted=True))
-                control = self._make_control(field, self._baseline[field.id])
-                control.setObjectName(f"modSetting_{field.id}")
-                control.setAccessibleName(localized_text(field.label))
-                control.setAccessibleDescription(description)
-                label.setBuddy(control)
-                row_layout.addWidget(control)
-                error = self._label("")
-                error.setProperty("validationError", True)
-                row_layout.addWidget(error)
-                self._controls[field.id], self._rows[field.id] = control, row
-                self._errors[field.id] = error
-                group_layout.addWidget(row)
-            self._groups.append((card, fields))
-            body.addWidget(card)
+        for section in self._build_sections(layout):
+            self._sections.append(section)
+            body.addWidget(section.card)
         self.empty_label = self._label(translate_ui_phrase("No settings are available."))
         body.addWidget(self.empty_label)
         body.addStretch()
         self.scroll_area.setWidget(content)
+        self.scroll_area.viewport().installEventFilter(self)
         root.addWidget(self.scroll_area, 1)
         self.restart_label = self._label("", muted=True)
         root.addWidget(self.restart_label)
@@ -172,6 +181,139 @@ class ModSettingsDialog(QDialog):
             QWidget[class="card"] {{ background: {S['surface']}; border: 1px solid {S['border']}; border-radius: 8px; }}
             QScrollArea {{ border: none; background: transparent; }}
         """)
+
+    def _build_sections(self, layout: tuple[SettingsLayoutSection, ...]) -> Iterator[_FormSection]:
+        available = {field.id: field for field in self._fields}
+        for section in layout:
+            rows = tuple(tuple(available.pop(field_id) for field_id in row if field_id in available)
+                         for row in section.rows)
+            rows = tuple(row for row in rows if row)
+            if rows:
+                yield self._create_section(localized_text(section.title), rows, authored=True)
+        grouped: dict[str, list[ModSetting]] = {}
+        for field in available.values():
+            title = localized_text(field.group) or translate_ui_phrase("Settings")
+            grouped.setdefault(title, []).append(field)
+        for title, fields in grouped.items():
+            yield self._create_section(title, (tuple(fields),), authored=False)
+
+    def _create_section(
+        self, title: str, rows: tuple[tuple[ModSetting, ...], ...], *, authored: bool,
+    ) -> _FormSection:
+        card = QWidget()
+        card.setProperty("class", "card")
+        group_layout = QVBoxLayout(card)
+        group_layout.setContentsMargins(16, 14, 16, 14)
+        heading = self._label(title)
+        heading.setObjectName("modSettingsGroup")
+        group_layout.addWidget(heading)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(6)
+        group_layout.addLayout(grid)
+        for row in rows:
+            for field in row:
+                self._create_field(card, field)
+        return _FormSection(title, card, grid, rows, authored)
+
+    def _create_field(self, card: QWidget, field: ModSetting) -> None:
+        widget = QWidget(card)
+        column = QVBoxLayout(widget)
+        column.setContentsMargins(0, 4, 0, 4)
+        column.setSpacing(5)
+        label = self._label(localized_text(field.label))
+        column.addWidget(label)
+        description = localized_text(field.description)
+        help_label = self._label(description, muted=True) if description else None
+        if help_label is not None:
+            column.addWidget(help_label)
+        column.addStretch()
+        control = self._make_control(field, self._baseline[field.id])
+        control.setObjectName(f"modSetting_{field.id}")
+        control.setAccessibleName(label.text())
+        control.setAccessibleDescription(description)
+        label.setBuddy(control)
+        if isinstance(control, (ScrollSafeSpinBox, ScrollSafeDoubleSpinBox, ScrollSafeComboBox)):
+            # Native size hints include the entire accepted range or longest
+            # choice. The layout measures the editor separately for packing.
+            control.setSizePolicy(QSizePolicy.Policy.Ignored, control.sizePolicy().verticalPolicy())
+        column.addWidget(control)
+        error = self._label("")
+        error.setProperty("validationError", True)
+        column.addWidget(error)
+        self._controls[field.id] = control
+        self._rows[field.id] = widget
+        self._labels[field.id] = (label, help_label)
+        self._errors[field.id] = error
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.scroll_area.viewport() and event.type() == QEvent.Type.Resize:
+            self._reflow_timer.start(0)
+        return super().eventFilter(watched, event)
+
+    def _fits_column(self, field_id: str, width: int) -> bool:
+        control = self._controls[field_id]
+        if isinstance(control, (QLineEdit, QPlainTextEdit)):
+            return False
+        if isinstance(control, (ScrollSafeSpinBox, ScrollSafeDoubleSpinBox)):
+            editor_width = control.fontMetrics().horizontalAdvance(control.text()) + 44
+        else:
+            editor_width = control.sizeHint().width()
+        if editor_width > width:
+            return False
+        label, description = self._labels[field_id]
+        return (
+            label.minimumSizeHint().width() <= width
+            and label.heightForWidth(width) <= 2 * label.fontMetrics().lineSpacing()
+            and (description is None or (
+                description.minimumSizeHint().width() <= width
+                and description.heightForWidth(width) <= 3 * description.fontMetrics().lineSpacing()
+            ))
+        )
+
+    def _reflow(self) -> None:
+        viewport_width = self.scroll_area.viewport().width()
+        body_left, _, body_right, _ = self.scroll_area.widget().layout().getContentsMargins()
+        minimum_column = max(176, self.fontMetrics().horizontalAdvance("0" * 22))
+        for section in self._sections:
+            left, _, right, _ = section.card.layout().getContentsMargins()
+            width = max(1, viewport_width - body_left - body_right - left - right)
+            gap = section.grid.horizontalSpacing()
+            columns = min(3, max(1, (width + gap) // (minimum_column + gap)))
+            cell_width = (width - (columns - 1) * gap) // columns
+            positions = self._positions(section, columns, cell_width)
+            if positions == section.positions and columns == section.columns:
+                continue
+            while section.grid.count():
+                section.grid.takeAt(0)
+            for col in range(3):
+                section.grid.setColumnStretch(col, int(col < columns))
+            for field_id, row, col, span in positions:
+                section.grid.addWidget(self._rows[field_id], row, col, 1, span)
+            section.positions = positions
+            section.columns = columns
+
+    def _positions(
+        self, section: _FormSection, columns: int, cell_width: int,
+    ) -> tuple[tuple[str, int, int, int], ...]:
+        row, column = 0, 0
+        positions = []
+        visible = set(section.visible)
+        for fields in section.rows:
+            full_row = section.authored and len(fields) == 1
+            for field in fields:
+                if field.id not in visible:
+                    continue
+                span = columns if full_row or not self._fits_column(field.id, cell_width) else 1
+                if column + span > columns:
+                    row, column = row + 1, 0
+                positions.append((field.id, row, column, span))
+                column += span
+                if column == columns:
+                    row, column = row + 1, 0
+            if column:
+                row, column = row + 1, 0
+        return tuple(positions)
 
     def _make_control(self, field: ModSetting, value: object) -> QWidget:
         changed = lambda *_: self._changed(field.id)
@@ -281,17 +423,43 @@ class ModSettingsDialog(QDialog):
     def _filter_rows(self, *_args) -> None:
         query = self.search_edit.text().strip().casefold()
         count = 0
-        for group, fields in self._groups:
+        sections = []
+        show_advanced = self.advanced_toggle.isChecked()
+        for index, section in enumerate(self._sections):
             visible = []
-            for field in fields:
-                text = " ".join(localized_text(value) for value in (field.label, field.description, field.group)).casefold()
-                show = (not field.advanced or self.advanced_toggle.isChecked()) and (not query or query in text)
-                self._rows[field.id].setVisible(show)
-                visible.append(show)
-            group.setVisible(any(visible))
-            count += sum(visible)
+            for row in section.rows:
+                for field in row:
+                    label, description = self._labels[field.id]
+                    text = " ".join((section.title, label.text(), description.text() if description else "",
+                                     localized_text(field.group))).casefold()
+                    show = (not field.advanced or show_advanced) and (not query or query in text)
+                    self._rows[field.id].setVisible(show)
+                    if show:
+                        visible.append(field.id)
+            section.visible = tuple(visible)
+            section.card.setVisible(bool(visible))
+            if visible:
+                sections.append(index)
+                count += len(visible)
+        current_sections = [self.section_jump.itemData(i) for i in range(self.section_jump.count())]
+        if sections != current_sections:
+            previous = self.section_jump.currentData()
+            with QSignalBlocker(self.section_jump):
+                self.section_jump.clear()
+                for index in sections:
+                    self.section_jump.addItem(self._sections[index].title, index)
+                self.section_jump.setCurrentIndex(self.section_jump.findData(previous))
+        self.section_jump.setVisible(len(sections) > 1)
         self.empty_label.setText(translate_ui_phrase("No settings match your search." if self._fields else "No settings are available."))
         self.empty_label.setVisible(count == 0)
+        self._reflow()
+
+    def _jump_to_section(self, index: int) -> None:
+        section_index = self.section_jump.itemData(index)
+        if section_index is not None:
+            card = self._sections[section_index].card
+            top = card.mapTo(self.scroll_area.widget(), card.rect().topLeft()).y()
+            self.scroll_area.verticalScrollBar().setValue(top)
 
     def _restore_defaults(self) -> None:
         if self._saving:
@@ -335,8 +503,10 @@ class ModSettingsDialog(QDialog):
             self.search_edit.clear()
             self.advanced_toggle.setChecked(True)
             self._refresh()
-            first = next((field.id for field in self._fields if field.id in errors), None)
+            first = next((field_id for section in self._sections for field_id in section.visible
+                          if field_id in errors), None)
             if first:
+                self.scroll_area.widget().layout().activate()
                 self.scroll_area.ensureWidgetVisible(self._rows[first])
                 self._controls[first].setFocus()
             return
@@ -349,6 +519,7 @@ class ModSettingsDialog(QDialog):
         self.scroll_area.setEnabled(not self._saving)
         self.search_edit.setEnabled(not self._saving)
         self.advanced_toggle.setEnabled(not self._saving)
+        self.section_jump.setEnabled(not self._saving)
         self.cancel_button.setEnabled(not self._saving)
         self.status_label.setStyleSheet("")
         self.status_label.setText(translate_ui_phrase("Saving settings...") if saving else "")

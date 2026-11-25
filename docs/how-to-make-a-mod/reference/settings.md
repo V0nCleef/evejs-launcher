@@ -7,6 +7,7 @@ Start with the result you want. Each walkthrough explains what the player sees, 
 | I want to… | Open |
 | --- | --- |
 | Add a Configure button | [Configure, with screenshots and a complete demo](../03-configure.md) |
+| Organize related fields | [Design Configure forms](../03a-configure-forms.md) |
 | Choose switches, numbers or drop-downs | [Form controls](../04-controls.md) |
 | Save different values for different characters | [Profile settings](../05-profiles.md) |
 | Show labels in another language | [Translate setting labels](../06-languages.md) |

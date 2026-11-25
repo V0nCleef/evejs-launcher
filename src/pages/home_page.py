@@ -6,6 +6,8 @@ only renders that already-authoritative observation.
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 from pathlib import Path
 
 from PyQt6.QtCore import QEvent, Qt, pyqtSignal, QUrl, QObject, QVariantAnimation
@@ -380,7 +382,6 @@ class ActivityRow(QFrame):
     def set_entry(self, timestamp: str, message: str, state: str, label: str) -> None:
         self.time_label.setText(timestamp)
         self._full_message = message
-        set_translatable_tooltip(self.message_label, message)
         set_translatable_text(self.state_label, label.upper())
         self.state_label.setProperty("state", state)
         style = self.state_label.style()
@@ -400,7 +401,8 @@ class ActivityRow(QFrame):
         self._render_message()
 
     def _render_message(self) -> None:
-        rendered = translate_ui_phrase(self._full_message)
+        rendered = translate_ui_phrase(self._full_message, allow_templates=True, template_min_literal=10)
+        self.message_label.setToolTip("" if self._full_message == "Awaiting runtime transition" else rendered)
         available = self.message_label.contentsRect().width()
         if available <= 0:
             self.message_label.setText(rendered)
@@ -419,7 +421,7 @@ class ActivityRow(QFrame):
 
 
 class RecentActivityCard(QFrame):
-    """Four-row feed populated strictly from RuntimeSnapshot observations."""
+    """Four-row feed of runtime observations and completed launches."""
 
     _SERVICE_MESSAGES = {
         ServiceState.OFFLINE: ("offline", "OFFLINE", "service offline"),
@@ -466,6 +468,9 @@ class RecentActivityCard(QFrame):
 
     def add_header_action(self, widget: QWidget) -> None:
         self.header_layout.addWidget(widget)
+
+    def record_launch_completion(self, count: int) -> None:
+        self._append(datetime.now().strftime("%H:%M"), f"Launched {count} client(s).", "online", "CLIENTS")
 
     def record_snapshot(self, snapshot: RuntimeSnapshot) -> None:
         signature = (snapshot.game, snapshot.market, snapshot.running_clients)

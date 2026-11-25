@@ -34,6 +34,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -133,6 +134,7 @@ class SettingsPage(QWidget):
     """Application settings form."""
 
     settings_saved = pyqtSignal(dict)
+    show_characters_requested = pyqtSignal(object)
     save_finished = pyqtSignal(bool)
     settings_update_check = pyqtSignal()
     docker_preflight_requested = pyqtSignal(object)
@@ -1402,10 +1404,6 @@ class SettingsPage(QWidget):
         else:
             set_translatable_text(self.last_checked_label, "Never")
 
-        self.hidden_list.clear()
-        for name in cfg.get("hidden_characters", []):
-            self.hidden_list.addItem(str(name))
-
         self._set_combo_data(self.runtime_backend_combo, cfg.get("runtime_backend", "native"))
         self.docker_compose_edit.setText(str(cfg.get("docker_compose_file", "")))
         self._set_combo_data(self.docker_policy_combo, cfg.get("docker_control_policy", "connect_only"))
@@ -1589,10 +1587,6 @@ class SettingsPage(QWidget):
             "animations_enabled": self.animations_toggle.isChecked(),
             "update_auto_check": self.update_auto_check_toggle.isChecked(),
             "update_check_interval_hours": self.update_interval_spin.value(),
-            "hidden_characters": tuple(
-                self.hidden_list.item(i).text()
-                for i in range(self.hidden_list.count())
-            ),
             "runtime_backend": self.runtime_backend_combo.currentData() or "native",
             "docker_compose_file": self.docker_compose_edit.text().strip(),
             "docker_control_policy": (
@@ -1614,7 +1608,6 @@ class SettingsPage(QWidget):
         """Return a complete settings draft without writing configuration."""
         cfg = config.load()
         state = self._form_state()
-        state["hidden_characters"] = list(state["hidden_characters"])
         cfg.update(state)
         return cfg
 
@@ -1979,28 +1972,28 @@ class SettingsPage(QWidget):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(changelog_path)))
 
     # ── Hidden characters ────────────────────────────────────────────────────
-    def _show_selected_characters(self) -> None:
-        """Remove the selected character names from the hidden list and persist.
+    def set_hidden_character_items(self, entries) -> None:
+        role = Qt.ItemDataRole.UserRole
+        current = [
+            (self.hidden_list.item(index).data(role), self.hidden_list.item(index).text())
+            for index in range(self.hidden_list.count())
+        ]
+        if current == entries:
+            return
+        selected = [item.data(role) for item in self.hidden_list.selectedItems()]
+        self.hidden_list.clear()
+        for ref, title in entries:
+            item = QListWidgetItem(title)
+            item.setData(role, ref)
+            self.hidden_list.addItem(item)
+            item.setSelected(ref in selected)
 
-        Writes ``never_hide_characters`` *before* calling ``save_settings()``
-        so the ``settings_saved → _refresh_characters`` chain sees the
-        exemptions and doesn't immediately re-hide the character.
-        """
-        removed = [self.hidden_list.item(i).text()
-                   for i in range(self.hidden_list.count())
-                   if self.hidden_list.item(i).isSelected()]
+    def _show_selected_characters(self) -> None:
+        keys = []
         for item in self.hidden_list.selectedItems():
-            self.hidden_list.takeItem(self.hidden_list.row(item))
-        if removed:
-            # ── Write never_hide_characters FIRST so _refresh_characters sees it ──
-            cfg = config.load()
-            never = set(cfg.get("never_hide_characters", []))
-            for name in removed:
-                never.add(name)
-            cfg["never_hide_characters"] = sorted(never)
-            config.save(cfg)
-            # Now persist the updated hidden_characters (triggers refresh)
-            self.save_settings()
+            keys.append(item.data(Qt.ItemDataRole.UserRole))
+        if keys:
+            self.show_characters_requested.emit(keys)
 
     def _on_evejs_root_edited(self) -> None:
         """Startup is derived at launch; root edits need no script scan."""

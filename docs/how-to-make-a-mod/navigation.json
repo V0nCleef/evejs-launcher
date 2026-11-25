@@ -58,6 +58,20 @@
       "path": "docs/how-to-make-a-mod/03-configure.md"
     },
     {
+      "title": "3a. Design Configure forms",
+      "titles": {
+        "en": "3a. Design Configure forms",
+        "nl": "3a. Instelformulieren ontwerpen",
+        "fr": "3a. Concevoir les formulaires de réglages",
+        "de": "3a. Konfigurationsformulare gestalten",
+        "ru": "3a. Проектирование форм настроек",
+        "zh_CN": "3a. 设计配置表单",
+        "ja": "3a. 設定フォームを設計する",
+        "ko": "3a. 설정 양식 설계"
+      },
+      "path": "docs/how-to-make-a-mod/03a-configure-forms.md"
+    },
+    {
       "title": "4. Choose form controls",
       "titles": {
         "en": "4. Choose form controls",
@@ -331,7 +345,10 @@
     "examples/mods/portable-helper-demo/README.md",
     "examples/mods/portable-helper-demo/evejs-launcher.mod.json",
     "examples/mods/portable-helper-demo/helper.cjs",
-    "examples/mods/portable-helper-demo/loader.js.disabled"
+    "examples/mods/portable-helper-demo/loader.js.disabled",
+    "examples/mods/configure-layout-demo/evejs-launcher.mod.json",
+    "examples/mods/configure-layout-demo/evejs-launcher.settings-layout.json",
+    "examples/mods/configure-layout-demo/README.md"
   ],
   "references": [
     {
@@ -448,6 +465,8 @@
     "docs/how-to-make-a-mod/images/ai-handoff-toolbar.png",
     "docs/how-to-make-a-mod/images/legacy-delivery-notice.png",
     "docs/how-to-make-a-mod/images/shared-mods-neocom.png",
-    "docs/how-to-make-a-mod/images/dependency-sort-preview.png"
+    "docs/how-to-make-a-mod/images/dependency-sort-preview.png",
+    "docs/how-to-make-a-mod/images/configure-layout-wide.png",
+    "docs/how-to-make-a-mod/images/configure-layout-narrow.png"
   ]
 }

@@ -748,6 +748,48 @@ def test_launch_queue_completion_surfaces_first_worker_failure(
         window.deleteLater()
 
 
+@pytest.mark.parametrize(
+    ("skipped", "cancelled", "success_notice"), [(0, False, True), (1, False, False), (0, True, False)]
+)
+def test_only_clean_queue_completion_uses_a_timed_notice(qapp, tmp_path, monkeypatch, skipped, cancelled, success_notice):
+    window = _bare_launch_window(qapp, tmp_path)
+    window._launch_queue = object()
+    window._launch_queue_skipped_unavailable = skipped
+    window._home_page = SimpleNamespace(finish_launch_progress=lambda *_args: None)
+    window._characters_page.finish_group_launch_progress = lambda: None
+    window._announce_shipboard = lambda *_args, **_kwargs: None
+    clean, reports = [], []
+    window._show_clean_launch_completion = clean.append
+    monkeypatch.setattr(app_module.QMessageBox, "information", lambda *_args: reports.append(_args[1]))
+    try:
+        window._on_launch_queue_finished(2, 2, cancelled)
+        assert clean == ([2] if success_notice else [])
+        assert len(reports) == (0 if success_notice else 1)
+    finally:
+        window.deleteLater()
+
+
+def test_launch_completion_timer_owns_only_its_notice(qapp, tmp_path):
+    window = _bare_launch_window(qapp, tmp_path)
+    recorded = []
+    window._home_page = SimpleNamespace(recent_activity=SimpleNamespace(record_launch_completion=recorded.append))
+    try:
+        window._show_clean_launch_completion(1)
+        window._show_clean_launch_completion(2)
+        notices = window.findChildren(app_module.QMessageBox, "launchCompleteNotice")
+        assert len(notices) == 2
+        assert recorded == [1, 2]
+        first_timer = notices[0].findChild(QTimer)
+        assert first_timer.interval() == 5_000
+        assert notices[0].windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus
+        assert not notices[0].isModal()
+        first_timer.timeout.emit()
+        assert not notices[0].isVisible()
+        assert notices[1].isVisible()
+    finally:
+        window.deleteLater()
+
+
 def test_stale_queue_completion_cannot_clear_current_launch_queue(
     qapp: QApplication,
     tmp_path: Path,

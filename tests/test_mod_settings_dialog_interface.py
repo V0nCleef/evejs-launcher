@@ -2,11 +2,13 @@
 from copy import deepcopy
 from dataclasses import replace
 from string import Formatter
+from types import SimpleNamespace
 
 import pytest
 from PyQt6.QtCore import QPoint, QPointF, Qt
 from PyQt6.QtGui import QWheelEvent
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QApplication, QLabel
 
 from src import i18n
 from src.core.mod_settings_schema import ModSetting, SettingChoice, validate_values
@@ -129,6 +131,106 @@ def test_search_and_advanced_filtering_preserve_all_draft_values(make_dialog):
     dialog.search_edit.clear()
     dialog.advanced_toggle.setChecked(False)
     assert dialog.draft_values()["detail"] == 8
+
+
+def test_three_array_controls_reflow_without_recreating_the_editors(make_dialog, qapp):
+    fields = tuple(
+        ModSetting(f"array{i}", f"Array {i} escalation chance (%)", "number", i * 5,
+                   description="Percentage chance after depletion for this Array.",
+                   minimum=0, maximum=100, step=0.5, group="Escalation")
+        for i in range(1, 4)
+    )
+    dialog = make_dialog(fields=fields)
+    controls = tuple(dialog._controls.values())
+    controls[1].setValue(17.5)
+    controls[1].setFocus()
+
+    def row_positions(width):
+        dialog.resize(width, 575)
+        qapp.processEvents()
+        qapp.processEvents()
+        return [dialog._rows[field.id].y() for field in fields]
+
+    wide = row_positions(720)
+    assert wide[0] == wide[1] == wide[2]
+    medium = row_positions(550)
+    assert medium[0] == medium[1] < medium[2]
+    narrow = row_positions(420)
+    assert narrow[0] < narrow[1] < narrow[2]
+    assert dialog.scroll_area.horizontalScrollBar().maximum() == 0
+    assert tuple(dialog._controls.values()) == controls
+    assert controls[1].hasFocus()
+    assert dialog.draft_values() == {"array1": 5, "array2": 17.5, "array3": 15}
+    assert row_positions(720) == wide
+
+
+def test_authored_rows_and_full_width_fields_preserve_unlisted_settings(make_dialog, qapp):
+    layout = (
+        SimpleNamespace(title={"en": "Array presets"}, rows=(("count", "enabled"), ("scale",))),
+    )
+    dialog = make_dialog(fields=FIELDS, layout=layout)
+    qapp.processEvents()
+    assert tuple(section.title for section in dialog._sections) == ("Array presets", "Display")
+    rows = dialog._rows
+    assert rows["count"].y() == rows["enabled"].y()
+    assert rows["count"].x() < rows["enabled"].x()
+    assert rows["scale"].width() > rows["count"].width()
+    assert rows["name"].isVisible()
+    assert rows["name"].width() > rows["mode"].width()
+    dialog._controls["count"].setFocus()
+    QTest.keyClick(dialog._controls["count"], Qt.Key.Key_Tab)
+    assert dialog._controls["enabled"].hasFocus()
+    dialog._controls["scale"].setValue(0.75)
+    assert dialog.draft_values()["scale"] == 0.75
+    fallback = make_dialog(fields=FIELDS, layout_error=True)
+    assert any("Using automatic layout." in label.text() for label in fallback.findChildren(QLabel))
+
+
+def test_long_labels_and_editors_do_not_force_horizontal_scrolling(make_dialog, qapp):
+    fields = (
+        FIELDS[1],
+        replace(FIELDS[2], label={"en": "Scale", "nl": "y" * 256}),
+        replace(FIELDS[4], group="Mining", choices=(SettingChoice("normal", "x" * 512),)),
+        replace(FIELDS[3], group="Mining", default="First line\nSecond line", max_length=40),
+    )
+    i18n.set_language("nl")
+    dialog = make_dialog(fields=fields)
+    qapp.processEvents()
+    rows = dialog._rows
+    assert rows["scale"].width() == rows["mode"].width() == rows["name"].width() > rows["count"].width()
+    assert dialog._controls["scale"].accessibleName() == "y" * 256
+    dialog.resize(420, 575)
+    qapp.processEvents()
+    assert dialog.scroll_area.horizontalScrollBar().maximum() == 0
+    assert dialog.draft_values() == {field.id: field.default for field in fields}
+
+
+def test_section_navigation_filters_and_reveals_errors_in_a_large_form(make_dialog, qapp):
+    fields = tuple(
+        ModSetting(f"setting{i}", f"Setting {i}", "integer", 1, minimum=1,
+                   group=f"Panel {i // 20 + 1}", advanced=(i == 98))
+        for i in range(100)
+    )
+    dialog = make_dialog(fields=fields)
+    scrollbar = dialog.scroll_area.verticalScrollBar()
+    assert scrollbar.maximum() > 0
+    assert dialog.section_jump.count() == 5
+    dialog.section_jump.activated.emit(4)
+    assert scrollbar.value() > 0
+    dialog.advanced_toggle.setChecked(True)
+    dialog._controls["setting98"].setValue(0)
+    dialog.advanced_toggle.setChecked(False)
+    dialog.search_edit.setText("Panel 1")
+    assert not dialog._rows["setting98"].isVisible()
+    assert not dialog.section_jump.isVisible()
+    dialog.save_button.click()
+    qapp.processEvents()
+    assert dialog.search_edit.text() == ""
+    assert dialog.advanced_toggle.isChecked()
+    assert dialog._rows["setting98"].isVisible()
+    assert dialog._controls["setting98"].hasFocus()
+    assert scrollbar.value() > 0
+    assert len(dialog.draft_values()) == 100
 
 
 def test_choice_type_changes_are_real_changes(make_dialog):

@@ -14,6 +14,7 @@ from typing import Mapping, Sequence
 from src.i18n import current_language, translate_ui_phrase
 
 LocalizedText = str | Mapping[str, str]
+SETTINGS_LAYOUT_FILENAME = "evejs-launcher.settings-layout.json"
 _RESERVED_PATHS = {"con", "prn", "aux", "nul", "clock$", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
 
 
@@ -134,6 +135,8 @@ def parse_settings_schema(payload: object) -> ModSettingsSchema:
             raise ModSettingsSchemaError("A settings file path cannot escape its declared base.")
         if any(part.split(".", 1)[0].casefold() in _RESERVED_PATHS for part in relative.parts):
             raise ModSettingsSchemaError("A settings file path cannot use a reserved device name.")
+        if base == "mod" and path.casefold() == SETTINGS_LAYOUT_FILENAME:
+            raise ModSettingsSchemaError("The package layout file is reserved and cannot store settings.")
         if relative.suffix.lower() not in {".json", ".ini", ".yaml", ".yml"}:
             raise ModSettingsSchemaError("Only declared text configuration files can be edited.")
         if base == "evejs" and relative.parts[0] != "config":

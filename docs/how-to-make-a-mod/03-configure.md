@@ -2,6 +2,8 @@
 
 [Start here](00-start-here.md)
 
+[Design Configure forms](03a-configure-forms.md) for mods with several related settings.
+
 ## What the player sees
 
 **Configure** opens your mod’s settings window. The launcher builds this window from the settings described in your mod’s instruction file. You choose the questions and values; you do not have to design or program a window.

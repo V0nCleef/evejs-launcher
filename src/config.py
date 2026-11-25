@@ -44,6 +44,9 @@ DEFAULT_CONFIG = {
     "hidden_characters": [],  # list of character names hidden from UI
     "hide_test_characters": True,  # auto-hide characters belonging to test/GM accounts
     "never_hide_characters": [],  # characters the user explicitly un-hid — auto-hide skips these
+    "hidden_character_ids": [],
+    "never_hide_character_ids": [],
+    "character_visibility_initialized": False,
     "animations_enabled": True,  # cross-fade banner, page transitions, card effects
     "hero_rotation_interval_sec": 6,  # legacy preference; retained for config round-trips
     "deep_signal_enabled": True,  # legacy preference; shell is always enabled

@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 3,
+  "id": "configure-layout-demo",
+  "displayName": "Array Settings Demo",
+  "version": "1.0.0",
+  "description": "Demonstrates optional Configure form layout hints and saves example preferences.",
+  "kind": "settings",
+  "supportedBackends": ["native", "docker"],
+  "activation": {"strategy": "package"},
+  "restart": "none",
+  "settings": {
+    "schemaVersion": 1,
+    "files": [{"id": "prefs", "base": "mod", "path": "preferences.json", "format": "json"}],
+    "fields": [
+      {
+        "id": "array1Chance",
+        "label": "Array 1 chance (%)",
+        "group": "Array escalation",
+        "type": "number",
+        "default": 5,
+        "minimum": 0,
+        "maximum": 100,
+        "step": 0.5,
+        "file": "prefs",
+        "key": ["escalation", "array1ChancePct"]
+      },
+      {
+        "id": "array2Chance",
+        "label": "Array 2 chance (%)",
+        "group": "Array escalation",
+        "type": "number",
+        "default": 15,
+        "minimum": 0,
+        "maximum": 100,
+        "step": 0.5,
+        "file": "prefs",
+        "key": ["escalation", "array2ChancePct"]
+      },
+      {
+        "id": "array3Chance",
+        "label": "Array 3 chance (%)",
+        "group": "Array escalation",
+        "type": "number",
+        "default": 25,
+        "minimum": 0,
+        "maximum": 100,
+        "step": 0.5,
+        "file": "prefs",
+        "key": ["escalation", "array3ChancePct"]
+      },
+      {
+        "id": "notes",
+        "label": "Notes",
+        "description": "Record what you are testing in this setup.",
+        "group": "Array escalation",
+        "type": "string",
+        "default": "",
+        "maxLength": 320,
+        "file": "prefs",
+        "key": ["notes"]
+      },
+      {
+        "id": "previewEnabled",
+        "label": "Enable preview",
+        "group": "Preview",
+        "type": "boolean",
+        "default": true,
+        "file": "prefs",
+        "key": ["previewEnabled"]
+      }
+    ]
+  }
+}

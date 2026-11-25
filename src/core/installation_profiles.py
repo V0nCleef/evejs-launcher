@@ -19,6 +19,8 @@ WORLD_DEFAULTS = {
     "client_settings_mode": "separate", "shared_settings_folder": "",
     "shared_settings_source": {}, "hidden_characters": [],
     "hide_test_characters": True, "never_hide_characters": [],
+    "hidden_character_ids": [], "never_hide_character_ids": [],
+    "character_visibility_initialized": False,
     "docker_readiness_timeout_sec": 180,
 }
 from .host import IS_LINUX

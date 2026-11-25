@@ -62,6 +62,7 @@ from src.constants import COLORS as C, SEMANTIC_COLORS as S, Status
 from src.core.character_names import ship_display_name, location_display_name
 from src.core.character_order import move_character, ordered_keys, validate_order
 from src.core.dashboard import visible_character_rows
+from src.core.character_visibility import VisibilityRef
 from src.core.db import Account, Character, _fmt_isk, _fmt_sp
 from src.core.groups import TargetGroupState
 from src.core.process_tracker import CLIENT_LAUNCH_GRACE_SECONDS, ProcessTracker
@@ -162,7 +163,8 @@ class CharactersPage(QWidget):
 
     launch_character = pyqtSignal(str, str, int)  # username, char_name, char_id
     character_selected = pyqtSignal(str, str, int)  # username, char_name, char_id
-    hide_character = pyqtSignal(str)  # character_name
+    hide_character = pyqtSignal(str, str, int)
+    rename_character_requested = pyqtSignal(str, str, int)
     delete_character_requested = pyqtSignal(str, str, int)
     delete_account_requested = pyqtSignal(str, str, int)
     new_character_requested = pyqtSignal()
@@ -505,7 +507,7 @@ class CharactersPage(QWidget):
     def refresh(
         self,
         accounts: list[Account],
-        hidden_characters: list[str],
+        hidden_characters: set[VisibilityRef] | list[VisibilityRef],
         tracker: ProcessTracker,
         evejs_root: str = "",
         portrait_target: PortraitTarget | None = None,
@@ -582,7 +584,8 @@ class CharactersPage(QWidget):
                 )
                 card.launched.connect(self.launch_character.emit)
                 card.selected.connect(self._on_card_selected)
-                card.hide_requested.connect(self._on_card_hide_requested)
+                card.hide_requested.connect(self.hide_character.emit)
+                card.rename_requested.connect(self.rename_character_requested.emit)
                 card.manage_groups_requested.connect(
                     lambda _username, _name, character_id: (
                         self.manage_groups_requested.emit(character_id)
@@ -601,6 +604,7 @@ class CharactersPage(QWidget):
                 card.installEventFilter(self)
                 self._cards[key] = card
             card._reorder_context = self._order_context
+            card.set_character_name(char.name)
             set_translatable_tooltip(card, 'Drag to reorder characters' if self._order_context else '')
             card.set_stats(
                 ship_type_id=char.ship_type_id,
@@ -1509,13 +1513,9 @@ class CharactersPage(QWidget):
 
     def _on_detail_hide(self) -> None:
         """Hide the character currently shown in the detail panel."""
-        _username, char_name, _char_id = self.detail_panel.get_character()
+        username, char_name, char_id = self.detail_panel.get_character()
         if char_name:
-            self.hide_character.emit(char_name)
-
-    def _on_card_hide_requested(self, character_name: str) -> None:
-        """Hide a character from its card's overflow menu."""
-        self.hide_character.emit(character_name)
+            self.hide_character.emit(username, char_name, char_id)
 
     # ── Click on empty grid space → deselect ───────────────────────────────
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802

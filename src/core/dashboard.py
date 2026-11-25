@@ -3,12 +3,13 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from .character_visibility import VisibilityRef, is_character_hidden
 from .db import Account, Character
 
 
 def visible_character_rows(
     accounts: Iterable[Account],
-    hidden_characters: Iterable[str],
+    hidden_characters: Iterable[VisibilityRef],
 ) -> list[tuple[Account, Character]]:
     """Return visible, non-banned character rows in account/character order."""
 
@@ -20,7 +21,7 @@ def visible_character_rows(
         rows.extend(
             (account, character)
             for character in account.characters
-            if character.name not in hidden
+            if not is_character_hidden(account, character, hidden)
         )
     return rows
 

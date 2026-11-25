@@ -29,6 +29,13 @@ def _hold_test_maintenance_lease(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(deletion, "hold_persistence_maintenance", hold)
 
 
+@pytest.fixture
+def stub_native_node_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    # These subprocess stubs exercise the helper protocol without a prepared install.
+    monkeypatch.setattr(deletion, "node_executable", lambda _root: "node")
+    monkeypatch.setattr(deletion, "node_environment", lambda _root: os.environ.copy())
+
+
 def _record(account_id: int, name: str, *, character_id: int) -> dict:
     return {
         "accountId": account_id,
@@ -166,6 +173,7 @@ def test_deletion_request_validation_is_exact_and_typed(tmp_path: Path) -> None:
 def test_deletion_helper_runs_as_offline_maintenance_owner(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    stub_native_node_runtime,
 ) -> None:
     root, game_store = _store(tmp_path)
     captured: dict[str, object] = {}
@@ -209,6 +217,7 @@ def test_deletion_helper_runs_as_offline_maintenance_owner(
 def test_deletion_helper_reports_work_and_shutdown_failures(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    stub_native_node_runtime,
 ) -> None:
     root, game_store = _store(tmp_path)
 
@@ -239,6 +248,7 @@ def test_deletion_helper_reports_work_and_shutdown_failures(
 def test_deletion_helper_marks_owner_conflict_as_pre_operation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    stub_native_node_runtime,
 ) -> None:
     root, game_store = _store(tmp_path)
 

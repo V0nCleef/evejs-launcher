@@ -8,6 +8,8 @@ The examples use manifest schema **3**, settings schema **1** and helper API **1
 
 [Open full-size image](images/mods-overview.png)
 
+[Design Configure forms](03a-configure-forms.md) for mods with several related settings.
+
 ## Choose one task
 
 

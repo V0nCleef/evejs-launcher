@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
 from src.constants import COLORS as C, SEMANTIC_COLORS as S
 from src.i18n import format_ui_phrase, translate_ui_phrase
 from src.core.db import Account, Character
+from src.core.character_visibility import VisibilityRef, is_character_hidden
 from src.core.groups import (
     CharacterGroup,
     DEFAULT_GROUP_COLOR,
@@ -73,7 +74,7 @@ class CharacterGroupsDialog(QDialog):
     def __init__(
         self,
         accounts: list[Account],
-        hidden_characters: set[str],
+        hidden_characters: set[VisibilityRef],
         state: TargetGroupState,
         *,
         focus_character_id: int | None = None,
@@ -555,7 +556,7 @@ class CharacterGroupsDialog(QDialog):
             return bool(
                 account.banned
                 or getattr(account, "hidden", False)
-                or character.name in self._hidden_characters
+                or is_character_hidden(account, character, self._hidden_characters)
             )
 
         def account_sort_key(account: Account) -> tuple[bool, str, int]:
@@ -589,7 +590,7 @@ class CharacterGroupsDialog(QDialog):
                     statuses.append(
                         translate_ui_phrase("banned — will not launch")
                     )
-                if getattr(account, "hidden", False) or character.name in self._hidden_characters:
+                if getattr(account, "hidden", False) or is_character_hidden(account, character, self._hidden_characters):
                     statuses.append(
                         translate_ui_phrase("hidden — will not launch")
                     )

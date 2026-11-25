@@ -72,6 +72,13 @@ from .core.client_launch_queue import (
     ClientWindowReadinessGate,
 )
 from .core.dashboard import visible_account_count, visible_character_rows
+from .core.character_visibility import (
+    VisibilityRef,
+    change_visibility,
+    migrate_legacy_visibility,
+    store_visibility_ids,
+    visibility_ids,
+)
 from .core.discovery import resolve_client_tq_path
 from .core.dlss5_uninstall import DLSS5UninstallRequest, DLSS5UninstallResult
 from .core.db import (
@@ -821,6 +828,7 @@ class MainWindow(QMainWindow):
         )
         self._characters_page.character_selected.connect(self._on_character_selected)
         self._characters_page.hide_character.connect(self._on_hide_character)
+        self._characters_page.rename_character_requested.connect(self._on_rename_character_requested)
         self._characters_page.portrait_loads_idle.connect(self._resume_close_after_data)
         self._mods_page.apply_restart_clicked.connect(self._on_mods_apply_restart)
         from .ui.mod_coordinator import ModCoordinator
@@ -854,6 +862,7 @@ class MainWindow(QMainWindow):
 
         self._settings_page.settings_update_check.connect(self._on_manual_update_check)
         self._settings_page.settings_saved.connect(self._on_settings_saved)
+        self._settings_page.show_characters_requested.connect(self._on_show_characters_requested)
         from .ui.drone_recovery import open_recovery
         self._settings_page.drone_recovery_requested.connect(lambda: open_recovery(self, Path(PROFILES_ROOT)))
         self._settings_page.voice_preview_requested.connect(
@@ -2538,6 +2547,7 @@ class MainWindow(QMainWindow):
             or getattr(self, "_mod_operation_request", None) is not None
             or getattr(self, "_drone_recovery_request", None) is not None
             or getattr(self, "_save_migration_thread", None) is not None
+            or getattr(self, "_character_rename_thread", None) is not None
         )
 
     def _update_allows_mutation(self) -> bool:
@@ -6151,7 +6161,7 @@ class MainWindow(QMainWindow):
                 except Exception as exc:
                     log.exception("Unable to persist pending overview import")
                     overview_error = str(exc) or type(exc).__name__
-            self._keep_created_character_visible(request.character_name)
+            self._keep_created_character_visible(request.character_name, result.account_id, result.character_id)
             self._refresh_characters()
             if dialog is not None:
                 dialog.set_busy(False)
@@ -6312,7 +6322,7 @@ class MainWindow(QMainWindow):
                 except Exception as exc:
                     log.exception("Unable to persist pending overview import")
                     overview_state_error = str(exc) or type(exc).__name__
-            self._keep_created_character_visible(outcome.request.character_name)
+            self._keep_created_character_visible(outcome.request.character_name, outcome.account_id, outcome.character_id)
             self._refresh_characters()
             if dialog is not None:
                 dialog.set_busy(False)
@@ -6408,6 +6418,141 @@ class MainWindow(QMainWindow):
             character_id,
             CharacterDeletionScope.CHARACTER,
         )
+
+    def _character_action_identity(
+        self, username: str, character_name: str, character_id: int,
+    ) -> tuple[int, int] | None:
+        matches = [
+            (account.account_id, character.char_id)
+            for account in self._accounts if account.username == username and account.account_id > 0
+            for character in account.characters
+            if character.char_id == character_id and character_id > 0 and character.name == character_name
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    def _character_rename_target(self) -> tuple[str, str, str] | None:
+        selection = getattr(self, "_data_selection", None)
+        root = self._cfg.get("evejs_root", "")
+        if not Path(root).is_absolute() or selection is None or self._data_load_error or getattr(self, "_data_load_warning", ""):
+            return None
+        if self._docker_mode() and (
+            not self._docker_managed() or selection.target_identity != self._current_observed_docker_target_identity()
+        ):
+            return None
+        return (
+            self._cfg.get("active_installation_profile", ""),
+            root,
+            selection.target_identity,
+        )
+
+    def _on_rename_character_requested(self, username: str, character_name: str, character_id: int) -> None:
+        from .core.application_operations import active_mutations, running_runtime_components
+        from .core.character_rename import CharacterRenameError, CharacterRenameRequest, rename_character
+        from .workers.character_rename_worker import CharacterRenameWorker
+
+        title = "Rename Character…"
+        if self._docker_mode() and not self._docker_managed():
+            QMessageBox.information(self, title, "Managed Docker mode is required; Connect-only mode is read-only.")
+            return
+        target = self._character_rename_target()
+        identity = self._character_action_identity(username, character_name, character_id)
+        if target is None or identity is None:
+            QMessageBox.warning(self, title, "Wait for the current EveJS character data to finish loading.")
+            return
+        if active_mutations(self) or self._close_in_progress:
+            QMessageBox.information(self, title, "Wait for the current launcher operation to finish.")
+            return
+        if running_runtime_components(self):
+            QMessageBox.information(self, title, "Stop Game and Market and close all EVE clients before renaming.")
+            return
+
+        new_name, accepted = QInputDialog.getText(
+            self, title,
+            format_ui_phrase("New name for {character} on account {account}", character=character_name, account=username),
+            text=character_name,
+        )
+        if not accepted or new_name == character_name:
+            return
+        if (
+            self._character_rename_target() != target
+            or self._character_action_identity(username, character_name, character_id) != identity
+        ):
+            QMessageBox.warning(self, title, "The selected account or character changed. Refresh and try again.")
+            return
+        if active_mutations(self) or self._close_in_progress or running_runtime_components(self):
+            QMessageBox.warning(self, title, "Stop Game and Market and close all EVE clients before renaming.")
+            return
+
+        updated = dict(self._cfg)
+        if migrate_legacy_visibility(updated, self._accounts) and not self._persist_character_visibility(updated):
+            QMessageBox.warning(self, title, "Could not save character visibility rules.")
+            return
+
+        request = CharacterRenameRequest(Path(target[1]), dict(self._cfg), username, *identity, character_name, new_name)
+        compose_factory = self._docker_lifecycle_target_factory() if self._docker_mode() else None
+
+        def operation():
+            if is_eve_client_running():
+                raise CharacterRenameError("Stop Game and Market and close all EVE clients before renaming.")
+            current = request
+            if compose_factory is not None:
+                current = replace(request, compose_target=compose_factory(), target_identity=target[2])
+            return rename_character(current)
+
+        thread = QThread(self)
+        worker = CharacterRenameWorker(operation)
+        thread.finished.connect(self._on_character_rename_finished, Qt.ConnectionType.QueuedConnection)
+        move_worker_to_thread(worker, thread)
+        thread.started.connect(worker.run)
+        progress = QProgressDialog(self)
+        progress.setWindowTitle(translate_ui_phrase(title))
+        progress.setLabelText(translate_ui_phrase("Preparing a recoverable backup..."))
+        progress.setRange(0, 0)
+        progress.setCancelButton(None)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self._character_rename_thread = thread
+        self._character_rename_worker = worker
+        self._character_rename_progress = progress
+        self._set_operation_controls_busy(True)
+        progress.show()
+        try:
+            thread.start()
+        except RuntimeError:
+            log.exception("Unable to start the character rename worker")
+            if not thread.isRunning():
+                from PyQt6 import sip
+                sip.delete(worker)
+                self._finish_character_rename(thread, None)
+
+    @pyqtSlot()
+    def _on_character_rename_finished(self) -> None:
+        thread = self.sender()
+        if thread is None or thread is not getattr(self, "_character_rename_thread", None):
+            return
+        self._finish_character_rename(thread, self._character_rename_worker.outcome)
+
+    def _finish_character_rename(self, thread: QThread, outcome: object) -> None:
+        from .core.character_rename import CharacterRenameError, CharacterRenameResult
+
+        self._character_rename_thread = None
+        self._character_rename_worker = None
+        self._character_rename_progress.close()
+        self._character_rename_progress.deleteLater()
+        self._character_rename_progress = None
+        thread.deleteLater()
+        self._set_operation_controls_busy(False)
+        self._refresh_characters()
+        title = "Rename Character…"
+        if isinstance(outcome, CharacterRenameResult):
+            if outcome.changed:
+                QMessageBox.information(self, title, format_ui_phrase("Character renamed to {name}.", name=outcome.name))
+        elif isinstance(outcome, CharacterRenameError):
+            message = translate_ui_phrase(str(outcome))
+            if getattr(outcome, "needs_review", False) and getattr(outcome, "backup_path", None):
+                message += "\n\n" + format_ui_phrase("Backup: {path}", path=str(outcome.backup_path))
+            QMessageBox.warning(self, title, message)
+        else:
+            QMessageBox.warning(self, title, "Unable to verify the character rename. See launcher logs.")
 
     def _on_delete_account_requested(
         self,
@@ -6745,6 +6890,14 @@ class MainWindow(QMainWindow):
                 self._cfg["hidden_characters"] = hidden
                 self._cfg["never_hide_characters"] = never
                 config.save(self._cfg)
+            updated = dict(self._cfg)
+            deleted_ids = set(outcome.deleted_character_ids)
+            for field in ("hidden_character_ids", "never_hide_character_ids"):
+                original = visibility_ids(self._cfg.get(field, []))
+                retained = {identity for identity in original if identity[1] not in deleted_ids}
+                if retained != original:
+                    store_visibility_ids(updated, field, retained)
+            self._persist_character_visibility(updated)
             PortraitCache.clear()
             self._refresh_characters()
             if not self._close_in_progress:
@@ -7614,7 +7767,7 @@ class MainWindow(QMainWindow):
 
     def _batch_launch_rows(
         self,
-        hidden: set[str] | None = None,
+        hidden: set[VisibilityRef] | None = None,
     ) -> tuple[list[tuple[Account, Character]], str | None]:
         """Resolve All Visible or one exact group through shared visibility."""
         if hidden is None:
@@ -7858,6 +8011,11 @@ class MainWindow(QMainWindow):
             failed_count=max(0, attempted - succeeded),
             cancelled=cancelled,
         )
+        if not cancelled and attempted > 0 and attempted == succeeded and not (
+            skipped_running or skipped_unavailable or failure_messages
+        ):
+            self._show_clean_launch_completion(succeeded)
+            return
         if cancelled:
             message = format_ui_phrase(
                 "Launched {count} client(s); remaining queued launches were cancelled.",
@@ -7918,6 +8076,25 @@ class MainWindow(QMainWindow):
                 + failure_detail,
             )
 
+    def _show_clean_launch_completion(self, count: int) -> None:
+        activity = getattr(self._home_page, "recent_activity", None)
+        if activity is not None:
+            activity.record_launch_completion(count)
+        notice = QMessageBox(self)
+        notice.setObjectName("launchCompleteNotice")
+        notice.setWindowTitle(translate_ui_phrase("Launch Complete"))
+        notice.setText(format_ui_phrase("Launched {count} client(s).", count=count))
+        notice.setIcon(QMessageBox.Icon.Information)
+        notice.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        notice.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        notice.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus)
+        notice.setModal(False)
+        timer = QTimer(notice)
+        timer.setSingleShot(True)
+        timer.timeout.connect(notice.close)
+        notice.show()
+        timer.start(5_000)
+
     def _kill_all_clients(self) -> None:
         if self._tracker.running_count > 0:
             self._announce_shipboard(VoiceEvent.CLIENTS_TERMINATING)
@@ -7932,31 +8109,52 @@ class MainWindow(QMainWindow):
                 format_ui_phrase("Terminated {count} client(s).", count=count),
             )
 
-    def _on_hide_character(self, character_name: str) -> None:
-        """Add a character name to hidden_characters and refresh the grid.
+    def _on_hide_character(self, username: str, character_name: str, character_id: int) -> None:
+        identity = self._character_action_identity(username, character_name, character_id)
+        if identity is None:
+            return
+        updated = dict(self._cfg)
+        change_visibility(updated, identity, hidden=True)
+        if self._persist_character_visibility(updated):
+            self._refresh_character_views()
+        else:
+            QMessageBox.warning(self, "Hidden Characters", "Could not save character visibility rules.")
 
-        Also removes it from ``never_hide_characters`` (if present) — the
-        user actively wants this character hidden, so the auto-hide exemption
-        no longer applies.
-        """
-        hidden: list[str] = list(self._cfg.get("hidden_characters", []))
-        if character_name not in hidden:
-            hidden.append(character_name)
-            self._cfg["hidden_characters"] = hidden
-            config.save(self._cfg)
-            log.info("Hid character '%s'", character_name)
-        # Remove from never-hide list so auto-hide can re-claim it on restart
-        never: list[str] = list(self._cfg.get("never_hide_characters", []))
-        if character_name in never:
-            never.remove(character_name)
-            self._cfg["never_hide_characters"] = never
-            config.save(self._cfg)
-        self._refresh_characters()
+    def _on_show_characters_requested(self, refs: list[VisibilityRef]) -> None:
+        updated = dict(self._cfg)
+        available = visibility_ids(self._cfg.get("hidden_character_ids", [])) | set(
+            self._cfg.get("hidden_characters", [])
+        )
+        for ref in refs:
+            if ref in available:
+                change_visibility(updated, ref, hidden=False)
+        if self._persist_character_visibility(updated):
+            self._refresh_character_views()
+        else:
+            QMessageBox.warning(self, "Hidden Characters", "Could not save character visibility rules.")
+
+    def _persist_character_visibility(self, updated: dict) -> bool:
+        if updated == self._cfg:
+            return True
+        try:
+            config.save(updated)
+        except (OSError, ValueError):
+            log.exception("Could not save character visibility rules")
+            return False
+        self._cfg.update(updated)
+        return True
 
     # ── Refresh + status ──────────────────────────────────────────────
 
-    def _keep_created_character_visible(self, character_name: str) -> None:
+    def _keep_created_character_visible(
+        self, character_name: str, account_id: int | None = None, character_id: int | None = None,
+    ) -> None:
         """Exempt a launcher-created character from automatic test/GM hiding."""
+        if account_id and character_id:
+            updated = dict(self._cfg)
+            change_visibility(updated, (account_id, character_id), hidden=False)
+            self._persist_character_visibility(updated)
+            return
         hidden = list(self._cfg.get("hidden_characters", []))
         never_hide = list(self._cfg.get("never_hide_characters", []))
         updated_hidden = [name for name in hidden if name != character_name]
@@ -7970,27 +8168,32 @@ class MainWindow(QMainWindow):
         self._cfg["never_hide_characters"] = never_hide
         config.save(self._cfg)
 
-    def _effective_hidden_characters(self, *, persist: bool = False) -> set[str]:
+    def _effective_hidden_characters(self, *, persist: bool = False) -> set[VisibilityRef]:
         """Return the shared explicit + automatic hidden-character set."""
-        configured = list(self._cfg.get("hidden_characters", []))
-        hidden = set(configured)
+        configured = visibility_ids(self._cfg.get("hidden_character_ids", []))
+        hidden_ids = set(configured)
+        hidden_names = set()
+        never_hide_names = set()
+        if not self._cfg.get("character_visibility_initialized", False):
+            hidden_names.update(self._cfg.get("hidden_characters", []))
+            never_hide_names.update(self._cfg.get("never_hide_characters", []))
         if self._cfg.get("hide_test_characters", True):
-            never_hide = set(self._cfg.get("never_hide_characters", []))
+            never_hide = visibility_ids(self._cfg.get("never_hide_character_ids", []))
             for account in self._accounts:
                 username_lower = account.username.lower()
                 if username_lower.startswith("test") or "gm" in username_lower:
-                    hidden.update(
-                        character.name
+                    hidden_ids.update(
+                        (account.account_id, character.char_id)
                         for character in account.characters
-                        if character.name not in never_hide
+                        if account.account_id > 0 and character.char_id > 0
+                        and character.name not in never_hide_names
                     )
-
-        if persist:
-            newly_hidden = [name for name in hidden if name not in configured]
-            if newly_hidden:
-                self._cfg["hidden_characters"] = configured + sorted(newly_hidden)
-                config.save(self._cfg)
-        return hidden
+            hidden_ids.difference_update(never_hide - configured)
+        if persist and hidden_ids != configured:
+            updated = dict(self._cfg)
+            store_visibility_ids(updated, "hidden_character_ids", hidden_ids)
+            self._persist_character_visibility(updated)
+        return hidden_ids | hidden_names
 
     def _refresh_characters(self) -> None:
         """Schedule one serialized account refresh outside the GUI thread."""
@@ -8190,6 +8393,10 @@ class MainWindow(QMainWindow):
             if result.warnings else ""
         )
         self._accounts = list(result.accounts)
+        if not result.warnings and self._accounts:
+            updated = dict(self._cfg)
+            if migrate_legacy_visibility(updated, self._accounts):
+                self._persist_character_visibility(updated)
         settings_page = getattr(self, "_settings_page", None)
         set_profiles = getattr(settings_page, "set_shared_profile_accounts", None)
         if callable(set_profiles):
@@ -8470,7 +8677,7 @@ class MainWindow(QMainWindow):
         try:
             self._characters_page.refresh(
                 self._accounts,
-                sorted(hidden),
+                list(hidden),
                 self._tracker,
                 "" if self._docker_mode() else evejs_root,
                 portrait_target=self._current_portrait_target(),
@@ -8479,6 +8686,23 @@ class MainWindow(QMainWindow):
             log.exception("Characters page refresh failed")
 
         self._refresh_character_creation_availability()
+
+        set_hidden = getattr(getattr(self, "_settings_page", None), "set_hidden_character_items", None)
+        if callable(set_hidden):
+            labels = {
+                (account.account_id, character.char_id): f"{character.name} ({account.username})"
+                for account in self._accounts for character in account.characters
+            }
+            entries = [
+                (identity, labels.get(identity) or format_ui_phrase("Character ID {id}", id=identity[1]))
+                for identity in visibility_ids(self._cfg.get("hidden_character_ids", []))
+            ]
+            initialized = self._cfg.get("character_visibility_initialized", False)
+            entries.extend(
+                (name, format_ui_phrase("{name} (previous name)", name=name) if initialized else name)
+                for name in self._cfg.get("hidden_characters", [])
+            )
+            set_hidden(sorted(entries, key=lambda entry: (entry[1].casefold(), str(entry[0]))))
 
         management_setter = getattr(
             self._characters_page,
@@ -10198,6 +10422,9 @@ class MainWindow(QMainWindow):
 
     def _close_launcher(self, event) -> None:
         """The existing guarded real shutdown, independent of X-to-tray."""
+        if getattr(self, "_character_rename_thread", None) is not None:
+            event.ignore()
+            return
         if getattr(self, "_save_migration_thread", None) is not None:
             event.ignore()
             return

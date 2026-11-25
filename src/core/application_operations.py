@@ -12,6 +12,7 @@ MUTATION_FIELDS = {
     "services": ("_lifecycle_thread", "_mod_lifecycle_lease"),
     "character_create": ("_character_creation_thread", "_character_creation_request", "_docker_character_request"),
     "character_delete": ("_character_deletion_thread", "_character_deletion_request"),
+    "character_rename": ("_character_rename_thread",),
     "overview": ("_overview_patch_thread",),
     "client_launch": ("_client_launch_thread", "_client_launch_request", "_launch_queue"),
     "docker": ("_docker_preflight_thread", "_docker_tool_request"),

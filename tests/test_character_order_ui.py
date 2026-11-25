@@ -1,6 +1,6 @@
 """Real Qt card gestures, drop validation and retained roster presentation."""
 from PyQt6.QtCore import QCoreApplication, QEvent, QMimeData, QPoint, QPointF, Qt
-from PyQt6.QtGui import QDragEnterEvent, QDropEvent
+from PyQt6.QtGui import QContextMenuEvent, QDragEnterEvent, QDropEvent
 from PyQt6.QtTest import QSignalSpy, QTest
 import pytest
 
@@ -70,6 +70,53 @@ def test_reordering_filtered_group_keeps_other_cards_and_group_launch_order(qapp
         assert page._group_state.selected_group.members==group.members
     finally:
         _close(qapp,page)
+
+
+def test_body_and_overflow_open_the_same_menu_and_capture_character_identity(qapp, monkeypatch):
+    page = _page(qapp)
+    try:
+        card = page._cards[("account-1", 101)]
+        seen = []
+        monkeypatch.setattr(card_module.QMenu, "popup", lambda menu, point: seen.append((menu, point)))
+        body = card.rect().center()
+        absolute = card.mapToGlobal(body)
+        card.contextMenuEvent(QContextMenuEvent(QContextMenuEvent.Reason.Mouse, body, absolute))
+        button = card._overflow_btn
+        cursor = button.mapToGlobal(button.rect().center())
+        monkeypatch.setattr(card_module.QCursor, "pos", lambda: cursor)
+        card._on_overflow_clicked()
+        assert [point for _menu, point in seen] == [absolute, cursor]
+        assert [action.text() for action in seen[0][0].actions()] == [
+            action.text() for action in seen[1][0].actions()
+        ]
+        requested = QSignalSpy(page.rename_character_requested)
+        rename = next(action for action in seen[0][0].actions() if action.text() == "Rename Character…")
+        card.set_character_name("A Different Name")
+        rename.trigger()
+        assert list(requested[0]) == ["account-1", "Pilot 1", 101]
+    finally:
+        _close(qapp, page)
+
+
+def test_rename_refreshes_existing_card_and_search_under_the_same_id(qapp):
+    page = _page(qapp)
+    try:
+        original = page._cards[("account-1", 101)]
+        original.set_selected(True)
+        page._selected_key = ("account-1", 101)
+        accounts = _accounts()
+        accounts[0].characters[0].name = "New Pilot Name"
+        page.refresh(accounts, [], ProcessTracker())
+        assert page._cards[("account-1", 101)] is original
+        assert page._selected_key == ("account-1", 101)
+        assert original.accessibleName() == "New Pilot Name"
+        assert original._name_label.toolTip() == "New Pilot Name"
+        page.search_edit.setText("New Pilot Name")
+        assert not original.isHidden()
+        page.search_edit.setText("Pilot 1")
+        assert original.isHidden()
+    finally:
+        _close(qapp, page)
 
 
 class _Enter(QDragEnterEvent):

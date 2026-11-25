@@ -935,7 +935,10 @@ class ModCoordinator(QObject):
                 QMessageBox.warning(self.window, "Mod Settings", result.error)
                 return
             session = result.value
-            dialog = ModSettingsDialog(mod.name, session.fields, session.values, scope_label=scope_label, parent=self.window)
+            dialog = ModSettingsDialog(
+                mod.name, session.fields, session.values, scope_label=scope_label, parent=self.window,
+                layout=session.layout, layout_error=session.layout_error,
+            )
             self._dialog = dialog
 
             def save(values):

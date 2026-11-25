@@ -5,8 +5,10 @@ import math
 from typing import Optional
 from PyQt6 import sip
 
-from PyQt6.QtCore import QMimeData, Qt, pyqtSignal
+from PyQt6.QtCore import QMimeData, QPoint, Qt, pyqtSignal
 from PyQt6.QtGui import (
+    QContextMenuEvent,
+    QCursor,
     QDrag,
     QKeyEvent,
     QPixmap,
@@ -249,8 +251,9 @@ class CharacterCard(CharacterCardMotion, QFrame):
 
     launched = pyqtSignal(str, str, int)  # username, char_name, char_id
     selected = pyqtSignal(str, str, int)  # username, char_name, char_id
-    hide_requested = pyqtSignal(str)  # character_name
+    hide_requested = pyqtSignal(str, str, int)
     manage_groups_requested = pyqtSignal(str, str, int)
+    rename_requested = pyqtSignal(str, str, int)
     delete_character_requested = pyqtSignal(str, str, int)
     delete_account_requested = pyqtSignal(str, str, int)
     reorder_dropped = pyqtSignal(object, bool)
@@ -288,6 +291,7 @@ class CharacterCard(CharacterCardMotion, QFrame):
         self._drag_start = None
         self._dragged = False
         self._drop_after = None
+        self._actions_menu: QMenu | None = None
         self.setAcceptDrops(True)
         self._launch_available = True
         self._launch_unavailable_reason = ""
@@ -354,6 +358,7 @@ class CharacterCard(CharacterCardMotion, QFrame):
         layout.addWidget(self._portrait, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         self._name_label = QLabel(self.char_name)
+        self._name_label.setTextFormat(Qt.TextFormat.PlainText)
         self._name_label.setStyleSheet(
             f"color: {S['text_primary']}; border: none; background: transparent; "
             "font-size: 14px; font-weight: 700;"
@@ -563,6 +568,13 @@ class CharacterCard(CharacterCardMotion, QFrame):
         """Update card status."""
         self._apply_status(status)
 
+    def set_character_name(self, name: str) -> None:
+        if name == self.char_name:
+            return
+        self.char_name = name
+        self._elide_name()
+        self.retranslate_ui()
+
     def set_stats(self, *, isk: str, ship: str, sp: str, location: str, sec_status: str, ship_type_id: int = 0) -> None:
         """Update retained card values without replacing its portrait or selection."""
         self._raw_ship, self._raw_location, self._ship_type_id = ship, location, ship_type_id
@@ -608,7 +620,27 @@ class CharacterCard(CharacterCardMotion, QFrame):
         self.launched.emit(self.username, self.char_name, self.char_id)
 
     def _on_overflow_clicked(self) -> None:
+        position = QCursor.pos()
+        if not self._overflow_btn.rect().contains(self._overflow_btn.mapFromGlobal(position)):
+            position = self._overflow_btn.mapToGlobal(self._overflow_btn.rect().bottomLeft())
+        self._show_actions(position)
+
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:  # noqa: N802
+        position = (
+            self.mapToGlobal(self.rect().center())
+            if event.reason() == QContextMenuEvent.Reason.Keyboard
+            else event.globalPos()
+        )
+        self._show_actions(position)
+        event.accept()
+
+    def _show_actions(self, position: QPoint) -> None:
+        previous = self._actions_menu
+        if previous is not None and not sip.isdeleted(previous) and previous.isVisible():
+            return
         menu = QMenu(self)
+        self._actions_menu = menu
+        identity = self.username, self.char_name, self.char_id
         menu.setAccessibleName(
             format_ui_phrase("Actions for {character}", character=self.char_name)
         )
@@ -639,7 +671,11 @@ class CharacterCard(CharacterCardMotion, QFrame):
         )
         menu.addAction(
             translate_ui_phrase("Hide Character"),
-            lambda: self.hide_requested.emit(self.char_name),
+            lambda: self.hide_requested.emit(*identity),
+        )
+        menu.addAction(
+            translate_ui_phrase("Rename Character…"),
+            lambda: self.rename_requested.emit(*identity),
         )
         menu.addAction(translate_ui_phrase("View Log"), lambda: None)
         menu.addSeparator()
@@ -659,12 +695,19 @@ class CharacterCard(CharacterCardMotion, QFrame):
                 self.char_id,
             ),
         )
-        menu.exec(self._overflow_btn.mapToGlobal(self._overflow_btn.rect().bottomLeft()))
+        menu.aboutToHide.connect(menu.deleteLater)
+        menu.popup(position)
 
     def _on_view_details(self) -> None:
         self.selected.emit(self.username, self.char_name, self.char_id)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        if event.key() == Qt.Key.Key_Menu or (
+            event.key() == Qt.Key.Key_F10 and event.modifiers() == Qt.KeyboardModifier.ShiftModifier
+        ):
+            self._show_actions(self.mapToGlobal(self.rect().center()))
+            event.accept()
+            return
         if event.key() in {
             Qt.Key.Key_Enter,
             Qt.Key.Key_Return,

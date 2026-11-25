@@ -11,6 +11,7 @@ from src.core.mod_update_source import (Version, parse_update_source, select_rel
 from src.core import mod_updates
 from src.core.mod_manifest import scan_mods
 from src.core.mod_operations import ModOperationContext
+from src.core.mod_settings_schema import SETTINGS_LAYOUT_FILENAME
 
 SOURCE = dict(provider='github', repository='V0nCleef/EveJS-DLSS5', asset='EveJS-DLSS5-{version}.zip', preserveFiles=['config.json'])
 
@@ -37,7 +38,11 @@ def test_channel_asset_changelog_and_equal_version():
     assert select_release(parse_update_source(dict(SOURCE, channel='prerelease')), '1.0.0', [release('1.2.0-rc.1')]).version == '1.2.0-rc.1'
 
 
-@pytest.mark.parametrize('change', [dict(repository='owner/../repo'), dict(asset='*.zip'), dict(preserveFiles=['../config.json']), dict(preserveFiles=['loader.js']), dict(preserveFiles=['evejs-launcher.mod.json'])])
+@pytest.mark.parametrize('change', [
+    dict(repository='owner/../repo'), dict(asset='*.zip'), dict(preserveFiles=['../config.json']),
+    dict(preserveFiles=['loader.js']), dict(preserveFiles=['evejs-launcher.mod.json']),
+    dict(preserveFiles=[SETTINGS_LAYOUT_FILENAME]),
+])
 def test_invalid_declarations(change):
     with pytest.raises(ValueError):
         parse_update_source(dict(SOURCE, **change))
@@ -64,7 +69,12 @@ def test_download_rejection_retains_no_partial(tmp_path, download):
 
 
 @pytest.fixture
-def fixture(tmp_path, monkeypatch):
+def replacement_includes_layout():
+    return True
+
+
+@pytest.fixture
+def fixture(tmp_path, monkeypatch, replacement_includes_layout):
     from src import config
     from src.core import mod_management
     monkeypatch.setattr(config, 'CONFIG_DIR', tmp_path / 'appdata')
@@ -80,18 +90,22 @@ def fixture(tmp_path, monkeypatch):
     (target / 'evejs-launcher.mod.json').write_text(json.dumps(manifest))
     (target / 'loader.js').write_text('//old')
     (target / 'config.json').write_text('{"user":42}')
+    (target / SETTINGS_LAYOUT_FILENAME).write_text('{"layout":"previous"}')
     (root / 'unrelated.txt').write_text('keep')
     archive = tmp_path / 'new.zip'
     with zipfile.ZipFile(archive, 'w') as output:
         output.writestr('Example/evejs-launcher.mod.json', json.dumps(dict(manifest, version='1.1.0')))
         output.writestr('Example/loader.js', '//new')
         output.writestr('Example/config.json', '{"user":0}')
+        if replacement_includes_layout:
+            output.writestr(f'Example/{SETTINGS_LAYOUT_FILENAME}', '{"layout":"incoming"}')
     offer = select_release(parse_update_source(SOURCE), '1.0.0', [release(data=archive.read_bytes())])
     offer = validate_release_metadata(offer, dict(schemaVersion=1, id='author.example', version='1.1.0', asset='EveJS-DLSS5-1.1.0.zip'))
     return root, target, offer, lambda _release, destination: shutil.copyfile(archive, destination)
 
 
-def test_real_package_swap_preserves_settings_order_and_active(fixture):
+@pytest.mark.parametrize("replacement_includes_layout", [True, False], ids=["replace-layout", "remove-layout"])
+def test_real_package_swap_preserves_settings_order_and_active(fixture, replacement_includes_layout):
     root, target, offer, downloader = fixture
     mod = scan_mods(root)[0]
     mod_updates.install_release(mod, offer, ModOperationContext(root), guard=lambda: None, downloader=downloader)
@@ -99,6 +113,11 @@ def test_real_package_swap_preserves_settings_order_and_active(fixture):
     assert updated.version == '1.1.0' and updated.active
     assert (target / 'loader.js').read_text() == '//new'
     assert json.loads((target / 'config.json').read_text()) == {'user': 42}
+    layout = target / SETTINGS_LAYOUT_FILENAME
+    if replacement_includes_layout:
+        assert json.loads(layout.read_text()) == {'layout': 'incoming'}
+    else:
+        assert not layout.exists()
     assert (root / 'unrelated.txt').read_text() == 'keep'
     assert not mod_updates.pending_updates(root)
     assert list((root / mod_updates.UPDATE_ROOT).glob('*/previous/loader.js.off')) or list((root / mod_updates.UPDATE_ROOT).glob('*/previous/loader.js.disabled'))
@@ -147,6 +166,7 @@ def test_failed_new_activation_restores_old_version(fixture, monkeypatch):
         mod_updates.install_release(scan_mods(root)[0], offer, ModOperationContext(root), guard=lambda: None, downloader=downloader)
     assert scan_mods(root)[0].version == '1.0.0' and scan_mods(root)[0].active
     assert (target / 'loader.js').read_text() == '//old'
+    assert json.loads((target / SETTINGS_LAYOUT_FILENAME).read_text()) == {'layout': 'previous'}
     assert not mod_updates.pending_updates(root)
 
 

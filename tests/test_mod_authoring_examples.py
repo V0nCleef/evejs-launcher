@@ -14,7 +14,7 @@ from src.core.local_mod_packages import LocalModPackages
 from src.core.mod_api_manifest import read_api_manifest
 from src.core.mod_api_runtime import commit_helper_contributions, run_mod_helper
 from src.core.mod_settings import ModSettingsContext, ModSettingsSession, profile_identity
-from src.core.mod_settings_schema import parse_settings_schema
+from src.core.mod_settings_schema import SETTINGS_LAYOUT_FILENAME, parse_settings_schema
 from src.core.mod_guide import catalog_paths
 
 
@@ -52,6 +52,27 @@ def test_configure_demo_saves_reopens_and_has_no_executable_helper(tmp_path):
     assert json.loads((context.mod_folder / "preferences.json").read_text()) == {"scanInterval": 20}
     reopened = ModSettingsSession.open(context, descriptor.settings)
     assert reopened.values["scanInterval"] == 20
+
+
+def test_configure_forms_guide_example_validates_and_round_trips(tmp_path):
+    page = SOURCE / "docs/how-to-make-a-mod/03a-configure-forms.md"
+    example, layout = re.findall(r"```json\n([\s\S]*?)\n```", page.read_text(encoding="utf-8"))
+    declaration = json.loads(example)
+    schema = parse_settings_schema(declaration)
+    first, second, third = schema.fields
+    assert {field.kind for field in schema.fields} == {"number"}
+    assert first.group and first.group == second.group == third.group
+    _, context = copy_example(tmp_path, "configure-demo")
+    (context.mod_folder / SETTINGS_LAYOUT_FILENAME).write_text(layout, encoding="utf-8")
+    session = ModSettingsSession.open(context, declaration)
+    assert session.layout[0].rows == ((first.id, second.id, third.id),)
+    assert session.values == {first.id: 5, second.id: 15, third.id: 25}
+    edited = {**session.values, second.id: 17.5}
+    session.save(edited)
+    reopened = ModSettingsSession.open(context, declaration)
+    assert reopened.values == edited
+    saved = json.loads((context.mod_folder / "preferences.json").read_text(encoding="utf-8"))
+    assert saved["escalation"]["array2ChancePct"] == 17.5
 
 
 def test_native_startup_example_uses_public_import_activation_and_real_helper(tmp_path):
@@ -191,7 +212,7 @@ def test_hello_loader_can_be_imported_and_runs_only_as_an_explicit_preload(tmp_p
     assert node, "Node.js is required to validate the bundled Node examples"
     disabled = context.mod_folder / "loader.js.disabled"
     completed = subprocess.run([node, "--require", str(disabled), "-e", ""], cwd=tmp_path,
-        capture_output=True, timeout=10, check=True, creationflags=0x08000000)
+        capture_output=True, timeout=10, check=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     assert completed.stdout == b"[hello-loader] Selected launcher preload is running.\n"
     assert not (context.mod_folder / "loader.js").exists()
 
@@ -211,6 +232,7 @@ def test_real_node_example_reads_typed_saved_preferences_and_noop_preserves_byte
     assert b"Enabled=0" in before and b"Intensity=4" in before
 
 
+@pytest.mark.skipif(os.name != "nt", reason="this example uses a Windows PowerShell helper")
 def test_real_powershell_receipt_example_installs_verifies_restores_and_recovers(tmp_path):
     descriptor, context = copy_example(tmp_path, "client-receipt-demo")
     result = run_mod_helper(descriptor, "verify", context, timeout=15)

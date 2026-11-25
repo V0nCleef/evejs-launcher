@@ -581,7 +581,7 @@ def test_verified_commit_with_unconfirmed_cleanup_does_not_restart_or_offer_retr
     )
     refreshed: list[str] = []
     window._keep_created_character_visible = (  # type: ignore[method-assign]
-        lambda _name: refreshed.append("visibility")
+        lambda _name, _account_id, _character_id: refreshed.append("visibility")
     )
     window._refresh_characters = (  # type: ignore[method-assign]
         lambda: refreshed.append("refresh")
@@ -640,7 +640,7 @@ def test_stale_target_suppresses_ui_and_restore_but_completes_teardown(
     rendered: list[str] = []
     window._refresh_characters = lambda: rendered.append("refresh")  # type: ignore[method-assign]
     window._keep_created_character_visible = (  # type: ignore[method-assign]
-        lambda _name: rendered.append("visibility")
+        lambda _name, _account_id, _character_id: rendered.append("visibility")
     )
     monkeypatch.setattr(
         app_module.QMessageBox,

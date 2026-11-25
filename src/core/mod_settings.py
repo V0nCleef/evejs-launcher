@@ -16,6 +16,7 @@ from .mod_config_documents import DocumentValue, read_value, values_equal
 from .mod_contributions import ContributionConflict, ContributionOwner, ContributionStore, FileTarget, KeyEdit, read_target
 from .mod_lifecycle_lock import acquire_mod_lifecycle_lock
 from .mod_contributions import ConfigurationReview, ContributionPlan
+from .mod_settings_layout import SettingsLayoutSection, load_settings_layout
 from .mod_settings_schema import ModSetting, ModSettingsSchema, SettingsFile, parse_settings_schema, validate_values
 
 
@@ -154,6 +155,8 @@ class ModSettingsSession:
     manifest_path: Path | None
     manifest_digest: str | None
     scope: str
+    layout: tuple[SettingsLayoutSection, ...] = ()
+    layout_error: bool = False
 
     @classmethod
     def open(cls, context: ModSettingsContext, declaration: object, *, scope: str = "global", manifest_path: Path | None = None) -> "ModSettingsSession":
@@ -182,7 +185,9 @@ class ModSettingsSession:
             if manifest_bytes is None:
                 raise ModSettingsError("The mod settings declaration is no longer installed.")
             digest = hashlib.sha256(manifest_bytes).hexdigest()
-        return cls(context, schema, fields, values, targets, observed, manifest_path, digest, scope)
+        layout, layout_error = load_settings_layout(context.evejs_root, context.mod_folder, schema.fields, scope=scope)
+        return cls(context, schema, fields, values, targets, observed, manifest_path, digest, scope,
+                   layout=layout, layout_error=layout_error)
 
     def _changed_fields(self, values: Mapping[str, object]) -> tuple[ModSetting, ...]:
         errors = validate_values(self.fields, values)
@@ -264,4 +269,4 @@ class ModSettingsSession:
         errors = validate_values(self.fields, verified_values)
         if errors:
             raise ModSettingsError("\n".join(f"{key}: {error}" for key, error in errors.items()))
-        return ModSettingsSession(self.context, self.schema, self.fields, verified_values, self.targets, observed, self.manifest_path, self.manifest_digest, self.scope)
+        return replace(self, values=verified_values, observed=observed)

@@ -51,6 +51,32 @@ def test_guide_navigation_examples_search_and_back_are_local(qapp, tmp_path):
     app.processEvents()
 
 
+def test_configure_forms_is_linked_from_the_configure_walkthrough(qapp):
+    previous = current_language()
+    set_language("en")
+    guide = ModAuthoringGuide(bundle_root=ROOT)
+    try:
+        guide._follow_link(QUrl("03-configure.md"))
+        links = [
+            fragment.charFormat().anchorHref()
+            for fragment in guide._fragments()
+            if fragment.charFormat().isAnchor()
+        ]
+        destination = "03a-configure-forms.md"
+        assert destination in links
+        guide.browser.anchorClicked.emit(QUrl(destination))
+        assert guide.location.text() == f"docs/how-to-make-a-mod/{destination}"
+        assert "Configure forms" in guide.navigation.currentItem().text()
+        guide.search.setText("Layout overrides")
+        guide._find()
+        assert guide.browser.textCursor().selectedText() == "Layout overrides"
+        guide._back()
+        assert guide.location.text() == "docs/how-to-make-a-mod/03-configure.md"
+    finally:
+        guide.close()
+        set_language(previous)
+
+
 def test_all_walkthrough_languages_keep_code_and_links_and_english_export_in_sync():
     source = json.loads((ROOT / "docs/how-to-make-a-mod/guide-content.json").read_text(encoding="utf-8"))
     catalog = json.loads((ROOT / "docs/how-to-make-a-mod/navigation.json").read_text(encoding="utf-8"))
