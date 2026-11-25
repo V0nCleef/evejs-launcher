@@ -140,6 +140,7 @@ class SettingsPage(QWidget):
     docker_preflight_requested = pyqtSignal(object)
     voice_preview_requested = pyqtSignal()
     drone_recovery_requested = pyqtSignal()
+    overview_copy_requested = pyqtSignal()
     linux_maintenance_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -265,6 +266,9 @@ class SettingsPage(QWidget):
             "Restore verified drone memberships for all characters from saved launcher profiles. Close EVE clients first."
         )
         client_form.addRow("", self.drone_recovery_btn)
+        self.overview_copy_btn = QPushButton("Copy overview once")
+        self.overview_copy_btn.clicked.connect(self.overview_copy_requested.emit)
+        client_form.addRow("", self.overview_copy_btn)
         self.client_settings_mode_combo.currentIndexChanged.connect(self._sync_client_settings_controls)
         root.addWidget(client_box)
 

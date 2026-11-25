@@ -2,6 +2,11 @@
 
 ## Changelog
 
+## v1.0.96 - 2026-11-25
+- Add Copy overview once in Settings for Native installations using the Overview Bridge and Separate client settings. Choose one captured character and one or more recipients.
+- Apply the selected snapshot once per recipient on the next launcher login. Each recipient can customize their own overview afterward.
+- Keep queued copies tied to the captured snapshot and require a matching acknowledgement before completing each copy.
+
 ## v1.0.95 - 2026-11-25
 - Save Migration can optionally bring saved overviews, hotkeys, and window layouts into Separate client settings at the destination.
 - Match preferences to the accounts and characters in the transferred save. Back up existing destination files and restore the destination save if copying preferences fails.

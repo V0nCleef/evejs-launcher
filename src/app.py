@@ -169,6 +169,7 @@ from .core.overview_patch import (
     is_eve_client_running,
 )
 from .core.overview_state import (
+    OverviewSeparateSettingsRequired,
     OverviewSnapshotRequired,
     add_pending_overview_import,
     load_overview_state,
@@ -865,6 +866,8 @@ class MainWindow(QMainWindow):
         self._settings_page.show_characters_requested.connect(self._on_show_characters_requested)
         from .ui.drone_recovery import open_recovery
         self._settings_page.drone_recovery_requested.connect(lambda: open_recovery(self, Path(PROFILES_ROOT)))
+        from .ui.overview_copy import open_overview_copy
+        self._settings_page.overview_copy_requested.connect(lambda: open_overview_copy(self))
         self._settings_page.voice_preview_requested.connect(
             self._preview_shipboard_voice
         )
@@ -7055,7 +7058,18 @@ class MainWindow(QMainWindow):
             patch_status = inspect_overview_patch(client_path)
             if patch_status.state is OverviewPatchState.PATCHED:
                 try:
-                    overview_bridge = prepare_overview_launch(character_id, **self._overview_kwargs(launch=True))
+                    overview_bridge = prepare_overview_launch(
+                        character_id,
+                        separate_settings=self._cfg.get("client_settings_mode", "separate") == "separate",
+                        **self._overview_kwargs(launch=True),
+                    )
+                except OverviewSeparateSettingsRequired:
+                    if show_errors:
+                        QMessageBox.information(
+                            self, "Copy overview once",
+                            "Save the Separate settings option first so the recipients can keep their own changes.",
+                        )
+                    return None
                 except OverviewSnapshotRequired as exc:
                     source_id = exc.source_character_id or source_id
                     source_name = next(

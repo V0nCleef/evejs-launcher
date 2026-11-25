@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 import uuid
 
@@ -22,6 +23,10 @@ class OverviewSnapshotRequired(RuntimeError):
     def __init__(self, source_character_id: int) -> None:
         super().__init__("The selected source overview has not been captured yet.")
         self.source_character_id = source_character_id
+
+
+class OverviewSeparateSettingsRequired(RuntimeError):
+    """Raised when an existing-character copy would apply in Shared mode."""
 
 
 @dataclass(frozen=True)
@@ -80,7 +85,10 @@ def save_overview_state(state: dict, path: Path = STATE_FILE) -> None:
 
 
 def snapshot_for_character(character_id: int, path: Path = STATE_FILE) -> dict | None:
-    value = load_overview_state(path)["snapshots"].get(str(character_id))
+    return _validated_snapshot(load_overview_state(path)["snapshots"].get(str(character_id)))
+
+
+def _validated_snapshot(value: object) -> dict | None:
     if not isinstance(value, dict):
         return None
     hashvalue = value.get("hashvalue")
@@ -108,6 +116,30 @@ def add_pending_overview_import(
         "sourceCharacterID": source_character_id,
         "createdAt": datetime.now(timezone.utc).isoformat(),
     }
+    save_overview_state(state, path)
+
+
+def queue_overview_copies(source_character_id, target_character_ids, path: Path = STATE_FILE) -> None:
+    """Pin the current source snapshot for a one-time import on each target."""
+    targets = tuple(dict.fromkeys(target_character_ids))
+    if (type(source_character_id) is not int or source_character_id <= 0 or not targets
+            or any(type(target) is not int or target <= 0 or target == source_character_id for target in targets)):
+        raise ValueError("Choose a source and at least one different character.")
+    state = load_overview_state(path)
+    snapshot = _validated_snapshot(state["snapshots"].get(str(source_character_id)))
+    if snapshot is None:
+        raise OverviewSnapshotRequired(source_character_id)
+    pending = state["pendingImports"]
+    if any(str(target) in pending for target in targets):
+        raise ValueError("One of the selected characters already has an overview copy queued.")
+    now = datetime.now(timezone.utc).isoformat()
+    for target in targets:
+        pending[str(target)] = {
+            "sourceCharacterID": source_character_id,
+            "createdAt": now,
+            "ackID": uuid.uuid4().hex,
+            "snapshot": {"hashvalue": snapshot["hashvalue"], "sqID": snapshot["sqID"]},
+        }
     save_overview_state(state, path)
 
 
@@ -162,13 +194,23 @@ def prepare_overview_launch(
     *,
     state_path: Path = STATE_FILE,
     ack_dir: Path = ACK_DIR,
+    separate_settings: bool = True,
 ) -> OverviewBridgeLaunch:
     """Build a capture command, or an apply command for a pending target."""
     if isinstance(character_id, bool) or not isinstance(character_id, int) or character_id <= 0:
         raise ValueError("A positive character ID is required for the overview bridge.")
     state = load_overview_state(state_path)
     pending = state["pendingImports"].get(str(character_id))
+    ack_id = _pinned_ack_id(pending)
+    if ack_id is not None and (ack_dir / f"{ack_id}.ack").is_file():
+        # A launch can follow a successful import before the periodic poll runs.
+        process_overview_ack_files(state_path=state_path, ack_dir=ack_dir)
+        state = load_overview_state(state_path)
+        pending = state["pendingImports"].get(str(character_id))
+        ack_id = _pinned_ack_id(pending)
     if isinstance(pending, dict):
+        if "snapshot" in pending and not separate_settings:
+            raise OverviewSeparateSettingsRequired
         source_id = pending.get("sourceCharacterID")
         if (
             isinstance(source_id, bool)
@@ -176,26 +218,21 @@ def prepare_overview_launch(
             or source_id <= 0
         ):
             raise OverviewSnapshotRequired(0)
-        snapshot = state["snapshots"].get(str(source_id))
-        if not isinstance(snapshot, dict):
+        snapshot = _validated_snapshot(pending.get("snapshot", state["snapshots"].get(str(source_id))))
+        if snapshot is None or ("snapshot" in pending and ack_id is None):
             raise OverviewSnapshotRequired(source_id)
-        hashvalue = snapshot.get("hashvalue")
-        sq_id = snapshot.get("sqID")
-        if (
-            not isinstance(hashvalue, str)
-            or len(hashvalue) != 40
-            or isinstance(sq_id, bool)
-            or not isinstance(sq_id, int)
-            or sq_id <= 0
-        ):
-            raise OverviewSnapshotRequired(source_id)
-        command = f"apply|{character_id}|{hashvalue}|{sq_id}"
+        command = f"apply|{character_id}|{snapshot['hashvalue']}|{snapshot['sqID']}"
     else:
         command = f"capture|{character_id}"
 
     ack_dir.mkdir(parents=True, exist_ok=True)
-    ack_path = ack_dir / f"{uuid.uuid4().hex}.ack"
+    ack_path = ack_dir / f"{ack_id or uuid.uuid4().hex}.ack"
     return OverviewBridgeLaunch(command=command, ack_path=ack_path)
+
+
+def _pinned_ack_id(pending: object) -> str | None:
+    value = pending.get("ackID") if isinstance(pending, dict) else None
+    return value if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{32}", value) else None
 
 
 def process_overview_ack_files(
@@ -209,6 +246,7 @@ def process_overview_ack_files(
     state = load_overview_state(state_path)
     changed = False
     events: list[OverviewBridgeEvent] = []
+    processed: list[Path] = []
     for ack_path in sorted(ack_dir.glob("*.ack")):
         try:
             text = ack_path.read_text(encoding="utf-8", errors="replace").strip()
@@ -233,6 +271,14 @@ def process_overview_ack_files(
                 changed = True
                 events.append(OverviewBridgeEvent("capture", character_id))
             elif kind == "apply" and len(parts) == 4:
+                queued = state["pendingImports"].get(str(character_id), {})
+                pinned = queued.get("snapshot") if isinstance(queued, dict) else None
+                if isinstance(queued, dict) and "snapshot" in queued:
+                    if (_pinned_ack_id(queued) != ack_path.stem
+                            or not isinstance(pinned, dict)
+                            or parts[2] != pinned.get("hashvalue")
+                            or int(parts[3]) != pinned.get("sqID")):
+                        raise ValueError("The acknowledgement does not match the queued overview")
                 state["pendingImports"].pop(str(character_id), None)
                 changed = True
                 events.append(OverviewBridgeEvent("apply", character_id))
@@ -244,10 +290,12 @@ def process_overview_ack_files(
                 raise ValueError
         except (ValueError, IndexError):
             events.append(OverviewBridgeEvent("invalid", 0, ack_path.name))
+        processed.append(ack_path)
+    if changed:
+        save_overview_state(state, state_path)
+    for ack_path in processed:
         try:
             ack_path.unlink()
         except OSError:
             pass
-    if changed:
-        save_overview_state(state, state_path)
     return events

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
 from PyQt6.QtWidgets import QApplication, QMainWindow
 
@@ -55,7 +56,7 @@ def test_native_launch_request_carries_verified_overview_command(
     monkeypatch.setattr(
         app_module,
         "prepare_overview_launch",
-        lambda _id: bridge,
+        lambda _id, *, separate_settings: bridge if separate_settings else None,
     )
     try:
         request = window._make_client_launch_request(
@@ -68,3 +69,12 @@ def test_native_launch_request_carries_verified_overview_command(
 
     assert request is not None
     assert request.overview_bridge == bridge
+
+
+def test_overview_copy_explains_native_requirement_in_docker(monkeypatch):
+    from src.ui import overview_copy
+
+    messages = []
+    monkeypatch.setattr(overview_copy.QMessageBox, "information", lambda *args: messages.append(args[2]))
+    overview_copy.open_overview_copy(SimpleNamespace(_docker_mode=lambda: True))
+    assert messages == ["Overview copy is available for Native installations."]

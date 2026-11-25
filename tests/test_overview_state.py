@@ -105,3 +105,61 @@ def test_deleted_character_prunes_snapshot_target_and_source_dependencies(
     assert snapshot_for_character(source_id, state_path) is None
     assert pending_overview_source(target_id, state_path) is None
     assert pending_overview_source(other_target_id, state_path) is None
+
+
+def test_copy_existing_overviews_pins_snapshot_and_consumes_matching_ack(tmp_path):
+    from src.core import overview_state as overview
+
+    path, acks = tmp_path / "overview.json", tmp_path / "acks"
+    state = {"version": 1, "snapshots": {"10": {"hashvalue": "a" * 40, "sqID": 4}}, "pendingImports": {}}
+    overview.save_overview_state(state, path)
+    overview.queue_overview_copies(10, (20, 30), path)
+    state = overview.load_overview_state(path)
+    state["snapshots"]["10"] = {"hashvalue": "b" * 40, "sqID": 5}
+    overview.save_overview_state(state, path)
+    first = overview.prepare_overview_launch(20, state_path=path, ack_dir=acks)
+    other = overview.prepare_overview_launch(30, state_path=path, ack_dir=acks)
+    assert first.command == "apply|20|" + "a" * 40 + "|4"
+    first.ack_path.write_text("apply|20|" + "b" * 40 + "|5", encoding="utf-8")
+    assert overview.process_overview_ack_files(state_path=path, ack_dir=acks)[0].kind == "invalid"
+    assert overview.prepare_overview_launch(20, state_path=path, ack_dir=acks).command == first.command
+    first.ack_path.write_text(first.command, encoding="utf-8")
+    assert overview.process_overview_ack_files(state_path=path, ack_dir=acks)[0].kind == "apply"
+    assert overview.prepare_overview_launch(20, state_path=path, ack_dir=acks).command == "capture|20"
+    assert overview.prepare_overview_launch(30, state_path=path, ack_dir=acks).command == other.command
+
+
+def test_overview_copy_ignores_stale_ack_and_consumes_success_before_relaunch(tmp_path):
+    from src.core import overview_state as overview
+
+    path, acks = tmp_path / "overview.json", tmp_path / "acks"
+    overview.save_overview_state(
+        {"version": 1, "snapshots": {"10": {"hashvalue": "a" * 40, "sqID": 4}}, "pendingImports": {}},
+        path,
+    )
+    overview.queue_overview_copies(10, (20,), path)
+    launch = overview.prepare_overview_launch(20, state_path=path, ack_dir=acks)
+    stale = acks / "other-launch.ack"
+    stale.write_text(launch.command, encoding="utf-8")
+    assert overview.process_overview_ack_files(state_path=path, ack_dir=acks)[0].kind == "invalid"
+    with pytest.raises(overview.OverviewSeparateSettingsRequired):
+        overview.prepare_overview_launch(20, state_path=path, ack_dir=acks, separate_settings=False)
+    assert overview.prepare_overview_launch(20, state_path=path, ack_dir=acks) == launch
+    launch.ack_path.write_text(launch.command, encoding="utf-8")
+    next_launch = overview.prepare_overview_launch(20, state_path=path, ack_dir=acks)
+    assert next_launch.command == "capture|20"
+    assert next_launch.ack_path != launch.ack_path
+
+
+def test_overview_dialog_selects_multiple_targets_without_source(qapp):
+    from PyQt6.QtCore import Qt
+    from src.ui.overview_copy import OverviewCopyDialog
+
+    dialog = OverviewCopyDialog(((10, "Source"), (20, "Target A"), (30, "Target B")), {10})
+    assert dialog.source.count() == 1 and dialog.recipients.count() == 2
+    assert not dialog._confirm.isEnabled()
+    for index in range(dialog.recipients.count()):
+        dialog.recipients.item(index).setCheckState(Qt.CheckState.Checked)
+    assert dialog.selection() == (10, (20, 30))
+    assert dialog._confirm.isEnabled()
+    dialog.deleteLater()

@@ -82,6 +82,25 @@ _ROWS: dict[str, tuple[str, ...]] = {
         "启动客户端", "クライアントを起動", "클라이언트 실행", "LANCER LE CLIENT",
         "CLIENT STARTEN", "CLIENT STARTEN", "ЗАПУСТИТЬ КЛИЕНТ",
     ),
+    "Copy overview once": ("仅复制一次总览", "オーバービューを一度だけコピー", "오버뷰 한 번 복사", "Copier la vue d’ensemble une fois", "Übersicht einmal kopieren", "Overzicht eenmalig kopiëren", "Скопировать обзор один раз"),
+    "Close EVE clients before copying their overviews.": ("复制总览前请关闭 EVE 客户端。", "コピーする前に EVE クライアントを閉じてください。", "복사하기 전에 EVE 클라이언트를 닫으세요.", "Fermez les clients EVE avant de copier les vues d’ensemble.", "Schließe die EVE-Clients vor dem Kopieren.", "Sluit de EVE-clients voordat je de overzichten kopieert.", "Закройте клиенты EVE перед копированием обзоров."),
+    "Save the Separate settings option first so the recipients can keep their own changes.": ("请先保存独立设置模式，以便目标角色保留自己的更改。", "コピー先が変更を保持できるよう、先に個別設定を保存してください。", "대상 캐릭터가 변경 사항을 유지할 수 있도록 개별 설정을 먼저 저장하세요.", "Enregistrez d’abord les réglages séparés pour que chaque destinataire conserve ses modifications.", "Speichere zuerst getrennte Einstellungen, damit die Zielcharaktere ihre Änderungen behalten.", "Sla eerst Afzonderlijke instellingen op zodat de doelpersonages hun eigen wijzigingen behouden.", "Сначала сохраните раздельные настройки, чтобы получатели могли сохранять свои изменения."),
+    "Launch the source character once to capture its overview, then close EVE.": ("请启动源角色一次以捕获总览，然后关闭 EVE。", "コピー元のキャラクターで一度ログインしてから EVE を閉じてください。", "원본 캐릭터를 한 번 실행해 오버뷰를 저장한 뒤 EVE를 닫으세요.", "Lancez une fois le personnage source pour capturer sa vue d’ensemble, puis fermez EVE.", "Starte den Quellcharakter einmal zum Erfassen der Übersicht und schließe dann EVE.", "Start het bronpersonage één keer om het overzicht vast te leggen en sluit daarna EVE.", "Один раз запустите исходного персонажа для сохранения обзора, затем закройте EVE."),
+    "Enable the Overview Bridge in Tools to copy an overview.": ("在工具中启用总览桥接功能后即可复制。", "ツールでオーバービューブリッジを有効にしてください。", "도구에서 오버뷰 브리지를 활성화하세요.", "Activez le pont de vue d’ensemble dans Outils.", "Aktiviere die Übersichtsbrücke unter Werkzeuge.", "Schakel de overzichtsbridge in bij Hulpmiddelen.", "Включите мост обзора в разделе «Инструменты»."),
+    "Overview copy queued. It will apply once when each selected character next logs in.": ("总览复制已排队，将在各所选角色下次登录时应用一次。", "コピーを予約しました。選んだキャラクターの次回ログイン時に一度だけ適用されます。", "복사를 예약했습니다. 선택한 캐릭터가 다음에 로그인할 때 한 번 적용됩니다.", "Copie mise en attente. Elle s’applique une fois à la prochaine connexion de chaque personnage sélectionné.", "Die Übersicht wird bei der nächsten Anmeldung jedes ausgewählten Charakters einmal übernommen.", "De kopie staat klaar en wordt één keer toegepast wanneer elk gekozen personage weer inlogt.", "Копирование запланировано. Обзор применится один раз при следующем входе каждого выбранного персонажа."),
+    "Choose a source character and the characters that should receive its overview.": ("选择源角色和要接收其总览的角色。", "コピー元とコピー先のキャラクターを選んでください。", "원본 캐릭터와 오버뷰를 받을 캐릭터를 선택하세요.", "Choisissez le personnage source et ceux qui recevront sa vue d’ensemble.", "Wähle den Quellcharakter und die Charaktere, die seine Übersicht erhalten sollen.", "Kies een bronpersonage en de personages die het overzicht moeten ontvangen.", "Выберите исходного персонажа и тех, кто получит его обзор."),
+    "Overview copy is available for Native installations.": ("总览复制适用于原生安装。", "オーバービューのコピーはネイティブ環境で使用できます。", "오버뷰 복사는 네이티브 설치에서 사용할 수 있습니다.", "La copie de vue d’ensemble est disponible pour les installations natives.", "Übersichten lassen sich bei nativen Installationen kopieren.", "Overzichten kopiëren is beschikbaar voor native installaties.", "Копирование обзоров доступно для нативных установок."),
+    "The selected installation or characters changed. Reopen Copy overview once.": (
+        "所选安装或角色已更改。请重新打开仅复制一次总览。", "選択したインストールまたはキャラクターが変わりました。コピー画面を開き直してください。",
+        "선택한 설치 또는 캐릭터가 변경되었습니다. 오버뷰 복사 창을 다시 여세요.", "L’installation ou les personnages sélectionnés ont changé. Rouvrez la copie de vue d’ensemble.",
+        "Die ausgewählte Installation oder die Charaktere wurden geändert. Öffne die Übersichtskopie erneut.", "De gekozen installatie of personages zijn gewijzigd. Open de overzichtskopie opnieuw.",
+        "Выбранная установка или персонажи изменились. Откройте окно копирования обзора заново.",
+    ),
+    "One of the selected characters already has an overview copy queued.": (
+        "其中一个所选角色已排队等待复制总览。", "選択したキャラクターの一人にコピーがすでに予約されています。", "선택한 캐릭터 중 하나에 이미 오버뷰 복사가 예약되어 있습니다.",
+        "Une copie de vue d’ensemble est déjà en attente pour l’un des personnages sélectionnés.", "Für einen ausgewählten Charakter ist bereits eine Übersichtskopie vorgemerkt.",
+        "Voor een van de gekozen personages staat al een overzichtskopie klaar.", "Для одного из выбранных персонажей уже запланировано копирование обзора.",
+    ),
 }
 
 SOURCE_PHRASES = tuple(_ROWS)
