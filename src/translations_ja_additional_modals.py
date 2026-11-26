@@ -363,13 +363,13 @@ _ADDITIONAL_JA_MODAL_ITEMS: tuple[tuple[str, str], ...] = (
     ("Select a valid EveJS root.", "有効な EveJS ルートを選択してください。"),
     ("Select the copied EVE client tq folder.", "コピー済み EVE クライアントの tq フォルダーを選択してください。"),
     ("Select the copied EVE client tq folder first.", "先にコピー済み EVE クライアントの tq フォルダーを選択してください。"),
-    ("Supported — copied EVE build 3396210; no client patch required.", "対応済み — コピー済み EVE ビルド 3396210。クライアントパッチは不要です。"),
+    ("Supported — copied EVE build {build}; no client patch required.", "対応済み — コピー済み EVE ビルド {build}。クライアントパッチは不要です。"),
     (
         "Supported EVE build 3396210; ready to install the optional overview bridge.",
         "対応する EVE ビルド 3396210 です。任意のオーバービューブリッジをインストールできます。",
     ),
     ("The account username is not safe for automatic login.", "このアカウントのユーザー名は自動ログインに安全に使用できません。"),
-    ("The build 3396210 login modules are missing or modified.", "ビルド 3396210 のログインモジュールが見つからないか、変更されています。"),
+    ("The build {build} login modules are missing or modified.", "ビルド {build} のログインモジュールが見つからないか、変更されています。"),
     ("The copied client build could not be identified.", "コピー済みクライアントのビルドを特定できませんでした。"),
     ("The copied client does not expose the required no-console mode.", "コピー済みクライアントは、必要なコンソールなしモードを提供していません。"),
     (

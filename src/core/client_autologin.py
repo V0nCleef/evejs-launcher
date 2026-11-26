@@ -1,6 +1,6 @@
 """Build-gated automatic login support for the copied EveJS EVE client.
 
-The supported client already implements command-line login and character
+The supported clients already implement command-line login and character
 selection.  This module verifies the exact known implementation before the
 launcher opts into those switches; it never modifies client files and never
 handles a real password.
@@ -16,23 +16,38 @@ import re
 import zipfile
 
 
-SUPPORTED_BUILD = 3396210
 LOCAL_DUMMY_PASSWORD = "evejs-local"
 NO_CONSOLE_ARGUMENT = "/noconsole"
 
-_REQUIRED_ENTRY_SHA256 = {
-    "utillib/__init__.pyj": (
-        "F0F2E5BA970EACE41EF405E114BC6A1CC2EFD7AA804AF7E383CB1341BB23C594"
-    ),
-    "carbon/client/script/remote/connectionService.pyj": (
-        "B148ABAEBA26A8B60256781CEFDB0D6890272301AE94AF2C5425051C5D22457E"
-    ),
-    "eve/client/script/ui/login/loginII.pyj": (
-        "4B7DB99D94EBA7BEE86C1C7D967F998EF96BF806163A31D084772C8AA7F7382B"
-    ),
-    "eve/client/script/ui/login/charSelection/characterSelection.pyj": (
-        "C64564EF6E55317E4B68A7F4673A889A98C83427DC51C0DCEEBF310FBD32E206"
-    ),
+_REQUIRED_ENTRY_SHA256_BY_BUILD = {
+    3396210: {
+        "utillib/__init__.pyj": (
+            "F0F2E5BA970EACE41EF405E114BC6A1CC2EFD7AA804AF7E383CB1341BB23C594"
+        ),
+        "carbon/client/script/remote/connectionService.pyj": (
+            "B148ABAEBA26A8B60256781CEFDB0D6890272301AE94AF2C5425051C5D22457E"
+        ),
+        "eve/client/script/ui/login/loginII.pyj": (
+            "4B7DB99D94EBA7BEE86C1C7D967F998EF96BF806163A31D084772C8AA7F7382B"
+        ),
+        "eve/client/script/ui/login/charSelection/characterSelection.pyj": (
+            "C64564EF6E55317E4B68A7F4673A889A98C83427DC51C0DCEEBF310FBD32E206"
+        ),
+    },
+    3724492: {
+        "utillib/__init__.pyj": (
+            "1BF557FF2A379D4159F039C2400189F205A1BB777DDC359D5D2E08DD063B4C67"
+        ),
+        "carbon/client/script/remote/connectionService.pyj": (
+            "5B210125506AC256B39E0D32A258006ED858BDD5464703219ED1841A0A043E6D"
+        ),
+        "eve/client/script/ui/login/loginII.pyj": (
+            "A7ABB6C688863DE4C14BCB44AACF75327F42A09C39FCEA08425504141FF3AD37"
+        ),
+        "eve/client/script/ui/login/charSelection/characterSelection.pyj": (
+            "D0EB70EAEA5CF1B6D36AFC6F526AA2EB0C35060C10FC589ED6E007C0FD16A010"
+        ),
+    },
 }
 
 
@@ -85,10 +100,12 @@ def _password_bypass_enabled(evejs_root: Path) -> bool:
     )
 
 
-def _client_entries_match(code_archive: Path) -> bool:
+def _client_entries_match(
+    code_archive: Path, required_entry_hashes: dict[str, str]
+) -> bool:
     try:
         with zipfile.ZipFile(code_archive, "r") as archive:
-            for entry, expected in _REQUIRED_ENTRY_SHA256.items():
+            for entry, expected in required_entry_hashes.items():
                 actual = hashlib.sha256(archive.read(entry)).hexdigest().upper()
                 if actual != expected:
                     return False
@@ -136,14 +153,15 @@ def inspect_client_auto_login_capability(
     build = _read_client_build(client / "start.ini")
     if build is None:
         return _unsupported("The copied client build could not be identified.")
-    if build != SUPPORTED_BUILD:
+    required_entry_hashes = _REQUIRED_ENTRY_SHA256_BY_BUILD.get(build)
+    if required_entry_hashes is None:
         return _unsupported(
             f"EVE build {build} is not supported for automatic login.",
             build=build,
         )
-    if not _client_entries_match(client / "code.ccp"):
+    if not _client_entries_match(client / "code.ccp", required_entry_hashes):
         return _unsupported(
-            "The build 3396210 login modules are missing or modified.",
+            f"The build {build} login modules are missing or modified.",
             build=build,
         )
     if not supports_client_no_console(client / "bin64" / "exefile.exe"):
@@ -153,7 +171,7 @@ def inspect_client_auto_login_capability(
         )
     return AutoLoginCapability(
         True,
-        "Supported — copied EVE build 3396210; no client patch required.",
+        f"Supported — copied EVE build {build}; no client patch required.",
         build,
     )
 

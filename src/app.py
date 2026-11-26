@@ -7125,7 +7125,7 @@ class MainWindow(QMainWindow):
             launch_context=launch_context,
             character_id=character_id,
             auto_login_enabled=auto_login_enabled,
-            hide_console=character_id is None,
+            hide_console=auto_login_enabled or character_id is None,
             docker_auto_login_probe=docker_auto_login_probe,
             require_account_creation=new_account_requested,
             linux_setup_root=str(self._cfg.get("linux_setup_root", "")),

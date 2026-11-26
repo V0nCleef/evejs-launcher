@@ -1479,10 +1479,10 @@ class SettingsPage(QWidget):
         # editable and preserve its value when a selected setup is unsupported;
         # launch-time validation decides whether the requested sign-in is safe.
         self.auto_login_toggle.setEnabled(True)
-        set_translatable_text(self.auto_login_status_label, reason)
+        set_translatable_text_template(self.auto_login_status_label, reason)
         color = COLORS["green"] if supported else COLORS["gold"]
         self.auto_login_status_label.setStyleSheet(f"color: {color};")
-        set_translatable_tooltip(self.auto_login_status_label, reason)
+        set_translatable_tooltip_template(self.auto_login_status_label, reason)
 
     def save_settings(self) -> None:
         """Persist Native immediately or preflight the exact Docker draft."""

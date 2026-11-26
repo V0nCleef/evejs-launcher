@@ -2,6 +2,10 @@
 
 ## Changelog
 
+## v1.0.97 - 2026-11-26
+- Support local automatic login and character selection on verified EVE client build 3724492.
+- Keep the EVE console hidden on clients that support it when an automatic login request falls back to manual login.
+
 ## v1.0.96 - 2026-11-25
 - Add Copy overview once in Settings for Native installations using the Overview Bridge and Separate client settings. Choose one captured character and one or more recipients.
 - Apply the selected snapshot once per recipient on the next launcher login. Each recipient can customize their own overview afterward.

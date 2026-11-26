@@ -18,10 +18,10 @@ import threading
 import zipfile
 import zlib
 
-from .client_autologin import SUPPORTED_BUILD
 from .platform import get_hidden_process_flags
 
 
+SUPPORTED_BUILD = 3396210
 SUPPORTED_CODE_SHA256 = (
     "89696509EFDC1B081F7371B40CA3D459059DB0E43B5DB328FE373C0F2A9B1A86"
 )
