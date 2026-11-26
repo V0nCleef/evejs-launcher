@@ -23,6 +23,7 @@ from src.core.client_autologin import (
 def _supported_fixture(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    build: int = 3396210,
 ) -> tuple[Path, Path]:
     root = tmp_path / "evejs"
     client = tmp_path / "client" / "tq"
@@ -37,19 +38,19 @@ def _supported_fixture(
         encoding="utf-8",
     )
     (client / "start.ini").write_text(
-        "[main]\nbuild = 3396210\nserver=127.0.0.1\nport=26000\n",
+        f"[main]\nbuild = {build}\nserver=127.0.0.1\nport=26000\n",
         encoding="utf-8",
     )
     fixture_entries = {
         entry: f"fixture:{index}".encode("ascii")
-        for index, entry in enumerate(client_autologin._REQUIRED_ENTRY_SHA256)
+        for index, entry in enumerate(client_autologin._REQUIRED_ENTRY_SHA256_BY_BUILD[build])
     }
     with zipfile.ZipFile(client / "code.ccp", "w") as archive:
         for entry, payload in fixture_entries.items():
             archive.writestr(entry, payload)
-    monkeypatch.setattr(
-        client_autologin,
-        "_REQUIRED_ENTRY_SHA256",
+    monkeypatch.setitem(
+        client_autologin._REQUIRED_ENTRY_SHA256_BY_BUILD,
+        build,
         {
             entry: hashlib.sha256(payload).hexdigest().upper()
             for entry, payload in fixture_entries.items()
@@ -58,16 +59,18 @@ def _supported_fixture(
     return root, client
 
 
+@pytest.mark.parametrize("build", [3396210, 3724492])
 def test_known_build_modules_and_local_password_bypass_are_supported(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    build: int,
 ) -> None:
-    root, client = _supported_fixture(tmp_path, monkeypatch)
+    root, client = _supported_fixture(tmp_path, monkeypatch, build)
 
     capability = inspect_auto_login_capability(root, client)
 
     assert capability.supported is True
-    assert capability.build == 3396210
+    assert capability.build == build
     assert "no client patch" in capability.reason.casefold()
     assert inspect_client_auto_login_capability(client).supported is True
 
@@ -83,8 +86,13 @@ def test_unknown_build_and_modified_login_module_fail_closed(
     assert capability.supported is False
     assert "3458726" in capability.reason
 
+    (client / "start.ini").write_text("[main]\nbuild=3724492\n", encoding="utf-8")
+    capability = inspect_auto_login_capability(root, client)
+    assert capability.supported is False
+    assert "modified" in capability.reason.casefold()
+
     (client / "start.ini").write_text("[main]\nbuild=3396210\n", encoding="utf-8")
-    changed_entry = next(iter(client_autologin._REQUIRED_ENTRY_SHA256))
+    changed_entry = next(iter(client_autologin._REQUIRED_ENTRY_SHA256_BY_BUILD[3396210]))
     with zipfile.ZipFile(client / "code.ccp", "r") as archive:
         entries = {name: archive.read(name) for name in archive.namelist()}
     entries[changed_entry] = b"changed"

@@ -97,6 +97,7 @@ def test_docker_request_captures_auto_login_probe_for_observed_server(
 
     assert request is not None
     assert request.auto_login_enabled is True
+    assert request.hide_console is True
     assert request.docker_auto_login_probe == DockerAutoLoginProbe(
         target,
         "b" * 64,
@@ -137,6 +138,7 @@ def test_docker_request_preserves_explicit_auto_login_off() -> None:
 
     assert request is not None
     assert request.auto_login_enabled is False
+    assert request.hide_console is False
     assert request.docker_auto_login_probe is None
 
 
