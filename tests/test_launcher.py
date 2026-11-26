@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -458,9 +459,37 @@ def test_docker_context_fails_closed_without_complete_identity(
         ClientLaunchContext.from_docker(_docker_endpoints(), **identity_args)
 
 
+def test_2611253_accepts_only_a_prepared_copy_before_profile_work(tmp_path, monkeypatch):
+    root = tmp_path / "evejs"
+    root.mkdir()
+    (root / "package.json").write_text('{"version":"261125.3"}', encoding="utf-8")
+    client = tmp_path / "tq"
+    (client / "bin64").mkdir(parents=True)
+    (client / "start.ini").write_text(
+        "[main]\nbuild=3724492\nserver=127.0.0.1\ncryptoPack=Placebo\n", encoding="utf-8",
+    )
+    binary = client / "bin64/exefile.exe"
+    original = b"fixture-patched-binary"
+    binary.write_bytes(original)
+    monkeypatch.setattr(launcher, "_OFFLINE_CLIENT_BINARIES", {
+        binary.name: (len(original), hashlib.sha256(original).hexdigest()),
+    })
+    context = _docker_context(_docker_endpoints())
+
+    assert launcher.prepare_offline_client_launch(str(root), str(client), context) == (
+        "http://evejs@127.0.0.1:32602/1"
+    )
+    binary.write_bytes(b"x" * len(original))
+    with pytest.raises(ValueError, match="does not match the prepared client"):
+        launcher.prepare_offline_client_launch(str(root), str(client), context)
+    assert binary.read_bytes() == b"x" * len(original)
+
+
+@pytest.mark.parametrize("offline", [False, True])
 def test_launch_client_uses_context_proxy_without_native_default_fallback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    offline: bool,
 ) -> None:
     _accept_fixture_cache(monkeypatch)
     profile_tq = tmp_path / "profile" / "tq"
@@ -489,11 +518,18 @@ def test_launch_client_uses_context_proxy_without_native_default_fallback(
         profile_tq_path=profile_tq,
         client_path=str(configured_tq),
         launch_context=_docker_context(_docker_endpoints()),
+        offline_client_sentry_dsn="http://evejs@127.0.0.1:32602/1" if offline else None,
     )
 
     assert result is not None
     assert captured["env"]["HTTPS_PROXY"] == "http://127.0.0.1:32602"  # type: ignore[index]
-    assert captured["arguments"] == ("/port:32600",)
+    if offline:
+        assert captured["env"]["EVE_CLIENT_SENTRY_DSN"] == "http://evejs@127.0.0.1:32602/1"
+        assert captured["arguments"] == (
+            "/port:32600", "/noCrashReportUpload", "/resfileserver=http://127.0.0.1:32602/resfiles/",
+        )
+    else:
+        assert captured["arguments"] == ("/port:32600",)
 
 
 def test_launch_client_resfiles_come_from_configured_client_not_profile_junction(

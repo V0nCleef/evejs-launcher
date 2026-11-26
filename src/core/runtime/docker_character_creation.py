@@ -7,10 +7,13 @@ import json
 import logging
 from pathlib import Path, PurePosixPath
 import re
+import sqlite3
 from typing import Any
 
 from src.core.client_autologin import LOCAL_DUMMY_PASSWORD
 from src.core.character_creation import normalize_character_name
+from src.core.evejs_compatibility import SHARED_GAME_STORE_RELEASES
+from src.core.mod_evejs_compatibility import installed_evejs_version
 from src.core.runtime.data import docker_project_identity
 from src.core.runtime.docker_cli import DockerCommandError, DockerCommandResult
 from src.core.runtime.docker_compose import (
@@ -227,6 +230,8 @@ class ManagedDockerCharacterCreationController:
                 "prepared safely.",
                 target_identity=target_identity,
             )
+        if installed_evejs_version(self._target.project_directory) in SHARED_GAME_STORE_RELEASES:
+            return self._execute_shared(normalized, effective_config_digest, final_record_snapshot, target_identity)
 
         try:
             argv = self._target.compose_args(
@@ -325,6 +330,44 @@ class ManagedDockerCharacterCreationController:
                 else "Docker character creation committed; maintenance cleanup "
                 "was not confirmed."
             ),
+            target_identity=target_identity,
+        )
+
+    def _execute_shared(self, request, config_digest, record_snapshot, target_identity):
+        from src.core.character_creation import CharacterCreationRequest, _verify_result
+        from src.core.evejs_compatibility import require_completed_evejs_setup
+        from src.core.save_migration_storage import SaveMigrationError, _docker
+        from src.core.shared_character_maintenance import maintain_character
+
+        root = self._target.project_directory
+        creation = CharacterCreationRequest(str(root), request.username, request.character_name, request.is_gm)
+        try:
+            require_completed_evejs_setup(root)
+            storage = _docker(root, {}, target=self._target, expected_digest=config_digest)
+
+            def require_offline():
+                report = self._inspector.preflight(self._target)
+                if (
+                    not report.ok or _valid_effective_config_digest(report.config) != config_digest
+                    or tuple((service, report.records[service]) for service in sorted(report.records)) != record_snapshot
+                ):
+                    raise SaveMigrationError("Docker authority changed during character creation.")
+                storage.require_offline()
+
+            (account_id, character_id), _backup = maintain_character(
+                storage, {"operation": "create", **json.loads(_canonical_payload(request))}, self._backup_directory,
+                require_offline=require_offline, verify=lambda db, result, _: _verify_result(db, creation, result),
+            )
+        except (OSError, RuntimeError, ValueError, AttributeError, sqlite3.Error) as error:
+            safe = getattr(error, "restart_safe", True)
+            return self._failure(
+                "Docker character creation stopped. The original game save is intact." if safe else
+                "Docker character creation could not verify the save. Keep services stopped and retain the backup.",
+                target_identity=target_identity, restart_safe=safe,
+            )
+        return DockerCharacterCreationResult(
+            True, account_id=account_id, character_id=character_id, backup_created=True,
+            restart_safe=True, cleanup_confirmed=True, message="Docker character creation completed.",
             target_identity=target_identity,
         )
 

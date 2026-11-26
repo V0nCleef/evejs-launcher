@@ -49,6 +49,8 @@ def observe_backend(root: str, game_port: int) -> tuple[bool, bool]:
 
 
 def _prepared(root: str) -> LinuxInstallation:
+    from .evejs_compatibility import require_completed_evejs_setup
+    require_completed_evejs_setup(Path(root))
     installation = LinuxInstallation.load(root)
     installation.require_supported_mods()
     require_client_trust(installation)
@@ -59,7 +61,8 @@ def _prepared(root: str) -> LinuxInstallation:
 def start_game(root: str, mode: str, *, mod_runtime_plan=None):
     from .server_launcher import (get_server_console_log, NativeModRuntimeLaunchReceipt,
                                   build_game_server_command, get_native_mod_status_log,
-                                  _prepare_native_game_store_environment, _append_game_console)
+                                  _prepare_native_game_store_environment, _require_release_node,
+                                  _append_game_console)
     installation = _prepared(root)
     import socket
     try:
@@ -73,6 +76,7 @@ def start_game(root: str, mode: str, *, mod_runtime_plan=None):
     console = get_server_console_log(installation.root)
     console.parent.mkdir(parents=True, exist_ok=True)
     console.write_bytes(b'')
+    _require_release_node(installation.version, server, node=str(installation.node), env=env)
     from .native_config_preflight import validate_native_server_config
     checked = validate_native_server_config(installation.root, env=env)
     if checked.supported and checked.valid is not True:
@@ -83,7 +87,7 @@ def start_game(root: str, mode: str, *, mod_runtime_plan=None):
                 cwd=server, env=env, timeout=30)
     if mode not in ("vanilla", "modded"):
         raise LinuxSetupError("Invalid Native server mode.")
-    _prepare_native_game_store_environment(installation.root, server, env)
+    _prepare_native_game_store_environment(installation.root, server, env, node=str(installation.node))
     images = server / 'src/gameStore/migrateRuntimeImages.js'
     if images.is_file():
         run_bounded([str(installation.node), str(images)], cwd=server, env=env, timeout=60)

@@ -16,6 +16,7 @@ from tempfile import TemporaryDirectory
 import time
 from uuid import uuid4
 
+from .evejs_compatibility import EveJSSetupRequired, SHARED_GAME_STORE_RELEASES, require_completed_evejs_setup
 from .mod_evejs_compatibility import installed_evejs_version
 from .mod_lifecycle_lock import acquire_mod_lifecycle_lease
 from .save_migration_storage import SaveMigrationError, bundle_inventory, plain, resolve_storage
@@ -244,26 +245,35 @@ def _prepare_market(request, source, target, incoming, scratch):
                         raise SaveMigrationError("The chosen seed has a different format from the destination market.")
 
 
-def _prepare(request, source, target, incoming, scratch, verify_game):
+def _prepare(request, source, target, incoming, scratch, verify_game, source_storage, target_storage):
+    shared = request.source.version in SHARED_GAME_STORE_RELEASES
     # Offline ports alone are insufficient if a stopped or unreachable game
     # still has pending persistence work in the destination database.
     if (target / "game").is_file():
         with TemporaryDirectory(dir=scratch) as reference:
             with TemporaryDirectory(dir=scratch) as stage:
                 _copy_sqlite(target, "game", Path(stage), Path(reference) / "game")
-            with closing(sqlite3.connect(Path(reference) / "game")) as existing:
-                _is_idle_game(existing)
+            if shared:
+                target_storage.verify_shared_bundle(Path(reference))
+            else:
+                with closing(sqlite3.connect(Path(reference) / "game")) as existing:
+                    _is_idle_game(existing)
+    elif shared:
+        target_storage.verify_shared_bundle(incoming, game=False)
     with TemporaryDirectory(dir=scratch) as stage:
         _copy_sqlite(source, "game", Path(stage), incoming / "game")
     for name in ("images", "skins"):
         if (source / name).is_dir():
             shutil.copytree(source / name, incoming / name)
-    with closing(sqlite3.connect(incoming / "game")) as game:
-        _is_idle_game(game)
-        verify_game(game, request, declared_game_tables(request.destination.root))
-        if not request.carry_market:
-            _reset_market_state(game)
+    if not shared:
+        with closing(sqlite3.connect(incoming / "game")) as game:
+            _is_idle_game(game)
+            verify_game(game, request, declared_game_tables(request.destination.root))
+            if not request.carry_market:
+                _reset_market_state(game)
     _prepare_market(request, source, target, incoming, scratch)
+    if shared:
+        source_storage.verify_shared_bundle(incoming, market=True, fresh=not request.carry_market)
 
 
 def _check_routes(request):
@@ -274,8 +284,15 @@ def _check_routes(request):
         raise SaveMigrationError("Both installations must be available on this computer.")
     if left == right or left in right.parents or right in left.parents:
         raise SaveMigrationError("Choose two separate installation folders.")
-    if not request.source.version or request.source.version != request.destination.version:
+    version = request.source.version
+    if not version or version != request.destination.version:
         raise SaveMigrationError("Both installations need the same verified EveJS base version for this transfer.")
+    if version in SHARED_GAME_STORE_RELEASES:
+        try:
+            require_completed_evejs_setup(left)
+            require_completed_evejs_setup(right)
+        except EveJSSetupRequired as error:
+            raise SaveMigrationError(str(error)) from error
 
 
 def review_transfer(request):
@@ -374,7 +391,7 @@ def _transfer(request, source, target, backup, offline, progress, verify_game):
         target_before = target.action("capture", destination)
         _receipt(backup, "backups-verified", request, source_files=source_before, destination_files=target_before)
         progress("Checking the game and market formats…")
-        _prepare(request, original, destination, incoming, scratch, verify_game)
+        _prepare(request, original, destination, incoming, scratch, verify_game, source, target)
         if (incoming / "skins").exists() and "skins" not in target.files:
             raise SaveMigrationError("The destination has no persistent storage for saved ship skin designs.")
         expected = bundle_inventory(incoming, target.files)

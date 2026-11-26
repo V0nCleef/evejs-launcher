@@ -3,8 +3,12 @@
 ## Changelog
 
 ## v1.0.97 - 2026-11-26
-- Support local automatic login and character selection on verified EVE client build 3724492.
-- Keep the EVE console hidden on clients that support it when an automatic login request falls back to manual login.
+- Windows Native supports the reviewed EveJS 261125.3 and 261126.2 releases and automatic login and character selection on EVE client build 3724492. Thanks to Delta007a for the client update. 🫡
+- Preserve existing Neural Rendering preferences when launching EVE and keep the console hidden on supported clients when automatic login falls back to manual login.
+- Read character balances from the new shared GameStore. Support offline character maintenance and same-version Save Migration for reviewed shared saves, including paired market data.
+- Accept the official Docker Compose asset and certificate mounts for offline character creation and Save Migration.
+- Support Shared client settings and the Overview Bridge on the verified Windows EVE client build 3724492.
+- The Linux package retains the existing 3396210 Setup and Proton support. Linux Setup and Proton for build 3724492 are pending. EveJS 261126.2 Game startup can time out on its default persistence lease in Linux Native and Docker.
 
 ## v1.0.96 - 2026-11-25
 - Add Copy overview once in Settings for Native installations using the Overview Bridge and Separate client settings. Choose one captured character and one or more recipients.

@@ -8,16 +8,22 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import stat
 from pathlib import Path
 import uuid
 
 from ..config import CONFIG_DIR
+from .host import IS_WINDOWS
 from .platform import create_directory_link, get_eve_settings_path, remove_directory_link
 
 PROFILES_ROOT = CONFIG_DIR / "Profiles"
 _REQUIRED_CORE_PUBLIC_SECTIONS = ("audio", "device", "generic", "ui")
 _ATOMIC_TEMP_CREATE_ATTEMPTS = 8
+_EXACT_ACCOUNT_COMPACT_DIR = "px"
+# EVE's Windows archive loader uses a legacy path buffer for code.ccp members.
+# Build 3724492 has member paths as long as 117 characters.
+_CLIENT_ARCHIVE_PATH_BUDGET = 128
 
 
 def account_profiles_root(base_root: Path, username: str, usernames) -> Path:
@@ -31,7 +37,14 @@ def account_profiles_root(base_root: Path, username: str, usernames) -> Path:
     collides = any(name != username and name.rstrip(" .").casefold() == identity
                    for name in usernames)
     # A sibling namespace cannot collide with a legitimate username inside root.
-    scoped = root.parent / (root.name + "-exact-accounts") / hashlib.sha256(username.encode("utf-8")).hexdigest()[:32]
+    account_key = hashlib.sha256(username.encode("utf-8")).hexdigest()[:32]
+    scoped = root.with_name(root.name + "-exact-accounts") / account_key
+    if IS_WINDOWS and root.name == "Profiles":
+        compact = root.with_name(_EXACT_ACCOUNT_COMPACT_DIR) / account_key
+        archive = scoped / username / "tq" / "code.ccp"
+        needs_compact_path = len(str(archive)) + 1 + _CLIENT_ARCHIVE_PATH_BUDGET >= 260
+        if compact.is_dir() or (needs_compact_path and (collides or scoped.is_dir())):
+            return compact
     return scoped if collides or scoped.is_dir() else root
 
 
@@ -151,6 +164,8 @@ def create_profile(
 
     junction = profile_dir / "tq"
     _ensure_profile_junction(junction, Path(real_client_path))
+    if IS_WINDOWS and root.parent.name == _EXACT_ACCOUNT_COMPACT_DIR:
+        _copy_previous_exact_account_settings(root, username, junction)
 
     # ── Bootstrap EVE settings from real client (or template fallback) ──
     try:
@@ -165,9 +180,33 @@ def create_profile(
     return profile_dir
 
 
+def _copy_previous_exact_account_settings(root: Path, username: str, junction: Path) -> None:
+    previous = root.parent.with_name("Profiles-exact-accounts") / root.name / username / "tq"
+    if not _same_directory_target(previous, junction):
+        return
+    source = get_eve_settings_path(str(previous))
+    destination = get_eve_settings_path(str(junction))
+    if destination.exists() or not source.is_dir() or _is_directory_link(source):
+        return
+    stage = destination.with_name(f".settings-{uuid.uuid4().hex}")
+    stage.mkdir(parents=True)
+    try:
+        for item in source.iterdir():
+            supported = item.name in {"prefs.ini", "core_public__.yaml"} or re.fullmatch(
+                r"core_(?:char|user)_\d+\.dat", item.name,
+            )
+            if supported and item.is_file() and not _is_directory_link(item):
+                shutil.copy2(item, stage / item.name)
+        stage.rename(destination)
+    finally:
+        if stage.is_dir():
+            for item in stage.iterdir():
+                item.unlink()
+            stage.rmdir()
+
+
 def _bootstrap_settings(username: str, real_client_path: str = "", *, profiles_root: Path | None = None) -> None:
     """Bootstrap safe settings without copying account-private cache state."""
-    import shutil
 
     try:
         dst_dir = (get_profile_settings_path(username) if profiles_root is None
@@ -456,6 +495,7 @@ def configure_profile_game_endpoint(
     port: int,
     settings_dir: Path | None = None,
     write_preferences: bool = True,
+    offline_client_sentry_dsn: str | None = None,
 ) -> None:
     """Atomically apply one validated game endpoint immediately before launch."""
     _validate_game_endpoint(host, port)
@@ -475,9 +515,12 @@ def configure_profile_game_endpoint(
     # correctly configured read-only install launch normally.
     if updated_start != start_text:
         _atomic_write_text(start_path, updated_start)
-    if write_preferences:
+    if write_preferences or offline_client_sentry_dsn:
         prefs_text = _read_preserving_newlines(prefs_path) if prefs_path.exists() else ""
-        updated_prefs = _patch_flat_key(prefs_text, "port", str(port))
+        updated_prefs = _patch_flat_key(prefs_text, "port", str(port)) if write_preferences else prefs_text
+        if offline_client_sentry_dsn:
+            updated_prefs = _patch_flat_key(updated_prefs, "sentry_io_dsn", offline_client_sentry_dsn)
+            updated_prefs = _patch_flat_key(updated_prefs, "breakpadUpload", "0")
         if updated_prefs != prefs_text:
             _atomic_write_text(prefs_path, updated_prefs)
 

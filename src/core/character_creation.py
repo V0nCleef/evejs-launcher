@@ -401,6 +401,23 @@ def create_character(request: CharacterCreationRequest) -> CharacterCreationResu
     """
     normalized = normalize_creation_request(request)
     root = Path(normalized.evejs_root)
+    from .evejs_compatibility import SHARED_GAME_STORE_RELEASES
+    from .mod_evejs_compatibility import installed_evejs_version
+
+    if installed_evejs_version(root) in SHARED_GAME_STORE_RELEASES:
+        from .shared_character_maintenance import maintain_native_character
+
+        try:
+            (account_id, character_id), backup = maintain_native_character(
+                root, {"operation": "create", "username": normalized.username,
+                       "characterName": normalized.character_name, "isGM": normalized.is_gm,
+                       "password": LOCAL_DUMMY_PASSWORD},
+                Path(normalized.backup_root or _default_backup_root()),
+                verify=lambda db, result, _: _verify_result(db, normalized, result),
+            )
+        except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
+            raise CharacterCreationError(str(error), rollback_required=not getattr(error, "restart_safe", True)) from error
+        return CharacterCreationResult(normalized, account_id, character_id, backup)
     game_store = _game_store(root)
     database_path, data_path = _require_store_layout(game_store)
     backup_root = Path(normalized.backup_root or _default_backup_root())

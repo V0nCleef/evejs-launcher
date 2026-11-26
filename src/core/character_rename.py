@@ -11,6 +11,7 @@ import socket
 import subprocess
 from uuid import uuid4
 
+from .evejs_compatibility import EveJSSetupRequired, SHARED_GAME_STORE_RELEASES, require_completed_evejs_setup
 from .mod_lifecycle_lock import acquire_mod_lifecycle_lease
 from .native_runtime import node_environment, node_executable
 from .platform import get_hidden_process_flags
@@ -22,7 +23,7 @@ from .save_migration_storage import (
 )
 
 
-_REVIEWED_VERSION = "261115.2"
+_REVIEWED_VERSIONS = frozenset({"261115.2", *SHARED_GAME_STORE_RELEASES})
 _HELPERS = Path(__file__).resolve().with_name("helpers")
 _BACKUP = ".launcher-character-renames"
 _STORE = PurePosixPath("/var/lib/evejs/gameStore")
@@ -39,7 +40,7 @@ _REVIEWED_IMAGE_CONTENT = (
 )
 _ERROR_MESSAGES = {
     "INVALID_REQUEST": "The character rename request is invalid.",
-    "UNSUPPORTED_RELEASE": "Character rename requires the reviewed EveJS 261115.2 runtime.",
+    "UNSUPPORTED_RELEASE": "Character rename requires a reviewed EveJS runtime.",
     "UNSUPPORTED_LAYOUT": "The selected game store could not be verified for character rename.",
     "OWNER_BUSY": "EveJS still owns the game store. Stop Game and wait for its persistence lease to release.",
     "OWNER_CHANGED": "EveJS persistence ownership changed during character rename.",
@@ -107,10 +108,14 @@ def _validate_request(request: CharacterRenameRequest) -> Path:
     if not version.is_file() or version.stat().st_size > 4096:
         raise CharacterRenameError(_ERROR_MESSAGES["UNSUPPORTED_RELEASE"])
     metadata = json.loads(version.read_text(encoding="utf-8"))
-    if not isinstance(metadata, dict) or metadata.get("evejsVersion") != _REVIEWED_VERSION or (
+    if not isinstance(metadata, dict) or metadata.get("evejsVersion") not in _REVIEWED_VERSIONS or (
         type(metadata.get("configSchemaVersion")) is not int or metadata["configSchemaVersion"] != 1
     ):
         raise CharacterRenameError(_ERROR_MESSAGES["UNSUPPORTED_RELEASE"])
+    try:
+        require_completed_evejs_setup(root)
+    except EveJSSetupRequired as error:
+        raise CharacterRenameError(str(error)) from error
     return root
 
 
@@ -176,9 +181,21 @@ def _require_native_offline(storage: SaveStorage, root: Path) -> None:
                     raise CharacterRenameError("The Native Game endpoint could not be verified.")
                 ports.add(port)
     for port in ports:
+        if os.name == "nt":
+            # A loopback connect can time out even when Windows has no listener.
+            # An exclusive bind still refuses an occupied or unverifiable port.
+            try:
+                with socket.socket() as probe:
+                    probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                    probe.bind(("127.0.0.1", port))
+            except OSError as error:
+                if error.winerror in (10013, 10048):
+                    raise CharacterRenameError("Stop Game and Market before changing characters.") from error
+                raise CharacterRenameError("Native service availability could not be verified.") from error
+            continue
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=0.4):
-                raise CharacterRenameError("Stop Game and Market before renaming a character.")
+                raise CharacterRenameError("Stop Game and Market before changing characters.")
         except ConnectionRefusedError:
             continue
         except OSError as error:

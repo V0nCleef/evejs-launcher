@@ -560,6 +560,31 @@ def delete_character_or_account(
     """
     normalized = normalize_deletion_request(request)
     root = Path(normalized.evejs_root)
+    from .evejs_compatibility import SHARED_GAME_STORE_RELEASES
+    from .mod_evejs_compatibility import installed_evejs_version
+
+    if installed_evejs_version(root) in SHARED_GAME_STORE_RELEASES:
+        from .shared_character_maintenance import maintain_native_character
+
+        def verify(database, result, targets):
+            _verify_result(database, normalized, targets, result)
+            return targets
+
+        try:
+            targets, backup = maintain_native_character(
+                root, {"operation": "delete", "scope": normalized.scope.value, "username": normalized.username,
+                       "accountId": normalized.account_id, "characterId": normalized.character_id,
+                       "characterName": normalized.character_name},
+                Path(normalized.backup_root or _default_backup_root()),
+                prepare=lambda db: _inspect_targets(db, normalized), verify=verify,
+            )
+        except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
+            raise CharacterDeletionError(str(error), rollback_required=not getattr(error, "restart_safe", True)) from error
+        return CharacterDeletionResult(
+            normalized, tuple(target.character_id for target in targets),
+            tuple(target.character_name for target in targets),
+            normalized.scope is CharacterDeletionScope.ACCOUNT, backup,
+        )
     game_store = _game_store(root)
     database_path, data_path = _require_store_layout(game_store)
     backup_root = Path(normalized.backup_root or _default_backup_root())

@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { isDeepStrictEqual } = require("node:util");
 const { shutdownDatabase } = require("./game_store_maintenance");
+const sharedStore = require("./shared_game_store");
 const { exitWithTerminalResult } = require("./terminal_result");
 
 const reviewed = Object.freeze({
@@ -118,14 +119,15 @@ function nameError(validation, code) {
   return "INVALID_NAME";
 }
 
-function recordValue(raw) {
+function recordValue(raw, requireCanonical = true) {
   if (typeof raw !== "string" || Buffer.byteLength(raw) > maxRowBytes) {
     throw problem("UNSUPPORTED_LAYOUT");
   }
   const value = JSON.parse(raw);
   // The stock store serializes canonical JSON. A noncanonical record could
   // contain duplicated keys or numbers that Node would rewrite when parsed.
-  if (!value || typeof value !== "object" || Array.isArray(value) || JSON.stringify(value) !== raw) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      (requireCanonical && JSON.stringify(value) !== raw)) {
     throw problem("UNSUPPORTED_LAYOUT");
   }
   return value;
@@ -203,7 +205,30 @@ function characterRow(connection, characterId) {
   return connection.prepare("SELECT json FROM characters WHERE key = ?").get(String(characterId))?.json;
 }
 
-function renameUnderLease(database, Sqlite, file, store, request, source, proof) {
+function renameSharedRow(Sqlite, file, request, before, after, name, proof) {
+  const connection = new Sqlite(file, { fileMustExist: true, timeout: 1500 });
+  try {
+    connection.transaction(() => {
+      if (!isDeepStrictEqual(inspectOwners(connection), before.owners)) throw problem("OWNER_CHANGED");
+      if (characterRow(connection, request.characterId) !== before.raw) throw problem("TARGET_CHANGED");
+      proof.mutationStarted = true;
+      const result = connection.prepare(`
+        UPDATE character_records SET character_name = ?
+        WHERE character_id = ? AND account_id = ? AND character_name = ?
+      `).run(name, request.characterId, request.accountId, request.oldName);
+      if (result.changes !== 1 || characterRow(connection, request.characterId) !== after) {
+        throw problem("VERIFY_FAILED");
+      }
+    }).immediate();
+  } catch (error) {
+    proof.rollbackConfirmed = characterRow(connection, request.characterId) === before.raw;
+    throw error;
+  } finally {
+    connection.close();
+  }
+}
+
+function renameUnderLease(database, Sqlite, file, store, request, source, proof, shared) {
   const nameRuntime = require(path.join(source, "services", "character", "characterNameRuntime"));
   const key = `/${request.characterId}/characterName`;
   const before = readDisk(Sqlite, file, (connection) => {
@@ -213,8 +238,8 @@ function renameUnderLease(database, Sqlite, file, store, request, source, proof)
     const account = connection.prepare("SELECT json FROM accounts WHERE key = ?").get(request.username);
     const raw = characterRow(connection, request.characterId);
     if (!account || raw === undefined) throw problem("TARGET_CHANGED");
-    const record = recordValue(raw);
-    if (recordValue(account.json).id !== request.accountId || record.accountId !== request.accountId ||
+    const record = recordValue(raw, !shared);
+    if (recordValue(account.json, !shared).id !== request.accountId || record.accountId !== request.accountId ||
         record.characterName !== request.oldName || record.isDeleted === true) {
       throw problem("TARGET_CHANGED");
     }
@@ -227,9 +252,19 @@ function renameUnderLease(database, Sqlite, file, store, request, source, proof)
   if (validation !== nameRuntime.VALIDATION_CODE.VALID) {
     throw problem(nameError(validation, nameRuntime.VALIDATION_CODE));
   }
-  const after = JSON.stringify({ ...before.record, characterName: name });
+  // The typed view can contain integers and decimal text that JS cannot round-trip.
+  // Change just the stock text column and compare the full projected row in SQLite.
+  const after = shared
+    ? readDisk(Sqlite, file, connection => connection.prepare(
+      "SELECT json_set(?, '$.characterName', ?)",
+    ).pluck().get(before.raw, name))
+    : JSON.stringify({ ...before.record, characterName: name });
   saveBackup(store, request, before.raw, after);
   proof.backupCreated = true;
+  if (shared) {
+    renameSharedRow(Sqlite, file, request, before, after, name, proof);
+    return { name, raw: after, changed: true };
+  }
 
   function currentRow() {
     return readDisk(Sqlite, file, (connection) => {
@@ -276,17 +311,32 @@ async function main(proof) {
   if (!path.isAbsolute(store) || path.join(store, "data") !== process.env.EVEJS_GAMESTORE_DATA_DIR) {
     throw problem("UNSUPPORTED_LAYOUT");
   }
+  let shared;
   try {
-    verifyRelease(root);
+    const versionFile = path.join(root, "config/version.json");
+    if (ordinaryPath(versionFile, "file").size > 4096) throw problem("UNSUPPORTED_RELEASE");
+    if (sharedStore.supportsRelease(JSON.parse(fs.readFileSync(versionFile, "utf8")).evejsVersion)) {
+      shared = sharedStore.verifyRelease(root);
+    } else {
+      verifyRelease(root);
+    }
   } catch (_) {
     throw problem("UNSUPPORTED_RELEASE");
   }
   verifyLayout(store, file);
-  const Sqlite = require(path.join(root, "server", "node_modules", "better-sqlite3"));
+  const Sqlite = shared?.Sqlite || require(path.join(root, "server", "node_modules", "better-sqlite3"));
   readDisk(Sqlite, file, (connection) => {
-    assertReviewedStore(connection);
-    // Confirm existing owner and journal schema before the stock writer can initialize.
-    inspectOwners(connection);
+    if (shared) {
+      try {
+        sharedStore.assertIdle(connection, sharedStore.assertSchema(connection, shared.legacyNames));
+      } catch (error) {
+        throw problem(error.sharedStoreCode || "UNSUPPORTED_LAYOUT");
+      }
+    } else {
+      assertReviewedStore(connection);
+      // Confirm existing owner and journal schema before the stock writer can initialize.
+      inspectOwners(connection);
+    }
   });
   const database = require(path.join(source, "gameStore"));
   try {
@@ -296,7 +346,7 @@ async function main(proof) {
       throw problem("OWNER_BUSY");
     }
     proof.leaseAcquired = true;
-    const result = renameUnderLease(database, Sqlite, file, store, request, source, proof);
+    const result = renameUnderLease(database, Sqlite, file, store, request, source, proof, Boolean(shared));
     await shutdownDatabase(database, "launcher-character-rename");
     proof.leaseAcquired = false;
     readDisk(Sqlite, file, (connection) => {

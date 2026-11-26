@@ -408,7 +408,7 @@ class NewCharacterDialog(QDialog):
             OverviewPatchState.UNSUPPORTED: C["gold"],
             OverviewPatchState.MISSING: C["grey"],
         }
-        set_translatable_text(self.patch_status_label, status.reason)
+        set_translatable_text_template(self.patch_status_label, status.reason)
         self.patch_status_label.setStyleSheet(
             f"color: {colors.get(status.state, C['grey'])};"
         )

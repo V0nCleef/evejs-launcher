@@ -1,8 +1,8 @@
 """Runtime-selected Native and Docker character data providers.
 
-Docker volume rosters use a shipped, bounded read-only SQLite projection;
-details retain the allowlisted Config Editor export command.  A verified host bind is the sole Docker path allowed to use
-the existing SQLite reader.
+Docker volume rosters and shared-store details use bounded read-only SQLite
+projections. Legacy details retain the allowlisted Config Editor export.
+A verified host bind can use the native SQLite reader.
 """
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ from typing import Callable, Mapping, Protocol
 
 from src.core import db
 from src.core.db import Account, Character
+from src.core.evejs_compatibility import SHARED_GAME_STORE_RELEASES
+from src.core.mod_evejs_compatibility import installed_evejs_version
 from src.core.runtime.character_display import DISPLAY_SCRIPT
 from src.core.runtime.character_roster import ROSTER_SCRIPT
 from src.core.runtime.data_diagnostics import DataDiagnostic, value_kind
@@ -182,6 +184,13 @@ class DockerExportDataSource:
     def get_character_detail(self, char_id: int) -> dict | None:
         self.warnings = ()
         requested_id = _positive_id(char_id)
+        try:
+            release = installed_evejs_version(self.target.project_directory)
+        except OSError:
+            release = None
+        if release in SHARED_GAME_STORE_RELEASES:
+            display = self._load_export(requested_id, _map_display_values, display=True)
+            return display.get(requested_id)
         value = self._load_export(
             requested_id,
             lambda payload: _map_export_detail(payload, requested_id),
@@ -858,9 +867,13 @@ def _map_display_values(payload: Mapping[str, object]) -> dict[int, dict]:
             if char_id in result:
                 _invalid("duplicate_identity", "characterId")
             current = {}
-            for key in ("balance", "securityStatus"):
+            for key in ("balance", "securityStatus", "skillPoints"):
                 if key in row:
                     current[key] = _checked(key, row[key], _finite_float)
+            if "shipName" in row:
+                current["shipName"] = _checked("shipName", row["shipName"], lambda value: _optional_text(value, ""))
+            if "shipTypeID" in row:
+                current["shipTypeID"] = _checked("shipTypeID", row["shipTypeID"], _nonnegative_int)
             if "solarSystemName" in row:
                 name = _checked("solarSystemName", row["solarSystemName"], _required_text)
                 security = _checked("solarSystemSecurity", row["solarSystemSecurity"], _finite_float) if "solarSystemSecurity" in row else None

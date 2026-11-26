@@ -2,11 +2,34 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
 
 from src.core import db
+
+
+def test_shared_save_reads_authoritative_balance_without_wallet_view(tmp_path):
+    path = tmp_path / "gamestore.sqlite"
+    with closing(sqlite3.connect(path)) as connection, connection:
+        connection.executescript("""
+            PRAGMA application_id = 1163282244;
+            PRAGMA user_version = 35;
+            CREATE TABLE account_records(key TEXT, json TEXT);
+            CREATE VIEW accounts AS SELECT * FROM account_records;
+            CREATE TABLE character_records(key TEXT, json TEXT);
+            CREATE VIEW characters AS SELECT * FROM character_records;
+            CREATE TABLE character_wallets(character_id INTEGER PRIMARY KEY, balance_cents INTEGER);
+            CREATE VIEW walletAuthorityState AS SELECT bogus() AS json;
+            INSERT INTO account_records VALUES ('fixture', '{"id":1}');
+            INSERT INTO character_records VALUES ('2', '{"accountId":1,"characterName":"Pilot","balance":9}');
+            INSERT INTO character_wallets VALUES (2, 54321);
+        """)
+
+    assert db.load_accounts_from_game_store(tmp_path)[0].characters[0].isk == 543.21
+    assert db.get_character_detail_from_game_store(tmp_path, 2)["balance"] == 543.21
 
 
 def _write_solar_system_data(root: Path, name: str) -> None:

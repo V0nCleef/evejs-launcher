@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 import subprocess
 import ssl
 import time
@@ -18,10 +19,13 @@ from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal, pyqtSlot
 
 from ..constants import Ports
 from ..core import server_launcher
+from ..core.evejs_compatibility import SHARED_GAME_STORE_RELEASES
+from ..core.mod_evejs_compatibility import installed_evejs_version
 from ..core.platform import request_graceful_server_shutdown
 from ..core.runtime.endpoints import validate_port
 
 GAME_GRACEFUL_SHUTDOWN_TIMEOUT_SEC = 120.0
+SHARED_GAME_READINESS_TIMEOUT_SEC = 300.0
 MARKET_GRACEFUL_SHUTDOWN_TIMEOUT_SEC = 15.0
 MARKET_READINESS_TIMEOUT_SEC = 300.0
 
@@ -116,6 +120,7 @@ class ServiceStartWorker(QObject):
         self._start_market = start_market
         self._start_game = start_game
         self._game_port = validate_port(game_port, label="Game service")
+        self._default_game_timeout = readiness_timeout_sec is None
         if readiness_timeout_sec is None:
             from ..core.host import IS_LINUX
             readiness_timeout_sec = 300 if IS_LINUX else 120
@@ -146,6 +151,15 @@ class ServiceStartWorker(QObject):
             from ..core.linux_services import http_health
             return http_health(port)
         return server_launcher.is_server_running(port=port)
+
+    def _game_readiness_timeout(self) -> float:
+        if self._default_game_timeout and self._readiness_timeout_sec < SHARED_GAME_READINESS_TIMEOUT_SEC:
+            try:
+                if installed_evejs_version(Path(self._evejs_root)) in SHARED_GAME_STORE_RELEASES:
+                    return SHARED_GAME_READINESS_TIMEOUT_SEC
+            except OSError:
+                pass
+        return self._readiness_timeout_sec
 
     def _wait_for_ports(
         self,
@@ -355,7 +369,7 @@ class ServiceStartWorker(QObject):
                 ((self._game_port, 26001, 26002, 26003, 5222, 26400, linux_installation.cdn_port)
                  if linux_installation is not None else (self._game_port,)),
                 "Game service",
-                timeout_sec=self._readiness_timeout_sec,
+                timeout_sec=self._game_readiness_timeout(),
             )
             if game_ready and linux_installation is not None:
                 game_ready, game_error = self._wait_for_linux_tls(game_process, linux_installation)

@@ -1,13 +1,16 @@
 """Fixed read-only roster projection, independent of Config Editor detail building."""
 
-ROSTER_SCRIPT = r'''
+from .character_display import WALLET_LOOKUP_SCRIPT
+
+
+ROSTER_SCRIPT = (WALLET_LOOKUP_SCRIPT + r'''
 const Database = require('/app/server/node_modules/better-sqlite3');
 const db = new Database('/var/lib/evejs/gameStore/gamestore.sqlite', {readonly:true,fileMustExist:true});
 try {
   db.pragma('query_only = ON');
   db.exec('BEGIN');
   const hasTable = name => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
-  const wallet = hasTable('walletAuthorityState') ? db.prepare("SELECT json_extract(json,'$.balance') AS balance FROM walletAuthorityState WHERE key=?") : null;
+  const wallet = walletBalanceQuery(db);
   const systems = hasTable('solarSystems') ? db.prepare('SELECT json FROM solarSystems WHERE key=?') : null;
   function systemName(c) {
     if (typeof c.solarSystemName === 'string' && c.solarSystemName) return c.solarSystemName;
@@ -45,4 +48,4 @@ try {
   }
   process.stdout.write(JSON.stringify({protocol:'evejs-roster-v1',accounts,players,skippedRecords}));
 } finally { db.close(); }
-'''.strip()
+''').strip()

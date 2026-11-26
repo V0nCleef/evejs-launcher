@@ -412,3 +412,30 @@ def test_legacy_bridge_is_restore_only(
     assert status.state is patcher.OverviewPatchState.LEGACY
     assert status.can_restore
     assert not status.can_patch
+
+
+def test_build_3724492_overview_requires_a_prepared_client_before_any_write(tmp_path, monkeypatch):
+    archive_path = tmp_path / "code.ccp"
+    (tmp_path / "start.ini").write_text("build=3724492\n", encoding="utf-8")
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr(patcher.TARGET_ENTRY, b"test archive entry")
+    original = archive_path.read_bytes()
+    monkeypatch.setattr(patcher, "_STOCK_ARCHIVE_SHA256", patcher._sha256(archive_path))
+    monkeypatch.setattr(patcher, "is_eve_client_running", lambda: False)
+    assert patcher.inspect_overview_patch(tmp_path).state is patcher.OverviewPatchState.READY
+
+    with pytest.raises(patcher.OverviewPatchError):
+        patcher.patch_overview_client(tmp_path)
+
+    assert archive_path.read_bytes() == original
+    assert not (tmp_path / patcher.BACKUP_NAME).exists()
+
+
+def test_new_client_requires_its_own_overview_archive_hash(tmp_path, monkeypatch):
+    archive_path = tmp_path / "code.ccp"
+    (tmp_path / "start.ini").write_text("build=3724492\n", encoding="utf-8")
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr(patcher.TARGET_ENTRY, b"test archive entry")
+    monkeypatch.setattr(patcher, "SUPPORTED_CODE_SHA256", patcher._sha256(archive_path))
+
+    assert patcher.inspect_overview_patch(tmp_path).state is patcher.OverviewPatchState.UNSUPPORTED

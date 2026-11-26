@@ -1,7 +1,13 @@
 import json
 from pathlib import Path
 
-from src.core.evejs_compatibility import inspect_evejs_runtime
+import pytest
+
+from src.core.evejs_compatibility import (
+    EveJSSetupRequired,
+    inspect_evejs_runtime,
+    require_completed_evejs_setup,
+)
 
 
 DATA_ROOT_SOURCE = """
@@ -64,6 +70,28 @@ def _runtime_root(
             "param(\n  [string]$ClientPath\n)\n",
         )
     return root
+
+
+@pytest.mark.parametrize("release", ["261125.3", "261126.2"])
+def test_shared_release_config_and_pending_setup_use_selected_root(tmp_path, release):
+    root = _runtime_root(tmp_path, version=release)
+    state_path = root / "_local/setup-state.json"
+    state = {"schema": 1, "mode": "native", "pendingVersion": release}
+    original = json.dumps(state)
+    _write(state_path, original)
+
+    assert inspect_evejs_runtime(root).config_preflight_supported
+    with pytest.raises(EveJSSetupRequired, match="Resume setup"):
+        require_completed_evejs_setup(root)
+    assert state_path.read_text() == original
+
+    state["pendingVersion"] = ""
+    _write(state_path, json.dumps(state))
+    require_completed_evejs_setup(root)
+
+    _write(state_path, '{"schema":')
+    with pytest.raises(EveJSSetupRequired, match="could not be verified"):
+        require_completed_evejs_setup(root)
 
 
 def test_legacy_layout_uses_server_logs_and_existing_capabilities(tmp_path):

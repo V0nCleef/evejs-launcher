@@ -19,12 +19,16 @@ import zipfile
 import zlib
 
 from .platform import get_hidden_process_flags
+from .evejs_compatibility import STOCK_CLIENT_BUILD
 
 
 SUPPORTED_BUILD = 3396210
 SUPPORTED_CODE_SHA256 = (
     "89696509EFDC1B081F7371B40CA3D459059DB0E43B5DB328FE373C0F2A9B1A86"
 )
+_STOCK_BUILD = int(STOCK_CLIENT_BUILD)
+_STOCK_ARCHIVE_SHA256 = "86A5CBE3D1EF86833F517AEF7EBCDB0C7C25E144DFA17051877B8D7A911DF9B9"
+_STOCK_TARGET_SHA256 = "63CDF94C167BBCB121F4914DE8826D32077B730DB72F2D34FE88CACCE4770172"
 TARGET_ENTRY = "eve/client/script/parklife/overview/presetservice.pyj"
 MARKER_ENTRY = "evejs_launcher/overview_bridge_v1.json"
 PATCH_VERSION = 4
@@ -95,6 +99,14 @@ def _marker_from_archive(archive: zipfile.ZipFile) -> dict | None:
     return marker if isinstance(marker, dict) else None
 
 
+def _supported_archive_hash(build: int | None) -> str | None:
+    if build == SUPPORTED_BUILD:
+        return SUPPORTED_CODE_SHA256
+    if build == _STOCK_BUILD:
+        return _STOCK_ARCHIVE_SHA256
+    return None
+
+
 def inspect_overview_patch(client_path: str | Path) -> OverviewPatchStatus:
     client = Path(client_path)
     code_path = client / "code.ccp"
@@ -104,7 +116,8 @@ def inspect_overview_patch(client_path: str | Path) -> OverviewPatchStatus:
             "Select the copied EVE client tq folder first.",
         )
     build = _read_build(client / "start.ini")
-    if build != SUPPORTED_BUILD:
+    original_hash = _supported_archive_hash(build)
+    if original_hash is None:
         label = "unknown" if build is None else str(build)
         return OverviewPatchStatus(
             OverviewPatchState.UNSUPPORTED,
@@ -118,7 +131,10 @@ def inspect_overview_patch(client_path: str | Path) -> OverviewPatchStatus:
                 patch_version = marker.get("patchVersion")
                 if (
                     patch_version not in {1, 2, 3, PATCH_VERSION}
-                    or marker.get("originalArchiveSHA256") != SUPPORTED_CODE_SHA256
+                    or marker.get("originalArchiveSHA256") != original_hash
+                    or (build == _STOCK_BUILD and (
+                        patch_version != PATCH_VERSION or marker.get("originalEntrySHA256") != _STOCK_TARGET_SHA256
+                    ))
                 ):
                     raise OverviewPatchError("The installed overview patch is unknown.")
                 target_index = marker.get("targetIndex")
@@ -135,7 +151,7 @@ def inspect_overview_patch(client_path: str | Path) -> OverviewPatchStatus:
                 if target_hash != marker.get("patchedEntrySHA256"):
                     raise OverviewPatchError("The patched overview entry failed verification.")
                 backup = client / BACKUP_NAME
-                if not backup.is_file() or _sha256(backup) != SUPPORTED_CODE_SHA256:
+                if not backup.is_file() or _sha256(backup) != original_hash:
                     raise OverviewPatchError("The verified original client backup is missing.")
                 if patch_version == PATCH_VERSION:
                     return OverviewPatchStatus(
@@ -155,15 +171,15 @@ def inspect_overview_patch(client_path: str | Path) -> OverviewPatchStatus:
         archive_hash = _sha256(code_path)
     except OSError as exc:
         return OverviewPatchStatus(OverviewPatchState.CORRUPT, str(exc), build)
-    if archive_hash != SUPPORTED_CODE_SHA256:
+    if archive_hash != original_hash:
         return OverviewPatchStatus(
             OverviewPatchState.UNSUPPORTED,
-            "This code.ccp is modified or does not match the proven build 3396210 archive.",
+            f"This code.ccp is modified or does not match the proven build {build} archive.",
             build,
         )
     return OverviewPatchStatus(
         OverviewPatchState.READY,
-        "Supported EVE build 3396210; ready to install the optional overview bridge.",
+        f"Supported EVE build {build}; ready to install the optional overview bridge.",
         build,
     )
 
@@ -592,7 +608,10 @@ with open(output_path, 'wb') as output_file:
     return hybrid_pyc
 
 
-def _build_patched_archive(source_path: Path, stage_path: Path, client: Path) -> dict:
+def _build_patched_archive(source_path: Path, stage_path: Path, client: Path, *, build: int = SUPPORTED_BUILD) -> dict:
+    original_hash = _supported_archive_hash(build)
+    if original_hash is None:
+        raise OverviewPatchError("The selected client build cannot be patched.")
     with zipfile.ZipFile(source_path, "r") as source_archive:
         source_infos = source_archive.infolist()
         target_indexes = [
@@ -602,12 +621,15 @@ def _build_patched_archive(source_path: Path, stage_path: Path, client: Path) ->
             raise OverviewPatchError("The supported overview module is missing or duplicated.")
         target_index = target_indexes[0]
         original_entry = source_archive.read(source_infos[target_index])
+        entry_hash = hashlib.sha256(original_entry).hexdigest().upper()
+        if build == _STOCK_BUILD and entry_hash != _STOCK_TARGET_SHA256:
+            raise OverviewPatchError("The build 3724492 overview script failed verification.")
         try:
             original_pyc = zlib.decompress(original_entry)
         except zlib.error as exc:
             raise OverviewPatchError("The overview module has an invalid compression layer.") from exc
         from .host import IS_LINUX
-        if IS_LINUX:
+        if build == _STOCK_BUILD or IS_LINUX:
             from .portable_overview import graft_overview
             try:
                 patched_pyc = graft_overview(original_pyc)
@@ -629,10 +651,10 @@ def _build_patched_archive(source_path: Path, stage_path: Path, client: Path) ->
         patched_entry = zlib.compress(patched_pyc, 9)
         marker = {
             "patchVersion": PATCH_VERSION,
-            "originalArchiveSHA256": SUPPORTED_CODE_SHA256,
+            "originalArchiveSHA256": original_hash,
             "targetEntry": TARGET_ENTRY,
             "targetIndex": target_index,
-            "originalEntrySHA256": hashlib.sha256(original_entry).hexdigest().upper(),
+            "originalEntrySHA256": entry_hash,
             "patchedEntrySHA256": hashlib.sha256(patched_entry).hexdigest().upper(),
         }
 
@@ -680,6 +702,15 @@ def patch_overview_client(client_path: str | Path) -> OverviewPatchStatus:
         raise OverviewPatchError(status.reason)
     if is_eve_client_running():
         raise OverviewPatchError("Close every EVE client before patching code.ccp.")
+    original_hash = _supported_archive_hash(status.build)
+    assert original_hash is not None and status.build is not None
+    if status.build == _STOCK_BUILD:
+        from .launcher import validate_prepared_client_3724492
+
+        try:
+            validate_prepared_client_3724492(client)
+        except ValueError as exc:
+            raise OverviewPatchError(str(exc)) from exc
 
     code_path = client / "code.ccp"
     backup_path = client / BACKUP_NAME
@@ -688,15 +719,17 @@ def patch_overview_client(client_path: str | Path) -> OverviewPatchStatus:
     installed_replacement = False
     try:
         if backup_path.exists():
-            if not backup_path.is_file() or _sha256(backup_path) != SUPPORTED_CODE_SHA256:
+            if not backup_path.is_file() or _sha256(backup_path) != original_hash:
                 raise OverviewPatchError("The existing original backup is not trustworthy.")
         else:
             shutil.copy2(code_path, backup_stage)
-            if _sha256(backup_stage) != SUPPORTED_CODE_SHA256:
+            if _sha256(backup_stage) != original_hash:
                 raise OverviewPatchError("The staged original backup failed verification.")
             os.replace(backup_stage, backup_path)
 
-        _build_patched_archive(code_path, stage_path, client)
+        _build_patched_archive(backup_path, stage_path, client, build=status.build)
+        if _sha256(code_path) != original_hash:
+            raise OverviewPatchError("The EVE client archive changed before the patch could be installed.")
         with stage_path.open("r+b") as stream:
             os.fsync(stream.fileno())
         os.replace(stage_path, code_path)
@@ -709,7 +742,7 @@ def patch_overview_client(client_path: str | Path) -> OverviewPatchStatus:
         if installed_replacement and backup_path.is_file():
             try:
                 shutil.copy2(backup_path, stage_path)
-                if _sha256(stage_path) != SUPPORTED_CODE_SHA256:
+                if _sha256(stage_path) != original_hash:
                     raise OverviewPatchError("Automatic patch rollback failed verification.")
                 os.replace(stage_path, code_path)
             except Exception as rollback_exc:
@@ -734,15 +767,17 @@ def restore_overview_client(client_path: str | Path) -> OverviewPatchStatus:
         raise OverviewPatchError(status.reason)
     if is_eve_client_running():
         raise OverviewPatchError("Close every EVE client before restoring code.ccp.")
+    original_hash = _supported_archive_hash(status.build)
+    assert original_hash is not None
 
     code_path = client / "code.ccp"
     backup_path = client / BACKUP_NAME
     stage_path = client / f".{code_path.name}.evejs-launcher-restore"
     try:
-        if _sha256(backup_path) != SUPPORTED_CODE_SHA256:
+        if _sha256(backup_path) != original_hash:
             raise OverviewPatchError("The original client backup failed verification.")
         shutil.copy2(backup_path, stage_path)
-        if _sha256(stage_path) != SUPPORTED_CODE_SHA256:
+        if _sha256(stage_path) != original_hash:
             raise OverviewPatchError("The staged client restore failed verification.")
         os.replace(stage_path, code_path)
         restored = inspect_overview_patch(client)

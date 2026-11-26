@@ -18,7 +18,47 @@ MetadataStatus = Literal["valid", "missing", "invalid_or_conflicting"]
 
 _MAX_SOURCE_BYTES = 2 * 1024 * 1024
 _VERSION_METADATA_PATHS = (Path("package.json"), Path("config/version.json"))
-CONFIG_PREFLIGHT_VERSIONS = frozenset({"0.12.9", "261018.1", "261108.1", "261115.2"})
+SHARED_GAME_STORE_RELEASES = frozenset({"261125.3", "261126.2"})
+STOCK_CLIENT_BUILD = "3724492"
+CONFIG_PREFLIGHT_VERSIONS = frozenset({
+    "0.12.9", "261018.1", "261108.1", "261115.2", *SHARED_GAME_STORE_RELEASES,
+})
+
+
+class EveJSSetupRequired(RuntimeError):
+    """The selected EveJS installation has unfinished setup or update work."""
+
+
+def require_completed_evejs_setup(root: Path) -> None:
+    """Keep managed starts out of the upstream updater's pending setup state."""
+    if not root.is_dir() or installed_evejs_version(root) not in SHARED_GAME_STORE_RELEASES:
+        return
+    relative = Path("_local/setup-state.json")
+    setup_file = root / relative
+    if not setup_file.exists() and not setup_file.is_symlink():
+        return
+    try:
+        if setup_file.is_symlink():
+            raise ValueError
+        state = json.loads(_read_known_source(root.resolve(), relative) or "")
+        if (
+            not isinstance(state, dict)
+            or type(state.get("schema")) is not int
+            or state["schema"] != 1
+            or state.get("mode") not in ("native", "docker")
+            or not isinstance(state.get("pendingVersion"), str)
+        ):
+            raise ValueError
+    except (ValueError, TypeError):
+        raise EveJSSetupRequired(
+            "The selected EveJS setup state could not be verified. Open its setup tool "
+            "and finish or recover setup before starting services."
+        ) from None
+    if state["pendingVersion"]:
+        raise EveJSSetupRequired(
+            "The selected EveJS installation has an update awaiting setup. "
+            "Open its setup tool and choose Resume setup before starting services."
+        )
 
 
 @dataclass(frozen=True)

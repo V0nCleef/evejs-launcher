@@ -27,6 +27,7 @@ _MAX_DIAGNOSTIC_LENGTH = 200
 _CONFIG_FILES = frozenset(
     {"server.json", "gameplay.json", "world.json", "mining.json", "npc.json", "economy.json", "version.json"}
 )
+_REVIEWED_VERSIONS = "/".join(sorted(CONFIG_PREFLIGHT_VERSIONS))
 
 
 @dataclass(frozen=True)
@@ -191,7 +192,7 @@ def validate_native_server_config(
             supported=False,
             valid=None,
             message=(
-                "The selected EveJS server does not expose the verified 0.12.9/261018.1/261108.1/261115.2 config "
+                f"The selected EveJS server does not expose the verified {_REVIEWED_VERSIONS} config "
                 "validator; config preflight was skipped."
             ),
         )
@@ -269,7 +270,7 @@ def validate_native_server_config(
             valid=None,
             message=(
                 "The selected EveJS config manager does not match the verified "
-                "0.12.9/261018.1/261108.1/261115.2 validator contract; config preflight was skipped."
+                f"{_REVIEWED_VERSIONS} validator contract; config preflight was skipped."
             ),
         )
     if status == "invalid":

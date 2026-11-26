@@ -378,6 +378,23 @@ def test_existing_profile_is_patched_to_remapped_game_endpoint(
     assert "clusterMode=LOCAL\n" in prefs and "languageID=EN\n" in prefs
 
 
+def test_offline_launch_applies_only_the_selected_client_settings(tmp_path):
+    profile_tq, settings_dir = _paths(tmp_path)
+    (profile_tq / "start.ini").write_text("[main]\nserver=127.0.0.1\nport=26000\n", encoding="utf-8")
+    prefs = settings_dir / "prefs.ini"
+    prefs.write_text("languageID=EN\nbreakpadUpload=1\nsentry_io_dsn=old\nport=26000\n", encoding="utf-8")
+
+    profiles.configure_profile_game_endpoint(
+        "fixture", profile_tq, host="127.0.0.1", port=32600, settings_dir=settings_dir,
+        write_preferences=False, offline_client_sentry_dsn="http://evejs@127.0.0.1:32602/1",
+    )
+
+    assert set(prefs.read_text().splitlines()) == {
+        "languageID=EN", "breakpadUpload=0", "sentry_io_dsn=http://evejs@127.0.0.1:32602/1",
+        "port=26000",
+    }
+
+
 def test_repeated_launch_replaces_stale_values_without_duplicate_keys(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

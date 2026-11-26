@@ -11,11 +11,21 @@ import re
 import zipfile
 
 from . import platform
+from .client_autologin import _read_client_build
+from .evejs_compatibility import STOCK_CLIENT_BUILD
 from .profiles import _atomic_write_text, _is_directory_link, _path_entry_exists
 
 SHARED_PROFILE_NAME = "EveJSLauncherShared"
 SHARED_PROFILE_ARGUMENT = "/settingsprofile=" + SHARED_PROFILE_NAME
 _EVE_PREFS_SHA256 = "c79f54ef7882f755c53219343a402b6a7f18c89d82f062ce49565338ab3751e1"
+# Exact build-3724492 modules reviewed for the same named-profile selection,
+# local folder identity and numbered account/character settings contracts.
+_STOCK_SETTINGS_ENTRIES = {
+    "eveprefs/__init__.pyj": "e2c4494331dbc9e4cc15bd11eed522c8cee6a477c2fda3984a5ae724c744ac69",
+    "utillib/__init__.pyj": "1bf557ff2a379d4159f039c2400189f205a1bb777ddc359d5d2e08dd063b4c67",
+    "carbonui/services/settingsSvc.pyj": "ac7174598d1f28a04227342fb8b4c67bc9aa24d8ffff7b44509ffe087168343e",
+    "carbonui/util/settings.pyj": "88061aaba4141dee8871386f7fc0b3e40301c481054c221c0565d7c6744febe6",
+}
 
 
 def _create_junction(target: Path, alias: Path) -> None:
@@ -141,12 +151,21 @@ def resolve_shared_settings_folder(
 
 def require_shared_settings_support(client: str | Path) -> None:
     """Gate the named-profile contract against the inspected client code."""
+    root = Path(client)
     try:
-        with zipfile.ZipFile(Path(client) / "code.ccp") as archive:
-            digest = hashlib.sha256(archive.read("eveprefs/__init__.pyj")).hexdigest()
-        if digest == _EVE_PREFS_SHA256:
-            return
-    except (OSError, KeyError, zipfile.BadZipFile):
+        with zipfile.ZipFile(root / "code.ccp") as archive:
+            prefs = "eveprefs/__init__.pyj"
+            build = _read_client_build(root / "start.ini")
+            if build == int(STOCK_CLIENT_BUILD):
+                seen = archive.namelist()
+                if all(
+                    seen.count(entry) == 1 and hashlib.sha256(archive.read(entry)).hexdigest() == digest
+                    for entry, digest in _STOCK_SETTINGS_ENTRIES.items()
+                ):
+                    return
+            elif hashlib.sha256(archive.read(prefs)).hexdigest() == _EVE_PREFS_SHA256:
+                return
+    except (OSError, KeyError, RuntimeError, zipfile.BadZipFile):
         pass
     raise SharedSettingsError("Shared settings are not supported by this EVE client build.")
 

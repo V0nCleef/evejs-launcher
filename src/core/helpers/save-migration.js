@@ -8,7 +8,7 @@ const path = require("node:path");
 const { createHash } = require("node:crypto");
 
 const names = new Set(["game", "game-wal", "game-shm", "game-journal",
-  "market", "market-wal", "market-shm", "market-journal", "images", "skins"]);
+  "market", "market-wal", "market-shm", "market-journal", "images", "skins", "data", "manifest"]);
 const block = Buffer.alloc(1024 * 1024);
 const renamePause = new Int32Array(new SharedArrayBuffer(4));
 

@@ -94,6 +94,30 @@ def record(service: str, state: ServiceState, *, raw: str = "exited", health: st
     )
 
 
+def test_pending_2611253_setup_blocks_start_without_blocking_stop(tmp_path):
+    (tmp_path / "package.json").write_text('{"version":"261125.3"}', encoding="utf-8")
+    setup = tmp_path / "_local/setup-state.json"
+    setup.parent.mkdir()
+    setup.write_text('{"schema":1,"mode":"docker","pendingVersion":"261125.3"}', encoding="utf-8")
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services: {}\n", encoding="utf-8")
+    target = ComposeTarget(compose, tmp_path, "setup-qa")
+    inspector = FakeInspector({
+        role: record(role, ServiceState.OFFLINE) for role in ("server", "market")
+    })
+    runner = FakeRunner()
+    controller = ManagedComposeController(target, inspector, runner, policy=DockerControlPolicy.MANAGED)
+
+    started = controller.execute(DockerLifecycleAction.START_STACK)
+    assert not started.succeeded and started.diagnostic_code == "evejs_setup_required"
+    assert "Resume setup" in started.error
+    assert inspector.preflights == 0 and not runner.calls
+
+    stopped = controller.execute(DockerLifecycleAction.STOP_ALL)
+    assert stopped.succeeded
+    assert runner.calls[-1][0][-3:] == ("stop", "server", "market")
+
+
 @pytest.mark.parametrize(("action", "tail"), [
     (DockerLifecycleAction.START_MARKET, ("up", "-d", "market")),
     (DockerLifecycleAction.START_GAME, ("up", "-d", "server")),

@@ -132,6 +132,7 @@ a = Analysis(
         ('licenses/*', 'licenses'),
         ('src/core/template_settings/*', 'src/core/template_settings'),
         ('src/core/helpers/*.js', 'src/core/helpers'),
+        ('src/core/client/overview_bridge_py27.json', 'src/core/client'),
     ],
     hiddenimports=[
         'PyQt6.QtWidgets', 'PyQt6.QtCore', 'PyQt6.QtGui',

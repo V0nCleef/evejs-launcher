@@ -767,6 +767,55 @@ def test_native_store_runs_official_legacy_migration_before_selecting_data(
     ]
 
 
+def test_2611253_native_start_checks_format_without_running_a_conversion(tmp_path, monkeypatch):
+    (tmp_path / "package.json").write_text('{"version":"261125.3"}', encoding="utf-8")
+    server = tmp_path / "server"
+    _write_legacy_migration_entrypoint(server)
+    checker = server / "src/gameStore/startupSharedStore.js"
+    checker.touch()
+    store = tmp_path / "_local/gameStore"
+    (store / "data").mkdir(parents=True)
+    database = store / "gamestore.sqlite"
+    database.write_bytes(b"legacy save marker")
+    env = {"EVEJS_GAMESTORE_DATA_DIR": "unrelated"}
+    calls = []
+
+    def run(command, cwd, **kwargs):
+        calls.append((command, cwd, kwargs["env"]))
+        return subprocess.CompletedProcess(command, 1)
+
+    monkeypatch.setattr(server_launcher, "_run_game_dependency_command", run)
+    with pytest.raises(server_launcher.EveJSSetupRequired, match="Game save format"):
+        server_launcher._prepare_native_game_store_environment(
+            tmp_path, server, env, node="prepared-node",
+        )
+    assert calls == [(
+        ["prepared-node", str(checker.resolve()), "--check"],
+        server,
+        {"EVEJS_GAMESTORE_DATA_DIR": str((store / "data").resolve())},
+    )]
+    assert database.read_bytes() == b"legacy save marker"
+
+
+@pytest.mark.parametrize(("version", "supported"), [
+    ("v24.19.0", False),
+    ("v26.13.0", False),
+    ("v26.13.1", True),
+    ("v26.14.0", True),
+    ("v27.0.0", False),
+])
+def test_2611253_native_requires_supported_node_before_game_start(tmp_path, monkeypatch, version, supported):
+    monkeypatch.setattr(
+        server_launcher, "_run_game_dependency_command",
+        lambda command, *_args, **_kwargs: subprocess.CompletedProcess(command, 0, stdout=version),
+    )
+    if supported:
+        server_launcher._require_release_node("261125.3", tmp_path)
+    else:
+        with pytest.raises(RuntimeError, match="requires Node.js 26.13.1"):
+            server_launcher._require_release_node("261125.3", tmp_path)
+
+
 def test_native_store_refuses_ambiguous_legacy_and_canonical_saves(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

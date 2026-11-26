@@ -44,8 +44,9 @@ class FakeRunner:
 
     executable = "docker.exe"
 
-    def __init__(self, outcomes: list[object]) -> None:
+    def __init__(self, outcomes: list[object], *, display_payload: str = '{"players":[]}') -> None:
         self.outcomes = list(outcomes)
+        self.display_payload = display_payload
         self.calls: list[tuple[tuple[str, ...], Path, float]] = []
 
     def run(
@@ -57,7 +58,7 @@ class FakeRunner:
     ) -> DockerCommandResult:
         self.calls.append((args, cwd, timeout))
         if DISPLAY_SCRIPT in args:
-            return DockerCommandResult((self.executable, *args), 0, '{"players":[]}', "", False, False)
+            return DockerCommandResult((self.executable, *args), 0, self.display_payload, "", False, False)
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, BaseException):
             raise outcome
@@ -344,6 +345,18 @@ def test_character_detail_uses_requested_selected_player(tmp_path: Path) -> None
         "database-export",
         str(_FIXTURE_CHARACTER_ID),
     )
+
+
+def test_2611253_character_detail_skips_broad_config_editor_export(tmp_path):
+    (tmp_path / "package.json").write_text('{"version":"261125.3"}', encoding="utf-8")
+    stats = {"balance": 180.5, "shipName": "QA Shuttle", "shipTypeID": 11129, "skillPoints": 300}
+    response = {"players": [{"characterId": _FIXTURE_CHARACTER_ID, **stats}]}
+    runner = FakeRunner([], display_payload=json.dumps(response))
+    source = _source(tmp_path, "running", runner)
+
+    assert source.get_character_detail(_FIXTURE_CHARACTER_ID) == stats
+    assert len(runner.calls) == 1
+    assert runner.calls[0][0][-2:] == (DISPLAY_SCRIPT, str(_FIXTURE_CHARACTER_ID))
 
 
 @pytest.mark.parametrize(

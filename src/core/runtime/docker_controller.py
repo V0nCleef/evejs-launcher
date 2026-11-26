@@ -11,6 +11,7 @@ import time
 import uuid
 from typing import Any, Callable, Mapping
 
+from src.core.evejs_compatibility import EveJSSetupRequired, require_completed_evejs_setup
 from src.core.runtime.docker_cli import (
     DockerCommandError,
     redact_docker_diagnostic,
@@ -165,6 +166,14 @@ class ManagedComposeController:
     def _execute(self, action: DockerLifecycleAction) -> DockerLifecycleResult:
         if not isinstance(action, DockerLifecycleAction):
             raise ValueError("Docker lifecycle action is not allowed.")
+        if action not in (DockerLifecycleAction.STOP_GAME, DockerLifecycleAction.STOP_MARKET, DockerLifecycleAction.STOP_ALL):
+            try:
+                require_completed_evejs_setup(self._target.project_directory)
+            except EveJSSetupRequired as exc:
+                return DockerLifecycleResult(
+                    action, False, error=str(exc), target_identity=self._expected_target_identity,
+                    diagnostic_code="evejs_setup_required",
+                )
         preflight = self._inspector.preflight(self._target)
         if not preflight.ok or preflight.records is None:
             return DockerLifecycleResult(

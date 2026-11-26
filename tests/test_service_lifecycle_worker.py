@@ -137,6 +137,31 @@ def test_start_worker_verifies_mod_runtime_after_game_readiness() -> None:
     assert observed[0].succeeded is True
 
 
+@pytest.mark.parametrize(("version", "ready"), [("261115.2", False), ("261125.3", True)])
+def test_windows_shared_schema_cold_start_has_time_to_become_ready(tmp_path, monkeypatch, version, ready):
+    from src.core import host
+
+    monkeypatch.setattr(host, "IS_LINUX", False)
+    (tmp_path / "package.json").write_text(f'{{"version":"{version}"}}', encoding="utf-8")
+    elapsed = 0.0
+
+    def sleep(seconds):
+        nonlocal elapsed
+        elapsed += seconds
+
+    results = []
+    worker = ServiceStartWorker(
+        str(tmp_path), mode="vanilla", start_market=False, start_game=True,
+        probe=lambda _port: elapsed >= 125, poll_interval_sec=1,
+        start_game_fn=lambda _root, *, mode: FakeProcess(3),
+        clock_fn=lambda: elapsed, sleep_fn=sleep,
+    )
+    worker.completed.connect(results.append)
+    worker.run()
+
+    assert len(results) == 1 and results[0].game_ready is ready
+
+
 def test_start_worker_reports_mod_runtime_verification_failure() -> None:
     def fail_validation(_process: FakeProcess) -> object:
         raise RuntimeError("missing disabled marker")

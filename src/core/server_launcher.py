@@ -11,6 +11,7 @@ from enum import Enum
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import socket
 import subprocess
@@ -31,7 +32,13 @@ from .mod_runtime_state import (
     native_mod_preload_paths,
     validate_mod_runtime_plan,
 )
-from .evejs_compatibility import inspect_evejs_runtime
+from .evejs_compatibility import (
+    SHARED_GAME_STORE_RELEASES,
+    EveJSSetupRequired,
+    inspect_evejs_runtime,
+    require_completed_evejs_setup,
+)
+from .mod_evejs_compatibility import installed_evejs_version
 from .native_config_preflight import (
     NativeConfigPreflightError,
     validate_native_server_config,
@@ -722,18 +729,66 @@ def ensure_native_game_dependencies(server_dir: Path) -> None:
     _append_game_console(console, "Native Game dependencies repaired and verified.")
 
 
+def _require_release_node(
+    version: str | None, server_dir: Path, *, node: str = "node", env: dict[str, str] | None = None,
+) -> None:
+    if version not in SHARED_GAME_STORE_RELEASES:
+        return
+    probe = _run_game_dependency_command(
+        [node, "--version"], server_dir, purpose="check the EveJS Node.js version",
+        timeout_sec=10, capture_output=True, env=env,
+    )
+    match = re.fullmatch(r"v26\.(\d+)\.(\d+)", (probe.stdout or "").strip())
+    if probe.returncode != 0 or match is None or tuple(map(int, match.groups())) < (13, 1):
+        raise RuntimeError(
+            f"EveJS {version} requires Node.js 26.13.1 or later in the "
+            "26.x series. Check the Node.js executable selected for this installation."
+        )
+
+
 def _prepare_native_game_store_environment(
     evejs_root: Path,
     server_dir: Path,
     env: dict[str, str],
+    *,
+    node: str = "node",
 ) -> None:
-    """Apply EveJS's own v0.12.6 legacy migration before selecting gameStore."""
+    """Check shared saves and preserve older releases' GameStore selection."""
     local_root = evejs_root / "_local"
     legacy_store = local_root / "newDatabase"
     canonical_store = local_root / "gameStore"
     canonical_data = canonical_store / "data"
     # Never inherit an override that belongs to another selected installation.
     env.pop("EVEJS_GAMESTORE_DATA_DIR", None)
+
+    shared_store_check = server_dir / "src/gameStore/startupSharedStore.js"
+    release = installed_evejs_version(evejs_root)
+    if release in SHARED_GAME_STORE_RELEASES or shared_store_check.is_file():
+        if canonical_data.is_dir():
+            env["EVEJS_GAMESTORE_DATA_DIR"] = str(canonical_data.resolve())
+        if release in SHARED_GAME_STORE_RELEASES:
+            checker = shared_store_check.resolve()
+            if not checker.is_relative_to(evejs_root.resolve()) or not checker.is_file():
+                raise EveJSSetupRequired("The selected EveJS release has no verified local GameStore format checker.")
+            check_env = {
+                key: value for key, value in env.items()
+                if key.upper() not in {"NODE_OPTIONS", "NODE_PATH"}
+            }
+            try:
+                check = _run_game_dependency_command(
+                    [node, str(checker), "--check"],
+                    server_dir, purpose="check the EveJS save format", timeout_sec=30, env=check_env,
+                )
+                if check.returncode != 0:
+                    raise RuntimeError(f"EveJS save format check exited with code {check.returncode}.")
+            except RuntimeError as exc:
+                _append_game_console(get_server_console_log(evejs_root), str(exc))
+                raise EveJSSetupRequired(
+                    "The selected EveJS save could not be verified for startup. "
+                    "See the Game Console for details and complete the release's "
+                    "Game save format step with both services stopped."
+                ) from exc
+        return
 
     migration_script = (
         server_dir / "src" / "gameStore" / "migrateLegacyNewDatabase.js"
@@ -838,6 +893,7 @@ def start_game_server(
     if not index_js.exists():
         raise FileNotFoundError(f"Server entry point not found: {index_js}")
     layout = inspect_evejs_runtime(runtime_root)
+    require_completed_evejs_setup(layout.root)
 
     # Node cannot write fatal reports into a missing directory. Dependency
     # checks and repairs execute here inside ServiceStartWorker's QThread, so a
@@ -846,6 +902,7 @@ def start_game_server(
     console = get_server_console_log(runtime_root)
     console.parent.mkdir(parents=True, exist_ok=True)
     console.write_text("", encoding="utf-8")
+    _require_release_node(layout.evejs_version, server_dir)
     ensure_native_game_dependencies(server_dir)
 
     env = os.environ.copy()
@@ -941,6 +998,7 @@ def start_market_server(evejs_root: str) -> subprocess.Popen:
     cargo_toml = market_dir / "Cargo.toml"
     if not cargo_toml.exists():
         raise FileNotFoundError(f"Market server project not found: {cargo_toml}")
+    require_completed_evejs_setup(Path(evejs_root))
 
     # Use the pre-built binary if available, otherwise cargo run
     binary = market_dir / "target" / "release" / get_market_binary_name()

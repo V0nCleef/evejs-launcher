@@ -414,6 +414,10 @@ def _perform_client_launch(request: ClientLaunchRequest) -> LaunchedProcess:
 
 
 def _prepare_and_spawn_client(request: ClientLaunchRequest) -> LaunchedProcess:
+    from .core.launcher import prepare_offline_client_launch
+    offline_client_sentry_dsn = prepare_offline_client_launch(
+        request.evejs_root, request.client_path, request.launch_context,
+    )
     if request.require_account_creation:
         from .core.runtime.docker_autologin import require_docker_account_creation
         if request.docker_auto_login_probe is None:
@@ -458,6 +462,7 @@ def _prepare_and_spawn_client(request: ClientLaunchRequest) -> LaunchedProcess:
         port=request.launch_context.game_port,
         **settings_options,
         **({"write_preferences": False} if shared else {}),
+        **({"offline_client_sentry_dsn": offline_client_sentry_dsn} if offline_client_sentry_dsn else {}),
     )
     log.info("Client launch stage=settings_ready account=%s", request.username)
     auto_login = None
@@ -548,6 +553,7 @@ def _prepare_and_spawn_client(request: ClientLaunchRequest) -> LaunchedProcess:
         launch_context=request.launch_context,
         auto_login=auto_login,
         hide_console=request.hide_console,
+        **({"offline_client_sentry_dsn": offline_client_sentry_dsn} if offline_client_sentry_dsn else {}),
         **({"docker_mod_operation": request.docker_mod_operation} if request.docker_mod_operation is not None else {}),
         auto_login_server_password_bypass_verified=(
             server_password_bypass_verified

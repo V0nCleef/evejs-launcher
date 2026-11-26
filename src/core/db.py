@@ -30,12 +30,21 @@ def _system_label(system: dict) -> str:
 
 def _wallet_balances(con: sqlite3.Connection, char_id: int | None = None) -> dict[str, float]:
     """Read only authoritative personal balances; never load wallet histories."""
-    if not con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='walletAuthorityState'").fetchone():
+    if (
+        con.execute("PRAGMA application_id").fetchone()[0] == 0x45564744
+        and con.execute("PRAGMA user_version").fetchone()[0] == 35
+    ):
+        sql = "SELECT character_id, balance_cents / 100.0 FROM character_wallets"
+        identity = "character_id"
+    elif con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='walletAuthorityState'").fetchone():
+        sql = ("SELECT c.key, json_extract(w.json, '$.balance') FROM characters c "
+               "JOIN walletAuthorityState w ON w.key = 'character:' || c.key")
+        identity = "c.key"
+    else:
         return {}
-    sql = "SELECT c.key, json_extract(w.json, '$.balance') FROM characters c JOIN walletAuthorityState w ON w.key = 'character:' || c.key"
     args = ()
     if char_id is not None:
-        sql += " WHERE c.key = ?"
+        sql += f" WHERE {identity} = ?"
         args = (str(char_id),)
     return {str(key): value for key, value in con.execute(sql, args) if _finite_number(value)}
 
@@ -189,7 +198,7 @@ def _load_accounts_from_database(
     if not db_path.exists():
         return []
 
-    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    con = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
     try:
         return _read_accounts(con, resolve_location)
     finally:
@@ -273,7 +282,7 @@ def _get_character_detail_from_database(
     if not db_path.exists():
         return None
 
-    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    con = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
     cur = con.cursor()
     try:
         con.execute("BEGIN")

@@ -3,11 +3,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+import hashlib
 from http.client import HTTPConnection, HTTPException
 import logging
 import os
 from pathlib import Path
 import socket
+import stat
 import time
 from urllib.parse import urlsplit
 
@@ -21,6 +23,8 @@ from .client_autologin import (
 from .client_renderer import configure_client_renderer
 from .dlss5_runtime import prepare_installed_dlss5
 from .discovery import get_ca_cert_path
+from .evejs_compatibility import SHARED_GAME_STORE_RELEASES, STOCK_CLIENT_BUILD, require_completed_evejs_setup
+from .mod_evejs_compatibility import installed_evejs_version
 from .mod_api_runtime import prepare_public_client_mods
 from .mod_lifecycle_lock import acquire_mod_lifecycle_lock
 from .mod_client_notifications import start_client_notifications
@@ -42,6 +46,14 @@ _MIN_RESOURCE_CACHE_HEX_DIRECTORIES = 240
 _MIN_RESOURCE_CACHE_FILES = 50_000
 _CLIENT_ENDPOINT_READINESS_TIMEOUT_SEC = 30.0
 _CLIENT_ENDPOINT_POLL_INTERVAL_SEC = 0.5
+# Hashes of the prepared files in the reviewed EveJS build-3724492 client recipes.
+_OFFLINE_CLIENT_BINARIES = {
+    "blue.dll": (12068352, "fd73c0ebd68dcd8fd30471e85cdc984ad92c5653a7f03903ae99db14ee33e545"),
+    "exefile.exe": (992768, "5a26f6b9838963d6b687d433f4b11cb28bd1cf3a1670ad691d2df394c88cd575"),
+    "launchdarkly_stackless_client_sdk.pyd": (
+        11079680, "6dd06556e3a5e5776f3f37dafefea421e21cc81ca9c831353b104a13ad02e9ff",
+    ),
+}
 
 _LEGACY_IDENTITY_ALIASES = {
     "COMPUTERNAME": "EVEJS-PC",
@@ -78,6 +90,66 @@ def validate_proxy_origin(proxy_url: str) -> str:
             "EveJS proxy URL must be an HTTP origin with an explicit port."
         )
     return _http_url(parsed.hostname, port)
+
+
+def prepare_offline_client_launch(
+    evejs_root: str, client_path: str, launch_context: ClientLaunchContext,
+) -> str | None:
+    """Verify the prepared Windows copy and return its local crash-report DSN."""
+    root = Path(evejs_root)
+    if not evejs_root or not root.is_dir() or installed_evejs_version(root) not in SHARED_GAME_STORE_RELEASES:
+        return None
+    require_completed_evejs_setup(root)
+    proxy = urlsplit(validate_proxy_origin(launch_context.proxy_url))
+    if launch_context.game_host != "127.0.0.1" or proxy.hostname != "127.0.0.1":
+        raise ValueError("The prepared EVE build 3724492 requires IPv4 loopback Game and proxy endpoints.")
+    validate_prepared_client_3724492(Path(client_path))
+    return f"http://evejs@127.0.0.1:{proxy.port}/1"
+
+
+def validate_prepared_client_3724492(client: Path) -> None:
+    """Verify the copied client's offline binary and startup identity."""
+    guidance = (
+        f"Select a separate, prepared EVE build {STOCK_CLIENT_BUILD} copy. "
+        "Run the selected EveJS release's client setup to prepare it."
+    )
+    if not client.is_absolute() or str(client).startswith(("\\\\", "//")):
+        raise ValueError(guidance)
+
+    def ordinary(path: Path) -> os.stat_result:
+        result = path.lstat()
+        if path.is_symlink() or getattr(result, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+            raise ValueError(guidance)
+        return result
+
+    try:
+        for path in (client, *client.parents, client / "bin64"):
+            ordinary(path)
+        ini = client / "start.ini"
+        if ordinary(ini).st_size > 65536:
+            raise ValueError(guidance)
+        identity = {}
+        for line in ini.read_text(encoding="utf-8-sig").splitlines():
+            name, equals, value = line.partition("=")
+            name = name.strip().casefold()
+            if name == "serverip":
+                name = "server"
+            if equals and name in {"build", "server", "cryptopack"}:
+                if name in identity:
+                    raise ValueError(guidance)
+                identity[name] = value.strip()
+        if identity != {"build": STOCK_CLIENT_BUILD, "server": "127.0.0.1", "cryptopack": "Placebo"}:
+            raise ValueError(guidance)
+        for filename, (size, expected) in _OFFLINE_CLIENT_BINARIES.items():
+            binary = client / "bin64" / filename
+            information = ordinary(binary)
+            if not stat.S_ISREG(information.st_mode) or information.st_size != size:
+                raise ValueError(f"{filename} is missing or needs the verified offline patch. {guidance}")
+            with binary.open("rb") as stream:
+                if hashlib.file_digest(stream, "sha256").hexdigest() != expected:
+                    raise ValueError(f"{filename} does not match the prepared client. {guidance}")
+    except (OSError, UnicodeError) as exc:
+        raise ValueError(guidance) from exc
 
 
 def _probe_game_endpoint(host: str, port: int, *, timeout: float = 0.75) -> bool:
@@ -411,6 +483,7 @@ def launch_client(
     pre_spawn_check: Callable[[], None] | None = None,
     shared_settings: SharedClientSettings | None = None,
     hide_console: bool = False,
+    offline_client_sentry_dsn: str | None = None,
     docker_mod_operation=None,
 ) -> subprocess.Popen:
     """Launch the EVE client executable from a profile junction.
@@ -474,6 +547,8 @@ def launch_client(
         env["EO_REMOTEFILECACHEFOLDER"] = str(resfiles)
 
         arguments: tuple[str, ...] = (f"/port:{effective_context.game_port}",)
+        if offline_client_sentry_dsn:
+            arguments += ("/noCrashReportUpload", f"/resfileserver={validate_proxy_origin(effective_proxy)}/resfiles/")
         if shared_settings is not None:
             arguments += (shared_settings.argument, f"/server:{shared_settings.server_host}")
         if auto_login is not None:
@@ -509,6 +584,8 @@ def launch_client(
             **({"docker_operation": docker_mod_operation} if docker_mod_operation is not None else {}),
         )
         env.update(public_mods.environment)
+        if offline_client_sentry_dsn:
+            env["EVE_CLIENT_SENTRY_DSN"] = offline_client_sentry_dsn
         arguments += public_mods.arguments
 
         if auto_login is not None:

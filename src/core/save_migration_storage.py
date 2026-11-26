@@ -15,20 +15,29 @@ import subprocess
 import tomllib
 
 from .host import IS_LINUX, external_process_environment
+from .evejs_compatibility import SHARED_GAME_STORE_RELEASES
+from .mod_evejs_compatibility import installed_evejs_version
 from .platform import get_hidden_process_flags
 from .runtime.docker_cli import DockerCommandRunner
+from .runtime.docker_compose import parse_compose_config
 from .runtime.docker_setup import DockerSetupDraft, build_compose_target
 
 _GAME = "/var/lib/evejs/gameStore"
 _MARKET = "/var/lib/evejs/market"
 _SKINS = "/var/lib/evejs/skinr/designs"
 _HELPER = Path(__file__).with_name("helpers") / "save-migration.js"
+_SHARED_HELPER = _HELPER.with_name("shared_game_store.js")
 _VOLUME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 _ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _TIMEOUT = 1800
 _GAME_DEFINITIONS = ("config/version.json", "server/src/gameStore/index.js", "server/src/gameStore/sqliteStore.js")
 _MARKET_DEFINITIONS = ("config/version.json", "externalservices/market-server/src/state.rs",
                        "externalservices/market-server/crates/market-common/src/lib.rs")
+_STOCK_SERVER_BINDS = {
+    "/app/server/src/_secondary/image/generated/Alliance": False,
+    "/app/server/certs": True,
+    "/app/server/src/_secondary/express/certs": True,
+}
 _IMAGE_DEFINITIONS = """
 const fs = require('node:fs'), crypto = require('node:crypto');
 const files = JSON.parse(fs.readFileSync(0, 'utf8'));
@@ -39,6 +48,16 @@ for (const file of files) {
   result[file] = crypto.createHash('sha256').update(data.toString('utf8').replace(/\\r\\n/g,'\\n')).digest('hex');
 }
 process.stdout.write(JSON.stringify(result));
+"""
+_SHARED_VALIDATION = """
+try {
+  const { root, game, market, fresh } = JSON.parse(fs.readFileSync(0, "utf8"));
+  reviewTransfer(root, game, market, fresh);
+  process.stdout.write("verified");
+} catch (error) {
+  process.stdout.write(error.sharedStoreCode ? error.message : "The reviewed shared save could not be verified.");
+  process.exitCode = 1;
+}
 """
 
 
@@ -187,6 +206,43 @@ class SaveStorage:
             raise SaveMigrationError("The save storage verification returned an incomplete result.")
         return result
 
+    def verify_shared_bundle(self, bundle, *, game=True, market=False, fresh=False):
+        """Verify detached database files without mounting the installation's live storage."""
+        plain(bundle)
+        path = PurePosixPath("/bundle") if self.runner else bundle
+        payload = json.dumps({
+            "root": "/app" if self.runner else str(self.root),
+            "game": str(path / "game") if game else None,
+            "market": str(path / "market") if market else None,
+            "fresh": fresh,
+        }).encode()
+        program = _SHARED_HELPER.read_text(encoding="utf-8") + _SHARED_VALIDATION
+        try:
+            if not self.runner:
+                env = {key: value for key, value in external_process_environment().items()
+                       if key.upper() not in {"NODE_OPTIONS", "NODE_PATH"}}
+                result = subprocess.run(
+                    [self.node, "-e", program], input=payload, stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL, timeout=60, env=env, **get_hidden_process_flags(),
+                )
+                code, output = result.returncode, result.stdout.decode("utf-8")
+            else:
+                args = (
+                    "run", "--rm", "-i", "--pull", "never", "--network", "none", "--read-only",
+                    "--security-opt", "no-new-privileges", "--cap-drop", "ALL", "--entrypoint", "node",
+                    "--env", "NODE_OPTIONS=", "--env", "NODE_PATH=",
+                    "--mount", _mount_string("bind", str(bundle), "/bundle", read_only=True),
+                    self.node, "-e", program,
+                )
+                code, output = self.runner.run_with_input_parsed(
+                    args, cwd=self.root, input_bytes=payload,
+                    parser=lambda raw, status: (status, raw), timeout=60,
+                )
+        except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as error:
+            raise SaveMigrationError("The reviewed shared save could not be verified.") from error
+        if code or output != "verified":
+            raise SaveMigrationError(output[:300] or "The reviewed shared save could not be verified.")
+
 
 def bundle_inventory(bundle, files):
     """Inventory a launcher-owned snapshot without depending on a host Node."""
@@ -299,7 +355,7 @@ def _verify_image_definitions(runner, root, image, files):
         raise SaveMigrationError("The Docker image save format differs from this installation. Set up matching images first.")
 
 
-def _compose_layout(document):
+def _compose_layout(document, *, shared=False, root=None):
     services = document["services"]
     server = services["server"]
     market = services["market"]
@@ -313,6 +369,28 @@ def _compose_layout(document):
     data = (server.get("environment") or {}).get("EVEJS_GAMESTORE_DATA_DIR")
     if data not in (None, "", _GAME + "/data"):
         raise SaveMigrationError("This Compose project overrides the GameStore location.")
+    if shared:
+        for role in (server, market):
+            env = role.get("environment") or {}
+            if env.get("EVEJS_GAMESTORE_SQLITE_PATH") not in (None, "", _GAME + "/gamestore.sqlite"):
+                raise SaveMigrationError("This Compose project overrides the shared GameStore database.")
+            protected = (PurePosixPath("/app/server"), PurePosixPath("/app/externalservices/market-server/src"))
+            for mount in role.get("volumes", []):
+                target = mount["target"]
+                destination = PurePosixPath(target)
+                if destination.anchor != "/" or ".." in destination.parts or str(destination) != target:
+                    raise SaveMigrationError("This Compose project has a non-canonical mount target.")
+                if not any(_under(destination, member) for member in protected):
+                    continue
+                if (
+                    role is server and root is not None and target in _STOCK_SERVER_BINDS
+                    and mount["type"] == "bind"
+                    and mount.get("read_only", False) is _STOCK_SERVER_BINDS[target]
+                    and (mount.get("bind") or {}).get("propagation") in (None, "rprivate")
+                    and plain(Path(mount["source"])) == root.joinpath(*destination.parts[2:])
+                ):
+                    continue
+                raise SaveMigrationError("This Compose project overrides the reviewed save-format code.")
     used = []
     folders = []
     for service, location in ((server, _GAME), (market, _MARKET), (server, _SKINS)):
@@ -351,17 +429,21 @@ def _compose_layout(document):
     return project, (server["image"], market["image"]), tuple(used), paths
 
 
-def _docker(root, settings):
+def _docker(root, settings, *, target=None, expected_digest=None):
     runner = DockerCommandRunner()
     runner = _pin_runner(runner, _require_local(runner, root))
-    target = build_compose_target(DockerSetupDraft(
+    target = target or build_compose_target(DockerSetupDraft(
         str(root), settings.get("docker_compose_file", ""), settings.get("docker_project_name", ""),
         settings.get("docker_control_policy", "connect_only"),
         settings.get("docker_keep_running_on_exit", True), settings.get("client_path", ""),
     ))
+    shared = installed_evejs_version(root) in SHARED_GAME_STORE_RELEASES
     def projection(raw):
         try:
-            return _compose_layout(json.loads(raw)), None
+            document = json.loads(raw)
+            if expected_digest is not None and parse_compose_config(document).effective_config_digest != expected_digest:
+                raise SaveMigrationError("The selected Compose configuration changed during character maintenance.")
+            return _compose_layout(document, shared=shared, root=root), None
         except (KeyError, TypeError, ValueError, OSError, SaveMigrationError) as error:
             return None, str(error) if isinstance(error, SaveMigrationError) else "Could not resolve the Compose save storage."
     layout, message = runner.run_parsed(target.compose_args(runner.executable, "config", "--format", "json"),
