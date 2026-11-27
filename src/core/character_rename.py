@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -17,7 +17,7 @@ from .native_runtime import node_environment, node_executable
 from .platform import get_hidden_process_flags
 from .runtime.data import docker_project_identity
 from .runtime.docker_cli import DockerCommandRunner
-from .runtime.docker_compose import ComposeTarget, parse_compose_config
+from .runtime.docker_compose import ComposeInspector, ComposeTarget, parse_compose_config
 from .save_migration_storage import (
     SaveStorage, StorageMount, _mount_string, _native, _pin_runner, _require_local, plain,
 )
@@ -235,9 +235,13 @@ def _native_call(request: CharacterRenameRequest, root: Path, operation: str) ->
     return _finish(result, request, backup)
 
 
-def _compose_projection(raw: str, target: ComposeTarget, expected: str, root: Path) -> tuple:
+def _compose_projection(
+    raw: str, target: ComposeTarget, expected: str, root: Path, *, market_tools: bool | None = None,
+) -> tuple:
     document = json.loads(raw)
     config = parse_compose_config(document)
+    if market_tools is not None:
+        config = replace(config, capabilities=replace(config.capabilities, market_tools=market_tools))
     project = config.project_name
     if (
         not isinstance(project, str) or not _COMPOSE_NAME.fullmatch(project)
@@ -300,9 +304,10 @@ def _volume_identity(raw: str, project: str, name: str) -> tuple:
 
 
 def _docker_plan(runner: DockerCommandRunner, target: ComposeTarget, expected: str, root: Path) -> _DockerPlan:
+    market_tools = ComposeInspector(runner).has_market_tools(target)
     project, image, destination, mount = runner.run_parsed(
         target.compose_args(runner.executable, "config", "--format", "json"), cwd=root,
-        parser=lambda raw: _compose_projection(raw, target, expected, root),
+        parser=lambda raw: _compose_projection(raw, target, expected, root, market_tools=market_tools),
     )
     if not isinstance(image, str) or not image or image.startswith("-"):
         raise CharacterRenameError("The selected Docker Game image could not be verified.")

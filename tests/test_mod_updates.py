@@ -123,6 +123,23 @@ def test_real_package_swap_preserves_settings_order_and_active(fixture, replacem
     assert list((root / mod_updates.UPDATE_ROOT).glob('*/previous/loader.js.off')) or list((root / mod_updates.UPDATE_ROOT).glob('*/previous/loader.js.disabled'))
 
 
+def test_docker_recovery_stays_with_the_original_backend(fixture):
+    root, target, _offer, _downloader = fixture
+    job = root / mod_updates.UPDATE_ROOT / ('a' * 32)
+    job.mkdir(parents=True)
+    journal = job / 'update.json'
+    record = dict(schemaVersion=1, phase='prepared', packageKind='loader',
+                  dockerTargetIdentity='b' * 64)
+    journal.write_text(json.dumps(record), encoding='utf-8')
+    before = {path.name: path.read_bytes() for path in target.iterdir()}
+
+    with pytest.raises(ModUpdateError, match='original managed Docker project'):
+        mod_updates.recover_update(journal, ModOperationContext(root), guard=lambda: None)
+
+    assert json.loads(journal.read_text(encoding='utf-8')) == record
+    assert {path.name: path.read_bytes() for path in target.iterdir()} == before
+
+
 def test_package_update_through_dialog_signal_preserves_settings(qapp, fixture):
     from concurrent.futures import ThreadPoolExecutor
     from src.widgets.mod_update_dialog import ModUpdateDialog

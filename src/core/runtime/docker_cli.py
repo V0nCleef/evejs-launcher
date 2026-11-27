@@ -84,6 +84,26 @@ class DockerStructuredOutputError(ValueError):
         super().__init__(self._MESSAGES[code])
 
 
+def local_docker_endpoint(runner, cwd: Path) -> str | None:
+    """Resolve the selected local socket or named pipe for a mutating operation."""
+    endpoint = os.environ.get("DOCKER_HOST", "")
+    if not endpoint or os.environ.get("DOCKER_CONTEXT"):
+        endpoint = runner.run(("context", "inspect", "--format",
+                               '{{(index .Endpoints "docker").Host}}'), cwd=cwd).stdout.strip()
+    return endpoint if endpoint.startswith(("npipe://", "unix://")) else None
+
+
+def pin_docker_runner(runner, endpoint: str):
+    """Keep each CLI call on the endpoint observed before mutation."""
+    def execute(argv, cwd, timeout):
+        return runner._execute((argv[0], "--host", endpoint, *argv[1:]), cwd, timeout)
+
+    def execute_input(argv, cwd, timeout, payload):
+        return runner._execute_input((argv[0], "--host", endpoint, *argv[1:]), cwd, timeout, payload)
+
+    return DockerCommandRunner(runner.executable, execute=execute, execute_input=execute_input)
+
+
 class DockerCommandRunner:
     """Execute Docker commands without a shell or unbounded pipe capture."""
 

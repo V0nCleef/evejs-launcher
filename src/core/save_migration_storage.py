@@ -19,6 +19,7 @@ from .evejs_compatibility import SHARED_GAME_STORE_RELEASES
 from .mod_evejs_compatibility import installed_evejs_version
 from .platform import get_hidden_process_flags
 from .runtime.docker_cli import DockerCommandRunner
+from .runtime.docker_cli import local_docker_endpoint, pin_docker_runner as _pin_runner
 from .runtime.docker_compose import parse_compose_config
 from .runtime.docker_setup import DockerSetupDraft, build_compose_target
 
@@ -310,26 +311,13 @@ def _native(root, settings):
 
 
 def _require_local(runner, root):
-    endpoint = os.environ.get("DOCKER_HOST", "")
-    if not endpoint or os.environ.get("DOCKER_CONTEXT"):
-        endpoint = runner.run(("context", "inspect", "--format",
-                               '{{(index .Endpoints "docker").Host}}'), cwd=root).stdout.strip()
-    if not endpoint.startswith(("npipe://", "unix://")):
+    endpoint = local_docker_endpoint(runner, root)
+    if endpoint is None:
         raise SaveMigrationError("Save Migration needs a local Docker context.")
     system = runner.run(("version", "--format", "{{.Server.Os}}"), cwd=root).stdout.strip()
     if system != "linux":
         raise SaveMigrationError("Save Migration needs Docker's Linux container engine.")
     return endpoint
-
-
-def _pin_runner(runner, endpoint):
-    # The default Docker context is mutable outside this process. Every later
-    # command must use the local endpoint that was checked at the start.
-    def execute(argv, cwd, timeout):
-        return runner._execute((argv[0], "--host", endpoint, *argv[1:]), cwd, timeout)
-    def execute_input(argv, cwd, timeout, payload):
-        return runner._execute_input((argv[0], "--host", endpoint, *argv[1:]), cwd, timeout, payload)
-    return DockerCommandRunner(runner.executable, execute=execute, execute_input=execute_input)
 
 
 def _verify_image_definitions(runner, root, image, files):

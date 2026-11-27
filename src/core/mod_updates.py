@@ -6,6 +6,7 @@ only package folders; it never guesses at or overwrites external client files.
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import json
 import logging
 import os
@@ -26,6 +27,56 @@ from .mod_enabled_updates import PHASES as ENABLED_PHASES, install_enabled_relea
 from .mod_api_manifest import ENABLED_UPDATE_PROTOCOL
 
 UPDATE_ROOT = Path('_local/launcher-mod-updates')
+
+
+def supports_docker_package_update(descriptor):
+    """Managed Docker can replace local packages that have no runtime provider."""
+    return (
+        descriptor is not None
+        and descriptor.kind == 'loader'
+        and descriptor.activation_strategy == ActivationKind.LOADER_RENAME.value
+        and 'docker' in descriptor.supported_backends
+        and descriptor.launcher_api is None
+        and descriptor.docker is None
+    )
+
+
+def _offline_docker_update_identity(operation):
+    from .runtime.data import docker_project_identity
+    from .runtime.docker_cli import DockerCommandRunner, local_docker_endpoint, pin_docker_runner
+    from .runtime.docker_compose import ComposeInspector
+
+    factory = operation.docker_base_target_factory
+    if not callable(factory):
+        raise ModUpdateError('A managed Docker installation is required to update this package.')
+    target = factory()
+    if target.project_directory != operation.evejs_root.resolve(strict=True):
+        raise ModUpdateError('The Docker project belongs to a different EveJS installation.')
+    try:
+        runner = DockerCommandRunner()
+        endpoint = local_docker_endpoint(runner, target.project_directory)
+        if endpoint:
+            runner = pin_docker_runner(runner, endpoint)
+            engine_id = runner.run(('info', '--format', '{{.ID}}'), cwd=target.project_directory).stdout.strip()
+    except (OSError, RuntimeError, ValueError) as error:
+        raise ModUpdateError('Docker could not verify the local engine. Open Docker Desktop and check the installation.') from error
+    if endpoint is None:
+        raise ModUpdateError('Mod updates need the local Docker engine.')
+    report = ComposeInspector(runner).preflight(target)
+    if not report.ok or report.config is None or report.records is None:
+        raise ModUpdateError('Docker could not verify the selected project. Open Docker Desktop and check the installation.')
+    if any(record.exists and record.raw_state not in {'created', 'exited', 'dead'}
+           for record in report.records.values()):
+        raise ModUpdateError('Stop Game, Market and any other services in this Docker project before updating the mod.')
+    if not engine_id:
+        raise ModUpdateError('The local Docker engine identity is unavailable.')
+    project_id = docker_project_identity(target, report.config.project_name, config=report.config)
+    return hashlib.sha256(f'{endpoint}\0{engine_id}\0{project_id}'.encode()).hexdigest()
+
+
+def _require_docker_update_identity(operation, identity):
+    if operation.backend != 'docker' or _offline_docker_update_identity(operation) != identity:
+        raise ModUpdateError('Return to the original managed Docker project before continuing this mod update.')
 
 
 def _save(path, data):
@@ -96,6 +147,11 @@ def install_release(mod, release, operation, *, guard, downloader=download_relea
         logging.getLogger(__name__).warning('Installing mod %s with unconfirmed EveJS compatibility.', current.id)
     if Version.parse(release.version) <= Version.parse(current.version):
         raise ModUpdateError('The selected mod release is not newer than the installed version.')
+    docker_identity = None
+    if operation.backend == 'docker' and descriptor.kind != 'client-package':
+        if not supports_docker_package_update(descriptor):
+            raise ModUpdateError('This mod does not support in-launcher Docker updates.')
+        docker_identity = _offline_docker_update_identity(operation)
     packages = LocalModPackages(operation.evejs_root)
     if pending_updates(packages.root):
         raise ModUpdateError('Recover the previous mod update before installing another update.')
@@ -122,6 +178,8 @@ def install_release(mod, release, operation, *, guard, downloader=download_relea
             raise ModUpdateError('The package EveJS compatibility differs from its release metadata.')
         if operation.backend not in candidate.supported_backends:
             raise ModUpdateError('The update does not support the selected backend.')
+        if docker_identity and not supports_docker_package_update(candidate):
+            raise ModUpdateError('The new version needs a Docker update procedure from the mod author.')
         if candidate.launcher_api:
             from src.updater.github import _read_version
             if Version.parse(candidate.launcher_api.min_launcher_version) > Version.parse(_read_version()):
@@ -138,6 +196,8 @@ def install_release(mod, release, operation, *, guard, downloader=download_relea
         if any(Path(name).name.casefold().startswith('evejs-launcher.') for name in preserved):
             raise ModUpdateError('Package settings cannot preserve or overwrite a mod descriptor during an update.')
         guard()
+        if docker_identity:
+            _require_docker_update_identity(operation, docker_identity)
         if not supports_evejs(candidate.evejs_versions, installed_evejs_version(packages.root)):
             logging.getLogger(__name__).warning('EveJS support for mod %s is unconfirmed; proceeding with user-requested update.', current.id)
         current = operation.current(mod)
@@ -149,6 +209,8 @@ def install_release(mod, release, operation, *, guard, downloader=download_relea
         data = dict(schemaVersion=1, phase='prepared', target=current.path.relative_to(packages.root).as_posix(),
                     modId=current.id, packageKind=descriptor.kind, oldVersion=current.version, newVersion=release.version,
                     enabled=current.active, recordId=record.record_id, oldFingerprint='')
+        if docker_identity:
+            data['dockerTargetIdentity'] = docker_identity
         _save(journal, data)
         if current.active:
             # The complete replacement relationship plan was checked above.
@@ -158,6 +220,8 @@ def install_release(mod, release, operation, *, guard, downloader=download_relea
         _save(journal, data)
         guard()
         with acquire_mod_lifecycle_lock(packages.root):
+            if docker_identity:
+                _require_docker_update_identity(operation, docker_identity)
             disabled = _current(packages.root, current.path)
             if disabled.active or disabled.version != current.version:
                 raise ModUpdateError('The installed mod changed during the update. Recover before retrying.')
@@ -184,6 +248,8 @@ def install_release(mod, release, operation, *, guard, downloader=download_relea
         replacement = _current(packages.root, current.path)
         if data['enabled']:
             guard()
+            if docker_identity:
+                _require_docker_update_identity(operation, docker_identity)
             change_mod_state(replacement, True, operation)
         report("Verifying installation")
         verified = _current(packages.root, current.path)
@@ -216,7 +282,16 @@ def recover_update(journal, operation, *, guard):
     if data['phase'] in {'complete', 'rolled_back'}:
         return
     if data.get('schemaVersion') == 2:
+        if ('dockerImageBefore' in data) != (operation.backend == 'docker'):
+            raise ModUpdateError('Return to the original runtime before continuing this enabled mod update.')
         return recover_enabled_release(journal, data, operation, guard=guard)
+    docker_identity = data.get('dockerTargetIdentity')
+    if docker_identity is not None:
+        if not isinstance(docker_identity, str) or data.get('packageKind') != 'loader':
+            raise ModUpdateError('Invalid Docker update recovery record.')
+        _require_docker_update_identity(operation, docker_identity)
+    elif operation.backend == 'docker' and data.get('packageKind') != 'client-package':
+        raise ModUpdateError('Return to Native mode to recover this mod update.')
     target = _safe_path(packages.root, _relative_path(data['target'], 'Update target'), 'Update target')
     if target.parent != packages.root / 'mods' or type(data.get('enabled')) is not bool:
         raise ModUpdateError('Invalid update recovery target.')
@@ -227,6 +302,8 @@ def recover_update(journal, operation, *, guard):
         # original is still active/owned and verify it without installing again.
         from .mod_api_runtime import run_mod_helper_locked
         with acquire_mod_lifecycle_lock(packages.root):
+            if docker_identity:
+                _require_docker_update_identity(operation, docker_identity)
             restored = _current(packages.root, target)
             record = next((row for row in packages.records() if row.record_id == data.get('recordId')), None)
             if (record is None or record.relative_path != data['target'] or record.mod_id != data['modId']
@@ -235,6 +312,8 @@ def recover_update(journal, operation, *, guard):
                     or _fingerprint(target, packages.limits) != record.fingerprint):
                 raise ModUpdateError('The original prepared update changed; automatic no-op recovery stopped.')
             descriptor = restored.api_descriptor
+            if docker_identity and not supports_docker_package_update(descriptor):
+                raise ModUpdateError('The Docker mod declaration changed during recovery.')
             api = descriptor.launcher_api if descriptor else None
             if data['enabled'] and api and {'install', 'prepare_disable', 'prepare_remove'}.intersection(api.capabilities):
                 if 'verify' not in api.capabilities:
@@ -261,11 +340,15 @@ def recover_update(journal, operation, *, guard):
             installed = _current(packages.root, target)
             if installed.id != data['modId'] or installed.version != data['newVersion']:
                 raise ModUpdateError('The installed folder changed identity; automatic recovery stopped.')
+            if docker_identity and not supports_docker_package_update(installed.api_descriptor):
+                raise ModUpdateError('The Docker mod declaration changed during recovery.')
             # Cleanup is required even if install failed before recording ON.
             api = installed.api_descriptor.launcher_api if installed.api_descriptor else None
             if installed.active or (api and 'prepare_disable' in api.capabilities):
                 packages.disable(installed, cleanup_gate=cleanup_gate(operation), for_update=True)
         with acquire_mod_lifecycle_lock(packages.root):
+            if docker_identity:
+                _require_docker_update_identity(operation, docker_identity)
             if _fingerprint(backup, packages.limits) != data['oldFingerprint']:
                 raise ModUpdateError('The previous package changed during recovery.')
             if target.exists():
@@ -276,8 +359,12 @@ def recover_update(journal, operation, *, guard):
     restored = _current(packages.root, target)
     if restored.id != data['modId'] or restored.version != data['oldVersion']:
         raise ModUpdateError('Recovery could not identify the previous package.')
+    if docker_identity and not supports_docker_package_update(restored.api_descriptor):
+        raise ModUpdateError('The Docker mod declaration changed during recovery.')
     if data['enabled']:
         guard()
+        if docker_identity:
+            _require_docker_update_identity(operation, docker_identity)
         change_mod_state(restored, True, operation)
     data['phase'] = 'rolled_back'
     _save(journal, data)

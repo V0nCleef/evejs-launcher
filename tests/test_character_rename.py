@@ -84,11 +84,19 @@ def _target(root, document):
     return target, docker_project_identity(target, config.project_name, config=config)
 
 
-@pytest.mark.parametrize("mode,drift", [("bind", None), ("volume", None), ("volume", "image"), ("bind", "container")])
-def test_docker_uses_only_the_verified_authoritative_save_mount(tmp_path, monkeypatch, mode, drift):
+@pytest.mark.parametrize("mode,drift,market_tools", [
+    ("bind", None, False), ("volume", None, False), ("volume", None, True),
+    ("volume", "image", False), ("bind", "container", False),
+])
+def test_docker_uses_only_the_verified_authoritative_save_mount(tmp_path, monkeypatch, mode, drift, market_tools):
     _metadata(tmp_path)
     document = _project(tmp_path, mode)
     target, identity = _target(tmp_path, document)
+    if market_tools:
+        from dataclasses import replace
+        parsed = parse_compose_config(document)
+        parsed = replace(parsed, capabilities=replace(parsed.capabilities, market_tools=True))
+        identity = docker_project_identity(target, parsed.project_name, config=parsed)
     helper_commands = []
     observations = []
     endpoint = "unix:///fixture/engine"
@@ -125,6 +133,8 @@ def test_docker_uses_only_the_verified_authoritative_save_mount(tmp_path, monkey
                 source = "/run/desktop/mnt/host/" + source.drive[0].lower() + "/" + "/".join(source.parts[1:])
             return completed(argv, json.dumps([{"Mounts": [{"Type": "bind", "Source": str(source)}]}]))
         assert action[0] == "compose"
+        if action[-4:] == ("--profile", "tools", "config", "--services"):
+            return completed(argv, "init\nmarket\nserver\nmarket-tools\n" if market_tools else "init\nmarket\nserver\n")
         observations.append(action)
         return completed(argv, json.dumps(document))
 

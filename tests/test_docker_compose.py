@@ -217,6 +217,21 @@ def test_config_parser_requires_each_endpoint_from_its_semantic_service() -> Non
         parse_compose_config(config)
 
 
+@pytest.mark.parametrize("publication", [
+    "40111:40111",
+    {"target": 40111, "published": "40111", "protocol": "tcp"},
+    {"target": 40111, "protocol": "tcp"},
+])
+def test_config_parser_refuses_unscoped_extra_publication(publication) -> None:
+    config = {"services": {
+        "market": {"ports": ["127.0.0.1:40110:40110", publication]},
+        "server": {"ports": ["127.0.0.1:32600:26000", "127.0.0.1:32601:26001",
+                            "127.0.0.1:32602:26002", "127.0.0.1:34443:26003", "127.0.0.1:35222:5222"]},
+    }}
+    with pytest.raises(ComposeValidationError, match="explicit loopback"):
+        parse_compose_config(config)
+
+
 def test_config_parser_rejects_duplicate_semantic_target_and_host_bind_collision() -> None:
     base = {"market": {"ports": ["127.0.0.1:40110:40110"]}, "server": {"ports": [
         "127.0.0.1:32600:26000", "127.0.0.1:32601:26001", "127.0.0.1:32602:26002", "127.0.0.1:34443:26003", "127.0.0.1:35222:5222",

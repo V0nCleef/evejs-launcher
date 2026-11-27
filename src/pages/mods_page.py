@@ -453,6 +453,11 @@ class ModRow(QFrame):
         mark_translatable(self.update_btn)
         layout.addWidget(self.update_btn)
 
+        self.update_status = QLabel(self)
+        self.update_status.setTextFormat(Qt.TextFormat.PlainText)
+        self.update_status.hide()
+        layout.addWidget(self.update_status)
+
         self.helper_btn = QPushButton("Actions", self)
         self.helper_btn.setProperty("class", "signalSecondary")
         api = mod.api_descriptor.launcher_api if mod.api_descriptor else None
@@ -646,6 +651,16 @@ class ModRow(QFrame):
         set_translatable_tooltip(self.toggle, reason)
         self._update_state_presentation()
 
+    def show_update_offer(self, version: str, *, blocked_reason: str = "") -> None:
+        self.update_status.setVisible(bool(version and blocked_reason))
+        if version and blocked_reason:
+            set_translatable_text_template(self.update_status, f"Available version {version}")
+            set_translatable_tooltip(self.update_status, blocked_reason)
+        if version and not blocked_reason:
+            self.update_btn.set_update_available(version)
+        else:
+            self.update_btn.set_up_to_date()
+
     def _sync_remove_cursor(self) -> None:
         cursor = (
             Qt.CursorShape.PointingHandCursor
@@ -664,6 +679,7 @@ class ModsPage(QWidget):
     import_requested = pyqtSignal(str)
     update_mod_requested = pyqtSignal(object)
     check_updates_requested = pyqtSignal()
+    runtime_context_changed = pyqtSignal()
     recover_update_requested = pyqtSignal()
     undo_requested = pyqtSignal()
     recover_requested = pyqtSignal()
@@ -1188,6 +1204,7 @@ class ModsPage(QWidget):
         self._docker_policy = docker_policy
         self._apply_runtime_presentation()
         self._update_summary_and_actions()
+        self.runtime_context_changed.emit()
         self.refresh_mods()
 
     def set_mod_runtime_snapshot(

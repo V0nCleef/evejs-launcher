@@ -61,6 +61,19 @@ _PHRASES: dict[str, tuple[str, ...]] = {
         "可用版本", "利用可能なバージョン", "사용 가능한 버전",
         "Version disponible", "Verfügbare Version", "Beschikbare versie", "Доступная версия",
     ),
+    "Available version {version}": (
+        "可用版本 {version}", "利用可能なバージョン {version}", "사용 가능한 버전 {version}",
+        "Version disponible {version}", "Verfügbare Version {version}",
+        "Beschikbare versie {version}", "Доступная версия {version}",
+    ),
+    "This mod does not support in-launcher Docker updates.": (
+        "此模组不支持在启动器中进行 Docker 更新。", "この MOD はランチャーでの Docker 更新に対応していません。",
+        "이 모드는 런처에서 Docker 업데이트를 지원하지 않습니다.",
+        "Ce mod ne prend pas en charge les mises à jour Docker depuis le lanceur.",
+        "Dieser Mod unterstützt keine Docker-Updates über den Launcher.",
+        "Deze mod ondersteunt geen Docker-updates via de launcher.",
+        "Этот мод не поддерживает обновление Docker через лаунчер.",
+    ),
     "Mod updates": (
         "模组更新", "MODの更新", "모드 업데이트",
         "Mises à jour des mods", "Mod-Updates", "Modupdates", "Обновления модов",

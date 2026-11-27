@@ -245,6 +245,10 @@ class ComposeInspector:
     def __init__(self, runner: Any) -> None:
         self._runner = runner
 
+    def has_market_tools(self, target: ComposeTarget) -> bool:
+        services = self._compose(target, *_TOOLS_PROFILE_SERVICES)
+        return any(line.strip() == "market-tools" for line in services.stdout.splitlines())
+
     def preflight(self, target: ComposeTarget) -> PreflightReport:
         diagnostics: list[str] = []
         try:
@@ -307,12 +311,7 @@ class ComposeInspector:
                 )
             diagnostics.append("Required Compose services found.")
 
-            profile_services_result = self._compose(target, *_TOOLS_PROFILE_SERVICES)
-            profile_services = {
-                line.strip()
-                for line in profile_services_result.stdout.splitlines()
-                if line.strip()
-            }
+            market_tools = self.has_market_tools(target)
             config = self._compose_parsed(
                 target,
                 "config",
@@ -324,7 +323,7 @@ class ComposeInspector:
                 config,
                 capabilities=ComposeCapabilities(
                     init=config.capabilities.init,
-                    market_tools="market-tools" in profile_services,
+                    market_tools=market_tools,
                 ),
             )
             # `config --services` is authoritative for active services; JSON supplies only
@@ -900,7 +899,7 @@ def _parse_port(value: Any) -> Endpoint | None:
         if len(parts) == 3:
             host, published, target = parts
     if host is None or published is None or target is None:
-        return None
+        raise ComposeValidationError("Every published port needs an explicit loopback address and port.")
     if host not in {"127.0.0.1", "::1"}:
         raise ComposeValidationError("Published endpoints must bind to loopback in supported local mode.")
     try:

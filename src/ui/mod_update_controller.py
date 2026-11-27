@@ -7,14 +7,17 @@ from PyQt6.QtCore import QObject, QTimer
 from PyQt6.QtWidgets import QDialog
 from src.i18n import translate_ui_phrase as tr
 from src.core.application_operations import active_mutations
+from src.core.mod_manifest import ActivationKind
 from src.core.mod_update_source import check_update
 from src.core.mod_evejs_compatibility import installed_evejs_version
-from src.core.mod_updates import install_release, pending_updates, recover_update
+from src.core.mod_updates import install_release, pending_updates, recover_update, supports_docker_package_update
 from src.core.overview_patch import is_eve_client_running
+from src.core.service_status import RuntimeBackend
 from src.widgets.localized_dialogs import LocalizedMessageBox as QMessageBox
 from src.widgets.mod_update_dialog import ModUpdateDialog
 
 log = logging.getLogger(__name__)
+DOCKER_UPDATE_UNAVAILABLE = 'This mod does not support in-launcher Docker updates.'
 
 
 class ModUpdateController(QObject):
@@ -34,6 +37,7 @@ class ModUpdateController(QObject):
         page.check_updates_requested.connect(lambda: self.check(manual=True))
         page.update_mod_requested.connect(self.update)
         page.recover_update_requested.connect(self.recover)
+        page.runtime_context_changed.connect(self.refresh_offers)
 
     def key(self, mod):
         version = self.host._page._inventory.evejs_version
@@ -42,22 +46,34 @@ class ModUpdateController(QObject):
     def inventory_ready(self):
         page = self.host._page
         page.recover_update_btn.setVisible(page._inventory.update_recovery_pending)
-        for row in page._rows:
+        self.refresh_offers()
+        QTimer.singleShot(0, self.check)
+
+    def refresh_offers(self):
+        for row in self.host._page._rows:
             self.show_offer(row)
         self.update_badge()
-        QTimer.singleShot(0, self.check)
+
+    def _offer_blocked_reason(self, mod):
+        page = self.host._page
+        if not page._can_mutate():
+            return page._disabled_reason()
+        if (page._runtime_backend is RuntimeBackend.DOCKER_COMPOSE
+                and mod.activation_kind is not ActivationKind.CLIENT_PACKAGE
+                and not supports_docker_package_update(mod.api_descriptor)):
+            return DOCKER_UPDATE_UNAVAILABLE
+        return ''
 
     def show_offer(self, row):
         offer = self.offers.get(self.key(row.mod))
-        if offer is None:
-            row.update_btn.set_up_to_date()
-        else:
-            row.update_btn.set_update_available(offer.version)
+        reason = self._offer_blocked_reason(row.mod) if offer else ''
+        row.show_update_offer(offer.version if offer else '', blocked_reason=reason)
 
     def update_badge(self):
         navigation = getattr(getattr(self.host, 'window', None), '_nav', None)
         if navigation is not None:
-            count = sum(self.key(mod) in self.offers for mod in self.host._page.mods())
+            count = sum(self.key(mod) in self.offers and not self._offer_blocked_reason(mod)
+                        for mod in self.host._page.mods())
             navigation.set_mod_update_count(count)
 
     def check(self, *, manual=False):
@@ -102,29 +118,39 @@ class ModUpdateController(QObject):
                     self.offers[key] = offer
                 if error:
                     errors.append(mod.name + ': ' + error)
-            for row in page._rows:
-                self.show_offer(row)
-            self.update_badge()
+            self.refresh_offers()
             page.recover_update_btn.setVisible(bool(self.pending))
             if manual and errors:
                 QMessageBox.warning(host.window, tr('Mod update'), tr('Mod updates could not be checked.') + '\n' + '\n'.join(errors))
-            elif manual and not any(self.key(mod) in self.offers for mod in mods):
-                QMessageBox.information(host.window, tr('Mod update'), tr('No mod updates are available.'))
+            elif manual:
+                reasons = {self._offer_blocked_reason(mod) for mod in mods if self.key(mod) in self.offers}
+                if not reasons:
+                    QMessageBox.information(host.window, tr('Mod update'), tr('No mod updates are available.'))
+                elif '' not in reasons:
+                    QMessageBox.information(host.window, tr('Mod update'), '\n'.join(tr(reason) for reason in sorted(reasons)))
         host.run(operation, present)
 
-    def guard(self, *, client_package=False):
+    def guard(self, *, backend, client_package=False):
+        page = self.host._page
+        if not page._can_mutate():
+            raise RuntimeError(tr(page._disabled_reason()))
+        selected_backend = 'docker' if self.host.window._docker_mode() else 'native'
+        if selected_backend != backend:
+            raise RuntimeError('The selected runtime changed. Reopen the mod update.')
         # No process is stopped automatically. This also catches clients opened
         # outside this launcher; package providers apply their own scoped guards.
         if is_eve_client_running():
             raise RuntimeError('Close EVE clients before updating mods, then retry.')
-        if not client_package and self.host.window._native_game_running(fail_closed=True):
+        if not client_package and backend == 'native' and self.host.window._native_game_running(fail_closed=True):
             raise RuntimeError('Stop the game server before updating mods, then retry.')
-        if not client_package and self.host.window._docker_mode():
-            raise RuntimeError('Switch to a stopped Native target to update package files; Docker mod updates are not supported yet.')
 
     def update(self, mod):
         offer = self.offers.get(self.key(mod))
         if not offer:
+            return
+        reason = self._offer_blocked_reason(mod)
+        if reason:
+            QMessageBox.information(self.host.window, tr('Mod update'), tr(reason))
             return
         try:
             context = self.host._context(mod)
@@ -144,6 +170,10 @@ class ModUpdateController(QObject):
         def start():
             if dialog.running:
                 return
+            reason = self._offer_blocked_reason(mod)
+            if reason:
+                QMessageBox.information(dialog, tr('Mod update'), tr(reason))
+                return
             dialog.begin()
             last_phase = None
             def progress(phase, done=0, total=0):
@@ -153,9 +183,14 @@ class ModUpdateController(QObject):
                              mod.id, mod.version, offer.version, phase)
                     last_phase = phase
                 dialog.progress_received.emit(phase, done, total)
-            launched = self.host.run(lambda: install_release(mod, offer, context,
-                guard=lambda: self.guard(client_package=bool(mod.api_descriptor and mod.api_descriptor.kind == 'client-package')),
-                progress=progress), completed)
+            def guard():
+                self.guard(backend=context.backend, client_package=mod.activation_kind is ActivationKind.CLIENT_PACKAGE)
+
+            def operation():
+                guard()
+                return install_release(mod, offer, context, guard=guard, progress=progress)
+
+            launched = self.host.run(operation, completed)
             if not launched:
                 dialog.running = False
                 dialog.reject()
@@ -172,5 +207,7 @@ class ModUpdateController(QObject):
             return
         def operation():
             for journal, data in pending_updates(context.evejs_root):
-                recover_update(journal, context, guard=lambda: self.guard(client_package=data.get('packageKind') == 'client-package'))
+                recover_update(journal, context, guard=lambda: self.guard(
+                    backend=context.backend, client_package=data.get('packageKind') == 'client-package',
+                ))
         self.host.run(operation, self.host._operation_result)

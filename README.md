@@ -105,7 +105,7 @@ Use **Add ZIP** or **Add Folder** to import a compatible package, or **Open Mod 
 | **Configure** | Opens the settings form supplied by the mod. It may include switches, number fields, lists, translated labels, and settings for individual profiles. |
 | **Check mod updates** | Looks for compatible releases. Checking does not install anything. |
 | **Sort by dependencies** | Previews the declared load order. Review and save it, then apply server changes when ready. |
-| **Gold Update button** | Opens the offered version and release notes for review before installation. A gold badge on Mods shows available updates. |
+| **Gold Update button** | Opens the offered version and release notes for review before installation. The Mods badge counts updates you can install on the selected backend. |
 | **Actions** | Shows supported package actions, such as client preparation or removal. |
 | **Remove / Undo Removal** | Removes supported local packages and restores them from launcher recovery storage where available. |
 | **Apply & Restart Server** | Applies configured server-mod changes through the normal restart flow and checks the resulting state. |
@@ -113,6 +113,8 @@ Use **Add ZIP** or **Add Folder** to import a compatible package, or **Open Mod 
 The launcher supports loader packages, declared source integrations, settings-only packages, and compatible client-file integrations. It also supports declared dependencies, load order, helper programs, and client start/exit events. It does not guess how an arbitrary source patch should be enabled or removed.
 
 Compatible mod updates preserve declared settings files. Other mutable files must be declared by the mod author. Source integrations and client-file packages can have their own removal and recovery rules; follow the actions offered by that package.
+
+Managed Docker can update supported loader mods directly. Stop Game and Market before updating, then start the stack to load the new mod. If a mod needs a separate Docker update procedure, its row shows the available version and explains why the launcher cannot install it.
 
 ## Shared in-game MODS menu
 

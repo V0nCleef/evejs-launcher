@@ -117,6 +117,61 @@ def test_sidebar_badge_tracks_only_current_compatible_offers(qapp, tmp_path):
     host.deleteLater()
 
 
+@pytest.mark.parametrize('loader_needs_helper', [False, True])
+def test_cached_update_offer_follows_docker_control_policy(qapp, tmp_path, monkeypatch, loader_needs_helper):
+    from pathlib import Path
+    from src.core.local_mod_packages import LocalModPackages
+    from src.core.service_status import DockerControlPolicy, RuntimeBackend
+    from src.ui import mod_update_controller
+    from src.widgets.nav_panel import NavPanel
+
+    package = Path(__file__).resolve().parents[1] / 'examples/mods/github-update-demo'
+    (tmp_path / 'package.json').write_text('{"version":"0.12.7.1"}', encoding='utf-8')
+    LocalModPackages(tmp_path).import_package(package)
+    page = ModsPage(defer_inventory=True)
+    page._evejs_root = str(tmp_path)
+    page.show_inventory(load_mod_inventory(str(tmp_path)))
+    # Leave the actual inventory in place to test backend changes before a rescan.
+    monkeypatch.setattr(page, 'refresh_mods', lambda: None)
+    navigation = NavPanel()
+    host = QObject()
+    host._page = page
+    host.window = SimpleNamespace(_nav=navigation)
+    host._context = lambda *_: pytest.fail('A blocked offer must not open an update context')
+    controller = ModUpdateController(host)
+    controller.attach(page)
+    row = page._rows[0]
+    monkeypatch.setattr(mod_update_controller, 'supports_docker_package_update',
+                        lambda descriptor: not loader_needs_helper)
+    messages = []
+    monkeypatch.setattr(mod_update_controller.QMessageBox, 'information',
+                        lambda _parent, _title, message: messages.append(message))
+    controller.offers[controller.key(row.mod)] = SimpleNamespace(version='1.2.3')
+
+    page.set_runtime_context(RuntimeBackend.DOCKER_COMPOSE, DockerControlPolicy.MANAGED)
+    assert row.update_btn.isHidden() is loader_needs_helper
+    assert row.update_status.isHidden() is not loader_needs_helper
+    assert navigation.btn_mods._badge_count == int(not loader_needs_helper)
+    if loader_needs_helper:
+        assert row.update_status.text() == 'Available version 1.2.3'
+        controller.update(row.mod)
+        assert messages == [mod_update_controller.DOCKER_UPDATE_UNAVAILABLE]
+
+    page.set_runtime_context(RuntimeBackend.DOCKER_COMPOSE, DockerControlPolicy.CONNECT_ONLY)
+    assert row.update_btn.isHidden()
+    assert 'Connect-only' in row.update_status.toolTip()
+    controller.update(row.mod)
+    assert 'Connect-only' in messages[-1]
+
+    page.set_runtime_context(RuntimeBackend.NATIVE, DockerControlPolicy.CONNECT_ONLY)
+    assert not row.update_btn.isHidden()
+    assert row.update_status.isHidden()
+    assert navigation.btn_mods._badge_count == 1
+    navigation.deleteLater()
+    page.deleteLater()
+    host.deleteLater()
+
+
 @pytest.mark.parametrize('language', ['en', 'zh_CN', 'ja', 'ko', 'fr', 'de', 'nl', 'ru'])
 def test_progress_is_queued_localized_and_cannot_close_mid_update(qapp, language):
     from threading import Thread
