@@ -2,6 +2,9 @@
 
 ## Changelog
 
+## v1.0.99 - 2026-11-27
+- In managed Docker, **Apply & Recreate Server** starts Market when needed and waits for it to become healthy before recreating Game. An already healthy Market keeps running.
+
 ## v1.0.98 - 2026-11-27
 - Enable **Settings → Copy overview once** for Managed and Connect-only Docker installations using the Overview Bridge and Separate client settings. Thanks to JcKalck for reporting the gap. 🫡
 - Keep captured overviews and pending copies tied to the selected Docker GameStore. Each recipient applies the snapshot once, on their next login.
