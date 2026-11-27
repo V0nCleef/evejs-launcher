@@ -2,6 +2,10 @@
 
 ## Changelog
 
+## v1.0.98 - 2026-11-27
+- Enable **Settings → Copy overview once** for Managed and Connect-only Docker installations using the Overview Bridge and Separate client settings. Thanks to JcKalck for reporting the gap. 🫡
+- Keep captured overviews and pending copies tied to the selected Docker GameStore. Each recipient applies the snapshot once, on their next login.
+
 ## v1.0.97 - 2026-11-26
 - Windows Native supports the reviewed EveJS 261125.3 and 261126.2 releases and automatic login and character selection on EVE client build 3724492. Thanks to Delta007a for the client update. 🫡
 - Preserve existing Neural Rendering preferences when launching EVE and keep the console hidden on supported clients when automatic login falls back to manual login.
