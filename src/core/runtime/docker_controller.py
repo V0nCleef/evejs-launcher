@@ -24,6 +24,7 @@ from src.core.runtime.docker_cli import (
 from src.core.runtime.docker_compose import (
     ComposeTarget,
     ContainerRecord,
+    PERSISTENCE_OWNER_LEASE_ENV,
     docker_container_runtime_identity,
 )
 from src.core.runtime.data import docker_project_identity
@@ -81,6 +82,11 @@ _GAME_START_ACTIONS = frozenset({
     DockerLifecycleAction.RESTART_GAME, DockerLifecycleAction.RECREATE_GAME,
     DockerLifecycleAction.RECREATE_STACK,
 })
+# Docker may step its guest clock during startup. The shared GameStore's
+# supported lease setting keeps its ownership fence intact across those steps.
+_GAME_LEASE_OVERRIDE = json.dumps({"services": {"server": {"environment": {
+    PERSISTENCE_OWNER_LEASE_ENV: "${" + PERSISTENCE_OWNER_LEASE_ENV + ":-300000}",
+}}}}).encode("utf-8")
 _GAME_ATTEMPT_FORMAT = (
     "{{.Id}}\t{{.State.StartedAt}}\t{{.State.Status}}\t{{.State.ExitCode}}\t{{.State.OOMKilled}}"
 )
@@ -257,7 +263,7 @@ class ManagedComposeController:
             self._trace(action, "read_only_verification", target=target_identity)
             return self._poll(action, target_identity)
         try:
-            argv = self._target.compose_args(self._runner.executable, *_COMMANDS[action])
+            command = _COMMANDS[action]
             self._trace(action, "command", target=target_identity,
                 reason="explicit_stop" if action in {DockerLifecycleAction.STOP_GAME, DockerLifecycleAction.STOP_MARKET,
                     DockerLifecycleAction.STOP_ALL} else "authorized_start_or_restart")
@@ -285,29 +291,48 @@ class ManagedComposeController:
                 if not market_result.succeeded:
                     return replace(market_result,action=action)
                 if action is DockerLifecycleAction.RECREATE_STACK:
-                    argv = self._target.compose_args(self._runner.executable,*_COMMANDS[DockerLifecycleAction.RECREATE_GAME])
+                    command = _COMMANDS[DockerLifecycleAction.RECREATE_GAME]
             prepare_game = preparing and (replace_game or _safely_stopped(preflight.records.get("server")))
             if prepare_game:
                 self._trace(action, "prepare_server", target=target_identity)
                 self._before_game_start()
                 if action is DockerLifecycleAction.RESTART_GAME:
-                    argv = self._target.compose_args(self._runner.executable, "up", "-d", "server")
+                    command = ("up", "-d", "server")
             if prepare_game or (start_market and action is DockerLifecycleAction.RECREATE_GAME):
                 fresh = self._inspector.preflight(self._target)
                 if not fresh.ok or fresh.config is None or docker_project_identity(self._target, fresh.config.project_name, config=fresh.config) != target_identity:
                     raise ValueError("Docker authority changed during server preparation.")
             game = preflight.records.get("server")
-            can_recover = (
+            shared_store = (
                 action in _GAME_START_ACTIONS
-                and (replace_game or _safely_stopped(game))
                 and installed_evejs_version(self._target.project_directory) in SHARED_GAME_STORE_RELEASES
             )
+            starts_game = replace_game or _safely_stopped(game)
+            apply_lease_default = shared_store and not getattr(self._config, "server_owner_lease_configured", True)
+            can_recover = shared_store and starts_game
             prior_attempt = self._game_attempt(game) if can_recover else None
             if game is not None and game.exists and prior_attempt is None:
                 can_recover = False
             prior_markers = self._world_lease_markers(prior_attempt.container_id) if prior_attempt else None
-            self._runner.run(argv, cwd=self._target.project_directory,
-                             timeout=self._command_timeouts[action])
+            if apply_lease_default and starts_game:
+                if command[0] == "restart":
+                    command = ("up", "-d", "--no-deps", "--force-recreate", "server")
+                self._runner.run_with_input(
+                    self._target.compose_args(self._runner.executable, "-f", "-", *command),
+                    cwd=self._target.project_directory,
+                    input_bytes=_GAME_LEASE_OVERRIDE,
+                    timeout=self._command_timeouts[action],
+                )
+            else:
+                if apply_lease_default:
+                    # The running Game may already have the launcher's lease.
+                    # A Start request must not recreate it using the base file.
+                    command = ("up", "-d", "--no-recreate", "server")
+                self._runner.run(
+                    self._target.compose_args(self._runner.executable, *command),
+                    cwd=self._target.project_directory,
+                    timeout=self._command_timeouts[action],
+                )
         except DockerCommandError as exc:
             return DockerLifecycleResult(action, False, error=_diagnostic(exc),
                                          target_identity=target_identity)

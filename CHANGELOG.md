@@ -2,6 +2,12 @@
 
 ## Changelog
 
+## v1.0.100 - 2026-11-27
+- Automatically give Game enough time to renew its save lock in Managed Docker on supported EveJS versions. Keep explicit lease settings and retry Game once after a verified lease-loss exit.
+- Update compatible loader mods while the selected Docker project is stopped. Preserve the mod's settings and restore the previous package if activation fails. Thanks to JcKalck for reporting the Docker update problem. 🫡
+- Fix offline character rename on the stock EveJS 261126.2 Docker layout.
+- Validate the bind address on every published port before accepting a local Docker project.
+
 ## v1.0.99 - 2026-11-27
 - In managed Docker, **Apply & Recreate Server** starts Market when needed and waits for it to become healthy before recreating Game. An already healthy Market keeps running.
 

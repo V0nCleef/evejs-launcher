@@ -184,6 +184,59 @@ def _prove_game_lease_recovery(tmp_path, *, failure, expected_restarts):
     if failure == "verification_only":
         assert not runner.calls
 
+
+@pytest.mark.parametrize(("version", "configured", "already_running", "writes_override"), [
+    ("261126.2", False, False, True),
+    ("261125.3", False, False, True),
+    ("261126.2", True, False, False),
+    ("261126.2", False, True, False),
+    ("261115.2", False, False, False),
+])
+def test_managed_applies_game_lease_without_editing_compose(
+    tmp_path, version, configured, already_running, writes_override,
+):
+    (tmp_path / "package.json").write_text(json.dumps({"version": version}), encoding="utf-8")
+    compose = tmp_path / "compose.yaml"
+    source = b"services: {}\n"
+    compose.write_bytes(source)
+    draft = ComposeTarget(compose, tmp_path, "lease-fixture")
+    game = record("server", ServiceState.ONLINE, raw="running", health="healthy")
+    market = record("market", ServiceState.ONLINE, raw="running", health="healthy")
+    initial = {"server": game if already_running else ContainerRecord.absent("server"), "market": market}
+
+    class Inspector(SequenceInspector):
+        def preflight(self, target):
+            report = super().preflight(target)
+            report.config = SimpleNamespace(project_name="lease-fixture", server_owner_lease_configured=configured)
+            return report
+
+    class Runner(FakeRunner):
+        overlays = []
+
+        def run_with_input(self, args, *, cwd, input_bytes, timeout):
+            self.overlays.append((args, input_bytes))
+            return self.run(args, cwd=cwd, timeout=timeout)
+
+    runner = Runner()
+    outcome = ManagedComposeController(
+        draft, Inspector(initial, [{"server": game, "market": market}]), runner,
+        policy=DockerControlPolicy.MANAGED,
+    ).execute(DockerLifecycleAction.START_STACK)
+
+    assert outcome.succeeded
+    assert compose.read_bytes() == source
+    if writes_override:
+        [(args, payload)] = runner.overlays
+        assert args == draft.compose_args("docker", "-f", "-", "up", "-d", "server")
+        assert json.loads(payload) == {"services": {"server": {"environment": {
+            "EVEJS_PERSISTENCE_OWNER_LEASE_MS": "${EVEJS_PERSISTENCE_OWNER_LEASE_MS:-300000}",
+        }}}}
+    else:
+        assert not runner.overlays
+        command = ("up", "-d", "--no-recreate", "server") if already_running else ("up", "-d", "server")
+        assert runner.calls[0][0] == draft.compose_args("docker", *command)
+
+
 def test_pending_2611253_setup_blocks_start_without_blocking_stop(tmp_path):
     (tmp_path / "package.json").write_text('{"version":"261125.3"}', encoding="utf-8")
     setup = tmp_path / "_local/setup-state.json"

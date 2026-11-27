@@ -112,6 +112,9 @@ def _normalized_derived_project_name(folder_name: str) -> str:
     return normalized.lstrip("_-")
 
 
+PERSISTENCE_OWNER_LEASE_ENV = "EVEJS_PERSISTENCE_OWNER_LEASE_MS"
+
+
 @dataclass(frozen=True)
 class ComposeTarget:
     """Explicit selected Compose files and project directory for every call."""
@@ -199,6 +202,7 @@ class ComposeConfig:
     resource_keys: tuple[tuple[str, str], ...] = ()
     # Stable character-group scope: actual game-store storage, not image/config.
     game_store_identity: str | None = None
+    server_owner_lease_configured: bool = False
 
 
 @dataclass(frozen=True)
@@ -704,7 +708,7 @@ def _map_state(raw_state: str, health: str | None) -> ServiceState:
 
 
 def parse_compose_config(payload: Mapping[str, Any]) -> ComposeConfig:
-    """Retain only service/dependency/port/mount/grace fields; never environment."""
+    """Project service authority and selected environment metadata without retaining values."""
     raw_services = payload.get("services")
     if not isinstance(raw_services, Mapping):
         raise ComposeValidationError("Effective Compose config has no services object.")
@@ -750,6 +754,9 @@ def parse_compose_config(payload: Mapping[str, Any]) -> ComposeConfig:
         ).encode("utf-8")
     ).hexdigest()
     server_node_options_sha256 = _server_node_options_sha256(raw_services)
+    server_environment = raw_services["server"].get("environment")
+    if isinstance(server_environment, list):
+        server_environment = {entry.partition("=")[0]: None for entry in server_environment if isinstance(entry, str)}
     return ComposeConfig(
         _string_or_none(payload.get("name")),
         MappingProxyType(services),
@@ -759,6 +766,7 @@ def parse_compose_config(payload: Mapping[str, Any]) -> ComposeConfig:
         server_node_options_sha256,
         _resource_keys(payload, services, publications),
         _game_store_identity(payload, services),
+        isinstance(server_environment, Mapping) and PERSISTENCE_OWNER_LEASE_ENV in server_environment,
     )
 
 
