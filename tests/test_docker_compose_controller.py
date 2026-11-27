@@ -96,6 +96,94 @@ def record(service: str, state: ServiceState, *, raw: str = "exited", health: st
     )
 
 
+
+@pytest.mark.parametrize("failure", ["world_lease", "clock_rollback"])
+def test_managed_recovers_only_a_fresh_game_lease_exit(tmp_path, failure):
+    _prove_game_lease_recovery(tmp_path, failure=failure, expected_restarts=1)
+
+
+@pytest.mark.parametrize("failure", [
+    "different_error", "older_attempt", "old_log_marker", "active_owner", "oom", "market_offline",
+    "changed_container", "changed_project", "verification_only",
+])
+def test_managed_does_not_retry_other_failures(tmp_path, failure):
+    _prove_game_lease_recovery(tmp_path, failure=failure, expected_restarts=0)
+
+
+def test_managed_game_lease_recovery_is_bounded_to_one_start(tmp_path):
+    _prove_game_lease_recovery(tmp_path, failure="repeat_exit", expected_restarts=1)
+
+
+def _prove_game_lease_recovery(tmp_path, *, failure, expected_restarts):
+    (tmp_path / "package.json").write_text('{"version":"261126.2"}', encoding="utf-8")
+    compose = tmp_path / "compose.yaml"
+    compose.write_text("services: {}\n", encoding="utf-8")
+    target = ComposeTarget(compose, tmp_path, "lease-fixture")
+    exited_game = replace(record("server", ServiceState.OFFLINE), exit_code=1)
+    ready_market = record("market", ServiceState.ONLINE, raw="running", health="healthy")
+    ready_game = record("server", ServiceState.ONLINE, raw="running", health="healthy")
+    old_started = "2026-08-22T10:20:30.123456789Z"
+    current_started = (
+        "2026-08-22T10:19:30.123456789Z" if failure == "clock_rollback"
+        else "2026-08-22T10:24:30.123456789Z"
+    )
+    failed = {
+        "server": exited_game,
+        "market": record("market", ServiceState.OFFLINE) if failure == "market_offline" else ready_market,
+    }
+    ready = {"server": ready_game, "market": ready_market}
+
+    class Inspector:
+        def preflight(self, _target):
+            records = {"server": exited_game, "market": ready_market}
+            if failure == "changed_container" and runner.inspect_count > 1:
+                records["server"] = replace(exited_game, short_id="b" * 12)
+            project = "changed" if failure == "changed_project" and runner.inspect_count > 1 else "lease-fixture"
+            return SimpleNamespace(ok=True, records=records, config=SimpleNamespace(project_name=project))
+
+        def status(self, _target):
+            return ready if runner.restarts and failure != "repeat_exit" else failed
+
+    class Runner(FakeRunner):
+        inspect_count = 0
+        restarts = 0
+
+        def run(self, args, *, cwd, timeout=10.0):
+            if args[0] == "inspect":
+                self.inspect_count += 1
+                started = old_started if self.inspect_count == 1 or failure == "older_attempt" else current_started
+                cid = args[-1][0] * 64
+                oom = "true" if failure == "oom" else "false"
+                return DockerCommandResult(args, 0, f"{cid}\t{started}\texited\t1\t{oom}\n", "", False, False)
+            if args[0] == "logs":
+                assert args == ("logs", "--tail", "80", "--timestamps", "a" * 64)
+                if self.inspect_count == 1 and failure != "old_log_marker":
+                    return DockerCommandResult(args, 0, "", "", False, False)
+                code = {
+                    "different_error": "SQLITE_CORRUPT",
+                    "active_owner": "PERSISTENCE_OWNER_ACTIVE",
+                }.get(failure, "PERSISTENCE_OWNER_LEASE_LOST")
+                stamp = "2026-08-22T10:18:00.123456789Z"
+                stderr = f"{stamp} Error: startup failure\n{stamp}   code: '{code}',\n{stamp}   ownerRole: 'world',\n"
+                return DockerCommandResult(args, 0, "", stderr, False, False)
+            if args[0] == "start":
+                assert args == ("start", "a" * 64)
+                self.restarts += 1
+            return super().run(args, cwd=cwd, timeout=timeout)
+
+    runner = Runner()
+    result = ManagedComposeController(
+        target, Inspector(), runner, policy=DockerControlPolicy.MANAGED,
+        verification_only=failure == "verification_only",
+    ).execute(DockerLifecycleAction.START_STACK)
+
+    assert runner.restarts == expected_restarts
+    assert result.succeeded == (failure in {"world_lease", "clock_rollback"})
+    if failure == "repeat_exit":
+        assert "could not restart" in result.error
+    if failure == "verification_only":
+        assert not runner.calls
+
 def test_pending_2611253_setup_blocks_start_without_blocking_stop(tmp_path):
     (tmp_path / "package.json").write_text('{"version":"261125.3"}', encoding="utf-8")
     setup = tmp_path / "_local/setup-state.json"

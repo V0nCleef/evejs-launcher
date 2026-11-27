@@ -1,7 +1,7 @@
 """Policy-gated managed Docker Compose lifecycle operations."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 import hashlib
 import json
@@ -11,7 +11,12 @@ import time
 import uuid
 from typing import Any, Callable, Mapping
 
-from src.core.evejs_compatibility import EveJSSetupRequired, require_completed_evejs_setup
+from src.core.evejs_compatibility import (
+    EveJSSetupRequired,
+    SHARED_GAME_STORE_RELEASES,
+    require_completed_evejs_setup,
+)
+from src.core.mod_evejs_compatibility import installed_evejs_version
 from src.core.runtime.docker_cli import (
     DockerCommandError,
     redact_docker_diagnostic,
@@ -71,6 +76,28 @@ _COMMAND_TIMEOUTS: Mapping[DockerLifecycleAction, float] = {
 _MOD_RUNTIME_INSPECT_FORMAT = (
     "{{.Id}}\t{{.State.StartedAt}}\t{{.State.Running}}\t{{json .Config.Env}}"
 )
+_GAME_START_ACTIONS = frozenset({
+    DockerLifecycleAction.START_GAME, DockerLifecycleAction.START_STACK,
+    DockerLifecycleAction.RESTART_GAME, DockerLifecycleAction.RECREATE_GAME,
+    DockerLifecycleAction.RECREATE_STACK,
+})
+_GAME_ATTEMPT_FORMAT = (
+    "{{.Id}}\t{{.State.StartedAt}}\t{{.State.Status}}\t{{.State.ExitCode}}\t{{.State.OOMKilled}}"
+)
+_WORLD_LEASE_FAILURE = re.compile(
+    r"^(\d{4}-\d{2}-\d{2}T[0-9:.]{8,18}Z) [ \t]*"
+    r"code: 'PERSISTENCE_OWNER_(?:LEASE_LOST|STALE)',\r?\n\S+ [ \t]*ownerRole: 'world',",
+    re.MULTILINE,
+)
+
+
+@dataclass(frozen=True)
+class _GameAttempt:
+    container_id: str
+    started_at: str
+    status: str
+    exit_code: int
+    oom_killed: bool
 
 
 @dataclass(frozen=True)
@@ -234,9 +261,7 @@ class ManagedComposeController:
             self._trace(action, "command", target=target_identity,
                 reason="explicit_stop" if action in {DockerLifecycleAction.STOP_GAME, DockerLifecycleAction.STOP_MARKET,
                     DockerLifecycleAction.STOP_ALL} else "authorized_start_or_restart")
-            preparing = self._before_game_start is not None and action in {
-                DockerLifecycleAction.START_GAME, DockerLifecycleAction.START_STACK,
-                DockerLifecycleAction.RESTART_GAME, DockerLifecycleAction.RECREATE_GAME, DockerLifecycleAction.RECREATE_STACK}
+            preparing = self._before_game_start is not None and action in _GAME_START_ACTIONS
             replace_game = action in {DockerLifecycleAction.RESTART_GAME, DockerLifecycleAction.RECREATE_GAME, DockerLifecycleAction.RECREATE_STACK}
             if action is DockerLifecycleAction.RECREATE_STACK or (preparing and replace_game and not _safely_stopped(preflight.records.get("server"))):
                 # The authorized mod-image transition stops only Game before
@@ -258,7 +283,6 @@ class ManagedComposeController:
                                  cwd=self._target.project_directory,timeout=180.0)
                 market_result = self._poll(DockerLifecycleAction.START_MARKET,target_identity)
                 if not market_result.succeeded:
-                    from dataclasses import replace
                     return replace(market_result,action=action)
                 if action is DockerLifecycleAction.RECREATE_STACK:
                     argv = self._target.compose_args(self._runner.executable,*_COMMANDS[DockerLifecycleAction.RECREATE_GAME])
@@ -272,6 +296,16 @@ class ManagedComposeController:
                 fresh = self._inspector.preflight(self._target)
                 if not fresh.ok or fresh.config is None or docker_project_identity(self._target, fresh.config.project_name, config=fresh.config) != target_identity:
                     raise ValueError("Docker authority changed during server preparation.")
+            game = preflight.records.get("server")
+            can_recover = (
+                action in _GAME_START_ACTIONS
+                and (replace_game or _safely_stopped(game))
+                and installed_evejs_version(self._target.project_directory) in SHARED_GAME_STORE_RELEASES
+            )
+            prior_attempt = self._game_attempt(game) if can_recover else None
+            if game is not None and game.exists and prior_attempt is None:
+                can_recover = False
+            prior_markers = self._world_lease_markers(prior_attempt.container_id) if prior_attempt else None
             self._runner.run(argv, cwd=self._target.project_directory,
                              timeout=self._command_timeouts[action])
         except DockerCommandError as exc:
@@ -281,7 +315,81 @@ class ManagedComposeController:
             return DockerLifecycleResult(action, False,
                                          error=_diagnostic(f"Docker lifecycle command failed: {exc}"),
                                          target_identity=target_identity)
-        return self._poll(action, target_identity)
+        result = self._poll(action, target_identity)
+        if can_recover and result.diagnostic_code == "container_exited":
+            return self._recover_game_start(result, prior_attempt, prior_markers)
+        return result
+
+    def _game_attempt(self, record: ContainerRecord | None) -> _GameAttempt | None:
+        if record is None or not record.short_id:
+            return None
+
+        def parse(stdout: str) -> _GameAttempt:
+            full_id, started_at, status, exit_code, oom_killed = stdout.strip().split("\t")
+            docker_container_runtime_identity(full_id, started_at, expected_short_id=record.short_id)
+            if oom_killed not in {"true", "false"}:
+                raise ValueError("Invalid Docker OOM state.")
+            return _GameAttempt(full_id, started_at, status, int(exit_code), oom_killed == "true")
+
+        try:
+            return self._runner.run_parsed(
+                ("inspect", "--type", "container", "--format", _GAME_ATTEMPT_FORMAT, record.short_id),
+                cwd=self._target.project_directory, parser=parse, timeout=10.0,
+            )
+        except (DockerCommandError, OSError, ValueError):
+            return None
+
+    def _world_lease_markers(self, container_id: str) -> frozenset[str] | None:
+        # A wall-clock correction can put new entries before StartedAt. Use the
+        # append-ordered tail and compare with the tail before starting Game.
+        try:
+            logs = self._runner.run(
+                ("logs", "--tail", "80", "--timestamps", container_id),
+                cwd=self._target.project_directory, timeout=10.0,
+            )
+        except (DockerCommandError, OSError, ValueError):
+            return None
+        if logs.truncated:
+            return None
+        return frozenset(_WORLD_LEASE_FAILURE.findall(logs.stdout) + _WORLD_LEASE_FAILURE.findall(logs.stderr))
+
+    def _recover_game_start(
+        self, result: DockerLifecycleResult, previous: _GameAttempt | None, prior_markers: frozenset[str] | None,
+    ) -> DockerLifecycleResult:
+        """Retry a newly exited Game once without replacing containers or bypassing EveJS's fence."""
+        records = result.records or {}
+        if not self._service_ready("market", records.get("market")):
+            return result
+        attempt = self._game_attempt(records.get("server"))
+        if (
+            attempt is None or attempt.status != "exited" or attempt.exit_code != 1 or attempt.oom_killed
+            or (previous is not None and attempt.container_id == previous.container_id
+                and (attempt.started_at == previous.started_at or prior_markers is None))
+        ):
+            return result
+
+        markers = self._world_lease_markers(attempt.container_id)
+        if not markers or not markers.difference(prior_markers or ()):
+            return result
+        try:
+            fresh = self._inspector.preflight(self._target)
+            if (
+                not fresh.ok or fresh.config is None or fresh.records is None
+                or docker_project_identity(self._target, fresh.config.project_name, config=fresh.config) != result.target_identity
+                or not self._service_ready("market", fresh.records.get("market"))
+                or self._game_attempt(fresh.records.get("server")) != attempt
+            ):
+                return result
+            require_completed_evejs_setup(self._target.project_directory)
+            self._trace(result.action, "retry_game_start", target=result.target_identity, reason="world_lease_lost")
+            self._runner.run(("start", attempt.container_id), cwd=self._target.project_directory, timeout=75.0)
+        except (DockerCommandError, EveJSSetupRequired, OSError, ValueError):
+            return result
+
+        recovered = self._poll(result.action, result.target_identity)
+        if not recovered.succeeded and recovered.diagnostic_code == "container_exited":
+            return replace(recovered, error="Game lost its save lease during startup and could not restart. Open Game Console for details.")
+        return recovered
 
     def _poll(
         self,
