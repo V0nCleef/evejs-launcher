@@ -247,7 +247,11 @@ class ManagedComposeController:
                 stopped = self._inspector.status(self._target)
                 if not _safely_stopped(stopped.get("server")):
                     raise ValueError("Game did not stop; mod preparation was refused.")
-            if action is DockerLifecycleAction.RECREATE_STACK or (preparing and not self._service_ready("market",preflight.records.get("market"))):
+            start_market = action is DockerLifecycleAction.RECREATE_STACK or (
+                (preparing or action is DockerLifecycleAction.RECREATE_GAME)
+                and not self._service_ready("market", preflight.records.get("market"))
+            )
+            if start_market:
                 market_command = (("up","-d","--force-recreate","market") if action is DockerLifecycleAction.RECREATE_STACK
                                   else ("up","-d","market"))
                 self._runner.run(self._target.compose_args(self._runner.executable,*market_command),
@@ -258,14 +262,16 @@ class ManagedComposeController:
                     return replace(market_result,action=action)
                 if action is DockerLifecycleAction.RECREATE_STACK:
                     argv = self._target.compose_args(self._runner.executable,*_COMMANDS[DockerLifecycleAction.RECREATE_GAME])
-            if preparing and (replace_game or _safely_stopped(preflight.records.get("server"))):
+            prepare_game = preparing and (replace_game or _safely_stopped(preflight.records.get("server")))
+            if prepare_game:
                 self._trace(action, "prepare_server", target=target_identity)
                 self._before_game_start()
+                if action is DockerLifecycleAction.RESTART_GAME:
+                    argv = self._target.compose_args(self._runner.executable, "up", "-d", "server")
+            if prepare_game or (start_market and action is DockerLifecycleAction.RECREATE_GAME):
                 fresh = self._inspector.preflight(self._target)
                 if not fresh.ok or fresh.config is None or docker_project_identity(self._target, fresh.config.project_name, config=fresh.config) != target_identity:
                     raise ValueError("Docker authority changed during server preparation.")
-                if action is DockerLifecycleAction.RESTART_GAME:
-                    argv = self._target.compose_args(self._runner.executable, "up", "-d", "server")
             self._runner.run(argv, cwd=self._target.project_directory,
                              timeout=self._command_timeouts[action])
         except DockerCommandError as exc:
@@ -431,16 +437,14 @@ class ManagedComposeController:
         if action in {
             DockerLifecycleAction.START_GAME,
             DockerLifecycleAction.START_STACK,
+            DockerLifecycleAction.RECREATE_GAME,
             DockerLifecycleAction.RECREATE_STACK,
         }:
             return (
                 self._service_ready("server", game)
                 and self._service_ready("market", market)
             )
-        if action in {
-            DockerLifecycleAction.RESTART_GAME,
-            DockerLifecycleAction.RECREATE_GAME,
-        }:
+        if action is DockerLifecycleAction.RESTART_GAME:
             return self._service_ready("server", game)
         if action is DockerLifecycleAction.STOP_GAME:
             return _safely_stopped(game)

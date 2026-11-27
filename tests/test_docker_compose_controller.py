@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -152,6 +154,71 @@ def test_managed_exact_argv_matrix_and_explicit_target(action: DockerLifecycleAc
     assert runner.calls[0][1] == tmp_path.resolve()
     assert "-f" in runner.calls[0][0] and "--project-directory" in runner.calls[0][0] and "-p" in runner.calls[0][0]
     assert not set(runner.calls[0][0]).intersection({"down", "rm", "kill", "start", "run", "exec", "build", "pull"})
+
+
+@pytest.mark.parametrize("market_exists", [False, True])
+def test_recreate_game_starts_offline_market_before_recreating_game(tmp_path, market_exists):
+    target = ComposeTarget(tmp_path / "compose.yaml", tmp_path, "fixture")
+    offline = {"server": record("server", ServiceState.OFFLINE)}
+    if market_exists:
+        offline["market"] = record("market", ServiceState.OFFLINE)
+    warming = {**offline, "market": record("market", ServiceState.STARTING, raw="running", health="starting")}
+    market_ready = {**offline, "market": record("market", ServiceState.ONLINE, raw="running", health="healthy")}
+    ready = {**market_ready, "server": record("server", ServiceState.ONLINE, raw="running", health="healthy")}
+
+    class Inspector(SequenceInspector):
+        def preflight(self, target):
+            report = super().preflight(target)
+            report.config = SimpleNamespace(project_name="fixture")
+            return report
+
+    inspector = Inspector(offline, [warming, market_ready, ready, ready])
+    runner = FakeRunner()
+    start_market = target.compose_args("docker", "up", "-d", "market")
+    recreate_game = target.compose_args("docker", "up", "-d", "--no-deps", "--force-recreate", "server")
+
+    def while_market_warms(_seconds):
+        assert [argv for argv, _, _ in runner.calls] == [start_market]
+
+    controller = ManagedComposeController(
+        target, inspector, runner, policy=DockerControlPolicy.MANAGED, sleep_fn=while_market_warms,
+    )
+    result = controller.execute(DockerLifecycleAction.RECREATE_GAME)
+
+    assert result.succeeded and result.records == ready
+    assert [argv for argv, _, _ in runner.calls[:2]] == [start_market, recreate_game]
+    assert inspector.preflights == 2
+
+
+def test_recreate_game_refuses_to_start_game_after_market_exits(tmp_path):
+    target = ComposeTarget(tmp_path / "compose.yaml", tmp_path)
+    offline = {"server": record("server", ServiceState.OFFLINE)}
+    failed = {**offline, "market": replace(record("market", ServiceState.FAILED), exit_code=17)}
+    runner = FakeRunner()
+    controller = ManagedComposeController(
+        target, SequenceInspector(offline, [failed]), runner, policy=DockerControlPolicy.MANAGED,
+    )
+
+    result = controller.execute(DockerLifecycleAction.RECREATE_GAME)
+
+    assert not result.succeeded and result.action is DockerLifecycleAction.RECREATE_GAME
+    assert result.diagnostic_code == "container_exited" and result.records == failed
+    assert [argv for argv, _, _ in runner.calls] == [target.compose_args("docker", "up", "-d", "market")]
+
+
+def test_recreate_verification_does_not_start_market(tmp_path):
+    runner = FakeRunner()
+    inspector = FakeInspector({"server": record("server", ServiceState.ONLINE, raw="running")})
+    controller = ManagedComposeController(
+        ComposeTarget(tmp_path / "compose.yaml", tmp_path), inspector, runner,
+        policy=DockerControlPolicy.MANAGED, verification_only=True,
+        readiness_timeout_sec=1.0, clock_fn=iter((0.0, 2.0)).__next__,
+    )
+
+    result = controller.execute(DockerLifecycleAction.RECREATE_GAME)
+
+    assert not result.succeeded and result.diagnostic_code == "readiness_timeout"
+    assert not runner.calls
 
 
 def test_success_returns_privacy_safe_effective_node_options_digest(

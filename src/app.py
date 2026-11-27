@@ -2037,9 +2037,11 @@ class MainWindow(QMainWindow):
             DockerLifecycleAction.RECREATE_GAME,
             DockerLifecycleAction.RECREATE_STACK,
         } else snapshot.game
-        market = (ServiceState.STARTING
-                  if action in {DockerLifecycleAction.START_MARKET, DockerLifecycleAction.START_GAME, DockerLifecycleAction.START_STACK, DockerLifecycleAction.RECREATE_STACK}
-                  and snapshot.market is not ServiceState.ONLINE else snapshot.market)
+        starts_market = action in {
+            DockerLifecycleAction.START_MARKET, DockerLifecycleAction.START_GAME,
+            DockerLifecycleAction.START_STACK, DockerLifecycleAction.RECREATE_STACK,
+        } or (action is DockerLifecycleAction.RECREATE_GAME and not verification_only)
+        market = ServiceState.STARTING if starts_market and snapshot.market is not ServiceState.ONLINE else snapshot.market
         game = ServiceState.STOPPING if action in {DockerLifecycleAction.STOP_GAME, DockerLifecycleAction.STOP_ALL} else game
         market = ServiceState.STOPPING if action in {DockerLifecycleAction.STOP_MARKET, DockerLifecycleAction.STOP_ALL} else market
         self._runtime_snapshot = replace(snapshot, game=game, market=market)

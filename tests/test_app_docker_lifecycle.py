@@ -604,6 +604,20 @@ def test_record_success_renders_container_state_and_requests_one_observation(
     window.deleteLater()
 
 
+@pytest.mark.parametrize(("market", "verification_only", "expected"), [
+    (ServiceState.OFFLINE, False, ServiceState.STARTING),
+    (ServiceState.ONLINE, False, ServiceState.ONLINE),
+    (ServiceState.OFFLINE, True, ServiceState.OFFLINE),
+])
+def test_recreate_marks_only_a_market_start_it_can_perform(qapp, tmp_path, market, verification_only, expected):
+    window = _bare_docker_window(tmp_path, _docker_snapshot(ServiceState.OFFLINE, market))
+    try:
+        assert window._begin_docker_lifecycle(DockerLifecycleAction.RECREATE_GAME, verification_only=verification_only)
+        assert window._runtime_snapshot.market is expected
+    finally:
+        window.deleteLater()
+
+
 def test_recreate_result_stamps_exact_runtime_identity_before_monitor_poll(
     qapp,
     tmp_path,
