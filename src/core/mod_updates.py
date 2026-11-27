@@ -27,6 +27,7 @@ from .mod_enabled_updates import PHASES as ENABLED_PHASES, install_enabled_relea
 from .mod_api_manifest import ENABLED_UPDATE_PROTOCOL
 
 UPDATE_ROOT = Path('_local/launcher-mod-updates')
+_DOCKER_PACKAGE_UPDATE_SCHEMA = 3
 
 
 def supports_docker_package_update(descriptor):
@@ -80,6 +81,10 @@ def _require_docker_update_identity(operation, identity):
 
 
 def _save(path, data):
+    # Until a Docker operation is finished, older launchers must refuse its
+    # journal instead of treating it as a Native recovery.
+    if data['schemaVersion'] == _DOCKER_PACKAGE_UPDATE_SCHEMA and data['phase'] in {'complete', 'rolled_back'}:
+        data['schemaVersion'] = 1
     temporary = path.with_suffix('.tmp')
     with temporary.open('w', encoding='utf-8') as stream:
         json.dump(data, stream, indent=2)
@@ -104,7 +109,12 @@ def _jobs(root):
         if path.stat().st_size > 65536:
             raise ModUpdateError('The mod update recovery record is too large.')
         data = json.loads(path.read_text(encoding='utf-8'))
-        ordinary = data.get('schemaVersion') == 1 and data.get('phase') in {'prepared', 'disabled', 'swapping', 'installed', 'complete', 'rolled_back', 'recovering'}
+        ordinary_schema = data.get('schemaVersion') == 1 or (
+            data.get('schemaVersion') == _DOCKER_PACKAGE_UPDATE_SCHEMA
+            and data.get('packageKind') == 'loader'
+            and isinstance(data.get('dockerTargetIdentity'), str)
+        )
+        ordinary = ordinary_schema and data.get('phase') in {'prepared', 'disabled', 'swapping', 'installed', 'complete', 'rolled_back', 'recovering'}
         enabled = data.get('schemaVersion') == 2 and data.get('mode') == ENABLED_UPDATE_PROTOCOL and data.get('phase') in ENABLED_PHASES
         if not ordinary and not enabled:
             raise ModUpdateError('Unsupported mod update recovery record.')
@@ -210,7 +220,7 @@ def install_release(mod, release, operation, *, guard, downloader=download_relea
                     modId=current.id, packageKind=descriptor.kind, oldVersion=current.version, newVersion=release.version,
                     enabled=current.active, recordId=record.record_id, oldFingerprint='')
         if docker_identity:
-            data['dockerTargetIdentity'] = docker_identity
+            data.update(schemaVersion=_DOCKER_PACKAGE_UPDATE_SCHEMA, dockerTargetIdentity=docker_identity)
         _save(journal, data)
         if current.active:
             # The complete replacement relationship plan was checked above.

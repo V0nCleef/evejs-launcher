@@ -128,7 +128,7 @@ def test_docker_recovery_stays_with_the_original_backend(fixture):
     job = root / mod_updates.UPDATE_ROOT / ('a' * 32)
     job.mkdir(parents=True)
     journal = job / 'update.json'
-    record = dict(schemaVersion=1, phase='prepared', packageKind='loader',
+    record = dict(schemaVersion=3, phase='prepared', packageKind='loader',
                   dockerTargetIdentity='b' * 64)
     journal.write_text(json.dumps(record), encoding='utf-8')
     before = {path.name: path.read_bytes() for path in target.iterdir()}
@@ -138,6 +138,13 @@ def test_docker_recovery_stays_with_the_original_backend(fixture):
 
     assert json.loads(journal.read_text(encoding='utf-8')) == record
     assert {path.name: path.read_bytes() for path in target.iterdir()} == before
+
+
+def test_completed_docker_journal_is_readable_by_older_launchers(tmp_path):
+    journal = tmp_path / 'update.json'
+    record = dict(schemaVersion=3, phase='complete', packageKind='loader', dockerTargetIdentity='b' * 64)
+    mod_updates._save(journal, record)
+    assert json.loads(journal.read_text(encoding='utf-8')) == dict(record, schemaVersion=1)
 
 
 def test_package_update_through_dialog_signal_preserves_settings(qapp, fixture):
