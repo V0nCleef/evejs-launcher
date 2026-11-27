@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QMainWindow, QMessageBox
 
 from src import app as app_module
 from src.app import MainWindow
+from src.core.overview_state import pending_overview_source
 from src.core.runtime.docker_character_creation import (
     DockerCharacterCreationRequest,
     DockerCharacterCreationResult,
@@ -363,6 +364,28 @@ def test_offline_create_enters_docker_worker_through_shared_lifecycle_slot(
         "CREATING & VERIFYING\N{HORIZONTAL ELLIPSIS}",
     )
     worker.deleteLater()
+
+
+def test_docker_create_keeps_overview_scope_after_roster_refresh(qapp, tmp_path, monkeypatch):
+    window = _window(tmp_path)
+    _, worker = _install_sequence_spies(window)
+    _forbid_gui_thread_docker(monkeypatch)
+    monkeypatch.setattr(app_module.QMessageBox, "information", lambda *args: None)
+    window._refresh_characters = lambda: None
+    window._keep_created_character_visible = lambda *_: None
+    path = tmp_path / "overview.json"
+    window._overview_kwargs = lambda: {"path": path}
+    window._begin_docker_character_creation(replace(_draft(), overview_source_character_id=140000010))
+    # A refresh can drop the cached roster while the container is offline.
+    window._overview_kwargs = lambda: None
+    result = DockerCharacterCreationResult(
+        True, account_id=101, character_id=202, backup_created=True,
+        cleanup_confirmed=True, restart_safe=True, request_token=worker["token"],
+        target_identity=_TARGET_IDENTITY,
+    )
+    _complete_retained_worker(window, worker, result)
+    assert pending_overview_source(202, path) == 140000010
+    window.deleteLater()
 
 
 def test_game_only_online_state_is_rejected_before_stop_or_mutation(

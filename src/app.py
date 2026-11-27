@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -467,6 +468,10 @@ def _prepare_and_spawn_client(request: ClientLaunchRequest) -> LaunchedProcess:
     log.info("Client launch stage=settings_ready account=%s", request.username)
     auto_login = None
     docker_auto_login_probe = None
+    if request.overview_bridge is not None and request.launch_context.target_identity is not None:
+        docker_auto_login_probe = request.docker_auto_login_probe
+        if docker_auto_login_probe is None:
+            raise DockerAutoLoginContextError("The selected Docker launch target could not be verified.")
     server_password_bypass_verified = False
     # A blank character name is the explicit account-only creation route.
     # Preserve manual fallback for named roster launches whose ID is missing.
@@ -702,6 +707,7 @@ class MainWindow(QMainWindow):
         self._docker_character_observed_target: str | None = None
         self._docker_character_request: DockerCharacterCreationRequest | None = None
         self._docker_character_overview_source_id: int | None = None
+        self._docker_character_overview_scope: dict | None = None
         self._docker_character_result: DockerCharacterCreationResult | None = None
         self._docker_character_restore_game = False
         self._docker_character_restore_market = False
@@ -5456,7 +5462,10 @@ class MainWindow(QMainWindow):
     # ── Character launching ───────────────────────────────────────────
 
     def _snapshot_ready_ids(self) -> set[int]:
-        snapshots = load_overview_state(**self._overview_kwargs()).get("snapshots", {})
+        scope = self._overview_kwargs()
+        if scope is None:
+            return set()
+        snapshots = load_overview_state(**scope).get("snapshots", {})
         result: set[int] = set()
         for key, value in snapshots.items():
             try:
@@ -5468,17 +5477,30 @@ class MainWindow(QMainWindow):
         return result
 
     def _overview_kwargs(self, *, launch=False):
-        identity = self._cfg.get("active_installation_profile", "default")
-        if identity == "default":
-            return {}
         from .core.installation_profiles import client_profiles_root
+
+        identity = self._cfg.get("active_installation_profile", "default")
+        docker = self._docker_mode()
+        if not docker and identity == "default":
+            return {}
         base = client_profiles_root(self._cfg, Path(PROFILES_ROOT)).parent
+        if docker:
+            selection = getattr(self, "_data_selection", None)
+            if selection is None or not self._docker_data_selection_is_current(selection):
+                return None
+            storage = selection.group_identity
+            if not isinstance(storage, str) or not re.fullmatch(r"docker-game-store:[0-9a-f]{64}", storage):
+                return None
+            base = base / "overview_bridge" / "docker" / storage.removeprefix("docker-game-store:")
         return ({"state_path": base / "overview_bridge.json", "ack_dir": base / "overview_bridge" / "acks"}
                 if launch else {"path": base / "overview_bridge.json"})
 
     def _poll_overview_acks(self) -> None:
         try:
-            events = process_overview_ack_files(**self._overview_kwargs(launch=True))
+            scope = self._overview_kwargs(launch=True)
+            if scope is None:
+                return
+            events = process_overview_ack_files(**scope)
         except Exception:
             log.exception("Unable to process overview bridge acknowledgements")
             return
@@ -5559,37 +5581,38 @@ class MainWindow(QMainWindow):
         if self.sender() is self._new_character_dialog:
             self._new_character_dialog = None
 
-    def _begin_overview_patch(self, action: OverviewPatchAction) -> None:
+    def _begin_overview_patch(self, action: OverviewPatchAction, *, from_settings: bool = False) -> None:
+        from .core.application_operations import active_mutations
+
         dialog = self._new_character_dialog
-        if dialog is None or self._overview_patch_thread is not None:
+        if (dialog is None and not from_settings) or self._overview_patch_thread is not None:
             return
-        if (
-            self._character_creation_thread is not None
-            or self._character_deletion_thread is not None
-            or self._client_launch_thread is not None
-            or self._lifecycle_active()
-        ):
-            dialog.show_error("Wait for the current launcher operation to finish.")
+        def report_error(message):
+            if from_settings:
+                QMessageBox.warning(self, "EVE Client Overview Patch", message)
+            else:
+                dialog.show_error(message)
+
+        if active_mutations(self) or self._close_in_progress or self._lifecycle_active():
+            report_error("Wait for the current launcher operation to finish.")
             return
         if self._tracker.running_count or is_eve_client_running():
-            dialog.show_error("Close every EVE client before changing code.ccp.")
+            report_error("Close every EVE client before changing code.ccp.")
             return
         client_path = str(self._cfg.get("client_path", ""))
         status = inspect_overview_patch(client_path)
-        if action is OverviewPatchAction.PATCH and not status.can_patch:
-            dialog.set_patch_status(status)
-            return
-        if action is OverviewPatchAction.RESTORE and not status.can_restore:
-            dialog.set_patch_status(status)
+        if not (status.can_patch if action is OverviewPatchAction.PATCH else status.can_restore):
+            if dialog is not None:
+                dialog.set_patch_status(status)
             return
         question_source = (
             "Install the optional overview bridge?\n\n"
-            "The launcher verifies build 3396210, keeps the original beside "
+            "The launcher verifies the client build, keeps the original beside "
             "code.ccp, stages the replacement, and validates the completed archive."
             if action is OverviewPatchAction.PATCH
             else
             "Restore the original client archive?\n\n"
-            "The launcher verifies build 3396210, keeps the original beside "
+            "The launcher verifies the client build, keeps the original beside "
             "code.ccp, stages the replacement, and validates the completed archive."
         )
         reply = QMessageBox.question(
@@ -5603,6 +5626,13 @@ class MainWindow(QMainWindow):
             return
 
         if not self._update_allows_mutation():
+            return
+        if (str(self._cfg.get("client_path", "")) != client_path
+                or active_mutations(self) or self._close_in_progress or self._lifecycle_active()):
+            report_error("Wait for the current launcher operation to finish.")
+            return
+        if self._tracker.running_count or is_eve_client_running():
+            report_error("Close every EVE client before changing code.ccp.")
             return
         worker_factory = getattr(self, "_overview_patch_worker_factory", None)
         worker = (
@@ -5623,13 +5653,14 @@ class MainWindow(QMainWindow):
         self._overview_patch_worker = worker
         self._overview_patch_outcome = None
         self._overview_patch_thread_finished = False
-        dialog.show_error("")
-        dialog.set_busy(
-            True,
-            "PATCHING CLIENT…"
-            if action is OverviewPatchAction.PATCH
-            else "RESTORING CLIENT…",
-        )
+        if dialog is not None:
+            dialog.show_error("")
+            dialog.set_busy(
+                True,
+                "PATCHING CLIENT…"
+                if action is OverviewPatchAction.PATCH
+                else "RESTORING CLIENT…",
+            )
         thread.start()
 
     @pyqtSlot(object)
@@ -5673,15 +5704,23 @@ class MainWindow(QMainWindow):
                 )
                 dialog.show_error(outcome.message)
         if isinstance(outcome, OverviewPatchResult) and not self._close_in_progress:
-            message = (
-                "The overview bridge is installed.\n\nYou can create the character "
-                "now. If its source overview has not been captured yet, launch the "
-                "source character once afterwards, then launch the new character to "
-                "apply the queued copy."
-                if outcome.action is OverviewPatchAction.PATCH
-                else "The original EVE client archive has been restored."
-            )
+            if outcome.action is OverviewPatchAction.RESTORE:
+                message = "The original EVE client archive has been restored."
+            elif dialog is None:
+                message = (
+                    "The overview bridge is installed.\n\nLaunch the source character "
+                    "once to capture its overview, then use Copy overview once in Settings."
+                )
+            else:
+                message = (
+                    "The overview bridge is installed.\n\nYou can create the character "
+                    "now. If its source overview has not been captured yet, launch the "
+                    "source character once afterwards, then launch the new character to "
+                    "apply the queued copy."
+                )
             QMessageBox.information(self, "EVE Client", message)
+        elif dialog is None and not self._close_in_progress:
+            QMessageBox.warning(self, "EVE Client Overview Patch", outcome.message)
         if self._close_in_progress:
             QTimer.singleShot(0, self.close)
 
@@ -5848,6 +5887,12 @@ class MainWindow(QMainWindow):
                 "refresh, then try again."
             )
             return
+        overview_scope = None
+        if draft.overview_source_character_id is not None:
+            overview_scope = self._overview_kwargs()
+            if overview_scope is None:
+                dialog.show_error("Wait for the launcher to load characters for the selected Docker project.")
+                return
         snapshot = self._docker_cached_snapshot()
         transitional = {
             ServiceState.STARTING,
@@ -5898,6 +5943,7 @@ class MainWindow(QMainWindow):
             draft.is_gm,
         )
         self._docker_character_overview_source_id = draft.overview_source_character_id
+        self._docker_character_overview_scope = overview_scope
         self._docker_character_result = None
         self._docker_character_restore_game = restore_game
         self._docker_character_restore_market = restore_market
@@ -6154,6 +6200,7 @@ class MainWindow(QMainWindow):
         )
         request = getattr(self, "_docker_character_request", None)
         source_id = getattr(self, "_docker_character_overview_source_id", None)
+        overview_scope = getattr(self, "_docker_character_overview_scope", None)
         closing = bool(getattr(self, "_close_in_progress", False))
         self._clear_docker_character_creation()
         if not current or request is None or closing:
@@ -6164,9 +6211,9 @@ class MainWindow(QMainWindow):
         dialog = self._new_character_dialog
         if result.succeeded:
             overview_error = ""
-            if source_id is not None and result.character_id is not None:
+            if source_id is not None and result.character_id is not None and overview_scope is not None:
                 try:
-                    add_pending_overview_import(result.character_id, source_id, **self._overview_kwargs())
+                    add_pending_overview_import(result.character_id, source_id, **overview_scope)
                 except Exception as exc:
                     log.exception("Unable to persist pending overview import")
                     overview_error = str(exc) or type(exc).__name__
@@ -6234,6 +6281,7 @@ class MainWindow(QMainWindow):
         self._docker_character_observed_target = None
         self._docker_character_request = None
         self._docker_character_overview_source_id = None
+        self._docker_character_overview_scope = None
         self._docker_character_result = None
         self._docker_character_restore_game = False
         self._docker_character_restore_market = False
@@ -7037,30 +7085,17 @@ class MainWindow(QMainWindow):
         auto_login_enabled = bool(
             self._cfg.get("auto_login_enabled", False)
         )
-        docker_auto_login_probe = None
-        new_account_requested = self._docker_mode() and not character_name and not any(
-            account.username == username for account in getattr(self,"_accounts",()))
-        from .core.host import IS_LINUX
-        if (auto_login_enabled or new_account_requested or IS_LINUX) and self._docker_mode():
-            try:
-                target_factory = self._docker_log_target_factory()
-                runtime_snapshot = getattr(self, "_runtime_snapshot", None)
-                docker_auto_login_probe = DockerAutoLoginProbe(
-                    target=target_factory(),
-                    expected_game_runtime_identity=getattr(
-                        runtime_snapshot,
-                        "game_runtime_identity",
-                        "",
-                    ),
-                )
-            except Exception:
-                # The worker reports an identity-validation failure without
-                # exposing local paths or raw Docker command details.
-                docker_auto_login_probe = None
-
+        docker = self._docker_mode()
         overview_bridge = None
-        if character_id is not None and not self._docker_mode():
-            source_id = pending_overview_source(character_id, **self._overview_kwargs())
+        overview_scope = self._overview_kwargs() if character_id is not None and (
+            not docker or any(
+                account.username == username and not account.banned
+                and any(character.char_id == character_id for character in account.characters)
+                for account in getattr(self, "_accounts", ())
+            )
+        ) else None
+        if overview_scope is not None:
+            source_id = pending_overview_source(character_id, **overview_scope)
             patch_status = inspect_overview_patch(client_path)
             if patch_status.state is OverviewPatchState.PATCHED:
                 try:
@@ -7103,6 +7138,23 @@ class MainWindow(QMainWindow):
                 if show_errors:
                     QMessageBox.information(self, "Overview Copy", message)
                 return None
+
+        docker_auto_login_probe = None
+        new_account_requested = docker and not character_name and not any(
+            account.username == username for account in getattr(self, "_accounts", ())
+        )
+        from .core.host import IS_LINUX
+        if docker and (auto_login_enabled or new_account_requested or IS_LINUX or overview_bridge is not None):
+            try:
+                docker_auto_login_probe = DockerAutoLoginProbe(
+                    target=self._docker_log_target_factory()(),
+                    expected_game_runtime_identity=getattr(
+                        getattr(self, "_runtime_snapshot", None), "game_runtime_identity", "",
+                    ),
+                )
+            except Exception:
+                # The worker reports a sanitized diagnostic if authority is unavailable.
+                docker_auto_login_probe = None
 
         # Account-only login has no authenticated character IDs yet. Use its
         # independent login profile until normal character launches can apply

@@ -18,6 +18,7 @@ from src import config
 from src.app import MainWindow
 from src.core.client_launch_queue import AsyncClientLaunchQueue
 from src.core.launcher import ClientLaunchContext
+from src.core.overview_state import OverviewBridgeLaunch
 from src.core.runtime.docker_autologin import DockerAutoLoginProbe
 from src.core.runtime.docker_compose import ComposeTarget
 from src.workers.client_launch_worker import (
@@ -889,12 +890,16 @@ def test_perform_launch_forwards_account_and_optional_character_as_auto_login_in
     assert endpoint_checks == [request.launch_context]
 
 
-@pytest.mark.parametrize("bypass_enabled", [True, False])
-@pytest.mark.parametrize("character_id", [None, 90000001])
+@pytest.mark.parametrize(("bypass_enabled", "overview_enabled", "character_id"), [
+    (True, False, None), (False, False, None),
+    (True, False, 90000001), (False, False, 90000001),
+    (False, True, 90000001),
+])
 def test_docker_launch_uses_only_verified_bypass_and_rechecks_before_spawn(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     bypass_enabled: bool,
+    overview_enabled: bool,
     character_id: int | None,
 ) -> None:
     target = ComposeTarget(tmp_path / "compose.yaml", tmp_path, "fixture")
@@ -915,8 +920,9 @@ def test_docker_launch_uses_only_verified_bypass_and_rechecks_before_spawn(
         profiles_root=tmp_path / "profiles",
         launch_context=context,
         character_id=character_id,
-        auto_login_enabled=True,
+        auto_login_enabled=not overview_enabled,
         docker_auto_login_probe=DockerAutoLoginProbe(target, "b" * 64),
+        overview_bridge=OverviewBridgeLaunch("capture|90000001", tmp_path / "capture.ack") if overview_enabled else None,
     )
     (request.profiles_root / request.username / "tq").mkdir(parents=True)
     captured: dict[str, object] = {}
@@ -973,6 +979,7 @@ def test_docker_launch_uses_only_verified_bypass_and_rechecks_before_spawn(
     assert process.pid == 4242
     assert (captured["auto_login"] is not None) is bypass_enabled
     assert captured["auto_login_server_password_bypass_verified"] is bypass_enabled
+    assert captured["overview_bridge"] == request.overview_bridge
     pre_spawn_check = captured["pre_spawn_check"]
     assert callable(pre_spawn_check)
     pre_spawn_check()

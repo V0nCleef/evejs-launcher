@@ -88,6 +88,7 @@ Services started elsewhere are detected as externally managed. The launcher does
 
   Account-only login starts with an independent profile. Once the character exists, launches from its roster card use your configured shared character settings.
 - **Advanced Character Create** reveals starter-character, GM, and overview-copy settings. Close EVE clients first. The launcher stops its services briefly, backs up and verifies the changes, then restores the prior service state. Services started elsewhere must be stopped from their original console first.
+- **Settings → Copy overview once** works on Native and Docker with the Overview Bridge and Separate client settings. Launch the source pilot once to capture its overview, close EVE, then choose the recipients in Settings. Each recipient imports the overview on their next login.
 - On Native, deletion requires services and clients to be offline, makes a backup, and asks for typed confirmation.
 
 Each account uses its own launcher profile. Normal login stays inside the EVE client. Compatible Native installations can opt into **Auto-Login Character** after the launcher verifies the supported client and local server setup; real account passwords are not stored.
