@@ -2,6 +2,10 @@
 
 ## Changelog
 
+## v1.0.101 - 2026-11-28
+- Keep temporary Docker helpers separate from the Game and Market services. Offline roster reads no longer trigger a loop of new Server containers or make a stopped stack look busy. Thanks to FusionByte for reporting it. 🫡
+- Keep offline Tools and mod operations protected while a real Docker helper is still active.
+
 ## v1.0.100 - 2026-11-27
 - Automatically give Game enough time to renew its save lock in Managed Docker on supported EveJS versions. Keep explicit lease settings and retry Game once after a verified lease-loss exit.
 - Update compatible loader mods while the selected Docker project is stopped. Preserve the mod's settings and restore the previous package if activation fails. Thanks to JcKalck for reporting the Docker update problem. 🫡
