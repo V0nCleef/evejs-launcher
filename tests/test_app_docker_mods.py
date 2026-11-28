@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -286,13 +287,40 @@ def test_managed_mod_apply_requires_confirmation_before_override_write(
     assert not docker_mod_override_path(tmp_path).exists()
 
 
+@pytest.mark.parametrize("storage_changed", [False, True], ids=["new", "mod-updated"])
 def test_managed_mod_apply_writes_override_then_requests_exact_recreation(
     qapp,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    storage_changed: bool,
 ) -> None:
     monkeypatch.setattr(app_module.QMessageBox, "critical", lambda _parent, title, message: pytest.fail(title + ": " + message))
     _loader(tmp_path, "Fixture Mod")
+    if storage_changed:
+        old = apply_docker_mod_override(
+            tmp_path, ("Fixture Mod",), policy=DockerControlPolicy.MANAGED,
+        )
+        finalize_docker_mod_override(old, policy=DockerControlPolicy.MANAGED)
+        folder = tmp_path / "mods" / "Fixture Mod"
+        (folder / "helper.cjs").write_text("// Fixture helper\n", encoding="utf-8")
+        descriptor = {
+            "schemaVersion": 3, "id": "fixture-mod", "displayName": "Fixture Mod",
+            "version": "1.1.0", "kind": "loader", "restart": "game_server",
+            "activation": {"strategy": "loader_rename"},
+            "launcherApi": {
+                "version": 1, "minLauncherVersion": "1.0.80",
+                "helper": {"runtime": "node", "path": "helper.cjs"},
+                "capabilities": ["verify"],
+            },
+            "docker": {
+                "schemaVersion": 1, "dataDirectory": "fixture",
+                "serverHelper": {"runtime": "node", "path": "helper.cjs", "actions": []},
+                "hostActions": [],
+            },
+        }
+        (folder / "evejs-launcher.mod.json").write_text(
+            json.dumps(descriptor), encoding="utf-8",
+        )
     window = _window(tmp_path)
     lifecycle: list[tuple[DockerLifecycleAction, object]] = []
     window._begin_docker_lifecycle = _record_started_lifecycle(lifecycle)
@@ -304,7 +332,8 @@ def test_managed_mod_apply_writes_override_then_requests_exact_recreation(
 
     window._on_mods_apply_restart()
 
-    assert docker_mod_override_path(tmp_path).is_file()
+    override = docker_mod_override_path(tmp_path).read_text(encoding="utf-8")
+    assert ('EVEJS_MOD_DATA_ROOT: "/var/lib/evejs/mods"' in override) is storage_changed
     assert len(lifecycle) == 1
     assert lifecycle[0][0] is DockerLifecycleAction.RECREATE_GAME
     completion = lifecycle[0][1]

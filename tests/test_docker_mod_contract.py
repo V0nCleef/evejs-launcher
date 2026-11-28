@@ -9,6 +9,14 @@ from src.core.runtime.docker_compose import ComposeTarget, ContainerRecord, Comp
 from src.core.runtime.docker_cli import DockerCommandResult, DockerCommandRunner
 from src.core.runtime.docker_mod_helpers import DockerModHelperController, DockerModHelperError, RESULT_PREFIX
 from src.core.runtime.docker_mod_images import attach_image_override, prepare_image_override
+from src.core.runtime.docker_mods import (
+    DockerModBridgeError,
+    apply_docker_mod_override,
+    attach_docker_mod_override,
+    docker_mod_transaction_path,
+    finalize_docker_mod_override,
+    rollback_docker_mod_override,
+)
 from src.core.service_status import DockerControlPolicy, ServiceState
 
 
@@ -99,6 +107,54 @@ def portable_declaration(folder):
         launcherApi=dict(version=1, minLauncherVersion="1.0.80", helper=dict(runtime="node", path="helper.cjs"),
             capabilities=actions, enabledUpdate=dict(protocol="evejs-mod-enabled-update-v1", compatibility="portable.v1", fromVersions=["1.0.0"])),
         docker=dict(schemaVersion=1, dataDirectory="portable", serverHelper=dict(runtime="node", path="helper.cjs", actions=actions), hostActions=[]))
+
+
+@pytest.mark.parametrize("portable_before", [False, True], ids=["added", "removed"])
+def test_apply_after_docker_storage_declaration_changes(tmp_path, portable_before):
+    folder, _ = package(tmp_path)
+    manifest = folder / "evejs-launcher.mod.json"
+    portable = portable_declaration(folder)
+    if portable_before:
+        manifest.write_text(json.dumps(portable), encoding="utf-8")
+    else:
+        manifest.unlink()
+    target = ComposeTarget(tmp_path / "compose.yaml", tmp_path, "fixture")
+    managed = DockerControlPolicy.MANAGED
+    first = apply_docker_mod_override(tmp_path, ("portable",), policy=managed)
+    finalize_docker_mod_override(first, policy=managed)
+    assert (b"EVEJS_MOD_DATA_ROOT" in first.committed_content) is portable_before
+
+    if portable_before:
+        manifest.unlink()
+    else:
+        manifest.write_text(json.dumps(portable), encoding="utf-8")
+    with pytest.raises(DockerModBridgeError, match="exact launcher renderer"):
+        attach_docker_mod_override(target)
+
+    # The prior storage setting may differ, but no unrelated Compose edit is
+    # safe to replace, even during explicit Apply.
+    modified = first.committed_content + b"    restart: always\n"
+    first.override_path.write_bytes(modified)
+    with pytest.raises(DockerModBridgeError, match="exact launcher renderer"):
+        apply_docker_mod_override(tmp_path, ("portable",), policy=managed)
+    assert first.override_path.read_bytes() == modified
+    assert not docker_mod_transaction_path(tmp_path).exists()
+    first.override_path.write_bytes(first.committed_content)
+
+    second = apply_docker_mod_override(tmp_path, ("portable",), policy=managed)
+    assert second.previous_content == first.committed_content
+    assert second.requires_recreation
+    assert (b"EVEJS_MOD_DATA_ROOT" in second.committed_content) is not portable_before
+    rollback_docker_mod_override(second, policy=managed)
+    assert first.override_path.read_bytes() == first.committed_content
+    assert not docker_mod_transaction_path(tmp_path).exists()
+
+    retry = apply_docker_mod_override(tmp_path, ("portable",), policy=managed)
+    attached = attach_docker_mod_override(target, transaction_token=retry.transaction_token)
+    assert attached.override_files == (retry.override_path,)
+    finalize_docker_mod_override(retry, policy=managed)
+    assert attach_docker_mod_override(target) == attached
+    assert not docker_mod_transaction_path(tmp_path).exists()
 
 
 def test_docker_only_package_admits_declared_start_and_enabled_update(tmp_path):

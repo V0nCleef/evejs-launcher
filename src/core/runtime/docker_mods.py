@@ -36,6 +36,7 @@ _TRANSACTION_FILENAME = "compose.mods.transaction.json"
 _OWNED_HEADER = "# Managed by EveJS Launcher. Manual edits will be replaced."
 _CONTAINER_MODS_ROOT = "/app/mods"
 _NODE_OPTIONS_PREFIX = "      NODE_OPTIONS: "
+_MOD_DATA_ROOT_LINE = '      EVEJS_MOD_DATA_ROOT: "/var/lib/evejs/mods"'
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
 MAX_DOCKER_MOD_OVERRIDE_BYTES = 512 * 1024
 MAX_DOCKER_LOADER_PAYLOAD_BYTES = 2 * 1024 * 1024
@@ -102,11 +103,34 @@ def build_docker_mod_override(
     file would allow a base or user override to keep preloading a mod while the
     launcher falsely reported that every loader was disabled.
     """
+    from src.core.mod_api_manifest import ModApiManifestError, read_api_manifest
+
+    root = Path(evejs_root)
     selected = _normalize_selection(selected_mods)
+    has_persistent_data = False
+    for name in selected:
+        try:
+            if read_api_manifest(root, root / "mods" / name).docker is not None:
+                has_persistent_data = True
+                break
+        except (ModApiManifestError, OSError, ValueError):
+            pass
+    return _render_docker_mod_override(
+        root, selected, shared_menu_digest, has_persistent_data=has_persistent_data
+    )
+
+
+def _render_docker_mod_override(
+    root: Path,
+    selected: tuple[str, ...],
+    shared_menu_digest: str | None,
+    *,
+    has_persistent_data: bool,
+) -> DockerModOverride:
     if shared_menu_digest is not None and not selected:
         raise DockerModBridgeError("An empty mod plan cannot load shared client menus.")
 
-    mods_source = (Path(evejs_root).resolve() / "mods").resolve().as_posix()
+    mods_source = (root.resolve() / "mods").resolve().as_posix()
     preload_paths = tuple(
         f"{_CONTAINER_MODS_ROOT}/{name}/loader.js" for name in selected
     )
@@ -123,17 +147,8 @@ def build_docker_mod_override(
         "    environment:",
         f"      NODE_OPTIONS: {_yaml_scalar(node_options)}",
     ]
-    # Only declared container contracts opt into persistent mod storage;
-    # historical loader-only overrides retain their exact rendering.
-    from src.core.mod_api_manifest import read_api_manifest, ModApiManifestError
-    portable = False
-    for name in selected:
-        try:
-            portable |= read_api_manifest(Path(evejs_root),Path(evejs_root)/"mods"/name).docker is not None
-        except (ModApiManifestError,OSError,ValueError):
-            pass
-    if portable:
-        lines.append('      EVEJS_MOD_DATA_ROOT: "/var/lib/evejs/mods"')
+    if selected and has_persistent_data:
+        lines.append(_MOD_DATA_ROOT_LINE)
     if selected:
         lines.extend(
             (
@@ -145,7 +160,7 @@ def build_docker_mod_override(
             )
         )
     if shared_menu_digest is not None:
-        source = shared_menu_path(Path(evejs_root).resolve(), shared_menu_digest).parent.as_posix()
+        source = shared_menu_path(root.resolve(), shared_menu_digest).parent.as_posix()
         target = container_menu_path(shared_menu_digest).rsplit("/", 1)[0]
         lines.extend(("      - type: bind", f"        source: {_yaml_scalar(source)}",
                       f"        target: {_yaml_scalar(target)}", "        read_only: true"))
@@ -514,7 +529,9 @@ def _read_owned_override(
         maximum=MAX_DOCKER_MOD_OVERRIDE_BYTES,
         label="Docker mod override",
     )
-    rendered = _parse_owned_override(root, content)
+    rendered = _parse_owned_override(
+        root, content, require_current_manifests=require_active_loaders
+    )
     if require_active_loaders:
         _validate_active_loaders(root, rendered.selected_mods)
         digest = _menu_digest_from_node_options(rendered.node_options)
@@ -744,7 +761,9 @@ def _require_result_transaction(
     return transaction
 
 
-def _parse_owned_override(root: Path, content: bytes) -> DockerModOverride:
+def _parse_owned_override(
+    root: Path, content: bytes, *, require_current_manifests: bool
+) -> DockerModOverride:
     try:
         text = content.decode("utf-8", errors="strict")
     except UnicodeDecodeError as exc:
@@ -774,10 +793,21 @@ def _parse_owned_override(root: Path, content: bytes) -> DockerModOverride:
         )
     node_options = encoded_node_options.replace("$$", "$")
     selected = _selection_from_node_options(node_options)
-    # Re-render the artifact's captured digest, including older declarations
-    # during disable/rollback. Parsing must not discover a new enabled mod.
-    expected = build_docker_mod_override(root, selected,
-        shared_menu_digest=_menu_digest_from_node_options(node_options))
+    menu_digest = _menu_digest_from_node_options(node_options)
+    if require_current_manifests:
+        expected = build_docker_mod_override(
+            root, selected, shared_menu_digest=menu_digest
+        )
+    else:
+        # Apply and rollback inspect the previous override after manifests can
+        # have changed. Admit either exact renderer output for its old storage
+        # declaration, with the same preload and mount checks as a new file.
+        expected = _render_docker_mod_override(
+            root,
+            selected,
+            menu_digest,
+            has_persistent_data=len(lines) > 5 and lines[5] == _MOD_DATA_ROOT_LINE,
+        )
     if _normalized_terminators(content) != expected.content.encode("utf-8"):
         raise DockerModBridgeError(
             "The Docker mod override differs from the exact launcher renderer."
@@ -1060,7 +1090,9 @@ def _atomic_write(
         raise DockerModBridgeError("The Docker mod override path is not canonical.")
     _require_safe_override_parent(root, create=True)
     # Refuse to publish bytes that are not exactly one supported renderer output.
-    rendered = _parse_owned_override(root, content)
+    rendered = _parse_owned_override(
+        root, content, require_current_manifests=require_active_loaders
+    )
     if require_active_loaders:
         _validate_active_loaders(root, rendered.selected_mods)
     temporary_path: Path | None = None

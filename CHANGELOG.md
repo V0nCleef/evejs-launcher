@@ -2,6 +2,9 @@
 
 ## Changelog
 
+## v1.0.102 - 2026-11-28
+- Fix Managed Docker Apply & Recreate Server after a mod adds or removes its Docker storage declaration. The launcher can replace its previous generated override and restore it if Apply fails. Thanks to JcKalck for reporting it. 🫡
+
 ## v1.0.101 - 2026-11-28
 - Keep temporary Docker helpers separate from the Game and Market services. Offline roster reads no longer trigger a loop of new Server containers or make a stopped stack look busy. Thanks to FusionByte for reporting it. 🫡
 - Keep offline Tools and mod operations protected while a real Docker helper is still active.
