@@ -105,6 +105,54 @@ def test_ps_parser_accepts_reasonable_object_collection_and_maps_states() -> Non
     assert states["nohealth"] is ServiceState.STARTING
 
 
+@pytest.mark.parametrize("helper_first", [False, True])
+@pytest.mark.parametrize("labels", [
+    "com.docker.compose.project=fixture,com.docker.compose.oneoff=True",
+    {"com.docker.compose.oneoff": "true"},
+])
+def test_compose_one_off_cannot_replace_the_stopped_service_or_trigger_a_roster_reload(
+    tmp_path, helper_first, labels,
+):
+    from types import SimpleNamespace
+
+    from src.app import MainWindow
+    from src.core.service_status import RuntimeBackend, RuntimeSnapshot
+
+    server = {"Service": "server", "State": "created", "ID": "111111111111"}
+    helper = {"Service": "server", "State": "running", "ID": "222222222222", "Labels": labels}
+    orphan = {**helper, "State": "exited", "ID": "333333333333"}
+    during = [helper, server, orphan] if helper_first else [server, helper, orphan]
+
+    class Runner:
+        executable = "docker"
+        rows = [server]
+
+        def run_parsed(self, _argv, *, cwd, parser, timeout=10.0):
+            return parser(json.dumps(self.rows))
+
+    target = ComposeTarget(tmp_path / "compose.yaml", tmp_path, "fixture")
+    runner = Runner()
+    inspector = ComposeInspector(runner)
+    refresh_requests = []
+    window = SimpleNamespace(_queue_character_activity_refresh=lambda: refresh_requests.append(True))
+    for rows in ([server], during, [server, orphan]):
+        runner.rows = rows
+        records = inspector.status(target)
+        assert records["server"].short_id == server["ID"]
+        assert records["server"].state is ServiceState.OFFLINE
+        assert "one-off:" + orphan["ID"] not in records
+        if rows is during:
+            assert records["one-off:" + helper["ID"]].one_off
+        snapshot = RuntimeSnapshot(
+            records["server"].state, records["market"].state, 0,
+            backend=RuntimeBackend.DOCKER_COMPOSE, game_container=records["server"].short_id,
+        )
+        MainWindow._observe_character_activity(window, snapshot)
+    assert refresh_requests == []
+    runner.rows = [helper]
+    assert not inspector.status(target)["server"].exists
+
+
 def test_config_parser_resolves_remapped_loopback_endpoints_and_nested_mount() -> None:
     config = {
         "name": "fixture-evejs",

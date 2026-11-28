@@ -227,6 +227,11 @@ class ManagedDockerToolController:
 
         if spec.requires_services_stopped:
             records = report.records
+            if any(record.one_off and not _safely_stopped(record) for record in records.values()):
+                return DockerToolResult(
+                    action, False, error="Wait for the active Docker helper to finish before running this tool.",
+                    target_identity=target_identity,
+                )
             for service, label in (("server", "Server"), ("market", "Market")):
                 if not _safely_stopped(records.get(service)):
                     return DockerToolResult(

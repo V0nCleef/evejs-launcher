@@ -216,6 +216,7 @@ class ContainerRecord:
     publishers: tuple[str, ...]
     exists: bool = True
     raw_state: str | None = None
+    one_off: bool = False
 
     @classmethod
     def absent(cls, service: str) -> "ContainerRecord":
@@ -339,17 +340,7 @@ class ComposeInspector:
             diagnostics.append("Safe local endpoints and effective mounts validated.")
 
             try:
-                found = {
-                    record.service: record
-                    for record in self._compose_parsed(
-                        target,
-                        "ps",
-                        "--all",
-                        "--format",
-                        "json",
-                        parser=parse_ps_output,
-                    )
-                }
+                records = self.status(target, expected=set(config.services) | {"init"})
             except (
                 DockerCommandError,
                 DockerStructuredOutputError,
@@ -357,17 +348,6 @@ class ComposeInspector:
                 json.JSONDecodeError,
             ):
                 return PreflightReport.failed(PreflightFailureKind.INSPECT_FAILED)
-            # Preserve every effective/observed service for destructive
-            # controllers.  Ordinary presentation still reads its known keys,
-            # while maintenance can fail closed when a profile or extension
-            # service could share the same persistent store.
-            record_services = set(config.services) | set(found) | _REQUIRED_SERVICES | {"init"}
-            records = MappingProxyType(
-                {
-                    service: found.get(service, ContainerRecord.absent(service))
-                    for service in record_services
-                }
-            )
             diagnostics.append("Compose service records inspected.")
             return PreflightReport(True, tuple(diagnostics), config, records)
         except (
@@ -382,7 +362,9 @@ class ComposeInspector:
                 PreflightFailureKind.COMPOSE_CONFIG_INVALID
             )
 
-    def status(self, target: ComposeTarget) -> Mapping[str, ContainerRecord]:
+    def status(
+        self, target: ComposeTarget, *, expected: Iterable[str] = (),
+    ) -> Mapping[str, ContainerRecord]:
         """Read only current records after a successful cached preflight."""
         records = self._compose_parsed(
             target,
@@ -392,14 +374,17 @@ class ComposeInspector:
             "json",
             parser=parse_ps_output,
         )
-        found = {record.service: record for record in records}
-        record_services = set(found) | _REQUIRED_SERVICES
-        return MappingProxyType(
-            {
-                service: found.get(service, ContainerRecord.absent(service))
-                for service in record_services
-            }
+        found = {record.service: record for record in records if not record.one_off}
+        for service in _REQUIRED_SERVICES.union(expected):
+            found.setdefault(service, ContainerRecord.absent(service))
+        # Compose labels `run` containers with their source service. Keep a
+        # running helper visible to maintenance without replacing that service.
+        found.update(
+            (f"one-off:{record.short_id or record.name or record.service}", record)
+            for record in records
+            if record.one_off and record.raw_state not in {"created", "exited", "dead"}
         )
+        return MappingProxyType(found)
 
     def container_runtime_identity(
         self,
@@ -678,7 +663,12 @@ def _container_record(value: Mapping[str, Any]) -> ContainerRecord:
     publishers = value.get("Publishers", value.get("publishers", []))
     publisher_values = tuple(_publisher_text(item) for item in publishers if _publisher_text(item)) if isinstance(publishers, list) else ()
     container_id = str(value.get("ID") or value.get("id") or "") or None
-    return ContainerRecord(service, str(value.get("Name") or value.get("name") or "") or None, container_id[:12] if container_id else None, state, health, exit_code, publisher_values, True, raw_state or None)
+    labels = value.get("Labels", value.get("labels"))
+    key = "com.docker.compose.oneoff"
+    if isinstance(labels, str):
+        labels = dict(label.split("=", 1) for label in labels.split(",") if "=" in label)
+    one_off = isinstance(labels, Mapping) and str(labels.get(key, "")).casefold() == "true"
+    return ContainerRecord(service, str(value.get("Name") or value.get("name") or "") or None, container_id[:12] if container_id else None, state, health, exit_code, publisher_values, True, raw_state or None, one_off)
 
 
 def _publisher_text(value: Any) -> str:

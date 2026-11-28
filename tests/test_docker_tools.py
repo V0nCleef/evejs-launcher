@@ -1,6 +1,7 @@
 """Closed managed-Docker Tool Deck command and preflight contracts."""
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -336,6 +337,23 @@ def test_running_service_blocks_every_offline_required_action(
     assert running_service.title() in result.error
     assert inspector.preflights == 1
     assert runner.calls == []
+
+
+@pytest.mark.parametrize("raw_state", ["created", "exited", "dead"])
+def test_stopped_tool_still_waits_for_running_one_off(tmp_path: Path, raw_state: str) -> None:
+    records = {service: _record(service, raw_state=raw_state) for service in ("server", "market")}
+    helper = replace(_record("server", raw_state="running"), one_off=True)
+    records["one-off:fixture"] = helper
+    runner = FakeRunner()
+    controller = _controller(tmp_path, FakeInspector(records), runner)
+
+    blocked = controller.execute(DockerToolAction.MARKET_DOCTOR)
+    assert not blocked.succeeded and "helper" in blocked.error
+    assert runner.calls == []
+
+    records.pop("one-off:fixture")
+    assert controller.execute(DockerToolAction.MARKET_DOCTOR).succeeded
+    assert len(runner.calls) == 1
 
 
 @pytest.mark.parametrize("raw_state", ["created", "exited", "dead"])
